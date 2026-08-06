@@ -1,0 +1,79 @@
+package com.soreverse.mcp.engine
+
+import org.json.JSONObject
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+
+data class Workspace(
+    val id: String,
+    val source: SoSource,
+    val data: ByteArray,
+    val elf: ElfFile,
+    val temporary: Boolean,
+    val originalSha256: String,
+    val analysisInputSource: String,
+    val structureRecovery: JSONObject,
+    val edits: MutableMap<String, EditSession> = ConcurrentHashMap(),
+)
+
+internal data class SourceSummary(
+    val architecture: String,
+    val bits: Int,
+    val endian: String,
+    val hasDebugInfo: Boolean,
+    val stripped: Boolean,
+)
+
+internal data class DisasmCursorState(
+    val workspaceId: String,
+    val editSessionId: String,
+    val locator: String,
+    val byteOffset: Int,
+    val limit: Int,
+    val maxBytes: Int,
+)
+
+data class EditSession(
+    val id: String,
+    val data: ByteArray,
+    var revision: Int = 0,
+    val patches: MutableList<PatchRecord> = mutableListOf(),
+    val snapshots: MutableList<Snapshot> = mutableListOf(),
+    val undone: MutableList<PatchRecord> = mutableListOf(),
+) {
+    /**
+     * 安全修复: 每会话独立锁，防止并发 MCP 请求交叉修改同一编辑会话导致数据损坏。
+     * 所有修改 session.data / patches / snapshots / undone 的操作都必须持有此锁。
+     */
+    val lock: Any = Any()
+}
+
+internal data class EmulatorSession(
+    val id: String,
+    val workspaceId: String,
+    val editSessionId: String,
+    val architecture: String,
+    val data: ByteArray,
+    val live: UnidbgEmulator.LiveSession? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+data class Snapshot(
+    val revision: Int,
+    val sha256: String,
+    val timeMillis: Long,
+    val patchCount: Int,
+    val dataCopy: ByteArray,
+    val id: String = UUID.randomUUID().toString(),
+    val protected: Boolean = false,
+)
+
+data class PatchRecord(
+    val timeMillis: Long,
+    val kind: String,
+    val locator: String,
+    val fileOffset: Int,
+    val oldHex: String,
+    val newHex: String,
+    val asm: String = "",
+)

@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Android
+local.properties
+*.apk
+*.aab
+*.jks
+!release/*.jks
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kotlin
+.kotlin/
+
+# Integration report
+INTEGRATION_CHECK_REPORT.md

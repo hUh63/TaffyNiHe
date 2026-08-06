@@ -1,0 +1,233 @@
+package com.soreverse.mcp
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.soreverse.mcp.core.GitHubRelease
+import com.soreverse.mcp.core.GitHubUpdateManager
+import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.UpdateCheckResult
+import com.soreverse.mcp.core.UpdateDownloadEvent
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import java.io.File
+
+@Composable
+internal fun SettingsUpdatesPage(
+    t: UiText,
+    settings: SettingsStore,
+    manager: GitHubUpdateManager,
+    initialRelease: GitHubRelease?,
+    onRelease: (GitHubRelease?) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var autoCheck by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        settings.autoCheckUpdates = false
+    }
+    var release by remember(initialRelease) { mutableStateOf(initialRelease) }
+    var checking by remember { mutableStateOf(false) }
+    var downloading by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf(0) }
+    var probeCompleted by remember { mutableStateOf(0) }
+    var probeTotal by remember { mutableStateOf(0) }
+    var probeAvailable by remember { mutableStateOf(0) }
+    var selectedSource by remember { mutableStateOf("") }
+    var probeResults by remember { mutableStateOf<List<UpdateDownloadEvent.ProbeResult>>(emptyList()) }
+    var downloadPhase by remember { mutableStateOf("") }
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
+    var downloadedFile by remember { mutableStateOf<File?>(null) }
+    var verifyNote by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+
+    LaunchedEffect(release?.tag) {
+        downloadedFile = release?.let(manager::cachedDownload)
+        if (!downloading) {
+            progress = 0
+            probeCompleted = 0
+            probeTotal = 0
+            probeAvailable = 0
+            probeResults = emptyList()
+            selectedSource = ""
+            downloadPhase = ""
+        }
+    }
+
+    fun startDownload(update: GitHubRelease, forced: String?) {
+        downloadJob?.cancel()
+        downloading = true
+        status = ""
+        progress = 0
+        if (forced == null) {
+            probeCompleted = 0
+            probeTotal = 0
+            probeAvailable = 0
+            probeResults = emptyList()
+        }
+        selectedSource = forced ?: ""
+        verifyNote = ""
+        downloadPhase = if (forced != null) "downloading" else "probing"
+        error = ""
+        downloadJob = scope.launch {
+            try {
+                manager.download(update, forced) { event ->
+                    when (event) {
+                        is UpdateDownloadEvent.Probing -> {
+                            downloadPhase = "probing"
+                            probeTotal = event.total
+                        }
+                        is UpdateDownloadEvent.ProbeResult -> {
+                            probeCompleted = event.completed
+                            if (event.reachable) probeAvailable++
+                            probeResults = probeResults + event
+                        }
+                        is UpdateDownloadEvent.Selected -> {
+                            downloadPhase = "downloading"
+                            selectedSource = event.source
+                            progress = 0
+                        }
+                        is UpdateDownloadEvent.Downloading -> {
+                            downloadPhase = "downloading"
+                            selectedSource = event.source
+                            progress = event.percent
+                        }
+                        UpdateDownloadEvent.Verifying -> downloadPhase = "verifying"
+                        is UpdateDownloadEvent.VerifySkipped -> {
+                            verifyNote = if (t.zh) "已跳过 SHA-256 校验（${event.reason}），文件为有效 APK，可安装。" else "SHA-256 check skipped (${event.reason}); file is a valid APK and installable."
+                        }
+                    }
+                }
+                    .onSuccess {
+                        downloadedFile = it
+                        status = if (verifyNote.isNotBlank()) {
+                            if (t.zh) "下载完成（未校验 SHA-256），可以安装。" else "Download complete (SHA-256 not verified). Ready to install."
+                        } else {
+                            if (t.zh) "下载并校验完成，可以安装。" else "Download and verification complete. Ready to install."
+                        }
+                    }
+                    .onFailure { error = it.message ?: if (t.zh) "下载失败" else "Download failed" }
+            } finally {
+                downloading = false
+                downloadPhase = ""
+                downloadJob = null
+            }
+        }
+    }
+
+    fun downloadLatest() {
+        if (checking || downloading) return
+        checking = true
+        error = ""
+        status = if (t.zh) "正在获取最新版本信息…" else "Fetching latest release…"
+        scope.launch {
+            manager.fetchLatestRelease()
+                .onSuccess { latestRelease ->
+                    release = latestRelease
+                    onRelease(latestRelease)
+                    status = ""
+                    checking = false
+                    // 获取到 release 后立即开始下载
+                    startDownload(latestRelease, null)
+                }
+                .onFailure {
+                    error = it.message ?: if (t.zh) "获取版本信息失败" else "Failed to fetch release info"
+                    status = ""
+                    checking = false
+                }
+        }
+    }
+
+    PageScroll {
+        GlassGroup {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (t.zh) "GitHub 正式发行版" else "Official GitHub releases", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                Text(
+                    if (t.zh) "当前版本已内置全部功能，不联网检查更新。" else "This build ships with all features and does not check for updates online.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text("${if (t.zh) "当前版本" else "Current version"}: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodyMedium)
+            }
+            GroupDivider()
+            ToggleRow(if (t.zh) "启动时自动检查" else "Check automatically at startup", autoCheck) {
+                autoCheck = it
+                settings.autoCheckUpdates = it
+            }
+            GroupDivider()
+            NavRow(
+                if (checking) (if (t.zh) "正在获取…" else "Fetching…") else (if (t.zh) "立即下载SOMCP" else "Download SOMCP now"),
+                status,
+                Icons.Default.Info,
+                onClick = ::downloadLatest,
+            )
+        }
+        if (error.isNotBlank()) {
+            Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(error, color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        release?.let { update ->
+            GlassGroup {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(update.name, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                    Text(update.tag, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    if (update.notes.isNotBlank()) MarkdownMessageContent(update.notes, selectable = true)
+                    if (downloading) {
+                        UpdateDownloadStatus(
+                            downloadPhase, progress, probeCompleted, probeTotal, probeAvailable, selectedSource, probeResults, t.zh,
+                            verifyNote = verifyNote,
+                            onPickSource = { source -> startDownload(update, source) },
+                        )
+                    } else if (verifyNote.isNotBlank() && downloadedFile != null) {
+                        Text(verifyNote, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    PrimaryActionButton(
+                        text = when {
+                            downloadedFile != null -> if (t.zh) "安装更新" else "Install update"
+                            downloading -> if (t.zh) "取消下载" else "Cancel download"
+                            else -> if (t.zh) "下载 APK" else "Download APK"
+                        },
+                        onClick = {
+                            val file = downloadedFile
+                            if (file != null) {
+                                if (!manager.install(file)) {
+                                    status = if (t.zh) "请允许塔菲逆核安装未知应用，返回后再次点击安装。" else "Allow Taffy to install unknown apps, then return and tap Install again."
+                                }
+                            } else if (!downloading) {
+                                startDownload(update, null)
+                            } else {
+                                downloadJob?.cancel()
+                                downloadJob = null
+                                downloading = false
+                                downloadPhase = ""
+                                status = if (t.zh) "下载已取消" else "Download cancelled"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}

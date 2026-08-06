@@ -430,7 +430,7 @@ object ArscTool {
     }
 
     private fun decodeComplex(data: Int, unit: String): String {
-        val value = (data and 0xFFFFFF00) shr 8
+        val value = (data and 0xFFFFFF00.toInt()) shr 8
         val type = data and 0xFF
         val unitNames = arrayOf("px", "dp", "sp", "pt", "in", "mm", "", "", "", "", "", "", "", "", "", "", "%")
         val unitName = if (type < unitNames.size) unitNames[type] else "?$type"

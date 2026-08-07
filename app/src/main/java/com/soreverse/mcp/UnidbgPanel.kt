@@ -62,7 +62,7 @@ import org.json.JSONObject
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun UnidbgPanel(
+internal fun UnidbgPanel(
     t: UiText,
     context: Context,
     onClose: () -> Unit,
@@ -162,7 +162,7 @@ fun UnidbgPanel(
                 result = summarize(json)
             } else {
                 val err = json.optJSONObject("error")
-                val msg = err?.optString("message").ifBlank { json.optString("error", "") }
+                val msg = err?.optString("message").orEmpty().ifBlank { json.optString("error", "") }
                 error = (if (msg.isBlank()) (if (zh) "模拟执行失败" else "Emulation failed") else msg)
             }
         }

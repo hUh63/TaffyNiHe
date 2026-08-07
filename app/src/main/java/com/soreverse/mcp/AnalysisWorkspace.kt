@@ -305,15 +305,15 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
             ) { Text(if (detailMode) (if (zh) "简洁" else "Simple") else (if (zh) "详细" else "Detail"), style = MaterialTheme.typography.labelSmall) }
         }
         if (detailMode) {
-            DetailCard(if (zh) "反编译" else "Decompile", tools.decompileResult)
-            DetailCard(if (zh) "模拟" else "Emulate", tools.emulateResult)
-            DetailCard(if (zh) "SO概览" else "Overview", tools.soOverview)
-            DetailCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto)
-            DetailCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck)
-            DetailCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult)
-            DetailCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs)
-            DetailCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo)
-            DetailCard("Frida", tools.fridaStatus)
+            DetailCard(if (zh) "反编译" else "Decompile", tools.decompileResult, zh)
+            DetailCard(if (zh) "模拟" else "Emulate", tools.emulateResult, zh)
+            DetailCard(if (zh) "SO概览" else "Overview", tools.soOverview, zh)
+            DetailCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto, zh)
+            DetailCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck, zh)
+            DetailCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult, zh)
+            DetailCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs, zh)
+            DetailCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo, zh)
+            DetailCard("Frida", tools.fridaStatus, zh)
         } else {
             DataCard(if (zh) "反编译" else "Decompile", tools.decompileResult)
             DataCard(if (zh) "模拟" else "Emulate", tools.emulateResult)
@@ -351,7 +351,7 @@ internal fun DataCard(title: String, text: String) {
 
 /** 详细模式：结构化卡片，类似 ElfOverviewPanel 风格 */
 @Composable
-private fun DetailCard(title: String, text: String) {
+private fun DetailCard(title: String, text: String, zh: Boolean) {
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
     if (json == null) {
@@ -371,7 +371,7 @@ private fun DetailCard(title: String, text: String) {
             // 基础属性
             SectionCard(if (zh) "📦 基础属性" else "📦 Basics") {
                 Kv(if (zh) "名称" else "Name", ov.optString("fileName", "—"))
-                Kv(if (zh) "大小" else "Size", formatBytes(ov.optLong("size", 0L)))
+                Kv(if (zh) "大小" else "Size", fmtBytes(ov.optLong("size", 0L)))
                 val arch = ov.optString("architecture", "—")
                 val bits = ov.optInt("bits", 0)
                 Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
@@ -452,7 +452,7 @@ private fun MetricRow(vararg pairs: Pair<String, String>) {
     }
 }
 
-private fun formatBytes(bytes: Long): String {
+private fun fmtBytes(bytes: Long): String {
     if (bytes <= 0) return "—"
     val units = arrayOf("B", "KB", "MB", "GB")
     var v = bytes.toDouble()

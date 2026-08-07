@@ -244,7 +244,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 // 额外功能
                 Button(onClick = {
                     scope.launch { tools.unpackExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "so", "", 30) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", ".so", 60) }.getOrNull() }
                         tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无SO" else "no SO"
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
@@ -284,7 +284,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 }
                 Button(onClick = {
                     scope.launch { tools.soExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "exports", "", 60) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "dynsyms", "", 60) }.getOrNull() }
                         tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无导出表" else "no exports"
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
@@ -316,7 +316,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 // 额外功能
                 Button(onClick = {
                     scope.launch { tools.emulateExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "registers", "", 60) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", tools.emulateSymbol.ifBlank { "JNI_OnLoad" }, org.json.JSONArray(), true) }.getOrNull() }
                         tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先执行模拟" else "Run emulate first"
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
@@ -324,7 +324,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 }
                 Button(onClick = {
                     scope.launch { tools.emulateExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "memory", "", 60) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", "0x0", 256) }.getOrNull() }
                         tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先执行模拟" else "Run emulate first"
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
@@ -378,7 +378,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 // 额外功能
                 Button(onClick = {
                     scope.launch { tools.rebuildExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "patches", "", 60) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
                         tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无补丁" else "no patches"
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {

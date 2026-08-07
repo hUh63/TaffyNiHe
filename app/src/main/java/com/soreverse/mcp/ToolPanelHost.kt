@@ -47,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.EngineProvider
 
 // --- 顶层 helper ------------------------------------------------------------
 
@@ -157,19 +158,19 @@ internal fun ToolPanelHost(
 @Composable
 private fun SharedSoPicker(state: ToolPagesState, zh: Boolean, onChanged: () -> Unit = {}) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val scope = rememberCoroutineScope()
         scope.launch {
             state.opening = true; state.openError = ""
-            val r = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).open(uri.toString(), false) }.getOrNull() }
+            val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).open(uri.toString(), false) }.getOrNull() }
             state.opening = false
             if (r != null && r.optBoolean("ok", false)) {
                 state.sharedWorkspaceId = r.optString("workspaceId")
                 state.sharedSoName = r.optString("soFileName").ifBlank { r.optString("fileName") }
                 onChanged()
             } else {
-                state.openError = r?.optString("error").ifBlank { (if (zh) "打开 SO 失败" else "Open failed") }
+                state.openError = r?.optString("error").orEmpty().ifBlank { (if (zh) "打开 SO 失败" else "Open failed") }
             }
         }
     }
@@ -204,10 +205,10 @@ private fun SharedSoPicker(state: ToolPagesState, zh: Boolean, onChanged: () -> 
                 if (loc.isEmpty()) { state.decompileError = if (zh) "请输入函数符号或地址" else "Enter a symbol or address"; return@Button }
                 scope.launch {
                     state.decompileRunning = true; state.decompileError = ""; state.decompileResult = ""
-                    val r = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).rzDecompile(state.sharedWorkspaceId, "", loc, true) }.getOrNull() }
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzDecompile(state.sharedWorkspaceId, "", loc, true) }.getOrNull() }
                     state.decompileRunning = false
                     if (r != null && r.optBoolean("ok", false)) state.decompileResult = r.optString("pseudocode").ifBlank { toolSummarize(r) }
-                    else state.decompileError = r?.optJSONObject("error")?.optString("message").ifBlank { (r?.optString("error") ?: (if (zh) "反编译失败" else "Decompile failed")) }
+                    else state.decompileError = r?.optJSONObject("error")?.optString("message").orEmpty().ifBlank { (r?.optString("error") ?: (if (zh) "反编译失败" else "Decompile failed")) }
                 }
             }, modifier = Modifier.fillMaxWidth(), enabled = state.sharedWorkspaceId.isNotBlank() && state.decompileTarget.isNotBlank() && !state.decompileRunning) {
                 if (state.decompileRunning) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -229,8 +230,8 @@ private fun SharedSoPicker(state: ToolPagesState, zh: Boolean, onChanged: () -> 
             SharedSoPicker(state, zh) {
                 scope.launch {
                     state.soAnalyzeRunning = true
-                    val o = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).overview(state.sharedWorkspaceId) }.getOrNull() }
-                    val c = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).rzScanCrypto(state.sharedWorkspaceId) }.getOrNull() }
+                    val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(state.sharedWorkspaceId) }.getOrNull() }
+                    val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(state.sharedWorkspaceId) }.getOrNull() }
                     state.soAnalyzeRunning = false
                     state.soOverview = (if (o?.optBoolean("ok", false) == true) toolSummarize(o) else o?.optString("error") ?: "")
                     state.soCrypto = (if (c?.optBoolean("ok", false) == true) toolSummarize(c) else "")
@@ -271,14 +272,14 @@ private fun SharedSoPicker(state: ToolPagesState, zh: Boolean, onChanged: () -> 
             Button(onClick = {
                 scope.launch {
                     state.rebuildRunning = true; state.rebuildError = ""; state.rebuildResult = ""; state.rebuildCheck = ""
-                    val c = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).editCheck(state.sharedWorkspaceId) }.getOrNull() }
+                    val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editCheck(state.sharedWorkspaceId, "") }.getOrNull() }
                     if (c != null && c.optBoolean("ok", false)) state.rebuildCheck = toolSummarize(c)
                     else state.rebuildError = c?.optString("error") ?: (if (zh) "校验失败" else "Check failed")
-                    val b = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).build(state.sharedWorkspaceId, "", state.sharedSoName) }.getOrNull() }
+                    val b = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).build(state.sharedWorkspaceId, "", state.sharedSoName) }.getOrNull() }
                     state.rebuildRunning = false
                     if (b != null && b.optBoolean("ok", false)) state.rebuildResult = toolSummarize(b)
                     else state.rebuildError = b?.optString("error") ?: state.rebuildError
-                    val o = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
+                    val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
                     state.rebuildOutputs = (if (o?.optBoolean("ok", false) == true) toolSummarize(o) else if (zh) "（无）" else "(none)")
                 }
             }, modifier = Modifier.fillMaxWidth(), enabled = state.sharedWorkspaceId.isNotBlank() && !state.rebuildRunning) {
@@ -303,7 +304,7 @@ private fun SharedSoPicker(state: ToolPagesState, zh: Boolean, onChanged: () -> 
             SharedSoPicker(state, zh) {
                 scope.launch {
                     state.unpackRunning = true
-                    val r = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).list(state.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(state.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
                     state.unpackRunning = false
                     state.unpackInfo = (if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: (if (zh) "（无数据）" else "(none)"))
                 }

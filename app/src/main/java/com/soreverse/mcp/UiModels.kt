@@ -102,6 +102,8 @@ internal class AnalyzeUiState {
     var decompileResult by mutableStateOf<String?>(null)
     var decompileError by mutableStateOf("")
     var decompileBackend by mutableStateOf("")
+    /** 反编译入口状态：用户是否已进入反编译对话 */
+    var decompileEntered by mutableStateOf(false)
     /** 分析引擎模式: Native(rizin) 或 Standalone(纯Java) */
     var engineMode by mutableStateOf(EngineMode.NATIVE)
     /** Native 引擎可用性状态: null=未检测, true=可用, false=不可用 */

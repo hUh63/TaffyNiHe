@@ -35,6 +35,7 @@ import com.soreverse.mcp.core.EngineProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 internal data class ToolDef(val key: String, val labelZh: String, val labelEn: String)
 
@@ -103,18 +104,18 @@ internal fun AnalysisWorkspace(
 @Composable
 private fun WorkspacePicker(tools: ToolPagesState, zh: Boolean) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val scope = rememberCoroutineScope()
         scope.launch {
             tools.opening = true; tools.openError = ""
-            val r = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).open(uri.toString(), false) }.getOrNull() }
+            val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).open(uri.toString(), false) }.getOrNull() }
             tools.opening = false
             if (r != null && r.optBoolean("ok", false)) {
                 tools.sharedWorkspaceId = r.optString("workspaceId")
                 tools.sharedSoName = r.optString("soFileName").ifBlank { r.optString("fileName") }
             } else {
-                tools.openError = r?.optString("error").ifBlank { (if (zh) "打开失败" else "Open failed") }
+                tools.openError = r?.optString("error").orEmpty().ifBlank { (if (zh) "打开失败" else "Open failed") }
             }
         }
     }
@@ -148,10 +149,10 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     if (loc.isEmpty()) { tools.decompileError = if (zh) "请输入函数符号或地址" else "Enter sym/VA"; return@Button }
                     scope.launch {
                         tools.decompileRunning = true; tools.decompileError = ""; tools.decompileResult = ""
-                        val r = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).rzDecompile(tools.sharedWorkspaceId, "", loc, true) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzDecompile(tools.sharedWorkspaceId, "", loc, true) }.getOrNull() }
                         tools.decompileRunning = false
                         if (r != null && r.optBoolean("ok", false)) tools.decompileResult = r.optString("pseudocode").ifBlank { toolSummarize(r) }
-                        else tools.decompileError = r?.optJSONObject("error")?.optString("message").ifBlank { (r?.optString("error") ?: (if (zh) "反编译失败" else "Decompile failed")) }
+                        else tools.decompileError = r?.optJSONObject("error")?.optString("message").orEmpty().ifBlank { (r?.optString("error") ?: (if (zh) "反编译失败" else "Decompile failed")) }
                     }
                 }, modifier = Modifier.fillMaxWidth(), enabled = tools.sharedWorkspaceId.isNotBlank() && tools.decompileTarget.isNotBlank() && !tools.decompileRunning) {
                     if (tools.decompileRunning) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -165,7 +166,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 Button(onClick = {
                     scope.launch {
                         tools.unpackRunning = true
-                        val r = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
                         tools.unpackRunning = false
                         tools.unpackInfo = (if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: (if (zh) "（无数据）" else "(none)"))
                     }
@@ -178,8 +179,8 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 Button(onClick = {
                     scope.launch {
                         tools.soAnalyzeRunning = true
-                        val o = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
-                        val c = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
+                        val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
+                        val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
                         tools.soAnalyzeRunning = false
                         tools.soOverview = (if (o?.optBoolean("ok", false) == true) toolSummarize(o) else o?.optString("error") ?: "")
                         tools.soCrypto = (if (c?.optBoolean("ok", false) == true) toolSummarize(c) else "")
@@ -197,7 +198,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     if (sym.isEmpty()) { tools.emulateError = if (zh) "请输入函数符号" else "Enter symbol"; return@Button }
                     scope.launch {
                         tools.emulateRunning = true; tools.emulateError = ""
-                        val r = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", sym, org.json.JSONArray(), true) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", sym, org.json.JSONArray(), true) }.getOrNull() }
                         tools.emulateRunning = false
                         if (r != null && r.optBoolean("ok", false)) tools.emulateResult = toolSummarize(r)
                         else tools.emulateError = r?.optString("error") ?: (if (zh) "模拟失败" else "Emulate failed")
@@ -219,11 +220,11 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 Button(onClick = {
                     scope.launch {
                         tools.rebuildRunning = true; tools.rebuildError = ""; tools.rebuildResult = ""
-                        val c = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).editCheck(tools.sharedWorkspaceId) }.getOrNull() }
+                        val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editCheck(tools.sharedWorkspaceId, "") }.getOrNull() }
                         if (c != null && c.optBoolean("ok", false)) tools.rebuildCheck = toolSummarize(c)
                         else tools.rebuildError = c?.optString("error") ?: (if (zh) "校验失败" else "Check failed")
-                        val b = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
-                        val o = withContext(Dispatchers.IO) { runCatching { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
+                        val b = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
+                        val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
                         tools.rebuildRunning = false
                         if (b != null && b.optBoolean("ok", false)) tools.rebuildResult = toolSummarize(b)
                         else tools.rebuildError = b?.optString("error") ?: tools.rebuildError

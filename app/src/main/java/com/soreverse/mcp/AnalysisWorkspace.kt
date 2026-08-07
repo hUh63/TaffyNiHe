@@ -182,7 +182,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
         when (state.activeTool) {
             "decompile" -> {
                 OutlinedTextField(value = tools.decompileTarget, onValueChange = { tools.decompileTarget = it },
-                    label = { Text(if (zh) "符号/VA" else "Sym/VA") }, singleLine = true,
+                    label = { Text(if (zh) "函数符号/VA" else "Sym/VA") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
                     shape = RoundedCornerShape(8.dp),
                     placeholder = { Text("JNI_OnLoad", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) })
@@ -200,7 +200,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     shape = RoundedCornerShape(8.dp)) {
                     if (tools.decompileRunning) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     else { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp)); Spacer(Modifier.size(4.dp)) }
-                    Text(if (zh) "执行" else "Run")
+                    Text(if (zh) "反编译" else "Decompile")
                 }
                 if (tools.decompileError.isNotBlank()) Text(tools.decompileError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
@@ -295,39 +295,67 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (zh) "输出结果" else "Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-        ResultBlock(if (zh) "反编译" else "Decompile", tools.decompileResult)
-        ResultBlock(if (zh) "模拟" else "Emulate", tools.emulateResult)
-        ResultBlock(if (zh) "SO概览" else "Overview", tools.soOverview)
-        ResultBlock(if (zh) "加密扫描" else "Crypto", tools.soCrypto)
-        ResultBlock(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck)
-        ResultBlock(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult)
-        ResultBlock(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs)
-        ResultBlock(if (zh) "包体结构" else "Package Files", tools.unpackInfo)
-        ResultBlock("Frida", tools.fridaStatus)
+        DataCard(if (zh) "反编译" else "Decompile", tools.decompileResult)
+        DataCard(if (zh) "模拟" else "Emulate", tools.emulateResult)
+        DataCard(if (zh) "SO概览" else "Overview", tools.soOverview)
+        DataCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto)
+        DataCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck)
+        DataCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult)
+        DataCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs)
+        DataCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo)
+        DataCard("Frida", tools.fridaStatus)
     }
 }
 
 @Composable
-internal fun ResultBlock(title: String, text: String) {
+internal fun DataCard(title: String, text: String) {
     if (text.isBlank()) return
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        Column(Modifier.padding(8.dp)) {
-            Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.size(4.dp))
-            Text(
-                text,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                lineHeight = 18.sp,
-            )
+        Column(Modifier.padding(10.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.size(6.dp))
+            // 解析结构化 JSON 展示
+            val json = runCatching { JSONObject(text) }.getOrNull()
+            if (json != null) {
+                JsonOverview(json, text)
+            } else {
+                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun JsonOverview(json: JSONObject, raw: String) {
+    val keys = json.keys().asSequence().filter { it != "ok" }.toList()
+    if (keys.isEmpty()) { Text(raw, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface); return }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        keys.forEach { k ->
+            val v = json.opt(k)
+            when (v) {
+                is JSONObject -> {
+                    Text("$k:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    JsonOverview(v, v.toString())
+                }
+                is org.json.JSONArray -> {
+                    Text("$k: [${v.length()} items]", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    for (i in 0 until v.length().coerceAtMost(10)) {
+                        val item = v.opt(i)
+                        Text("  [$i] $item", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                    if (v.length() > 10) Text("  ... ${v.length() - 10} more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                else -> {
+                    Row(Modifier.fillMaxWidth()) {
+                        Text("$k: ", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("$v", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
         }
     }
 }

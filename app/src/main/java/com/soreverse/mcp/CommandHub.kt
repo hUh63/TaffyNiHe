@@ -143,13 +143,13 @@ internal fun CommandHubScreen(
     val zh = t.zh
     val sats = remember(zh) {
         listOf(
-            Satellite("📖", if (zh) "反编译" else "Decompile", MainTab.Tools, "decompile"),
-            Satellite("🔓", if (zh) "脱壳" else "Unpack", MainTab.Tools, "unpack"),
-            Satellite("🧬", if (zh) "SO 分析" else "SO", MainTab.Tools, "soanalyze"),
-            Satellite("⚡", if (zh) "模拟" else "Emulate", MainTab.Tools, "emulate"),
-            Satellite("🎯", "Frida", MainTab.Tools, "frida"),
-            Satellite("📦", if (zh) "回编" else "Rebuild", MainTab.Tools, "rebuild"),
-            Satellite("📡", if (zh) "日志" else "Logs", MainTab.Tools, "logs"),
+            Satellite("📖", if (zh) "反编译" else "Decompile", MainTab.Home, "decompile"),
+            Satellite("🔓", if (zh) "脱壳" else "Unpack", MainTab.Home, "unpack"),
+            Satellite("🧬", if (zh) "SO 分析" else "SO", MainTab.Home, "soanalyze"),
+            Satellite("⚡", if (zh) "模拟" else "Emulate", MainTab.Home, "emulate"),
+            Satellite("🎯", "Frida", MainTab.Home, "frida"),
+            Satellite("📦", if (zh) "回编" else "Rebuild", MainTab.Home, "rebuild"),
+            Satellite("📡", if (zh) "日志" else "Logs", MainTab.Home, "logs"),
             Satellite("⚙️", if (zh) "设置" else "Settings", MainTab.Settings),
         )
     }

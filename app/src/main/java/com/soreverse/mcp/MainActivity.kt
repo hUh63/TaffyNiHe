@@ -446,12 +446,10 @@ private fun SoReverseApp() {
                                     t = t,
                                     settings = settings,
                                     onNavigate = { target, category ->
-                                        if (category in setOf("decompile", "unpack", "soanalyze", "emulate", "frida", "rebuild")) {
-                                            workspaceState.activeTool = category ?: "decompile"
+                                        if (target == MainTab.Tools) {
+                                            tab = MainTab.Tools
                                         }
-                                        toolCategory = category
                                         activeToolPage = null
-                                        tab = MainTab.Tools
                                     },
                                     onNavigateSettings = { dest ->
                                         settingsDest = dest

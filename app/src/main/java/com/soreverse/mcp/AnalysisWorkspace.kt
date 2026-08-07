@@ -106,7 +106,7 @@ internal fun AnalysisWorkspace(
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // 左控制台
             Surface(
-                modifier = Modifier.width(190.dp).fillMaxHeight(),
+                modifier = Modifier.width(160.dp).fillMaxHeight(),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
@@ -333,10 +333,26 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
             }
             "frida" -> {
                 OutlinedTextField(value = tools.fridaScript, onValueChange = { tools.fridaScript = it },
-                    label = { Text("Frida JS") }, modifier = Modifier.fillMaxWidth().height(100.dp),
+                    label = { Text("Frida JS") }, modifier = Modifier.fillMaxWidth().height(80.dp),
                     textStyle = MaterialTheme.typography.bodySmall, shape = RoundedCornerShape(8.dp))
+                // 主按钮：校验脚本
                 Button(onClick = { tools.fridaStatus = if (zh) "脚本已就绪，通过MCP下发" else "Script ready, deliver via MCP" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
                     Text(if (zh) "✅ 校验脚本" else "✅ Validate", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                Text(if (zh) "Frida 功能需 root + frida-server" else "Frida needs root + frida-server", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                Spacer(Modifier.size(2.dp))
+                // 扩展功能(需root)
+                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "🔗 连接设备" else "🔗 Attach", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "📤 加载脚本" else "📤 Load Script", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "🔍 Hook 类" else "🔍 Hook Class", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "🛡️ SSL Pinning 绕过" else "🛡️ SSL Bypass", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
                 }
             }
             "rebuild" -> {

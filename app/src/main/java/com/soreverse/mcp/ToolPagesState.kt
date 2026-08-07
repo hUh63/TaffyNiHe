@@ -26,17 +26,23 @@ class ToolPagesState {
     var decompileResult by mutableStateOf("")
     var decompileError by mutableStateOf("")
     var decompileRunning by mutableStateOf(false)
+    /** 反编译页的额外功能结果（函数列表/反汇编等） */
+    var decompileExtra by mutableStateOf("")
 
     // ---- 模拟页 ----
     var emulateSymbol by mutableStateOf("")
     var emulateResult by mutableStateOf("")
     var emulateError by mutableStateOf("")
     var emulateRunning by mutableStateOf(false)
+    /** 模拟页的额外功能结果（寄存器/dump等） */
+    var emulateExtra by mutableStateOf("")
 
     // ---- SO 分析页 ----
     var soOverview by mutableStateOf("")
     var soCrypto by mutableStateOf("")
     var soAnalyzeRunning by mutableStateOf(false)
+    /** SO 分析页的额外功能结果（段信息/导入导出表等） */
+    var soExtra by mutableStateOf("")
 
     // ---- 回编页 ----
     var rebuildCheck by mutableStateOf("")
@@ -44,10 +50,14 @@ class ToolPagesState {
     var rebuildOutputs by mutableStateOf("")
     var rebuildError by mutableStateOf("")
     var rebuildRunning by mutableStateOf(false)
+    /** 回编页的额外功能结果（hex补丁/重命名等） */
+    var rebuildExtra by mutableStateOf("")
 
     // ---- 脱壳页 ----
     var unpackInfo by mutableStateOf("")
     var unpackRunning by mutableStateOf(false)
+    /** 脱壳页的额外功能结果（提取SO等） */
+    var unpackExtra by mutableStateOf("")
 
     // ---- Frida 页 ----
     var fridaScript by mutableStateOf(DEFAULT_FRIDA_SCRIPT)

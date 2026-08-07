@@ -294,6 +294,7 @@ private fun SoReverseApp() {
     var activeToolPage by remember { mutableStateOf<String?>(null) }
     var showMcpToolList by remember { mutableStateOf(false) }
     var mcpToolCategory by remember { mutableStateOf<String?>(null) }
+    var showLogs by remember { mutableStateOf(false) }
     val toolState = remember { ToolPagesState() }
     val workspaceState = remember { WorkspaceState(context.applicationContext) }
     val t = textFor(language, context)
@@ -451,9 +452,13 @@ private fun SoReverseApp() {
                                         if (target == MainTab.Tools) {
                                             tab = MainTab.Tools
                                         } else if (target == MainTab.Home) {
-                                            // 卫星/工具列表 → 展示 MCP 工具清单
-                                            showMcpToolList = true
-                                            mcpToolCategory = category
+                                            // 卫星/工具列表 → 展示 MCP 工具清单 或 日志
+                                            if (category == "logs") {
+                                                showLogs = true
+                                            } else {
+                                                showMcpToolList = true
+                                                mcpToolCategory = category
+                                            }
                                         } else if (target == MainTab.Settings) {
                                             tab = MainTab.Settings
                                         }
@@ -598,6 +603,7 @@ private fun SoReverseApp() {
             }
             BackHandler(enabled = activeToolPage != null) { activeToolPage = null }
             BackHandler(enabled = showMcpToolList) { showMcpToolList = false; mcpToolCategory = null }
+            BackHandler(enabled = showLogs) { showLogs = false }
             if (showMcpToolList) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -608,6 +614,14 @@ private fun SoReverseApp() {
                         category = mcpToolCategory,
                         onClose = { showMcpToolList = false; mcpToolCategory = null },
                     )
+                }
+            }
+            if (showLogs) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    LogsTab(t = t, settings = settings, onBack = { showLogs = false })
                 }
             }
             val panel = activeToolPage

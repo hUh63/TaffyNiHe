@@ -205,7 +205,7 @@ internal fun CommandHubScreen(
             zh = zh,
             settings = settings,
             onNavigateSettings = onNavigateSettings,
-            onAnalyze = { onNavigate(MainTab.Home, null) },
+            onAnalyze = { onNavigate(MainTab.Tools, null) },
         )
 
         // 工具列表入口文本

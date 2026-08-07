@@ -454,6 +454,8 @@ private fun SoReverseApp() {
                                             // 卫星/工具列表 → 展示 MCP 工具清单
                                             showMcpToolList = true
                                             mcpToolCategory = category
+                                        } else if (target == MainTab.Settings) {
+                                            tab = MainTab.Settings
                                         }
                                         activeToolPage = null
                                     },

@@ -400,48 +400,76 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
 @Composable
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     var detailMode by androidx.compose.runtime.remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // 结果标签页：收集所有非空的结果
+    val resultTabs = remember(tools) {
+        listOfNotNull(
+            R2Tab(if (zh) "反编译" else "Decompile", tools.decompileResult),
+            R2Tab(if (zh) "反编译·额外" else "Decompile·Extra", tools.decompileExtra),
+            R2Tab(if (zh) "模拟" else "Emulate", tools.emulateResult),
+            R2Tab(if (zh) "模拟·额外" else "Emulate·Extra", tools.emulateExtra),
+            R2Tab(if (zh) "SO概览" else "Overview", tools.soOverview),
+            R2Tab(if (zh) "加密扫描" else "Crypto", tools.soCrypto),
+            R2Tab(if (zh) "SO·额外" else "SO·Extra", tools.soExtra),
+            R2Tab(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck),
+            R2Tab(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult),
+            R2Tab(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs),
+            R2Tab(if (zh) "回编·额外" else "Rebuild·Extra", tools.rebuildExtra),
+            R2Tab(if (zh) "包体结构" else "Package Files", tools.unpackInfo),
+            R2Tab(if (zh) "脱壳·额外" else "Unpack·Extra", tools.unpackExtra),
+            R2Tab("Frida", tools.fridaStatus),
+        ).filter { it.text.isNotBlank() }
+    }
+    var selectedTab by androidx.compose.runtime.remember { mutableStateOf(0) }
+
+    Column(Modifier.fillMaxSize().padding(10.dp)) {
+        // 顶部：标题 + 简洁/详细切换 + 标签页数量
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(if (zh) "输出结果" else "Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            Button(
-                onClick = { detailMode = !detailMode },
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                shape = RoundedCornerShape(6.dp),
-            ) { Text(if (detailMode) (if (zh) "简洁" else "Simple") else (if (zh) "详细" else "Detail"), style = MaterialTheme.typography.labelSmall) }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${selectedTab + 1}/${resultTabs.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(
+                    onClick = { detailMode = !detailMode },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp),
+                ) { Text(if (detailMode) (if (zh) "简洁" else "Simple") else (if (zh) "详细" else "Detail"), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp) }
+            }
         }
-        if (detailMode) {
-            DetailCard(if (zh) "反编译" else "Decompile", tools.decompileResult, zh)
-            DetailCard(if (zh) "反编译·额外" else "Decompile·Extra", tools.decompileExtra, zh)
-            DetailCard(if (zh) "模拟" else "Emulate", tools.emulateResult, zh)
-            DetailCard(if (zh) "模拟·额外" else "Emulate·Extra", tools.emulateExtra, zh)
-            DetailCard(if (zh) "SO概览" else "Overview", tools.soOverview, zh)
-            DetailCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto, zh)
-            DetailCard(if (zh) "SO·额外" else "SO·Extra", tools.soExtra, zh)
-            DetailCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck, zh)
-            DetailCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult, zh)
-            DetailCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs, zh)
-            DetailCard(if (zh) "回编·额外" else "Rebuild·Extra", tools.rebuildExtra, zh)
-            DetailCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo, zh)
-            DetailCard(if (zh) "脱壳·额外" else "Unpack·Extra", tools.unpackExtra, zh)
-            DetailCard("Frida", tools.fridaStatus, zh)
+        Spacer(Modifier.size(4.dp))
+        // 标签页导航条
+        if (resultTabs.isNotEmpty()) {
+            androidx.compose.foundation.horizontalScroll(rememberScrollState()).let { scrollMod ->
+                Row(Modifier.fillMaxWidth().then(scrollMod), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    resultTabs.forEachIndexed { idx, tab ->
+                        val sel = idx == selectedTab
+                        Button(
+                            onClick = { selectedTab = idx },
+                            colors = if (sel) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(6.dp),
+                        ) { Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, maxLines = 1) }
+                    }
+                }
+            }
+            Spacer(Modifier.size(6.dp))
+            // 当前选中标签页的内容
+            val current = resultTabs.getOrNull(selectedTab) ?: return
+            Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                if (detailMode) {
+                    DetailCard(current.label, current.text, zh)
+                } else {
+                    DataCard(current.label, current.text)
+                }
+            }
         } else {
-            DataCard(if (zh) "反编译" else "Decompile", tools.decompileResult)
-            DataCard(if (zh) "反编译·额外" else "Decompile·Extra", tools.decompileExtra)
-            DataCard(if (zh) "模拟" else "Emulate", tools.emulateResult)
-            DataCard(if (zh) "模拟·额外" else "Emulate·Extra", tools.emulateExtra)
-            DataCard(if (zh) "SO概览" else "Overview", tools.soOverview)
-            DataCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto)
-            DataCard(if (zh) "SO·额外" else "SO·Extra", tools.soExtra)
-            DataCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck)
-            DataCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult)
-            DataCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs)
-            DataCard(if (zh) "回编·额外" else "Rebuild·Extra", tools.rebuildExtra)
-            DataCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo)
-            DataCard(if (zh) "脱壳·额外" else "Unpack·Extra", tools.unpackExtra)
-            DataCard("Frida", tools.fridaStatus)
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(if (zh) "暂无结果，请执行分析工具" else "No results yet, run a tool", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
+
+private data class R2Tab(val label: String, val text: String)
 
 @Composable
 internal fun DataCard(title: String, text: String) {

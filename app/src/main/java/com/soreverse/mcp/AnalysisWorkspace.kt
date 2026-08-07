@@ -50,6 +50,7 @@ import com.soreverse.mcp.core.EngineProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal data class ToolDef(val key: String, val labelZh: String, val labelEn: String)
@@ -293,17 +294,37 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
 
 @Composable
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
+    var detailMode by androidx.compose.runtime.remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(if (zh) "输出结果" else "Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-        DataCard(if (zh) "反编译" else "Decompile", tools.decompileResult)
-        DataCard(if (zh) "模拟" else "Emulate", tools.emulateResult)
-        DataCard(if (zh) "SO概览" else "Overview", tools.soOverview)
-        DataCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto)
-        DataCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck)
-        DataCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult)
-        DataCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs)
-        DataCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo)
-        DataCard("Frida", tools.fridaStatus)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(if (zh) "输出结果" else "Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Button(
+                onClick = { detailMode = !detailMode },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(6.dp),
+            ) { Text(if (detailMode) (if (zh) "简洁" else "Simple") else (if (zh) "详细" else "Detail"), style = MaterialTheme.typography.labelSmall) }
+        }
+        if (detailMode) {
+            DetailCard(if (zh) "反编译" else "Decompile", tools.decompileResult)
+            DetailCard(if (zh) "模拟" else "Emulate", tools.emulateResult)
+            DetailCard(if (zh) "SO概览" else "Overview", tools.soOverview)
+            DetailCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto)
+            DetailCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck)
+            DetailCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult)
+            DetailCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs)
+            DetailCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo)
+            DetailCard("Frida", tools.fridaStatus)
+        } else {
+            DataCard(if (zh) "反编译" else "Decompile", tools.decompileResult)
+            DataCard(if (zh) "模拟" else "Emulate", tools.emulateResult)
+            DataCard(if (zh) "SO概览" else "Overview", tools.soOverview)
+            DataCard(if (zh) "加密扫描" else "Crypto", tools.soCrypto)
+            DataCard(if (zh) "回编校验" else "Rebuild Check", tools.rebuildCheck)
+            DataCard(if (zh) "回编输出" else "Rebuild Output", tools.rebuildResult)
+            DataCard(if (zh) "回编历史" else "Rebuild History", tools.rebuildOutputs)
+            DataCard(if (zh) "包体结构" else "Package Files", tools.unpackInfo)
+            DataCard("Frida", tools.fridaStatus)
+        }
     }
 }
 
@@ -318,7 +339,6 @@ internal fun DataCard(title: String, text: String) {
         Column(Modifier.padding(10.dp)) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.size(6.dp))
-            // 解析结构化 JSON 展示
             val json = runCatching { JSONObject(text) }.getOrNull()
             if (json != null) {
                 JsonOverview(json, text)
@@ -327,6 +347,118 @@ internal fun DataCard(title: String, text: String) {
             }
         }
     }
+}
+
+/** 详细模式：结构化卡片，类似 ElfOverviewPanel 风格 */
+@Composable
+private fun DetailCard(title: String, text: String) {
+    if (text.isBlank()) return
+    val json = runCatching { JSONObject(text) }.getOrNull()
+    if (json == null) {
+        DataCard(title, text)
+        return
+    }
+    // 如果有 overview 子对象，用它来渲染结构化视图
+    val ov = json.optJSONObject("overview") ?: json
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+
+            // 基础属性
+            SectionCard(if (zh) "📦 基础属性" else "📦 Basics") {
+                Kv(if (zh) "名称" else "Name", ov.optString("fileName", "—"))
+                Kv(if (zh) "大小" else "Size", formatBytes(ov.optLong("size", 0L)))
+                val arch = ov.optString("architecture", "—")
+                val bits = ov.optInt("bits", 0)
+                Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
+                Kv(if (zh) "入口" else "Entry", ov.optString("entryPoint", "0x0"))
+                Kv(if (zh) "类型" else "Type", ov.optString("elfType", "—"))
+                Kv(if (zh) "字节序" else "Endian", ov.optString("endian", "—"))
+            }
+
+            // 结构与规模
+            SectionCard(if (zh) "📊 结构与规模" else "📊 Structure") {
+                MetricRow(
+                    (if (zh) "节区" else "Sections") to ov.optInt("sectionCount", 0).toString(),
+                    (if (zh) "程序段" else "Segments") to ov.optInt("segmentCount", 0).toString(),
+                    (if (zh) "函数" else "Fns") to ov.optInt("functionCount", 0).toString(),
+                )
+                MetricRow(
+                    (if (zh) "符号" else "Symbols") to ov.optInt("symbolCount", 0).toString(),
+                    (if (zh) "字符串" else "Strings") to ov.optInt("stringCount", 0).toString(),
+                )
+            }
+
+            // 安全特性
+            val sec = ov.optJSONArray("securityFeatures") ?: org.json.JSONArray()
+            if (sec.length() > 0) {
+                SectionCard(if (zh) "🔒 安全特性" else "🔒 Security") {
+                    for (i in 0 until sec.length()) {
+                        val s = sec.optJSONObject(i) ?: continue
+                        val name = s.optString("name", "?")
+                        val present = s.optBoolean("present", false)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                            Text(if (present) (if (zh) "有" else "Yes") else (if (zh) "无" else "No"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (present) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+
+            // 原始 JSON（收起）
+            Text(if (zh) "原始数据" else "Raw", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 8)
+        }
+    }
+}
+
+@Composable
+private fun SectionCard(title: String, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.6f)),
+    ) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun Kv(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun MetricRow(vararg pairs: Pair<String, String>) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        pairs.forEach { (label, value) ->
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(value, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "—"
+    val units = arrayOf("B", "KB", "MB", "GB")
+    var v = bytes.toDouble()
+    var u = 0
+    while (v >= 1024 && u < units.size - 1) { v /= 1024; u++ }
+    return "%.1f %s".format(v, units[u])
 }
 
 @Composable

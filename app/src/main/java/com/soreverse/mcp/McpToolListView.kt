@@ -28,6 +28,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.soreverse.mcp.mcp.ToolCatalog
+import com.soreverse.mcp.mcp.ToolClass
+import com.soreverse.mcp.mcp.ToolHandler
 import androidx.compose.ui.unit.sp
 
 /** 卫星分类 → MCP 工具分类的映射 */
@@ -112,6 +115,7 @@ private fun ToolCard(handler: ToolHandler, zh: Boolean) {
         ToolClass.CORE -> if (zh) "核心" else "CORE"
         ToolClass.EXTRA -> if (zh) "扩展" else "EXTRA"
         ToolClass.META -> if (zh) "元" else "META"
+        else -> ""
     }
     Card(
         modifier = Modifier.fillMaxWidth(),

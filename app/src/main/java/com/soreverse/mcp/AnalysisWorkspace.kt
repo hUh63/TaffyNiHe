@@ -324,7 +324,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 }
                 Button(onClick = {
                     scope.launch { tools.emulateExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", "0x0", 256) }.getOrNull() }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", 0L, 256) }.getOrNull() }
                         tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先执行模拟" else "Run emulate first"
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {

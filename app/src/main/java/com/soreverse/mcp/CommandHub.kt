@@ -205,7 +205,7 @@ internal fun CommandHubScreen(
             zh = zh,
             settings = settings,
             onNavigateSettings = onNavigateSettings,
-            onAnalyze = { onNavigate(MainTab.Tools, null) },
+            onAnalyze = { onNavigate(MainTab.Home, null) },
         )
 
         // 工具列表入口文本
@@ -225,7 +225,7 @@ internal fun CommandHubScreen(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                    ) { onNavigate(MainTab.Tools, null) }
+                    ) { onNavigate(MainTab.Home, null) }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }

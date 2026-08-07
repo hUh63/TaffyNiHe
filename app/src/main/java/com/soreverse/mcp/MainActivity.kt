@@ -292,6 +292,8 @@ private fun SoReverseApp() {
     var backProgress by remember { mutableStateOf(0f) }
     var toolCategory by remember { mutableStateOf<String?>(null) }
     var activeToolPage by remember { mutableStateOf<String?>(null) }
+    var showMcpToolList by remember { mutableStateOf(false) }
+    var mcpToolCategory by remember { mutableStateOf<String?>(null) }
     val toolState = remember { ToolPagesState() }
     val workspaceState = remember { WorkspaceState(context.applicationContext) }
     val t = textFor(language, context)
@@ -448,6 +450,10 @@ private fun SoReverseApp() {
                                     onNavigate = { target, category ->
                                         if (target == MainTab.Tools) {
                                             tab = MainTab.Tools
+                                        } else if (target == MainTab.Home) {
+                                            // 卫星/工具列表 → 展示 MCP 工具清单
+                                            showMcpToolList = true
+                                            mcpToolCategory = category
                                         }
                                         activeToolPage = null
                                     },
@@ -589,6 +595,19 @@ private fun SoReverseApp() {
                 )
             }
             BackHandler(enabled = activeToolPage != null) { activeToolPage = null }
+            BackHandler(enabled = showMcpToolList) { showMcpToolList = false; mcpToolCategory = null }
+            if (showMcpToolList) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    McpToolListView(
+                        zh = t.zh,
+                        category = mcpToolCategory,
+                        onClose = { showMcpToolList = false; mcpToolCategory = null },
+                    )
+                }
+            }
             val panel = activeToolPage
             if (panel != null) {
                 Surface(

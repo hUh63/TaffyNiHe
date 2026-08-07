@@ -468,10 +468,19 @@ private fun EngineRuntime.parseAxtCommand(command: String): Pair<Long, Boolean>?
 internal fun EngineRuntime.rzDecompile(workspaceId: String, editSessionId: String = "", locator: String = "", strict: Boolean = true): JSONObject = guarded {
     val bytes = dataFor(workspaceId, editSessionId)
     val elf = elfFor(workspaceId, editSessionId)
-    if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")
     val target = locator.ifBlank { hex(elf.entry) }
     val name = LocatorParser.target(target, "so_function")
-    val va = resolveCodeAddress(bytes, elf, target) ?: return@guarded err("INVALID_ARGUMENT", "locator must resolve to a function or hex VA", "locator", locator)
+    val va = resolveCodeAddress(bytes, elf, target) ?: return@guarded err("INVALID_ARGUMENT", "locator must resolve to a function or hex VA. 支持 so_function:xxx / 符号名 / 0xVA", "locator", locator)
+
+    // 方案 B：当 Rizin/Ghidra 原生后端不可用时，降级为纯 Java(Arm64Disasm) 反汇编兜底，
+    // 而不是直接报 RIZIN_UNAVAILABLE。这样在引擎缺失场景也能给出可读结果。
+    if (!NativeEngine.active().available()) {
+        val fallback = standaloneJavaPseudoDecompile(bytes, elf, va, name)
+        if (fallback.optBoolean("ok", false)) return@guarded fallback
+        // 兜底本身也失败（非 arm64 等），再转成标准错误。
+        return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI 且纯 Java 兜底不可用(${errMessage(fallback)})", "backend", "rizin-ghidra", "payload" to fallback)
+    }
+
     val payload = JSONObject(NativeEngine.active().decompile(bytes, elf.architecture, va))
         .put("workspaceId", workspaceId)
         .put("addr", hex(va))
@@ -479,10 +488,19 @@ internal fun EngineRuntime.rzDecompile(workspaceId: String, editSessionId: Strin
         .put("usesBuiltinPseudo", false)
     val decompErr = payload.optString("error")
     if ((decompErr == "DECOMPILER_UNAVAILABLE" || decompErr == "DECOMPILER_FAILED") && strict) {
+        // Ghidra 反编译失败且 strict=true 时，同样降级为纯 Java 兜底（若可用），保证有输出。
+        val fallback = standaloneJavaPseudoDecompile(bytes, elf, va, name)
+        if (fallback.optBoolean("ok", false)) return@guarded fallback
         return@guarded err(decompErr, payload.optString("message"), "backend", "rizin-ghidra", "payload" to payload)
     }
     if (payload.has("error")) return@guarded ok(payload)
     ok(enrichDecompilePayload(payload, bytes, elf, va, name, target))
+}
+
+// 从 err JSONObject 提取错误消息（供 rzDecompile 兜底提示用）
+private fun EngineRuntime.errMessage(fallback: JSONObject): String {
+    val e = fallback.optJSONObject("error") ?: return "unknown"
+    return e.optString("message").ifBlank { e.optString("code") }
 }
 
 private fun EngineRuntime.rizinFunctionKind(elf: ElfFile, item: JSONObject): String {

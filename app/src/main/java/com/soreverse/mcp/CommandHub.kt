@@ -143,13 +143,13 @@ internal fun CommandHubScreen(
     val zh = t.zh
     val sats = remember(zh) {
         listOf(
-            Satellite("📖", if (zh) "反编译" else "Decompile", MainTab.Analyze, "decompile"),
-            Satellite("🔓", if (zh) "脱壳" else "Unpack", MainTab.Analyze, "dynamic"),
-            Satellite("🧬", if (zh) "SO 分析" else "SO", MainTab.Analyze, "analyze"),
-            Satellite("⚡", if (zh) "模拟" else "Emulate", MainTab.Analyze, "emulate"),
-            Satellite("🎯", "Frida", MainTab.Analyze, "dynamic"),
-            Satellite("📦", if (zh) "回编" else "Rebuild", MainTab.Analyze, "build"),
-            Satellite("📡", if (zh) "日志" else "Logs", MainTab.Logs),
+            Satellite("📖", if (zh) "反编译" else "Decompile", MainTab.Tools, "decompile"),
+            Satellite("🔓", if (zh) "脱壳" else "Unpack", MainTab.Tools, "unpack"),
+            Satellite("🧬", if (zh) "SO 分析" else "SO", MainTab.Tools, "soanalyze"),
+            Satellite("⚡", if (zh) "模拟" else "Emulate", MainTab.Tools, "emulate"),
+            Satellite("🎯", "Frida", MainTab.Tools, "frida"),
+            Satellite("📦", if (zh) "回编" else "Rebuild", MainTab.Tools, "rebuild"),
+            Satellite("📡", if (zh) "日志" else "Logs", MainTab.Tools, "logs"),
             Satellite("⚙️", if (zh) "设置" else "Settings", MainTab.Settings),
         )
     }
@@ -205,7 +205,7 @@ internal fun CommandHubScreen(
             zh = zh,
             settings = settings,
             onNavigateSettings = onNavigateSettings,
-            onAnalyze = { onNavigate(MainTab.SoAnalyze, null) },
+            onAnalyze = { onNavigate(MainTab.Tools, null) },
         )
 
         // 工具列表入口文本
@@ -225,7 +225,7 @@ internal fun CommandHubScreen(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                    ) { onNavigate(MainTab.Analyze, null) }
+                    ) { onNavigate(MainTab.Tools, null) }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }

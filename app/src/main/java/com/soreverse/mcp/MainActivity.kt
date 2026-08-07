@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
@@ -76,6 +77,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -271,7 +273,7 @@ private fun SoReverseApp() {
     val updateManager = remember { GitHubUpdateManager(context.applicationContext) }
     var availableRelease by remember { mutableStateOf<GitHubRelease?>(null) }
     var showUpdatePrompt by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf(MainTab.Service) }
+    var tab by remember { mutableStateOf(MainTab.Home) }
     var settingsDest by remember { mutableStateOf(SettingsDest.Root) }
     var language by remember { mutableStateOf(settings.language) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
@@ -289,6 +291,9 @@ private fun SoReverseApp() {
     var pendingDeepLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
     var backProgress by remember { mutableStateOf(0f) }
     var toolCategory by remember { mutableStateOf<String?>(null) }
+    var activeToolPage by remember { mutableStateOf<String?>(null) }
+    val toolState = remember { ToolPagesState() }
+    val workspaceState = remember { WorkspaceState(context.applicationContext) }
     val t = textFor(language, context)
     val dark = when (themeMode) {
         "dark" -> true
@@ -317,18 +322,18 @@ private fun SoReverseApp() {
         }
     }
     val inSettingsDetail = tab == MainTab.Settings && settingsDest != SettingsDest.Root
-    val inAnalyzeDetail = (tab == MainTab.Analyze || tab == MainTab.SoAnalyze) && (analyzeState.showDeepReport || analyzeState.expandedSoPath != null)
+    val inAnalyzeDetail = tab == MainTab.Tools && (analyzeState.showDeepReport || analyzeState.expandedSoPath != null)
     val inInternalDetail = inSettingsDetail || inAnalyzeDetail
 
     LaunchedEffect(tab) {
-        if ((tab == MainTab.Analyze || tab == MainTab.SoAnalyze) && analyzeState.restoreDeepReportOnAnalyzeEntry) {
+        if (tab == MainTab.Tools && analyzeState.restoreDeepReportOnAnalyzeEntry) {
             analyzeState.restoreDeepReportOnAnalyzeEntry = false
             analyzeState.showDeepReport = true
         }
     }
 
     fun requestDeepLeave(action: () -> Unit) {
-        if ((tab == MainTab.Analyze || tab == MainTab.SoAnalyze) && analyzeState.showDeepReport && analyzeState.deepAnalyzingPath != null) {
+        if (tab == MainTab.Tools && analyzeState.showDeepReport && analyzeState.deepAnalyzingPath != null) {
             pendingDeepLeave = action
         } else {
             action()
@@ -359,19 +364,20 @@ private fun SoReverseApp() {
         if (!inInternalDetail || !predictiveBack) backProgress = 0f
     }
 
-    // 命令中枢：非首页 tab（工具/日志/设置）按返回键回到首页星核；首页则交给系统（退出）。
-    val backToHomeActive = !inInternalDetail && tab != MainTab.Service
+    // 底部导航：非首页 tab 按返回回到首页；首页交给系统退出。
+    val backToHomeActive = !inInternalDetail && tab != MainTab.Home
     DisposableEffect(predictiveBack, tab, settingsDest, analyzeState.expandedSoPath, analyzeState.showDeepReport) {
         val detailActive = inInternalDetail && (!predictiveBack || Build.VERSION.SDK_INT < 34)
         val callback = object : OnBackPressedCallback(detailActive || backToHomeActive) {
             override fun handleOnBackPressed() {
                 if (inInternalDetail) {
                     closeInternalDetail()
-                } else if (tab != MainTab.Service) {
+                } else if (tab != MainTab.Home) {
                     requestDeepLeave {
-                        tab = MainTab.Service
+                        tab = MainTab.Home
                         settingsDest = SettingsDest.Root
                         toolCategory = null
+                        activeToolPage = null
                     }
                 }
             }
@@ -407,7 +413,19 @@ private fun SoReverseApp() {
                 Scaffold(
                     containerColor = Color.Transparent,
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    // 命令中枢布局：取消底部导航栏，导航改由首页星核/卫星驱动，返回键回首页。
+                    bottomBar = {
+                        AppBottomNav(
+                            current = tab,
+                            zh = t.zh,
+                            onSelect = { target ->
+                                if (target != tab) {
+                                    settingsDest = SettingsDest.Root
+                                    toolCategory = null
+                                    tab = target
+                                }
+                            },
+                        )
+                    },
                 ) { padding ->
                     Box(
                         Modifier
@@ -424,34 +442,36 @@ private fun SoReverseApp() {
                             label = "main-nav",
                         ) { currentTab ->
                             when (currentTab) {
-                                MainTab.Service -> CommandHubScreen(
+                                MainTab.Home -> CommandHubScreen(
                                     t = t,
                                     settings = settings,
                                     onNavigate = { target, category ->
+                                        if (category in setOf("decompile", "unpack", "soanalyze", "emulate", "frida", "rebuild")) {
+                                            workspaceState.activeTool = category
+                                        }
                                         toolCategory = category
-                                        tab = target
+                                        activeToolPage = null
+                                        tab = MainTab.Tools
                                     },
                                     onNavigateSettings = { dest ->
                                         settingsDest = dest
                                         tab = MainTab.Settings
                                     },
                                 )
-                                MainTab.Analyze -> ToolsTab(
+                                MainTab.Tools -> AnalysisWorkspace(
                                     t = t,
-                                    settings = settings,
-                                    toolCategory = toolCategory,
-                                    onBack = { tab = MainTab.Service; toolCategory = null },
+                                    state = workspaceState,
+                                    context = context,
+                                    onOpenTask = { },
                                 )
-                                MainTab.SoAnalyze -> AnalyzeTab(
+                                MainTab.Tasks -> TasksPage(
                                     t = t,
-                                    settings = settings,
-                                    state = analyzeState,
-                                    scope = appScope,
-                                    deepService = deepService,
-                                    backProgress = backProgress,
-                                    onLeaveDeepReport = { requestDeepLeave { analyzeState.showDeepReport = false } },
+                                    state = workspaceState,
+                                    onContinueTask = { taskId ->
+                                        workspaceState.continueTask(taskId)
+                                        tab = MainTab.Tools
+                                    },
                                 )
-                                MainTab.Logs -> LogsTab(t = t, settings = settings, onBack = { tab = MainTab.Service })
                                 MainTab.Settings -> SettingsHub(
                                     modifier = Modifier,
                                     backProgress = backProgress,
@@ -485,7 +505,7 @@ private fun SoReverseApp() {
                                     dest = settingsDest,
                                     onDest = { settingsDest = it },
                                     onBack = { settingsDest = SettingsDest.Root },
-                                    onHome = { tab = MainTab.Service; toolCategory = null },
+                                    onHome = { tab = MainTab.Home; toolCategory = null },
                                 )
                             }
                         }
@@ -534,7 +554,7 @@ private fun SoReverseApp() {
                     dismissButton = {
                         TextButton(onClick = {
                             pendingDeepLeave = null
-                            analyzeState.restoreDeepReportOnAnalyzeEntry = tab == MainTab.Analyze || tab == MainTab.SoAnalyze
+                            analyzeState.restoreDeepReportOnAnalyzeEntry = tab == MainTab.Tools
                             leave()
                         }) { Text(if (t.zh) "后台继续" else "Continue in background") }
                     },
@@ -548,8 +568,7 @@ private fun SoReverseApp() {
                     },
                 )
             }
-            if (showUpdatePrompt && availableRelease != null) {
-                val release = availableRelease!!
+            if (showUpdatePrompt && availableRelease != null) {                val release = availableRelease!!
                 AlertDialog(
                     onDismissRequest = { showUpdatePrompt = false },
                     title = { Text(if (t.zh) "发现新版本 ${release.tag}" else "Update ${release.tag} available") },
@@ -570,6 +589,26 @@ private fun SoReverseApp() {
                         }) { Text(if (t.zh) "查看更新" else "View update") }
                     },
                 )
+            }
+            BackHandler(enabled = activeToolPage != null) { activeToolPage = null }
+            val panel = activeToolPage
+            if (panel != null) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    if (panel == "emulate") {
+                        UnidbgPanel(t = t, context = context, onClose = { activeToolPage = null }, state = toolState)
+                    } else {
+                        ToolPanelHost(
+                            category = panel,
+                            t = t,
+                            context = context,
+                            state = toolState,
+                            onClose = { activeToolPage = null }
+                        )
+                    }
+                }
             }
         }
     }

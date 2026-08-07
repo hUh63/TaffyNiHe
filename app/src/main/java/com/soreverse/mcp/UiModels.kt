@@ -8,7 +8,7 @@ import com.soreverse.mcp.core.RikkaPart
 import kotlinx.coroutines.Job
 import org.json.JSONObject
 
-internal enum class MainTab { Service, Analyze, SoAnalyze, Logs, Settings }
+internal enum class MainTab { Home, Tools, Tasks, Settings }
 internal enum class SetupTarget { Directory, ApkMcp, KeepAlive }
 internal enum class SettingsDest {
     Root, ServiceConfig, Appearance, KeepAlive, Access, Limits, Export, Audit, Blutter, Tunnel, ApkBridge, AiDeep, Updates, Probe, ToolStats, TunnelStats, Instructions, Credits, Disclaimer, About, BackupRestore
@@ -94,7 +94,23 @@ internal class AnalyzeUiState {
     var extractedSoPaths by mutableStateOf<Map<String, String>>(emptyMap())
     /** 详情面板中显示的消息（分析进度、错误等），独立于主列表的 message。 */
     var detailMessage by mutableStateOf("")
+    /** 反编译入口状态（方案 A）：ELF 详情面板"反编译"按钮相关。 */
+    var showDecompileDialog by mutableStateOf(false)
+    var decompileSoPath by mutableStateOf("")
+    var decompileLocator by mutableStateOf("")
+    var decompileRunning by mutableStateOf(false)
+    var decompileResult by mutableStateOf<String?>(null)
+    var decompileError by mutableStateOf("")
+    var decompileBackend by mutableStateOf("")
+    /** 分析引擎模式: Native(rizin) 或 Standalone(纯Java) */
+    var engineMode by mutableStateOf(EngineMode.NATIVE)
+    /** Native 引擎可用性状态: null=未检测, true=可用, false=不可用 */
+    var nativeEngineAvailable by mutableStateOf<Boolean?>(null)
+    /** 扫描时是否跳过 APK SO 分析（提升首次扫描速度） */
+    var skipApkScan by mutableStateOf(false)
 }
+
+internal enum class EngineMode { NATIVE, STANDALONE }
 
 internal data class UiText(
     val zh: Boolean,

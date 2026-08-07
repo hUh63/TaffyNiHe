@@ -267,6 +267,17 @@ internal fun AnalyzeTab(
         }
     }
 
+    // 页面加载时检测引擎状态
+    LaunchedEffect(Unit) {
+        if (state.nativeEngineAvailable == null) {
+            state.nativeEngineAvailable = withContext(Dispatchers.IO) {
+                try {
+                    com.soreverse.mcp.nativecore.NativeEngine.active().available()
+                } catch (_: Exception) { false }
+            }
+        }
+    }
+
     LaunchedEffect(deepChatListState.isScrollInProgress, deepAtBottom) {
         when {
             deepAtBottom -> followDeepOutput = true
@@ -314,7 +325,81 @@ internal fun AnalyzeTab(
             title = if (t.zh) "分析" else "Analyze",
             subtitle = if (t.zh) "SO 文件程序基础分析" else "Program-level SO analysis",
             trailing = {
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 引擎状态指示灯
+                    val engineColor = when (state.nativeEngineAvailable) {
+                        true -> MaterialTheme.colorScheme.primary
+                        false -> MaterialTheme.colorScheme.error
+                        null -> MaterialTheme.colorScheme.outline
+                    }
+                    Surface(
+                        shape = CircleShape,
+                        color = engineColor.copy(alpha = 0.15f),
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Surface(
+                                shape = CircleShape,
+                                color = engineColor,
+                                modifier = Modifier.size(10.dp),
+                            ) {}
+                        }
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = when {
+                            state.engineMode == EngineMode.STANDALONE -> if (t.zh) "Java" else "Java"
+                            state.nativeEngineAvailable == false -> if (t.zh) "Native ✗" else "Native ✗"
+                            else -> if (t.zh) "Native" else "Native"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    // 引擎模式切换按钮
+                    Surface(
+                        onClick = {
+                            state.engineMode = when (state.engineMode) {
+                                EngineMode.NATIVE -> EngineMode.STANDALONE
+                                EngineMode.STANDALONE -> EngineMode.NATIVE
+                            }
+                            // 切换时重新检测 native 引擎状态
+                            if (state.engineMode == EngineMode.NATIVE) {
+                                scope.launch {
+                                    state.nativeEngineAvailable = withContext(Dispatchers.IO) {
+                                        try {
+                                            com.soreverse.mcp.nativecore.NativeEngine.active().available()
+                                        } catch (_: Exception) { false }
+                                    }
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.height(28.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
+                            Text(
+                                text = if (t.zh) "引擎" else "Engine",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = when (state.engineMode) {
+                                    EngineMode.NATIVE -> "Native"
+                                    EngineMode.STANDALONE -> "Java"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = when (state.engineMode) {
+                                    EngineMode.NATIVE -> if (state.nativeEngineAvailable == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                    EngineMode.STANDALONE -> MaterialTheme.colorScheme.tertiary
+                                },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(4.dp))
                     IconButton(
                         enabled = !state.scanning && state.analyzingSoPath == null && state.deepAnalyzingPath == null,
                         onClick = {
@@ -398,7 +483,7 @@ internal fun AnalyzeTab(
                             IndexedBadge(idx)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(src.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${if (t.zh) (if (src.source == "filesystem") "文件系统" else src.source) else src.source} ${src.abi} ${src.architecture}/${src.bits} ${formatBytes(src.size)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                Text("${if (t.zh) (if (src.source == "filesystem") "文件系统" else src.source) else src.source} ${src.abi}${if (src.architecture != "unknown") " ${src.architecture}/${src.bits}" else ""} ${formatBytes(src.size)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                 Text(src.path, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Column(horizontalAlignment = Alignment.End) {
@@ -607,6 +692,23 @@ internal fun AnalyzeTab(
                         showBack = true,
                         onBack = { state.expandedSoPath = null },
                         trailing = {
+                            TextButton(
+                                enabled = state.deepAnalyzingPath == null &&
+                                    selectedDetail.workspaceId.isNotBlank(),
+                                onClick = {
+                                    state.decompileSoPath = expandedPath
+                                    state.decompileLocator = selectedDetail.entryPoint.ifBlank {
+                                        selectedDetail.overview.optString("entry", "0x0")
+                                    }
+                                    state.decompileResult = null
+                                    state.decompileError = ""
+                                    state.decompileBackend = ""
+                                    state.decompileEntered = false
+                                    state.showDecompileDialog = true
+                                },
+                            ) {
+                                Text(if (t.zh) "反编译" else "Decompile")
+                            }
                             TextButton(
                                 enabled = state.deepAnalyzingPath == null,
                                 onClick = { startDeepAnalysis(expandedPath) },
@@ -821,7 +923,7 @@ internal fun AnalyzeTab(
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(src.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${src.abi} ${src.architecture}/${src.bits} ${formatBytes(src.size)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("${src.abi}${if (src.architecture != "unknown") " ${src.architecture}/${src.bits}" else ""} ${formatBytes(src.size)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     TextButton(
                                         enabled = state.analyzingSoPath == null && state.deepAnalyzingPath == null,
@@ -933,6 +1035,157 @@ internal fun AnalyzeTab(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+    // 反编译对话框（方案 A）：输入函数地址/符号，调用 decompile 并展示伪代码。
+    if (state.showDecompileDialog) {
+        val targetDetail = state.perSoDetail[state.decompileSoPath]
+        Dialog(
+            onDismissRequest = {
+                if (!state.decompileRunning) state.showDecompileDialog = false
+            },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        if (t.zh) "反编译 / 反汇编" else "Decompile / Disassemble",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        if (t.zh)
+                            "输入目标函数（符号名或十六进制 VA，如 0x1a2b3c / entry）。优先走 Rizin+Ghidra(SLEIGH) 反编译；引擎不可用时自动降级为纯 Java(Arm64Disasm) 反汇编。"
+                        else
+                            "Enter target function (symbol or hex VA, e.g. 0x1a2b3c / entry). Uses Rizin+Ghidra(SLEIGH) first; falls back to pure-Java (Arm64Disasm) when unavailable.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = state.decompileLocator,
+                        onValueChange = { state.decompileLocator = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text(if (t.zh) "函数符号 / VA" else "Function symbol / VA") },
+                        placeholder = { Text("0x..." ) },
+                        enabled = !state.decompileRunning,
+                    )
+                    // 引擎模式提示
+                    val modeLabel = when (state.engineMode) {
+                        EngineMode.STANDALONE -> if (t.zh) "Java（仅反汇编）" else "Java (disasm only)"
+                        else -> when (state.nativeEngineAvailable) {
+                            false -> if (t.zh) "Native ✗（走 Java 兜底）" else "Native ✗ (Java fallback)"
+                            else -> "Native + Ghidra"
+                        }
+                    }
+                    Text(
+                        "${if (t.zh) "引擎" else "Engine"}: $modeLabel",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    // 结果或错误
+                    if (state.decompileRunning) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(if (t.zh) "反编译中…" else "Decompiling…", style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else if (state.decompileError.isNotBlank()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(
+                                state.decompileError,
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
+                    } else if (state.decompileResult != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (t.zh) "输出" else "Output",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                state.decompileBackend.ifBlank { "" },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                            TextButton(onClick = { state.decompileResult?.let { copy(context, it, t.copied) } }) {
+                                Icon(Icons.Default.ContentCopy, if (t.zh) "复制伪代码" else "Copy pseudocode", Modifier.size(16.dp))
+                            }
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                        ) {
+                            Text(
+                                state.decompileResult!!,
+                                modifier = Modifier.fillMaxWidth().padding(12.dp).verticalScroll(rememberScrollState()),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+
+                    // 操作按钮
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            enabled = !state.decompileRunning,
+                            onClick = { state.showDecompileDialog = false },
+                        ) { Text(if (t.zh) "关闭" else "Close") }
+                        TextButton(
+                            enabled = !state.decompileRunning && state.decompileLocator.isNotBlank(),
+                            onClick = {
+                                if (state.decompileRunning) return@TextButton
+                                val ws = targetDetail?.workspaceId ?: ""
+                                val loc = state.decompileLocator.trim()
+                                state.decompileRunning = true
+                                state.decompileError = ""
+                                state.decompileResult = null
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            EngineProvider.get(context).rzDecompile(ws, "", loc, false)
+                                        }.getOrNull()
+                                    }
+                                    state.decompileRunning = false
+                                    state.decompileEntered = true
+                                    if (result == null) {
+                                        state.decompileError = if (t.zh) "反编译调用异常（引擎未初始化？）" else "Decompile call failed (engine not ready?)"
+                                    } else {
+                                        val okFlag = result.optBoolean("ok", false)
+                                        val errObj = result.optJSONObject("error")
+                                        val pseudo = result.optString("pseudocode")
+                                        if (okFlag && pseudo.isNotBlank()) {
+                                            state.decompileResult = pseudo
+                                            state.decompileBackend = result.optString("backend", "")
+                                            state.decompileError = ""
+                                        } else if (errObj != null) {
+                                            state.decompileError = errObj.optString("message").ifBlank { errObj.optString("code", "ERROR") }
+                                        } else if (pseudo.isBlank()) {
+                                            state.decompileError = if (t.zh) "引擎未返回反编译结果（可能该地址无法解析）" else "No decompile output (locator may not resolve)"
+                                        } else {
+                                            state.decompileResult = pseudo
+                                            state.decompileBackend = result.optString("backend", "")
+                                        }
+                                    }
+                                }
+                            },
+                        ) { Text(if (t.zh) "反编译" else "Decompile") }
                     }
                 }
             }

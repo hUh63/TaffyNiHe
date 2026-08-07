@@ -14,7 +14,7 @@ local.properties
 *.apk
 *.aab
 *.jks
-!release/*.jks
+release/*.properties
 
 # OS
 .DS_Store

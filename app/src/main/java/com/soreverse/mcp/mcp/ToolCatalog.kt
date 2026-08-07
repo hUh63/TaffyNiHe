@@ -997,6 +997,10 @@ object ToolCatalog {
         ArchiveTools.delete,
         ArchiveTools.rename,
         *DotnetTools.ALL.toTypedArray(),
+        // 塔菲逆核: 纯 Java SO 分析工具(SO逆向分析工具移植)
+        SoStandaloneTools.disasm,
+        SoStandaloneTools.elf,
+        SoStandaloneTools.hexdump,
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

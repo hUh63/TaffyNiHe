@@ -219,13 +219,13 @@ public class Arm64Disasm {
         // ── MSR (immediate) ──
         if ((insn & 0xFFF8F01F) == 0xD503401F) {
             int crm = (insn >>> 8) & 15;
-            int op2 = (insn >>> 5) & 7;
+            int op2_msr = (insn >>> 5) & 7;
             int mask = (insn >>> 16) & 3;
-            if (mask == 3 && crm == 4 && op2 == 5) return makeInsn(addr, "msr", "DAIFSet, #" + ((insn >>> 8) & 7));
-            if (mask == 3 && crm == 4 && op2 == 3) return makeInsn(addr, "msr", "DAIFClr, #" + ((insn >>> 8) & 7));
-            if (mask == 3 && crm == 3 && op2 == 0) return makeInsn(addr, "msr", "PAN, #" + ((insn >>> 8) & 1));
-            if (crm == 4 && op2 == 6) return makeInsn(addr, "msr", "UAO, #" + ((insn >>> 8) & 1));
-            return makeInsn(addr, "msr", "S" + mask + "_" + crm + "_" + op2 + ", #" + ((insn >>> 8) & 1));
+            if (mask == 3 && crm == 4 && op2_msr == 5) return makeInsn(addr, "msr", "DAIFSet, #" + ((insn >>> 8) & 7));
+            if (mask == 3 && crm == 4 && op2_msr == 3) return makeInsn(addr, "msr", "DAIFClr, #" + ((insn >>> 8) & 7));
+            if (mask == 3 && crm == 3 && op2_msr == 0) return makeInsn(addr, "msr", "PAN, #" + ((insn >>> 8) & 1));
+            if (crm == 4 && op2_msr == 6) return makeInsn(addr, "msr", "UAO, #" + ((insn >>> 8) & 1));
+            return makeInsn(addr, "msr", "S" + mask + "_" + crm + "_" + op2_msr + ", #" + ((insn >>> 8) & 1));
         }
 
         // ── MRS ──
@@ -409,7 +409,7 @@ public class Arm64Disasm {
         if ((insn & 0x1E000000) == 0x0A000000) {
             int sf = (insn >>> 31) & 1;
             int opc = (insn >>> 29) & 3;
-            int op2 = (insn >>> 21) & 7;
+            int op2_data = (insn >>> 21) & 7;
             int rm = (insn >>> 16) & 31;
             int shift = (insn >>> 10) & 0x3F;
             int rn = (insn >>> 5) & 31;
@@ -417,7 +417,7 @@ public class Arm64Disasm {
             String[] regs = sf != 0 ? REGS_64 : REGS_32;
             String[] logicalMnes = { "and", "bic", "orr", "orn", "eor", "eon" };
             String mne;
-            if (opc == 0 && op2 == 0) mne = "and";
+            if (opc == 0 && op2_data == 0) mne = "and";
             else if (opc == 0 && op2 == 1) mne = "bic";
             else if (opc == 1 && op2 == 0) mne = "orr";
             else if (opc == 1 && op2 == 1) mne = "orn";

@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.EngineProvider
@@ -88,7 +89,7 @@ internal fun AnalysisWorkspace(
                 Text((cur?.title ?: if (zh) "未选择" else "None").take(14), style = MaterialTheme.typography.labelMedium)
             }
             Spacer(Modifier.weight(1f))
-            WorkspacePicker(tools, zh)
+            WorkspacePicker(state, zh)
         }
         Spacer(Modifier.size(6.dp))
         // 工具切换条
@@ -129,7 +130,8 @@ internal fun AnalysisWorkspace(
 }
 
 @Composable
-private fun WorkspacePicker(tools: ToolPagesState, zh: Boolean) {
+private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
+    val tools = state.tools
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -137,11 +139,18 @@ private fun WorkspacePicker(tools: ToolPagesState, zh: Boolean) {
         scope.launch {
             tools.opening = true; tools.openError = ""
             val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).open(uri.toString(), false) }.getOrNull() }
-            tools.opening = false
             if (r != null && r.optBoolean("ok", false)) {
                 tools.sharedWorkspaceId = r.optString("workspaceId")
                 tools.sharedSoName = r.optString("soFileName").ifBlank { r.optString("fileName") }
+                val fname = tools.sharedSoName.ifBlank { uri.lastPathSegment ?: "file" }
+                val isApk = fname.endsWith(".apk", true) || uri.lastPathSegment?.endsWith(".apk", true) == true
+                // 每次打开文件都创建一个新任务（围绕主文件），并设为当前任务
+                state.createTask(fname, if (isApk) "apk" else "so", uri.toString(), fname)
+                tools.opening = false
+                // 注意: 选文件只复制到缓存并登记任务, 不做任何解析。
+                // 解析(overview/反编译/加密扫描等)由用户点击对应分析按钮时再触发。
             } else {
+                tools.opening = false
                 tools.openError = r?.optString("error").orEmpty().ifBlank { if (zh) "打开失败" else "Open failed" }
             }
         }
@@ -348,9 +357,6 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(if (zh) "输出结果" else "Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (resultTabs.isNotEmpty()) {
-                    Text("${selectedTab + 1}/${resultTabs.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
                 Button(
                     onClick = { detailMode = !detailMode },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -420,12 +426,33 @@ private data class R2Tab(val label: String, val text: String)
 internal fun DataCard(title: String, text: String, zh: Boolean) {
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.padding(10.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.size(6.dp))
+            if (json == null) {
+                // 纯文本：简洁单行显示（限制行数，不展开全部）
+                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp, maxLines = 12, overflow = TextOverflow.Ellipsis)
+            } else {
+                // JSON：简洁扁平化键值对展示
+                JsonOverview(json, json.toString())
+            }
+        }
+    }
+}
+
+/** 详细模式：完整结构化卡片（基础属性 + 结构规模 + 安全特性 + 原始JSON） */
+@Composable
+private fun DetailCard(title: String, text: String, zh: Boolean) {
+    if (text.isBlank()) return
+    val json = runCatching { JSONObject(text) }.getOrNull()
     if (json == null) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        ) {
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(Modifier.padding(10.dp)) {
                 Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.size(6.dp))
@@ -478,28 +505,9 @@ internal fun DataCard(title: String, text: String, zh: Boolean) {
                     }
                 }
             }
-        }
-    }
-}
-
-/** 详细模式：原始 JSON 数据展示 */
-@Composable
-private fun DetailCard(title: String, text: String, zh: Boolean) {
-    if (text.isBlank()) return
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(Modifier.padding(10.dp)) {
-            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.size(6.dp))
-            val json = runCatching { JSONObject(text) }.getOrNull()
-            if (json != null) {
-                JsonOverview(json, text)
-            } else {
-                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
-            }
+            // 原始 JSON（收起）
+            Text(if (zh) "原始数据" else "Raw", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 8)
         }
     }
 }

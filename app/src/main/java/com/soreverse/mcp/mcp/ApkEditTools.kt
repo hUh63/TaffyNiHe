@@ -286,7 +286,7 @@ object ApkEditTools {
                             it.seek(len - 22) // EOCD
                             val eocd = ByteArray(22)
                             it.readFully(eocd)
-                            val cdOffset = java.nio.ByteBuffer.wrap(eocd, 16, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int
+                            val cdOffset = java.nio.ByteBuffer.wrap(eocd, 16, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int.toLong()
                             if (cdOffset > 24) {
                                 it.seek(cdOffset - 24)
                                 val magic = ByteArray(16)

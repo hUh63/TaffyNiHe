@@ -13,6 +13,9 @@ Java.perform(function () {
 });
 """.trimIndent()
 
+/** 单个结果标签条目 */
+data class ResultTab(val id: String, val label: String, val text: String)
+
 /** 六个工具页独立状态 + 共享工作区。由 SoReverseApp remember 持有，切换页面不丢失。 */
 class ToolPagesState {
     // ---- 共享工作区（所有工具页共用同一个引擎 workspace）----
@@ -64,6 +67,48 @@ class ToolPagesState {
     // ---- Frida 页 ----
     var fridaScript by mutableStateOf(DEFAULT_FRIDA_SCRIPT)
     var fridaStatus by mutableStateOf("")
+
+    // ---- 编辑页 ----
+    var editorHexResult by mutableStateOf("")
+    var editorTextResult by mutableStateOf("")
+    var editorEditResult by mutableStateOf("")
+    var editorDiffResult by mutableStateOf("")
+
+    // ---- 标签页管理（每个工具独立） ----
+    /** 当前工具的结果标签列表 */
+    var resultTabs by mutableStateOf<List<ResultTab>>(emptyList())
+    /** 当前选中的标签索引 */
+    var selectedTabIndex by mutableStateOf(0)
+
+    /** 向当前工具结果标签列表追加一个标签 */
+    fun addTab(toolLabel: String, subLabel: String, text: String) {
+        val id = "${toolLabel}_${subLabel}_${resultTabs.size}"
+        val label = "$toolLabel·$subLabel"
+        // 替换同名标签（已有相同 subLabel 则更新）
+        val existing = resultTabs.indexOfFirst { it.label == label }
+        if (existing >= 0) {
+            resultTabs = resultTabs.toMutableList().also { it[existing] = it[existing].copy(text = text) }
+            selectedTabIndex = existing
+        } else {
+            resultTabs = resultTabs + ResultTab(id, label, text)
+            selectedTabIndex = resultTabs.lastIndex
+        }
+    }
+
+    /** 关闭指定索引的标签 */
+    fun closeTab(index: Int) {
+        if (index < 0 || index >= resultTabs.size) return
+        val list = resultTabs.toMutableList()
+        list.removeAt(index)
+        resultTabs = list
+        if (selectedTabIndex >= resultTabs.size) selectedTabIndex = (resultTabs.size - 1).coerceAtLeast(0)
+    }
+
+    /** 清除所有标签 */
+    fun clearTabs() {
+        resultTabs = emptyList()
+        selectedTabIndex = 0
+    }
 
     // ---- 模拟页 (Unidbg) 状态在 UnidbgPanel 内部；此处仅共享工作区 ----
 }

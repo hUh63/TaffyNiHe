@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -437,8 +438,10 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
         Spacer(Modifier.size(4.dp))
         // 标签页导航条
         if (resultTabs.isNotEmpty()) {
-            androidx.compose.foundation.horizontalScroll(rememberScrollState()).let { scrollMod ->
-                Row(Modifier.fillMaxWidth().then(scrollMod), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                     resultTabs.forEachIndexed { idx, tab ->
                         val sel = idx == selectedTab
                         Button(
@@ -450,7 +453,6 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
                         ) { Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, maxLines = 1) }
                     }
                 }
-            }
             Spacer(Modifier.size(6.dp))
             // 当前选中标签页的内容
             val current = resultTabs.getOrNull(selectedTab) ?: return

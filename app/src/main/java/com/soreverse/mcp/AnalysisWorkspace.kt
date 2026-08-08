@@ -415,8 +415,76 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
 
 private data class R2Tab(val label: String, val text: String)
 
+/** 简洁模式：结构化卡片，类似 ElfOverviewPanel 风格 */
 @Composable
 internal fun DataCard(title: String, text: String) {
+    if (text.isBlank()) return
+    val json = runCatching { JSONObject(text) }.getOrNull()
+    if (json == null) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(Modifier.padding(10.dp)) {
+                Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.size(6.dp))
+                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+            }
+        }
+        return
+    }
+    val ov = json.optJSONObject("overview") ?: json
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            SectionCard(if (zh) "📦 基础属性" else "📦 Basics") {
+                Kv(if (zh) "名称" else "Name", ov.optString("fileName", "—"))
+                Kv(if (zh) "大小" else "Size", fmtBytes(ov.optLong("size", 0L)))
+                val arch = ov.optString("architecture", "—")
+                val bits = ov.optInt("bits", 0)
+                Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
+                Kv(if (zh) "入口" else "Entry", ov.optString("entryPoint", "0x0"))
+                Kv(if (zh) "类型" else "Type", ov.optString("elfType", "—"))
+                Kv(if (zh) "字节序" else "Endian", ov.optString("endian", "—"))
+            }
+            SectionCard(if (zh) "📊 结构与规模" else "📊 Structure") {
+                MetricRow(
+                    (if (zh) "节区" else "Sections") to ov.optInt("sectionCount", 0).toString(),
+                    (if (zh) "程序段" else "Segments") to ov.optInt("segmentCount", 0).toString(),
+                    (if (zh) "函数" else "Fns") to ov.optInt("functionCount", 0).toString(),
+                )
+                MetricRow(
+                    (if (zh) "符号" else "Symbols") to ov.optInt("symbolCount", 0).toString(),
+                    (if (zh) "字符串" else "Strings") to ov.optInt("stringCount", 0).toString(),
+                )
+            }
+            val sec = ov.optJSONArray("securityFeatures") ?: org.json.JSONArray()
+            if (sec.length() > 0) {
+                SectionCard(if (zh) "🔒 安全特性" else "🔒 Security") {
+                    for (i in 0 until sec.length()) {
+                        val s = sec.optJSONObject(i) ?: continue
+                        val name = s.optString("name", "?")
+                        val present = s.optBoolean("present", false)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                            Text(if (present) (if (zh) "有" else "Yes") else (if (zh) "无" else "No"),
+                                style = MaterialTheme.typography.bodySmall, color = if (present) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 详细模式：原始 JSON 数据展示 */
+@Composable
+private fun DetailCard(title: String, text: String, zh: Boolean) {
     if (text.isBlank()) return
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -432,75 +500,6 @@ internal fun DataCard(title: String, text: String) {
             } else {
                 Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
             }
-        }
-    }
-}
-
-/** 详细模式：结构化卡片，类似 ElfOverviewPanel 风格 */
-@Composable
-private fun DetailCard(title: String, text: String, zh: Boolean) {
-    if (text.isBlank()) return
-    val json = runCatching { JSONObject(text) }.getOrNull()
-    if (json == null) {
-        DataCard(title, text)
-        return
-    }
-    // 如果有 overview 子对象，用它来渲染结构化视图
-    val ov = json.optJSONObject("overview") ?: json
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-
-            // 基础属性
-            SectionCard(if (zh) "📦 基础属性" else "📦 Basics") {
-                Kv(if (zh) "名称" else "Name", ov.optString("fileName", "—"))
-                Kv(if (zh) "大小" else "Size", fmtBytes(ov.optLong("size", 0L)))
-                val arch = ov.optString("architecture", "—")
-                val bits = ov.optInt("bits", 0)
-                Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
-                Kv(if (zh) "入口" else "Entry", ov.optString("entryPoint", "0x0"))
-                Kv(if (zh) "类型" else "Type", ov.optString("elfType", "—"))
-                Kv(if (zh) "字节序" else "Endian", ov.optString("endian", "—"))
-            }
-
-            // 结构与规模
-            SectionCard(if (zh) "📊 结构与规模" else "📊 Structure") {
-                MetricRow(
-                    (if (zh) "节区" else "Sections") to ov.optInt("sectionCount", 0).toString(),
-                    (if (zh) "程序段" else "Segments") to ov.optInt("segmentCount", 0).toString(),
-                    (if (zh) "函数" else "Fns") to ov.optInt("functionCount", 0).toString(),
-                )
-                MetricRow(
-                    (if (zh) "符号" else "Symbols") to ov.optInt("symbolCount", 0).toString(),
-                    (if (zh) "字符串" else "Strings") to ov.optInt("stringCount", 0).toString(),
-                )
-            }
-
-            // 安全特性
-            val sec = ov.optJSONArray("securityFeatures") ?: org.json.JSONArray()
-            if (sec.length() > 0) {
-                SectionCard(if (zh) "🔒 安全特性" else "🔒 Security") {
-                    for (i in 0 until sec.length()) {
-                        val s = sec.optJSONObject(i) ?: continue
-                        val name = s.optString("name", "?")
-                        val present = s.optBoolean("present", false)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-                            Text(if (present) (if (zh) "有" else "Yes") else (if (zh) "无" else "No"),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (present) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-            }
-
-            // 原始 JSON（收起）
-            Text(if (zh) "原始数据" else "Raw", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 8)
         }
     }
 }

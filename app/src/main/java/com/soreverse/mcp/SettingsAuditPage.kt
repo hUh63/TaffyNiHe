@@ -64,7 +64,7 @@ internal fun SettingsAuditPage(t: UiText, settings: SettingsStore) {
             GroupDivider()
             ToggleRow(if (t.zh) "启用模拟执行 (Unidbg)" else "Enable emulation (Unidbg)", emulationEnabled) { emulationEnabled = it; settings.emulationEnabled = it }
             Text(
-                if (t.zh) "启用模拟后允许 emulate_call / emulate_dump 验证补丁语义。" else "Emulation enables emulate_call / emulate_dump for patch validation.",
+                if (t.zh) "启用模拟后允许 taffy_emulate_call / taffy_emulate_dump 验证补丁语义。" else "Emulation enables taffy_emulate_call / taffy_emulate_dump for patch validation.",
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

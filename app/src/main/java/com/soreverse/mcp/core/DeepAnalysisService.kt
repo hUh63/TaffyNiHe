@@ -264,7 +264,7 @@ class DeepAnalysisService(private val appContext: Context) {
 ${focus?.let { "用户本轮问题: $it" }.orEmpty()}
 
 必须按以下阶段调用 MCP 工具取证：
-so_open → analyze_functions → analyze_cfg → analyze_xrefs → analyze_crypto → analysis_report
+taffy_so_open → taffy_analyze_functions → taffy_analyze_cfg → taffy_analyze_xrefs → taffy_analyze_crypto → taffy_analysis_report
 每个阶段都必须依据前序工具结果填写 workspaceId、函数定位符等参数，不得用中间文字代替工具调用。
 
 最终报告请包含：概览、安全特征、关键函数、加密/网络、攻击面、可行性、下一步建议。
@@ -275,7 +275,7 @@ Target file: $path
 ${focus?.let { "User request for this turn: $it" }.orEmpty()}
 
 Gather evidence through every MCP stage in this order:
-so_open → analyze_functions → analyze_cfg → analyze_xrefs → analyze_crypto → analysis_report
+taffy_so_open → taffy_analyze_functions → taffy_analyze_cfg → taffy_analyze_xrefs → taffy_analyze_crypto → taffy_analysis_report
 Use workspace IDs, function locators, and other arguments from prior tool results. Never replace a required tool call with intermediate prose.
 
 Final report sections: Overview, Security, Key Functions, Crypto/Network, Attack Surface, Feasibility, Next Steps.

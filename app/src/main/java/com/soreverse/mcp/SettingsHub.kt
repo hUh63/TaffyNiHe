@@ -247,9 +247,9 @@ internal fun SettingsHub(
                     Text(t.instructionsBody, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                     Text(
                         if (t.zh)
-                            "详细流程：先在服务页启动 SO MCP；需要电脑访问时开启 Cloudflare Tunnel，或 adb forward tcp:8000 tcp:8000。客户端配置 /mcp 后按 so_open -> analyze_* -> read_disasm/search_* 分析；修改前 session_open，dryRun 预览后再 patch，最后 build_so 导出。"
+                            "详细流程：先在服务页启动 SO MCP；需要电脑访问时开启 Cloudflare Tunnel，或 adb forward tcp:8000 tcp:8000。客户端配置 /mcp 后按 taffy_so_open -> analyze_* -> taffy_read_disasm/search_* 分析；修改前 taffy_session_open，dryRun 预览后再 patch，最后 taffy_build_so 导出。"
                         else
-                            "Start SO MCP on Service tab; enable Cloudflare Tunnel or adb forward for desktop access; then follow so_open -> analyze_* -> read/search -> session_open -> dryRun patch -> build_so.",
+                            "Start SO MCP on Service tab; enable Cloudflare Tunnel or adb forward for desktop access; then follow taffy_so_open -> analyze_* -> read/search -> taffy_session_open -> dryRun patch -> taffy_build_so.",
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

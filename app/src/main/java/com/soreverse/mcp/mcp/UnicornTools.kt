@@ -20,7 +20,7 @@ import java.io.File
  *  - 执行任意地址
  *  - 读取寄存器/内存
  *
- * 工作流: uc_emulate(asm="mov x0, #42; ret") → 直接返回 x0=42
+ * 工作流: taffy_uc_emulate(asm="mov x0, #42; ret") → 直接返回 x0=42
  *
  * 适用场景:
  *  - 验证一段 shellcode 的行为

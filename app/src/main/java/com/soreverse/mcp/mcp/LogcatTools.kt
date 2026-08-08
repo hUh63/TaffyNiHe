@@ -162,7 +162,7 @@ object LogcatTools {
                         captureTag = args.str("tag")
                         captureLevel = args.str("level", "V")
                         capturePid = args.intValue("pid", 0)
-                        captureFile = java.io.File(ctx.context.filesDir, "logcat_capture.log")
+                        captureFile = java.io.File(ctx.context.filesDir, "taffy_logcat_capture.log")
                         captureFile?.delete()
 
                         val cmd = mutableListOf("logcat", "-v", "time")

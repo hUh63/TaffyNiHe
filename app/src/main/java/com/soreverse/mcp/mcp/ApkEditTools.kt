@@ -13,19 +13,19 @@ import java.util.zip.ZipFile
 
 /**
  * 塔菲逆核: APK 细粒度编辑工具(参考"我的工具"APK的 rename_package/components/permissions/inject_so/set_icon 等)。
- * 这些工具操作已 decode 的 APK 目录(由 apk_rebuild decode 生成),
- * 改完后再用 apk_rebuild(build) 回编 + apk_sign 签名。
+ * 这些工具操作已 decode 的 APK 目录(由 taffy_apk_rebuild decode 生成),
+ * 改完后再用 taffy_apk_rebuild(build) 回编 + taffy_apk_sign 签名。
  *
  * 完整链路:
- *   apk_rebuild(decode) → apk_manifest_edit / apk_inject_so / apk_set_icon → apk_rebuild(build) → apk_sign
+ *   taffy_apk_rebuild(decode) → taffy_apk_manifest_edit / taffy_apk_inject_so / taffy_apk_set_icon → taffy_apk_rebuild(build) → taffy_apk_sign
  */
 object ApkEditTools {
 
     /** 修改已 decode 目录里的 AndroidManifest.xml: 包名重命名 / 加减权限 / 加减组件 */
     val manifestEdit: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_apk_manifest_edit",
-            "【Manifest 编辑】修改已 decode 的 APK 目录里的 AndroidManifest.xml。action=rename_package 改包名; add_permission/remove_permission 加减权限; add_component/remove_component 加减组件(activity/service/receiver/provider); set_debuggable/set_exported 改属性。改完用 apk_rebuild(build) 回编。",
-            "Edit AndroidManifest.xml in a decoded APK dir. action=rename_package; add_permission/remove_permission; add_component/remove_component; set_debuggable/set_exported. Rebuild with apk_rebuild(build) after editing.",
+            "【Manifest 编辑】修改已 decode 的 APK 目录里的 AndroidManifest.xml。action=rename_package 改包名; add_permission/remove_permission 加减权限; add_component/remove_component 加减组件(activity/service/receiver/provider); set_debuggable/set_exported 改属性。改完用 taffy_apk_rebuild(build) 回编。",
+            "Edit AndroidManifest.xml in a decoded APK dir. action=rename_package; add_permission/remove_permission; add_component/remove_component; set_debuggable/set_exported. Rebuild with taffy_apk_rebuild(build) after editing.",
             "build", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
@@ -34,7 +34,7 @@ object ApkEditTools {
                     "rename_package", "add_permission", "remove_permission",
                     "add_component", "remove_component", "set_debuggable", "set_exported",
                 )
-                "dir" str "已 decode 的 APK 目录路径(apk_rebuild decode 的输出)"
+                "dir" str "已 decode 的 APK 目录路径(taffy_apk_rebuild decode 的输出)"
                 "package" str "rename_package: 新包名(如 com.example.newname)"
                 "permission" str "add/remove_permission: 权限名(如 android.permission.INTERNET)"
                 "componentType".oneOf(
@@ -138,8 +138,8 @@ object ApkEditTools {
     /** 向已 decode 目录注入 SO 文件到 lib/arm64-v8a/ (或其他 abi) */
     val injectSo: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_apk_inject_so",
-            "【SO 注入】把 .so 文件注入到已 decode 的 APK 目录的 lib/<abi>/ 下。用于注入自定义 hook so、补缺失的 so、替换现有 so。改完用 apk_rebuild(build) 回编。",
-            "Inject a .so file into a decoded APK dir under lib/<abi>/. Rebuild with apk_rebuild(build) after injecting.",
+            "【SO 注入】把 .so 文件注入到已 decode 的 APK 目录的 lib/<abi>/ 下。用于注入自定义 hook so、补缺失的 so、替换现有 so。改完用 taffy_apk_rebuild(build) 回编。",
+            "Inject a .so file into a decoded APK dir under lib/<abi>/. Rebuild with taffy_apk_rebuild(build) after injecting.",
             "build", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
@@ -170,15 +170,15 @@ object ApkEditTools {
                 .put("abi", abi)
                 .put("target", target.absolutePath)
                 .put("sizeBytes", target.length())
-                .put("hint", "SO 已注入,用 apk_rebuild(build) 回编后 apk_sign 签名"))
+                .put("hint", "SO 已注入,用 taffy_apk_rebuild(build) 回编后 taffy_apk_sign 签名"))
         }
     }
 
     /** 替换已 decode 目录里的应用图标 */
     val setIcon: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_apk_set_icon",
-            "【图标替换】替换已 decode APK 目录里的应用图标。自动找 res/mipmap-*/ic_launcher.png 和 res/drawable-*/ic_launcher.png 替换。改完用 apk_rebuild(build) 回编。",
-            "Replace the app icon in a decoded APK dir. Finds and replaces ic_launcher.png in res/mipmap-*/ and res/drawable-*/. Rebuild with apk_rebuild(build).",
+            "【图标替换】替换已 decode APK 目录里的应用图标。自动找 res/mipmap-*/ic_launcher.png 和 res/drawable-*/ic_launcher.png 替换。改完用 taffy_apk_rebuild(build) 回编。",
+            "Replace the app icon in a decoded APK dir. Finds and replaces ic_launcher.png in res/mipmap-*/ and res/drawable-*/. Rebuild with taffy_apk_rebuild(build).",
             "build", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
@@ -211,7 +211,7 @@ object ApkEditTools {
                 .put("action", "set_icon")
                 .put("replaced", JSONArray(replaced))
                 .put("count", replaced.size)
-                .put("hint", "图标已替换,用 apk_rebuild(build) 回编"))
+                .put("hint", "图标已替换,用 taffy_apk_rebuild(build) 回编"))
         }
     }
 

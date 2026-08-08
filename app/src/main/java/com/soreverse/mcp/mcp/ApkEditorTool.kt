@@ -13,7 +13,7 @@ import java.io.File
 
 /**
  * 塔菲逆核: APKEditor 完整 APK 反编译/回编/合并/去混淆(纯 Java, aapt 无关, 基于 ARSCLib)。
- * 补齐 MT 管理器"改完完整回编成 APK"的最后一环 —— smali_assemble 只出 dex, 这个能出完整 APK。
+ * 补齐 MT 管理器"改完完整回编成 APK"的最后一环 —— taffy_smali_assemble 只出 dex, 这个能出完整 APK。
  *
  *  action:
  *   - decode:   APK → 可读目录(资源 json/xml + smali dex)。可编辑后再 build 回去。
@@ -21,15 +21,15 @@ import java.io.File
  *   - merge:    多个拆分包(xapk/apks/apkm/目录) → 合并成单个可安装 APK。
  *   - refactor: 去混淆重构(还原被混淆的资源名)。
  *
- * 完整链路: apk_rebuild(decode) → 改资源/smali → apk_rebuild(build) → apk_sign(签名) → 安装。
- * split 应用直接: apk_rebuild(merge) → apk_sign。
+ * 完整链路: taffy_apk_rebuild(decode) → 改资源/smali → taffy_apk_rebuild(build) → taffy_apk_sign(签名) → 安装。
+ * split 应用直接: taffy_apk_rebuild(merge) → taffy_apk_sign。
  */
 object ApkEditorTool {
 
     val rebuild: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_apk_rebuild",
-            "【APK 完整回编/合并/去混淆】APKEditor 引擎(纯 Java,aapt 无关)。action=decode 把 APK 拆成可读可改的目录(资源+dex/smali); action=build 把改好的目录回编成完整 APK; action=merge 把拆分包(xapk/apks/apkm)合并成单个可安装 APK; action=refactor 还原被混淆的资源名。回编后记得用 apk_sign 签名再装。",
-            "Full APK decode/build/merge/refactor via APKEditor (pure Java, aapt-independent). action=decode splits an APK into an editable dir (resources + dex/smali); action=build recompiles that dir back into a full APK; action=merge combines split bundles (xapk/apks/apkm) into a single installable APK; action=refactor restores obfuscated resource names. Sign the output with apk_sign before installing.",
+            "【APK 完整回编/合并/去混淆】APKEditor 引擎(纯 Java,aapt 无关)。action=decode 把 APK 拆成可读可改的目录(资源+dex/smali); action=build 把改好的目录回编成完整 APK; action=merge 把拆分包(xapk/apks/apkm)合并成单个可安装 APK; action=refactor 还原被混淆的资源名。回编后记得用 taffy_apk_sign 签名再装。",
+            "Full APK decode/build/merge/refactor via APKEditor (pure Java, aapt-independent). action=decode splits an APK into an editable dir (resources + dex/smali); action=build recompiles that dir back into a full APK; action=merge combines split bundles (xapk/apks/apkm) into a single installable APK; action=refactor restores obfuscated resource names. Sign the output with taffy_apk_sign before installing.",
             "build", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
@@ -95,7 +95,7 @@ object ApkEditorTool {
                             type = args.str("type", "json")
                         }
                         opt.newCommandExecutor().runCommand()
-                        result("build", out, "已回编成完整 APK。必须用 apk_sign 签名后才能安装。", null)
+                        result("build", out, "已回编成完整 APK。必须用 taffy_apk_sign 签名后才能安装。", null)
                     }
 
                     "merge" -> {
@@ -107,7 +107,7 @@ object ApkEditorTool {
                             cleanMeta = args.bool("cleanMeta", true)
                         }
                         opt.newCommandExecutor().runCommand()
-                        result("merge", out, "已把拆分包合并成单个 APK。用 apk_sign 签名后可安装。", null)
+                        result("merge", out, "已把拆分包合并成单个 APK。用 taffy_apk_sign 签名后可安装。", null)
                     }
 
                     "refactor" -> {

@@ -16,17 +16,17 @@ import java.util.zip.ZipFile
 /**
  * 塔菲逆核: Smali 增量编辑工具(参考 MT管理器的 edit_open/edit_text/edit_check/build 增量流程)。
  *
- * 塔菲逆核已有 baksmali_decode(全量解包) + smali_assemble(全量重编), 但缺少:
+ * 塔菲逆核已有 taffy_baksmali_decode(全量解包) + taffy_smali_assemble(全量重编), 但缺少:
  *  - 增量提取: 只提取指定类的 smali, 不解包整个 DEX
  *  - 增量替换: 只改一个类, 自动重编该 DEX + 写回 APK
  *  - 多 DEX 自动定位: 自动找到类在哪个 classes*.dex 里
  *  - 类列表: 列出 APK 中所有类(按包名过滤)
  *
  * 工作流:
- *  1. smali_edit action=list_classes  → 看有哪些类
- *  2. smali_edit action=extract       → 提取目标类的 smali 代码
+ *  1. taffy_smali_edit action=list_classes  → 看有哪些类
+ *  2. taffy_smali_edit action=extract       → 提取目标类的 smali 代码
  *  3. (AI 修改 smali 代码)
- *  4. smali_edit action=replace       → 替换该类, 自动重编 DEX + 写回 APK
+ *  4. taffy_smali_edit action=replace       → 替换该类, 自动重编 DEX + 写回 APK
  */
 object SmaliEditTools {
 
@@ -104,7 +104,7 @@ object SmaliEditTools {
                 .put("action", "list_classes")
                 .put("total", total)
                 .put("results", results)
-                .put("hint", "用 smali_edit action=extract 提取某个类的 smali 代码"))
+                .put("hint", "用 taffy_smali_edit action=extract 提取某个类的 smali 代码"))
         }
 
         /** 提取指定类的 smali 代码 */
@@ -136,7 +136,7 @@ object SmaliEditTools {
                     .put("dex", dexEntryName)
                     .put("smali", smaliText)
                     .put("lineCount", smaliText.lines().size)
-                    .put("hint", "修改 smali 后用 smali_edit action=replace 写回"))
+                    .put("hint", "修改 smali 后用 taffy_smali_edit action=replace 写回"))
             } finally {
                 tempDex.delete()
             }
@@ -212,7 +212,7 @@ object SmaliEditTools {
                     .put("success", true)
                     .put("newDexSize", newDexBytes.size)
                     .put("backupPath", backup.absolutePath)
-                    .put("hint", "DEX 已重编并写回 APK, 签名已失效. 用 apk_sign 或 apk_rebuild 重新签名"))
+                    .put("hint", "DEX 已重编并写回 APK, 签名已失效. 用 taffy_apk_sign 或 taffy_apk_rebuild 重新签名"))
 
             } finally {
                 tempDex.delete()
@@ -256,7 +256,7 @@ object SmaliEditTools {
                     .put("interfaces", JSONArray((classDef.interfaces ?: listOf<String>()).toList()))
                     .put("methods", methods)
                     .put("fields", fields)
-                    .put("hint", "用 smali_edit action=extract 提取完整 smali 代码"))
+                    .put("hint", "用 taffy_smali_edit action=extract 提取完整 smali 代码"))
             } finally {
                 tempDex.delete()
             }

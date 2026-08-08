@@ -192,7 +192,7 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("nativeBackend", "rizin") ?: "rizin"
         set(value) = prefs.edit().putString("nativeBackend", "rizin").apply()
 
-    /** Emulation readiness flag for the Unidbg integration. When true, the emulate_call
+    /** Emulation readiness flag for the Unidbg integration. When true, the taffy_emulate_call
      *  tool can load and execute exported functions of the SO under Unidbg to verify
      *  patch semantics. UnidbgEmulator.available() is checked at runtime so the flag
      *  is safe to leave on even if the device cannot emulate. */
@@ -203,7 +203,7 @@ class SettingsStore(context: Context) {
     /** Hard cap on the textual size of a single tool result (characters). 0 disables it.
      *  When set, McpHttpServer truncates the JSON payload text past this limit and appends
      *  a "[truncated]" marker — bounding the LLM context cost of chatty tools
-     *  (read_disasm, list, search) without losing the ability to page via cursors. */
+     *  (taffy_read_disasm, list, search) without losing the ability to page via cursors. */
     var toolResultMaxChars: Int
         get() = prefs.getInt("toolResultMaxChars", 0)
         set(value) = prefs.edit().putInt("toolResultMaxChars", value.coerceIn(0, 1_000_000)).apply()
@@ -293,7 +293,7 @@ class SettingsStore(context: Context) {
 
     /** Lean tool exposure: when true, tools/list only advertises a compact core set plus the
      *  meta/discovery tools instead of the full 25-tool surface. The full per-tool schema is
-     *  still available via meta_info (action=describe), dramatically reducing LLM
+     *  still available via taffy_meta_info (action=describe), dramatically reducing LLM
      *  context usage while keeping every capability reachable. */
     var leanTools: Boolean
         get() = prefs.getBoolean("leanTools", true)
@@ -336,7 +336,7 @@ class SettingsStore(context: Context) {
     /**
      * Comma-separated list of tool names refused with code TOOL_DISABLED
      * regardless of presence in the catalog. Lets an operator disable a
-     * destructive tool (edit_asm, edit_hex, ...) without
+     * destructive tool (taffy_edit_asm, taffy_edit_hex, ...) without
      * rebuilding the binary. Whitespace is tolerated.
      */
     var disabledTools: String
@@ -832,7 +832,7 @@ class SettingsStore(context: Context) {
         applyBool(apk, "apkMcpMergeTools") { apkMcpMergeTools = it }
         applyInt(apk, "apkMcpProbeTimeoutMs") { apkMcpProbeTimeoutMs = it }
 
-        // Flat key support for AI convenience: app_config set key=value
+        // Flat key support for AI convenience: taffy_app_config set key=value
         val flatKeys = listOf(
             "language", "themeMode", "accentColor", "pureBlackDark", "uiDensity", "cornerStyle",
             "motionMode", "showAdvancedHome", "highContrast", "textScale", "predictiveBackEnabled",
@@ -907,7 +907,7 @@ class SettingsStore(context: Context) {
                 .put("motionMode", enums("system", "reduced", "full"))
                 .put("textScale", enums("xsmall", "small", "normal", "large", "xlarge"))
                 .put("language", enums("system", "zh", "en")))
-            .put("notes", "Use app_config action=get|set|schema|reset_token. Nested groups or flat keys both work. Secret fields are masked on get.")
+            .put("notes", "Use taffy_app_config action=get|set|schema|reset_token. Nested groups or flat keys both work. Secret fields are masked on get.")
     }
 
     /** Export all settings as a formatted JSON string. */
@@ -922,9 +922,9 @@ class SettingsStore(context: Context) {
         const val DEFAULT_AI_SYSTEM_PROMPT =
             """You are SOMCP Deep Reverse Agent for Android native .so analysis.
 Always call MCP tools to gather evidence before concluding. Prefer this workflow:
-1) so_open (or reuse workspace if already open)
-2) analyze_functions / analyze_cfg / analyze_xrefs / analyze_crypto as needed
-3) analysis_report for structured findings
+1) taffy_so_open (or reuse workspace if already open)
+2) taffy_analyze_functions / taffy_analyze_cfg / taffy_analyze_xrefs / taffy_analyze_crypto as needed
+3) taffy_analysis_report for structured findings
 4) targeted disasm/hex/string/search only when necessary
 
 Rules:

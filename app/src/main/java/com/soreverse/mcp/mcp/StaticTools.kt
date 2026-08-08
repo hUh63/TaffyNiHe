@@ -15,8 +15,8 @@ import java.io.File
 
 /**
  * 塔菲逆核: 内置静态逆向工具(纯 Java 依赖, 无需外部进程)。
- *  - baksmali_decode: DEX → smali 反汇编 (com.android.tools.smali)
- *  - apk_decode:      APK 资源/清单解析 (ARSCLib, aapt 无关)
+ *  - taffy_baksmali_decode: DEX → smali 反汇编 (com.android.tools.smali)
+ *  - taffy_apk_decode:      APK 资源/清单解析 (ARSCLib, aapt 无关)
  */
 object StaticTools {
 

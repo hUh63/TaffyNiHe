@@ -163,6 +163,6 @@ object DexKitTool {
                 .put("total", total)
                 .put("returned", arr.length())
                 .put("results", arr)
-                .put("hint", "拿到真实类名/方法后,可用 jadx_decompile 反编译该类看代码,或 frida hook 该方法"))
+                .put("hint", "拿到真实类名/方法后,可用 taffy_jadx_decompile 反编译该类看代码,或 frida hook 该方法"))
     }
 }

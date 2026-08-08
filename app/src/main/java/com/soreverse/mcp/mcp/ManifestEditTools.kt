@@ -12,13 +12,13 @@ import java.io.File
 /**
  * 塔菲逆核: 高精度 AndroidManifest 编辑工具(超越 MT管理器和我的工具APK)。
  *
- * 之前 apk_manifest_edit 用正则替换, 复杂 XML 会匹配失败。
+ * 之前 taffy_apk_manifest_edit 用正则替换, 复杂 XML 会匹配失败。
  * 本工具用 ARSCLib + DOM 解析做精确的 XML 操作:
- *  - manifest_xml_edit: 用 ARSCLib 解码/编码 AXML, 操作后写回 APK
+ *  - taffy_manifest_xml_edit: 用 ARSCLib 解码/编码 AXML, 操作后写回 APK
  *  - manifest_component: 精确增删查改 activity/service/receiver/provider
  *  - manifest_permission: 精确增删查 uses-permission
  *  - manifest_meta: 精确增删查改 meta-data
- *  - resource_xref: 资源交叉引用(谁引用了 @string/xxx / @drawable/xxx)
+ *  - taffy_resource_xref: 资源交叉引用(谁引用了 @string/xxx / @drawable/xxx)
  *
  * 用 ARSCLib 做真正的 AXML 二进制↔XML 文本互转, 不是正则匹配。
  */
@@ -270,8 +270,8 @@ object ManifestEditTools {
     /** 资源交叉引用 — 谁引用了某个资源 ID */
     val resourceXref: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_resource_xref",
-            "【资源交叉引用】查找谁引用了某个资源(如 @string/app_name / @drawable/icon / @layout/main)。用 ARSCLib 解析 resources.arsc + 扫描所有 XML 中的资源引用。action=by_id 按 resource ID 查; action=list 列出所有资源定义; action=where_used 查资源在哪些 XML 中被引用。参考 MT管理器的 resource_xref。",
-            "Resource cross-reference. Find who references a resource (e.g. @string/app_name). Uses ARSCLib to parse resources.arsc + scans XML. action=by_id, list, where_used. Inspired by MT resource_xref.",
+            "【资源交叉引用】查找谁引用了某个资源(如 @string/app_name / @drawable/icon / @layout/main)。用 ARSCLib 解析 resources.arsc + 扫描所有 XML 中的资源引用。action=by_id 按 resource ID 查; action=list 列出所有资源定义; action=where_used 查资源在哪些 XML 中被引用。参考 MT管理器的 taffy_resource_xref。",
+            "Resource cross-reference. Find who references a resource (e.g. @string/app_name). Uses ARSCLib to parse resources.arsc + scans XML. action=by_id, list, where_used. Inspired by MT taffy_resource_xref.",
             "apk", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {

@@ -22,10 +22,10 @@ import java.util.Date
 
 /**
  * 塔菲逆核: APK 回编打包 + 签名(补齐 MT 管理器"改完装回去"的能力)。
- *  - smali_assemble: smali 目录 → dex(smali 库,反 baksmali)
- *  - apk_sign:       给 APK 做 v1/v2/v3 签名(apksig, 自动生成/复用内置签名密钥)
+ *  - taffy_smali_assemble: smali 目录 → dex(smali 库,反 baksmali)
+ *  - taffy_apk_sign:       给 APK 做 v1/v2/v3 签名(apksig, 自动生成/复用内置签名密钥)
  *
- * 配合已有的 baksmali_decode(dex→smali)/ jadx / apk_decode,形成
+ * 配合已有的 taffy_baksmali_decode(dex→smali)/ jadx / taffy_apk_decode,形成
  * "反编译 → 改 smali/资源 → 回编 dex → 打包 → 签名" 的完整链路。
  */
 object ApkBuildTool {

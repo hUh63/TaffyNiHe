@@ -20,14 +20,14 @@ import java.io.File
  *   - pslist:  列出运行中的第三方应用进程(帮你确定要脱壳的包名/pid)。
  *   - pids:    查某个包名当前的 pid。
  *
- * 脱壳后可接 jadx_decompile / baksmali_decode 分析 dump 出的 dex。
+ * 脱壳后可接 taffy_jadx_decompile / taffy_baksmali_decode 分析 dump 出的 dex。
  */
 object UnpackTool {
 
     val dexDump: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_dex_unpack",
-            "【DEX 脱壳(内存dump)】需 root。对运行中的加固 App 从内存扫出解密后的真实 dex(绕过磁盘上被加密/抽取的壳,原理同 frida-dexdump)。action=dump 脱壳(需先手动打开目标 App 让壳解密 dex 进内存,再传 package 脱); action=pslist 列运行中的第三方应用(找目标包名); action=pids 查包名当前 pid。脱出的 dex 可直接喂给 jadx_decompile/baksmali_decode 分析。三代指令抽取壳的方法体可能是 nop(本工具不做指令修复)。",
-            "DEX unpacking via memory dump (requires root). Scans a running hardened app's memory for decrypted dex, bypassing on-disk packers (same idea as frida-dexdump). action=dump (open the target app first so the packer decrypts dex into memory, then pass package); action=pslist lists running third-party apps; action=pids finds a package's current pid. Dumped dex can be fed to jadx_decompile/baksmali_decode.",
+            "【DEX 脱壳(内存dump)】需 root。对运行中的加固 App 从内存扫出解密后的真实 dex(绕过磁盘上被加密/抽取的壳,原理同 frida-dexdump)。action=dump 脱壳(需先手动打开目标 App 让壳解密 dex 进内存,再传 package 脱); action=pslist 列运行中的第三方应用(找目标包名); action=pids 查包名当前 pid。脱出的 dex 可直接喂给 taffy_jadx_decompile/taffy_baksmali_decode 分析。三代指令抽取壳的方法体可能是 nop(本工具不做指令修复)。",
+            "DEX unpacking via memory dump (requires root). Scans a running hardened app's memory for decrypted dex, bypassing on-disk packers (same idea as frida-dexdump). action=dump (open the target app first so the packer decrypts dex into memory, then pass package); action=pslist lists running third-party apps; action=pids finds a package's current pid. Dumped dex can be fed to taffy_jadx_decompile/taffy_baksmali_decode.",
             "dynamic", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {

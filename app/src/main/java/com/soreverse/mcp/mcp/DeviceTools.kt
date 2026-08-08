@@ -313,7 +313,7 @@ object DeviceTools {
                     put("minSdk", try { ai.minSdkVersion } catch (_: Exception) { -1 })
                 })
             } catch (e: Exception) {
-                err("APP_NOT_FOUND", "未找到应用 $pkg", "packageName", pkg, "hint" to "使用 installed_apps 查看已安装应用列表")
+                err("APP_NOT_FOUND", "未找到应用 $pkg", "packageName", pkg, "hint" to "使用 taffy_installed_apps 查看已安装应用列表")
             }
         }
     }

@@ -15,9 +15,9 @@ import java.nio.file.Files
  * 塔菲逆核: 纯 Java 内置 SO 分析工具（基于 SO逆向分析工具移植）。
  *
  * 提供不依赖 rizin/LIEF 等 native 引擎的纯 Java ELF/SO 分析能力：
- *  - so_standalone_elf:    纯 Java ELF 解析（ELF 头/节区/符号/字符串/段）
- *  - so_standalone_disasm: 纯 Java ARM64 反汇编
- *  - so_standalone_hexdump:十六进制转储
+ *  - taffy_so_standalone_elf:    纯 Java ELF 解析（ELF 头/节区/符号/字符串/段）
+ *  - taffy_so_standalone_disasm: 纯 Java ARM64 反汇编
+ *  - taffy_so_standalone_hexdump:十六进制转储
  *
  * 适用于无法加载 native 组件的环境，或作为 rizin 的轻量化备选。
  */

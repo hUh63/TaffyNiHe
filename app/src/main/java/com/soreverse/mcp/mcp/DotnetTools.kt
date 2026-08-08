@@ -17,8 +17,8 @@ import org.json.JSONObject
  * 返回明确错误而非崩溃。
  *
  * BinaryEngine 同时支持 ELF (.so) 和 PE (.dll/.exe) 格式，但 .NET 专属操作
- * （dotnet_*）仅对 PE 文件有效。PE 专属的原始编辑工具（pe_edit_hex / pe_edit_va /
- * pe_edit_section）补充了 somcp 原有 edit_* 工具仅支持 ELF 的缺口。
+ * （dotnet_*）仅对 PE 文件有效。PE 专属的原始编辑工具（taffy_pe_edit_hex / taffy_pe_edit_va /
+ * taffy_pe_edit_section）补充了 somcp 原有 edit_* 工具仅支持 ELF 的缺口。
  */
 object DotnetTools {
 
@@ -26,8 +26,8 @@ object DotnetTools {
 
     val peOpen = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_open",
-            "【PE/.NET 分析入口】打开 PE/DLL/EXE 文件并创建工作区（自动检测格式，也支持 ELF）。所有 PE/.NET 文件操作必须从 pe_open 开始。",
-            "Open a PE (.dll/.exe) or ELF (.so) file and create a BinaryEngine workspace. Auto-detects file format. All PE/.NET operations MUST start from pe_open. Use action=list to see open workspaces.",
+            "【PE/.NET 分析入口】打开 PE/DLL/EXE 文件并创建工作区（自动检测格式，也支持 ELF）。所有 PE/.NET 文件操作必须从 taffy_pe_open 开始。",
+            "Open a PE (.dll/.exe) or ELF (.so) file and create a BinaryEngine workspace. Auto-detects file format. All PE/.NET operations MUST start from taffy_pe_open. Use action=list to see open workspaces.",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("open (default) | list", "open", "list")
@@ -233,7 +233,7 @@ object DotnetTools {
     val peEditHex = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_edit_hex",
             "按文件偏移写入 hex 补丁到 PE/DLL 文件（需要编辑会话）",
-            "Patch raw hex bytes at a file offset in a PE/DLL file. Requires an edit session. Use this for PE files where edit_hex (ELF-only) does not apply.",
+            "Patch raw hex bytes at a file offset in a PE/DLL file. Requires an edit session. Use this for PE files where taffy_edit_hex (ELF-only) does not apply.",
             "dotnet", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"

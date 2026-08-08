@@ -13,16 +13,16 @@ import java.util.zip.ZipFile
 
 /**
  * 塔菲逆核: 进阶逆向辅助工具(参考 MT管理器的 native_xref / native_map_address / native_function_cfg
- * / patch_bytes / apk_search 等高级工具, 包装塔菲逆核已有的 rizin 引擎能力)。
+ * / patch_bytes / taffy_apk_search 等高级工具, 包装塔菲逆核已有的 rizin 引擎能力)。
  *
  * 这些工具把 rizin 的底层能力暴露为 AI 友好的高层 MCP 工具, 补齐 MT管理器有但塔菲逆核缺少的:
- *  - so_xref: 交叉引用(谁调用了某地址/函数) — 包装 rzXrefs
- *  - so_cfg: 函数控制流图 — 通过 rzCommand 执行 agf
- *  - so_addr_map: VA↔FileOffset 地址映射 — 通过 rzCommand
- *  - so_search_bytes: 字节模式搜索 — 包装 rzSearchBytes
- *  - apk_search: APK 统一搜索(跨 dex/native/资源/ZIP条目)
- *  - apk_patch_bytes: APK 内 ZIP 条目级原始字节读写
- *  - apk_resource_list: 列出 APK 内资源文件
+ *  - taffy_so_xref: 交叉引用(谁调用了某地址/函数) — 包装 rzXrefs
+ *  - taffy_so_cfg: 函数控制流图 — 通过 rzCommand 执行 agf
+ *  - taffy_so_addr_map: VA↔FileOffset 地址映射 — 通过 rzCommand
+ *  - taffy_so_search_bytes: 字节模式搜索 — 包装 rzSearchBytes
+ *  - taffy_apk_search: APK 统一搜索(跨 dex/native/资源/ZIP条目)
+ *  - taffy_apk_patch_bytes: APK 内 ZIP 条目级原始字节读写
+ *  - taffy_apk_resource_list: 列出 APK 内资源文件
  */
 object AdvancedTools {
 
@@ -197,12 +197,12 @@ object AdvancedTools {
                                 matches.put(JSONObject()
                                     .put("dex", dex.name)
                                     .put("size", dex.size)
-                                    .put("hint", "用 dex_search 或 jadx_decompile 进一步分析此 DEX"))
+                                    .put("hint", "用 taffy_dex_search 或 taffy_jadx_decompile 进一步分析此 DEX"))
                             }
                             ok(JSONObject()
                                 .put("action", "classes_dex")
                                 .put("dexFiles", matches)
-                                .put("hint", "找到 ${dexFiles.size} 个 DEX 文件, 用 dex_search 搜索类名/方法/字符串"))
+                                .put("hint", "找到 ${dexFiles.size} 个 DEX 文件, 用 taffy_dex_search 搜索类名/方法/字符串"))
                         }
                         "strings" -> {
                             // 用 DexKit 搜索字符串
@@ -371,7 +371,7 @@ object AdvancedTools {
                                     .put("offset", offset)
                                     .put("bytesWritten", writeBytes.size)
                                     .put("casVerified", expectedHex.isNotBlank())
-                                    .put("hint", "字节已写入, APK 签名已失效, 用 apk_rebuild(build) 重新签名. 用 apk_patch_bytes(read) 验证写入结果"))
+                                    .put("hint", "字节已写入, APK 签名已失效, 用 taffy_apk_rebuild(build) 重新签名. 用 taffy_apk_patch_bytes(read) 验证写入结果"))
                             }
                         }
                     }
@@ -443,7 +443,7 @@ object AdvancedTools {
                         .put("category", category)
                         .put("total", count)
                         .put("results", matches)
-                        .put("hint", if (action == "native") "用 so_open 打开 SO 进行逆向分析" else "用 apk_patch_bytes(read) 读取文件内容"))
+                        .put("hint", if (action == "native") "用 taffy_so_open 打开 SO 进行逆向分析" else "用 taffy_apk_patch_bytes(read) 读取文件内容"))
                 }
             }.getOrElse { e ->
                 err("RESOURCE_LIST_FAILED", "资源列表失败: ${e.message}", "path", path)

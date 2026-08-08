@@ -31,7 +31,7 @@ object DexAnalysisTools {
     /** 方法级交叉引用 */
     val dexXref: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_dex_xref",
-            "【DEX 方法交叉引用】精确分析谁调用了某方法(to), 或某方法调用了什么(from)。用 dexlib2 AnalyzedInstruction 做指令级分析, 精确到调用指令和调用位置(方法+偏移)。比 MT管理器的 dex_xref 更详细: 返回调用者类名/方法名/指令偏移/调用类型(invoke-virtual/direct/static/super)。自动扫描多 DEX。",
+            "【DEX 方法交叉引用】精确分析谁调用了某方法(to), 或某方法调用了什么(from)。用 dexlib2 AnalyzedInstruction 做指令级分析, 精确到调用指令和调用位置(方法+偏移)。比 MT管理器的 taffy_dex_xref 更详细: 返回调用者类名/方法名/指令偏移/调用类型(invoke-virtual/direct/static/super)。自动扫描多 DEX。",
             "Method-level cross-reference using dexlib2. Finds who calls a method (to) or what a method calls (from). Returns caller class/method/instruction offset/invoke type. More detailed than MT. Auto multi-DEX.",
             "decompile", ToolClass.EXTRA, heavy = true,
         ) {
@@ -226,7 +226,7 @@ object DexAnalysisTools {
                 .put("fields", fields)
                 .put("methods", methods)
                 .put("annotations", annotations)
-                .put("hint", "用 dex_xref 查方法交叉引用, smali_edit action=extract 提取 smali 代码"))
+                .put("hint", "用 taffy_dex_xref 查方法交叉引用, taffy_smali_edit action=extract 提取 smali 代码"))
         }
     }
 
@@ -312,7 +312,7 @@ object DexAnalysisTools {
                     .put("accessFlags", accessFlagsToString(method.accessFlags))
                     .put("instructionCount", count)
                     .put("instructions", instructions)
-                    .put("hint", "用 smali_edit action=extract 看可读的 smali 代码"))
+                    .put("hint", "用 taffy_smali_edit action=extract 看可读的 smali 代码"))
             }
             return err("METHOD_NOT_FOUND", "方法 $className.$methodName 不在 APK 中", "methodName", methodName)
         }
@@ -355,7 +355,7 @@ object DexAnalysisTools {
                     .put("success", true)
                     .put("outputDir", out.absolutePath)
                     .put("smaliFiles", smaliCount)
-                    .put("hint", "odex 已还原为 smali, 可用 smali_assemble 重新编译为正常 DEX"))
+                    .put("hint", "odex 已还原为 smali, 可用 taffy_smali_assemble 重新编译为正常 DEX"))
             }.getOrElse { e ->
                 err("DEODEX_FAILED", "deodex 失败: ${e.message ?: e.javaClass.simpleName}", "path", path)
             }
@@ -365,8 +365,8 @@ object DexAnalysisTools {
     /** 增量重编 */
     val dexIncrementalRebuild: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_dex_incremental_rebuild",
-            "【DEX 增量重编】只重编改动的类, 不全量重编整个 DEX。用 dexlib2 DexPool 保留未改动类的原始字节。比 smali_assemble(全量重编)快 10-50 倍。",
-            "Incremental DEX rebuild: only recompile changed classes. 10-50x faster than full smali_assemble.",
+            "【DEX 增量重编】只重编改动的类, 不全量重编整个 DEX。用 dexlib2 DexPool 保留未改动类的原始字节。比 taffy_smali_assemble(全量重编)快 10-50 倍。",
+            "Incremental DEX rebuild: only recompile changed classes. 10-50x faster than full taffy_smali_assemble.",
             "build", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {

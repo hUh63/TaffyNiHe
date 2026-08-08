@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
  * In-memory per-tool call statistics with optional persistence to
  * externalFilesDir/toolstats.json. Two reasons this exists:
  *  - process restart otherwise wipes stats, so the settings-page bar chart and
- *    meta_info (action=stats) cannot answer "which tool is slow over the week" questions;
+ *    taffy_meta_info (action=stats) cannot answer "which tool is slow over the week" questions;
  *  - the popularity weights fed back into ToolCatalog (adaptive CORE set)
  *    need a stable view across restarts to converge.
  *

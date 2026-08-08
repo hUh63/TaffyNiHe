@@ -13,14 +13,14 @@ import java.util.zip.ZipFile
  * 塔菲逆核: APK/ZIP 资源提取(纯 Java zip)。
  *
  * 从 APK 里按路径/前缀/后缀把文件抠出来到工作目录, 方便单独分析。
- * 典型: 抠 lib 下的 so 出来喂给 so_open 或 rizin, 抠 assets 看配置, 抠 classes.dex 反编译。
+ * 典型: 抠 lib 下的 so 出来喂给 taffy_so_open 或 rizin, 抠 assets 看配置, 抠 classes.dex 反编译。
  */
 object ApkExtractTool {
 
     val extract: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_apk_extract",
-            "【资源提取】从 APK/ZIP 里按条件把文件抠到工作目录。action=list 先列条目(可配 filter 过滤); action=extract 提取匹配的文件到 filesDir/extracted/<apk名>/。典型: 抠 .so 喂给 so_open 分析、抠 assets 看配置、抠 dex 反编译。filter 支持前缀(lib/)或后缀(.so)或包含关键字。",
-            "Extract files from an APK/ZIP to the work dir. action=list to list entries (with optional filter); action=extract to pull matching files into filesDir/extracted/<apk>/. Typical: pull .so for so_open, assets for config, dex for decompile.",
+            "【资源提取】从 APK/ZIP 里按条件把文件抠到工作目录。action=list 先列条目(可配 filter 过滤); action=extract 提取匹配的文件到 filesDir/extracted/<apk名>/。典型: 抠 .so 喂给 taffy_so_open 分析、抠 assets 看配置、抠 dex 反编译。filter 支持前缀(lib/)或后缀(.so)或包含关键字。",
+            "Extract files from an APK/ZIP to the work dir. action=list to list entries (with optional filter); action=extract to pull matching files into filesDir/extracted/<apk>/. Typical: pull .so for taffy_so_open, assets for config, dex for decompile.",
             "workspace", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
@@ -91,7 +91,7 @@ object ApkExtractTool {
                             .put("tool", "taffy_apk_extract").put("action", "extract")
                             .put("filter", filter).put("extractedCount", count)
                             .put("outputDir", outDir.absolutePath).put("files", extracted)
-                            .put("hint", "提取的 .so 可用 so_open 打开分析; dex 可用 jadx_decompile/baksmali_decode"))
+                            .put("hint", "提取的 .so 可用 taffy_so_open 打开分析; dex 可用 taffy_jadx_decompile/taffy_baksmali_decode"))
                     }
                 }
             }.getOrElse { e ->

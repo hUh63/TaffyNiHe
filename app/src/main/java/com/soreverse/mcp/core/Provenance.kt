@@ -15,7 +15,7 @@ import org.json.JSONObject
 /**
  * Single source of truth for authorship, license and upstream-origin metadata.
  *
- * These values are surfaced at runtime (MCP `initialize`, `meta_info` health,
+ * These values are surfaced at runtime (MCP `initialize`, `taffy_meta_info` health,
  * the About screen) so that any redistributed or rebranded build carries a
  * verifiable, hard-to-strip pointer back to the original GPL-3.0 project.
  * Removing this provenance requires editing source, and doing so while

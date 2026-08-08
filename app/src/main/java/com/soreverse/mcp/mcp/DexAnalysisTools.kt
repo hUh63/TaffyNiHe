@@ -529,10 +529,19 @@ object DexAnalysisTools {
         return "($params)${method.returnType}"
     }
 
-    // MethodReference 在不同 dexlib2 版本中 parameters 成员的可见性不同,
-    // 这里通过 Method 接口(有暴露 parameters)间接构造类型签名。
+    // MethodReference 接口在不同 dexlib2 版本中 parameters 成员的可见性不同,
+    // 用反射安全获取参数类型列表。
     private fun buildDescriptor(ref: MethodReference): String {
-        val params = ref.parameters.joinToString("") { it.toString() }
+        var params = ""
+        runCatching {
+            @Suppress("UNCHECKED_CAST")
+            val list = MethodReference::class.java.getMethod("getParameters").invoke(ref) as List<Any>
+            params = list.joinToString("") {
+                // MethodParameter 有 getType(); 普通 CharSequence 直接 toString()
+                runCatching { it.javaClass.getMethod("getType").invoke(it).toString() }
+                    .getOrDefault(it.toString())
+            }
+        }
         return "($params)${ref.returnType}"
     }
 

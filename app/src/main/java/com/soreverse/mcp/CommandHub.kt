@@ -32,6 +32,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -66,6 +69,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Canvas
@@ -156,12 +160,14 @@ internal fun CommandHubScreen(
     }
     Column(
         Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .safeDrawingPadding()
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // 顶部品牌
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -186,12 +192,12 @@ internal fun CommandHubScreen(
             ConnDot(running = running, zh = zh)
         }
 
-        // 中央星系（星核 + 卫星环绕），限制最大高度
+        // 中央星系（星核 + 卫星环绕），限制最大尺寸，小窗下不占满过高
         Box(
             Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .heightIn(max = 360.dp),
+                .padding(vertical = 10.dp)
+                .heightIn(max = 320.dp),
             contentAlignment = Alignment.Center,
         ) {
             SatelliteSystem(
@@ -199,6 +205,7 @@ internal fun CommandHubScreen(
                 sats = sats,
                 onCore = { toggle() },
                 onSat = { onNavigate(it.tab, it.toolCategory) },
+                maxDiameter = 300.dp,
             )
         }
 
@@ -291,7 +298,7 @@ internal fun CommandHubScreen(
             if (running) Icon(Icons.Filled.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
             else Icon(Icons.Filled.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { pickTree.launch(null) })
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
     }
 }
 
@@ -533,6 +540,7 @@ private fun SatelliteSystem(
     sats: List<Satellite>,
     onCore: () -> Unit,
     onSat: (Satellite) -> Unit,
+    maxDiameter: Dp = 320.dp,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val outline = MaterialTheme.colorScheme.outline
@@ -546,6 +554,7 @@ private fun SatelliteSystem(
     Box(
         Modifier
             .fillMaxWidth()
+            .widthIn(max = maxDiameter)
             .aspectRatio(1f),
         contentAlignment = Alignment.Center,
     ) {
@@ -607,7 +616,7 @@ private fun SatelliteNode(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(20.dp)
-    val sizeDp = 60.dp
+    val sizeDp = 56.dp
     Column(
         modifier
             .size(width = sizeDp, height = sizeDp)
@@ -620,8 +629,8 @@ private fun SatelliteNode(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(sat.icon, fontSize = 24.sp)
-        Spacer(Modifier.height(2.dp))
+        Text(sat.icon, fontSize = 22.sp)
+        Spacer(Modifier.height(1.dp))
         Text(
             sat.label,
             style = MaterialTheme.typography.labelSmall,

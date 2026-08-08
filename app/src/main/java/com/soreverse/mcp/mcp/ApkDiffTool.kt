@@ -77,7 +77,7 @@ object ApkDiffTool {
                 e1.keys.filter { it !in e2 }.take(limit).forEach { removed.put(it) }
                 e1.keys.filter { it in e2 }.forEach { k ->
                     if (changed.length() >= limit) return@forEach
-                    val a = e1[k] ?: return@merge; val b = e2[k] ?: return@merge
+                    val a = e1[k] ?: return@forEach; val b = e2[k] ?: return@forEach
                     if (a.crc != b.crc) changed.put(JSONObject().put("file", k).put("oldSize", a.size).put("newSize", b.size))
                 }
 

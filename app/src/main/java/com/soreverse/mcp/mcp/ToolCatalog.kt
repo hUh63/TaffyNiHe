@@ -1009,6 +1009,10 @@ object ToolCatalog {
         *LogcatTools.ALL.toTypedArray(),
         // 塔菲逆核: 进阶逆向辅助(参考MT管理器 native_xref/cfg/patch_bytes/apk_search)
         *AdvancedTools.ALL.toTypedArray(),
+        // 塔菲逆核: Unicorn 直接CPU模拟(参考Flutter解析工具的libunicorn_java独立模拟)
+        *UnicornTools.ALL.toTypedArray(),
+        // 塔菲逆核: Smali增量编辑(参考MT管理器edit_open/edit_text增量流程)
+        *SmaliEditTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

@@ -221,7 +221,7 @@ internal class RikkaAgentEngine(
                             val block = root["content_block"]?.jsonObject ?: return@runCatching
                             if (block["type"]?.jsonPrimitive?.contentOrNull == "tool_use") {
                                 toolNames[index] = block["id"]?.jsonPrimitive?.contentOrNull.orEmpty() to block["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                                val pair = toolNames.getOrNull(index) ?: return
+                                val pair = toolNames[index] ?: return
                                 trySend(listOf(RikkaPart.Tool(pair.first, pair.second, "", index = index)))
                             }
                         }

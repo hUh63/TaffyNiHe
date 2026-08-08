@@ -354,7 +354,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                         AppLog.i("apk-mcp auto-discovered ${prefixLabel(st.toolPrefix)} at $url (${st.tools.size} tools)")
                         break
                     }
-                } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch", e) }
+                } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch: ${e.message}") }
             }
         }
         if (firstState == null) {

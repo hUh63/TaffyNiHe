@@ -271,7 +271,7 @@ object DeviceTools {
                         put("sourceDir", ai.sourceDir)
                     })
                     count++
-                } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch", e) }
+                } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch: ${e.message}") }
             }
             return ok(JSONObject().put("count", arr.length()).put("apps", arr))
         }
@@ -337,7 +337,7 @@ object DeviceTools {
                         put("importance", p.importance)
                     })
                 }
-            } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch", e) }
+            } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch: ${e.message}") }
             return ok(JSONObject().put("count", arr.length()).put("processes", arr))
         }
     }

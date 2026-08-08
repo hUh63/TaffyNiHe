@@ -542,14 +542,33 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
                     }
                 }
             Spacer(Modifier.size(6.dp))
-            // 当前选中标签页的内容
+            // 当前选中标签页的内容（占剩余空间）
             val current = resultTabs.getOrNull(selectedTab) ?: return
-            Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                 if (detailMode) {
                     DetailCard(current.label, current.text, zh)
                 } else {
                     DataCard(current.label, current.text)
                 }
+            }
+            // 底部导航：上一页 / 页码 / 下一页
+            Spacer(Modifier.size(4.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { if (selectedTab > 0) selectedTab-- },
+                    enabled = selectedTab > 0,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp),
+                ) { Text("◀ " + if (zh) "上一页" else "Prev", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
+                Spacer(Modifier.size(12.dp))
+                Text("${selectedTab + 1} / ${resultTabs.size}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.size(12.dp))
+                Button(
+                    onClick = { if (selectedTab < resultTabs.size - 1) selectedTab++ },
+                    enabled = selectedTab < resultTabs.size - 1,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp),
+                ) { Text(if (zh) "下一页" else "Next" + " ▶", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
             }
         } else {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

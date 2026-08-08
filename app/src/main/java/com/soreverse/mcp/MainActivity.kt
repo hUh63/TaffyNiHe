@@ -473,7 +473,7 @@ private fun SoReverseApp() {
                                     t = t,
                                     state = workspaceState,
                                     context = context,
-                                    onOpenTask = { },
+                                    onOpenTask = { tab = MainTab.Tasks },
                                 )
                                 MainTab.Tasks -> TasksPage(
                                     t = t,

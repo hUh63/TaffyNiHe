@@ -80,18 +80,20 @@ internal fun AnalysisWorkspace(
 ) {
     val zh = t.zh
     val tools = state.tools
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        // 顶部栏：任务选择 + 工作区选择
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
+        // 顶部栏：任务选择 + 工作区选择（紧凑）
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val cur = state.currentTask()
-            Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = onOpenTask, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
-                Text((cur?.title ?: if (zh) "未选择" else "None").take(14), style = MaterialTheme.typography.labelMedium)
+            Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = onOpenTask,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(6.dp)) {
+                Text((cur?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
             }
             Spacer(Modifier.weight(1f))
             WorkspacePicker(state, zh)
         }
-        Spacer(Modifier.size(6.dp))
+        Spacer(Modifier.size(4.dp))
         // 工具切换条
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             toolDefs.forEach { def ->
@@ -100,12 +102,12 @@ internal fun AnalysisWorkspace(
                     onClick = { state.activeTool = def.key },
                     colors = if (sel) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp),
-                ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelMedium, fontSize = 13.sp) }
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp),
+                ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelSmall, fontSize = 12.sp) }
             }
         }
-        Spacer(Modifier.size(6.dp))
+        Spacer(Modifier.size(4.dp))
         // 主体：控制台(极紧凑) + 结果流(占剩余空间)
         Column(Modifier.fillMaxSize()) {
             // 控制台（极紧凑水平条）
@@ -155,24 +157,22 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
             }
         }
     }
-    Column(Modifier.fillMaxWidth(0.5f)) {
-        Button(
-            onClick = { picker.launch(arrayOf("*/*")) },
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-            enabled = !tools.opening,
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            if (tools.opening) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            } else {
-                Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-            }
-            Spacer(Modifier.size(6.dp))
-            Text((tools.sharedSoName.ifBlank { if (zh) "选文件" else "Open" }).take(14), style = MaterialTheme.typography.labelMedium, fontSize = 12.sp)
+    Button(
+        onClick = { picker.launch(arrayOf("*/*")) },
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+        enabled = !tools.opening,
+        shape = RoundedCornerShape(6.dp),
+    ) {
+        if (tools.opening) {
+            CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+        } else {
+            Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp))
         }
-        if (tools.openError.isNotBlank()) {
-            Text(tools.openError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
-        }
+        Spacer(Modifier.size(4.dp))
+        Text((tools.sharedSoName.ifBlank { if (zh) "选文件" else "Open" }).take(12), style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
+    }
+    if (tools.openError.isNotBlank()) {
+        Text(tools.openError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
     }
 }
 
@@ -435,11 +435,38 @@ internal fun DataCard(title: String, text: String, zh: Boolean) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.size(6.dp))
             if (json == null) {
-                // 纯文本：简洁单行显示（限制行数，不展开全部）
-                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp, maxLines = 12, overflow = TextOverflow.Ellipsis)
+                // 纯文本：简洁前几行
+                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
             } else {
-                // JSON：简洁扁平化键值对展示
-                JsonOverview(json, json.toString())
+                // 简洁卡片：提取最关键的字段清晰展示，不堆原文
+                val ov = json.optJSONObject("overview") ?: json
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // 名称/架构/大小（核心三项）
+                    val name = ov.optString("fileName").ifBlank { ov.optString("name", "—") }
+                    if (name.isNotBlank() && name != "—") Kv(if (zh) "名称" else "Name", name)
+                    val arch = ov.optString("architecture")
+                    if (arch.isNotBlank()) {
+                        val bits = ov.optInt("bits", 0)
+                        Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
+                    }
+                    if (ov.has("size") || ov.has("fileSize")) {
+                        Kv(if (zh) "大小" else "Size", fmtBytes(ov.optLong("size", ov.optLong("fileSize", 0L))))
+                    }
+                    // 关键计数（节区/函数/符号/字符串/加密）
+                    val counts = listOf(
+                        "sectionCount" to (if (zh) "节区" else "Sections"),
+                        "functionCount" to (if (zh) "函数" else "Fn"),
+                        "symbolCount" to (if (zh) "符号" else "Sym"),
+                        "stringCount" to (if (zh) "字符串" else "Str"),
+                    ).filter { ov.has(it.first) }.map { (k, label) -> label to ov.optInt(k, 0).toString() }
+                    if (counts.isNotEmpty()) {
+                        MetricRow(*counts.take(3).toTypedArray())
+                    }
+                    // 若 overview 无关键信息，退化为扁平 JSON（限行数简洁展示）
+                    if (!ov.has("fileName") && !ov.has("architecture")) {
+                        Text(json.toString(2).take(600), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
         }
     }

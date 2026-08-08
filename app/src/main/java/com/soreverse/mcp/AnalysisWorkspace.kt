@@ -383,7 +383,7 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
                 if (detailMode) {
                     DetailCard(current.label, current.text, zh)
                 } else {
-                    DataCard(current.label, current.text)
+                    DataCard(current.label, current.text, zh)
                 }
             }
             // 底部导航：上一页 / 页码 / 下一页
@@ -417,7 +417,7 @@ private data class R2Tab(val label: String, val text: String)
 
 /** 简洁模式：结构化卡片，类似 ElfOverviewPanel 风格 */
 @Composable
-internal fun DataCard(title: String, text: String) {
+internal fun DataCard(title: String, text: String, zh: Boolean) {
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
     if (json == null) {

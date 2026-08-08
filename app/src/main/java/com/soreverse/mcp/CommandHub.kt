@@ -414,7 +414,8 @@ private fun ServiceStatusRow(
             modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) { — 使用 IntrinsicSize.Min 保证等高
+        ) {
+        // 三个状态卡片 — 使用 IntrinsicSize.Min 保证等高
         Row(
             Modifier.weight(1f).height(IntrinsicSize.Min),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

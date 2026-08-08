@@ -254,7 +254,7 @@ object SmaliEditTools {
                     .put("action", "list_methods")
                     .put("className", className)
                     .put("superClass", classDef.superclass ?: "")
-                    .put("interfaces", JSONArray(classDef.interfaces ?: listOf()))
+                    .put("interfaces", JSONArray((classDef.interfaces ?: listOf<String>()).toList()))
                     .put("methods", methods)
                     .put("fields", fields)
                     .put("hint", "用 smali_edit action=extract 提取完整 smali 代码"))

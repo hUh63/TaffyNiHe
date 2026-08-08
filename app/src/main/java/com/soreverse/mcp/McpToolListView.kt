@@ -35,12 +35,12 @@ import androidx.compose.ui.unit.sp
 
 /** 卫星分类 → MCP 工具分类的映射 */
 private val categoryMap = mapOf(
-    "decompile" to setOf("analyze", "read"),
-    "unpack" to setOf("build", "workspace", "search", "dynamic"),
-    "soanalyze" to setOf("analyze", "read", "workspace"),
+    "decompile" to setOf("decompile", "analyze", "read"),
+    "unpack" to setOf("apk", "dynamic", "workspace", "search"),
+    "soanalyze" to setOf("soanalyze", "analyze", "read", "workspace"),
     "emulate" to setOf("emulate"),
-    "frida" to setOf("dynamic"),
-    "rebuild" to setOf("build", "edit", "session"),
+    "frida" to setOf("dynamic", "device"),
+    "rebuild" to setOf("build", "edit", "session", "apk"),
     "logs" to null, // 全部
 )
 
@@ -51,6 +51,9 @@ private val categoryLabelZh = mapOf(
     "build" to "构建", "session" to "会话", "apk" to "APK",
     "system" to "系统", "meta" to "元信息", "lowlevel" to "底层",
     "diff" to "对比", "dynamic" to "动态", "mcp" to "通用",
+    "file" to "文件", "archive" to "压缩包", "soanalyze" to "SO分析",
+    "decompile" to "反编译", "dotnet" to "DotNET", "device" to "设备",
+    "utility" to "工具",
 )
 
 private val categoryLabelEn = mapOf(
@@ -59,6 +62,9 @@ private val categoryLabelEn = mapOf(
     "build" to "Build", "session" to "Session", "apk" to "APK",
     "system" to "System", "meta" to "Meta", "lowlevel" to "Low-level",
     "diff" to "Diff", "dynamic" to "Dynamic", "mcp" to "General",
+    "file" to "File", "archive" to "Archive", "soanalyze" to "SO Analyze",
+    "decompile" to "Decompile", "dotnet" to "DotNET", "device" to "Device",
+    "utility" to "Utility",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

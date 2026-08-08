@@ -314,6 +314,15 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
                     Text(if (zh) "📤 导出表" else "📤 Exports", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
                 }
+                // CFG 流程图
+                Button(onClick = {
+                    scope.launch { tools.soExtra = ""
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", tools.decompileTarget.ifBlank { "main" }) }.getOrNull() }
+                        tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无CFG" else "no CFG"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "🔀 CFG 流程图" else "🔀 CFG", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
             }
             "emulate" -> {
                 OutlinedTextField(value = tools.emulateSymbol, onValueChange = { tools.emulateSymbol = it },

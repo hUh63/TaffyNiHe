@@ -444,8 +444,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     var detailMode by androidx.compose.runtime.remember { mutableStateOf(false) }
     // 结果标签页：收集所有非空的结果
-    val resultTabs = remember(tools) {
-        listOfNotNull(
+    val resultTabs = listOfNotNull(
             R2Tab(if (zh) "反编译" else "Decompile", tools.decompileResult),
             R2Tab(if (zh) "反编译·额外" else "Decompile·Extra", tools.decompileExtra),
             R2Tab(if (zh) "模拟" else "Emulate", tools.emulateResult),
@@ -461,7 +460,6 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
             R2Tab(if (zh) "脱壳·额外" else "Unpack·Extra", tools.unpackExtra),
             R2Tab("Frida", tools.fridaStatus),
         ).filter { it.text.isNotBlank() }
-    }
     var selectedTab by androidx.compose.runtime.remember { mutableStateOf(0) }
 
     Column(Modifier.fillMaxSize().padding(10.dp)) {

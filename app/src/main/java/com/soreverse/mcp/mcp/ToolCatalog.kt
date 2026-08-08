@@ -19,8 +19,8 @@ object ToolCatalog {
 
     private val soOpen = EngineToolHandler(
         ToolMeta("taffy_so_open",
-            "【SO 分析入口】打开 SO 文件并创建工作区（action=list 列出可用 SO）。所有 .so/.ELF 文件操作必须从 so_open 开始，不要使用 mt_apk_* 或 np_*。",
-            "【PRIMARY SO ENTRY POINT】Open a SO file and create a workspace. Use action=list to discover available SO files. Use action=open_url to download a http(s) SO into the selected work directory, then open and analyze it. All .so/ELF tasks MUST start from so_open — do NOT use mt_apk_* or np_* for SO files.",
+            "【SO 分析入口】打开 SO 文件并创建工作区（action=list 列出可用 SO）。所有 .so/.ELF 文件操作必须从 taffy_so_open 开始，不要使用 mt_apk_* 或 np_*。",
+            "【PRIMARY SO ENTRY POINT】Open a SO file and create a workspace. Use action=list to discover available SO files. Use action=open_url to download a http(s) SO into the selected work directory, then open and analyze it. All .so/ELF tasks MUST start from taffy_so_open — do NOT use mt_apk_* or np_* for SO files.",
             "workspace", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("open (default) | list | open_url", "open", "list", "open_url")
@@ -119,8 +119,8 @@ object ToolCatalog {
 
     private val readStats = EngineToolHandler(
         ToolMeta("taffy_read_stats",
-            "SO 快速统计（analyze_elf view=stats 的直观别名）",
-            "Direct alias for analyze_elf(view=stats). Useful for clients that expect a standalone read_stats tool.",
+            "SO 快速统计（taffy_analyze_elf view=stats 的直观别名）",
+            "Direct alias for taffy_analyze_elf(view=stats). Useful for clients that expect a standalone taffy_read_stats tool.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
@@ -130,8 +130,8 @@ object ToolCatalog {
 
     private val analysisReport = EngineToolHandler(
         ToolMeta("taffy_analysis_report",
-            "生成综合分析报告（meta_info action=report 的直观别名）",
-            "Generate a full analysis report. Direct alias for meta_info(action=report)/lief_api(action=report).",
+            "生成综合分析报告（taffy_meta_info action=report 的直观别名）",
+            "Generate a full analysis report. Direct alias for taffy_meta_info(action=report)/taffy_lief_api(action=report).",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
@@ -161,7 +161,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Function locator. Accepts full locator from analyze_functions (so_function:file!Name) or short function name."
+            "locator" str "Function locator. Accepts full locator from taffy_analyze_functions (so_function:file!Name) or short function name."
         }) }
     ) { e, a, _ -> e.rzCfg(a.str("workspaceId"), a.str("editSessionId"), a.str("locator")) }
 
@@ -184,7 +184,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Symbol/function locator. Accepts full locator from analyze_elf/analyze_functions or short symbol name."
+            "locator" str "Symbol/function locator. Accepts full locator from taffy_analyze_elf/taffy_analyze_functions or short symbol name."
             "direction".oneOf("to (default) | from | both", "to", "from", "both")
             "limit" int "Maximum references"
         }) }
@@ -198,7 +198,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Function locator or hex VA. Accepts full locator from analyze_functions, short function name, or 0x... address."
+            "locator" str "Function locator or hex VA. Accepts full locator from taffy_analyze_functions, short function name, or 0x... address."
             "addr" str "Hex virtual address fallback when no function symbol is available, e.g. 0x1234."
             "stepCount" int "Number of instructions to emulate (default 1, max 1000)"
         }) }
@@ -248,7 +248,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Function locator. Accepts full locator from analyze_functions or short function name."
+            "locator" str "Function locator. Accepts full locator from taffy_analyze_functions or short function name."
             "limit" int "Maximum instructions"
             "cursor" str "Pagination cursor"
             "instructionOffset" int "Skip N instructions"
@@ -268,7 +268,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Section locator. Accepts full locator from analyze_elf sections, so_section:.text, or short section name like .text."
+            "locator" str "Section locator. Accepts full locator from taffy_analyze_elf sections, so_section:.text, or short section name like .text."
             "byteOffset" int "Byte offset within the section"
             "maxBytes" int "Max bytes to dump"
         }) }
@@ -284,7 +284,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID"
-            "locator" str "Section locator for offset-based patching. Accepts full locator from analyze_elf sections, so_section:.text, or short section name like .text."
+            "locator" str "Section locator for offset-based patching. Accepts full locator from taffy_analyze_elf sections, so_section:.text, or short section name like .text."
             "edits" arr ("Array of hex edits" to SchemaBuilder.editsHexSchema())
             "va" str "Virtual address for VA-based patching (hex, e.g. 0x1234)"
             "patchHex" str "Hex bytes to write at va (e.g. '20 00 80 52')"
@@ -325,7 +325,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID"
-            "locator" str "Symbol locator for rename. Accepts full locator from analyze_elf symbols or short symbol name."
+            "locator" str "Symbol locator for rename. Accepts full locator from taffy_analyze_elf symbols or short symbol name."
             "edits" arr ("Array of symbol edits" to SchemaBuilder.editsSymbolSchema())
             "dryRun" bool "If true, return a preview (rename only)"
             "addr" str "Hex VA for new exported function (add op, shortcut)"
@@ -368,7 +368,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (uses patched bytes if set)"
-            "symbolName" str "Exported symbol to call, e.g. JNI_OnLoad or Java_com_example_Class_method. Use analyze_elf dynsyms first."
+            "symbolName" str "Exported symbol to call, e.g. JNI_OnLoad or Java_com_example_Class_method. Use taffy_analyze_elf dynsyms first."
             "args" arr "Array of integer/string arguments after implicit JNI args for Java_* methods"
             "trace" bool "Enable verbose Unidbg tracing for diagnostics; use only on small functions"
         }) }
@@ -382,7 +382,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
-            "addr" str "Unidbg runtime absolute virtual address. Add the module base from unidbg_session(action=modules) to an ELF RVA/VA."
+            "addr" str "Unidbg runtime absolute virtual address. Add the module base from taffy_unidbg_session(action=modules) to an ELF RVA/VA."
             "size" int "Number of bytes to dump (1-65536)"
         }) }
     ) { e, a, s ->
@@ -1004,7 +1004,7 @@ object ToolCatalog {
         *ApkEditTools.ALL.toTypedArray(),
         // 塔菲逆核: Logcat 日志采集(参考NexusBridge LogFox)
         *LogcatTools.ALL.toTypedArray(),
-        // 塔菲逆核: 进阶逆向辅助(参考MT管理器 native_xref/cfg/patch_bytes/apk_search)
+        // 塔菲逆核: 进阶逆向辅助(参考MT管理器 native_xref/cfg/patch_bytes/taffy_apk_search)
         *AdvancedTools.ALL.toTypedArray(),
         // 塔菲逆核: Unicorn 直接CPU模拟(参考Flutter解析工具的libunicorn_java独立模拟)
         *UnicornTools.ALL.toTypedArray(),

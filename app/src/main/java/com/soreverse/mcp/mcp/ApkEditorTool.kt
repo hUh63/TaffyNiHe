@@ -142,7 +142,7 @@ object ApkEditorTool {
 
         private fun result(action: String, out: File, hint: String, extra: JSONObject?): JSONObject {
             val body = JSONObject()
-                .put("tool", "apk_rebuild")
+                .put("tool", "taffy_apk_rebuild")
                 .put("action", action)
                 .put("output", out.absolutePath)
                 .put("outputKind", if (out.isDirectory) "directory" else "file")

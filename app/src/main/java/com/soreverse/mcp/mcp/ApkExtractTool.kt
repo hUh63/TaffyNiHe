@@ -66,7 +66,7 @@ object ApkExtractTool {
                             }
                         }
                         ok(JSONObject()
-                            .put("tool", "apk_extract").put("action", "list")
+                            .put("tool", "taffy_apk_extract").put("action", "list")
                             .put("filter", filter).put("matched", total)
                             .put("returned", arr.length()).put("entries", arr))
                     } else {
@@ -88,7 +88,7 @@ object ApkExtractTool {
                             }
                         }
                         ok(JSONObject()
-                            .put("tool", "apk_extract").put("action", "extract")
+                            .put("tool", "taffy_apk_extract").put("action", "extract")
                             .put("filter", filter).put("extractedCount", count)
                             .put("outputDir", outDir.absolutePath).put("files", extracted)
                             .put("hint", "提取的 .so 可用 so_open 打开分析; dex 可用 jadx_decompile/baksmali_decode"))

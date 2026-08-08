@@ -87,7 +87,7 @@ object ApkDiffTool {
                 perm1.filter { it !in perm2 }.forEach { permRemoved.put(it) }
 
                 ok(JSONObject()
-                    .put("tool", "apk_diff")
+                    .put("tool", "taffy_apk_diff")
                     .put("old", JSONObject().put("path", p1).put("version", readVersion(f1)).put("files", e1.size))
                     .put("new", JSONObject().put("path", p2).put("version", readVersion(f2)).put("files", e2.size))
                     .put("filesAdded", added)

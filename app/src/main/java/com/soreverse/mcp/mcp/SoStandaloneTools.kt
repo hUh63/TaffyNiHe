@@ -87,7 +87,7 @@ object SoStandaloneTools {
                 }
 
                 ok(JSONObject()
-                    .put("tool", "so_standalone_disasm")
+                    .put("tool", "taffy_so_standalone_disasm")
                     .put("engine", "pure_java")
                     .put("file", input.name)
                     .put("fileSize", data.size)
@@ -146,7 +146,7 @@ object SoStandaloneTools {
                         val len = hexLen.coerceAtMost(data.size - from)
                         val dump = HexDump.dump(data, 0, from, len)
                         ok(JSONObject()
-                            .put("tool", "so_standalone_elf")
+                            .put("tool", "taffy_so_standalone_elf")
                             .put("view", "hexdump")
                             .put("file", input.name)
                             .put("offset", "0x" + java.lang.Long.toHexString(hexOffset))
@@ -193,7 +193,7 @@ object SoStandaloneTools {
                 val dump = HexDump.dump(data, 0, offset, actualLen)
 
                 ok(JSONObject()
-                    .put("tool", "so_standalone_hexdump")
+                    .put("tool", "taffy_so_standalone_hexdump")
                     .put("file", input.name)
                     .put("fileSize", data.size)
                     .put("offset", offset)
@@ -220,7 +220,7 @@ object SoStandaloneTools {
         hdr.put("symbols", elf.symbols.size + elf.dynSymbols.size)
 
         return ok(JSONObject()
-            .put("tool", "so_standalone_elf")
+            .put("tool", "taffy_so_standalone_elf")
             .put("view", "header")
             .put("file", fileName)
             .put("header", hdr))
@@ -238,7 +238,7 @@ object SoStandaloneTools {
                 .put("size", sec.size))
         }
         return ok(JSONObject()
-            .put("tool", "so_standalone_elf")
+            .put("tool", "taffy_so_standalone_elf")
             .put("view", "sections")
             .put("file", fileName)
             .put("total", elf.sections.size)
@@ -261,7 +261,7 @@ object SoStandaloneTools {
                 .put("imported", isImported))
         }
         return ok(JSONObject()
-            .put("tool", "so_standalone_elf")
+            .put("tool", "taffy_so_standalone_elf")
             .put("view", "symbols")
             .put("file", fileName)
             .put("total", allSymbols.size)
@@ -278,7 +278,7 @@ object SoStandaloneTools {
                 .put("section", s.section))
         }
         return ok(JSONObject()
-            .put("tool", "so_standalone_elf")
+            .put("tool", "taffy_so_standalone_elf")
             .put("view", "symbols")
             .put("file", fileName)
             .put("total", elf.strings.size)
@@ -305,7 +305,7 @@ object SoStandaloneTools {
         }
 
         return ok(JSONObject()
-            .put("tool", "so_standalone_elf")
+            .put("tool", "taffy_so_standalone_elf")
             .put("view", "full")
             .put("file", fileName)
             .put("header", hdr)

@@ -63,7 +63,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * When `SettingsStore.toolCallRateLimitPerMin > 0`, callTool rejects new
      * calls for that tool once the in-window count reaches the limit. The
      * limiter is independent of the heavy concurrency gate so that even
-     * lightweight tools (meta_info help/tools/describe) can be throttled.
+     * lightweight tools (taffy_meta_info help/tools/describe) can be throttled.
      */
     private object RateLimiter {
         private val window = 60_000L
@@ -494,7 +494,7 @@ $historyRows
                     .put("builtInToolsAlwaysAdvertised", true)
                     .put("fullToolCount", ToolCatalog.ALL.size)
                     .put("toolUsageGuide", toolUsageGuide())
-                    .put("hint", "tools/list advertises the complete built-in catalog. IMPORTANT: Always route SO tasks to built-in tools (so_open + analyze_* + edit_*), NOT bridged APK tools."))
+                    .put("hint", "tools/list advertises the complete built-in catalog. IMPORTANT: Always route SO tasks to built-in tools (taffy_so_open + analyze_* + edit_*), NOT bridged APK tools."))
             "ping" -> JSONObject().put("ok", true)
             "resources/list" -> JSONObject().put("resources", JSONArray())
             "prompts/list" -> JSONObject().put("prompts", JSONArray())
@@ -507,7 +507,7 @@ $historyRows
                     .put("returnedCount", advertised.length())
                     .put("totalCatalogCount", ToolCatalog.ALL.size)
                     .put("toolUsageGuide", toolUsageGuide())
-                    .put("hint", "IMPORTANT: so_open + analyze_* + edit_* + build_so are the built-in SO reverse engineering tools. Bridged APK tools are for APK-layer tasks only. Always route SO tasks to built-in tools."))
+                    .put("hint", "IMPORTANT: taffy_so_open + analyze_* + edit_* + taffy_build_so are the built-in SO reverse engineering tools. Bridged APK tools are for APK-layer tasks only. Always route SO tasks to built-in tools."))
             }
             "tools/call" -> callTool(params)
             else -> return jsonRpcError(id ?: JSONObject.NULL, -32601, "Method not found")
@@ -525,14 +525,14 @@ $historyRows
     private val NoResponse: JSONObject = JSONObject().put("__noResponse", true)
 
     private fun toolUsageGuide(): JSONObject = JSONObject()
-        .put("so_analysis", "For SO/native library reverse engineering, use built-in tools: so_open -> analyze_* / edit_* -> build_so. Do NOT use bridged APK tools for SO tasks.")
+        .put("so_analysis", "For SO/native library reverse engineering, use built-in tools: taffy_so_open -> analyze_* / edit_* -> taffy_build_so. Do NOT use bridged APK tools for SO tasks.")
         .put("apk_tasks", "Bridged APK tools (mt_apk_* or np_*) are only for APK-level operations such as APK opening, signing, smali, and AXML editing.")
-        .put("deep_analysis", "For an AI-driven deep analysis of a SO: call analyze_guide (path or workspaceId) to receive a forensics guide tailored to the target, then follow its steps by calling analyze_functions/analyze_cfg/analyze_xrefs/search_strings/read_disasm/analyze_crypto/emulate_call as instructed and synthesize the report yourself. Set includeEvidence=true on analyze_guide to also get a full local evidence snapshot (ELF sections, functions, strings, crypto) without extra tool calls. analyze_guide itself performs NO AI inference — you are the reasoner.")
-        .put("file_tools", "file_list/file_read/file_write/file_search/file_replace/file_diff/file_rename/file_copy/file_delete/file_batch_rename are general file & text utilities for reading/writing/editing/comparing/batch-renaming files on the device; useful to view or prepare analysis artifacts.")
-        .put("archive_tools", "archive_list/archive_extract/archive_create/archive_add/archive_delete/archive_rename operate on ZIP/TAR/TAR.GZ archives: list, extract, create, or modify ZIP entries.")
-        .put("arsc", "arsc_analyze parses Android binary resource tables (.arsc / resources.arsc, or extract from an APK) to enumerate packages/types/entries.")
-        .put("workflow", "so_open (action=list) -> session_open -> analyze_*/edit_* -> build_so. Use bridged APK tools only for the outer APK layer.")
-        .put("common_mistake", "Do not call bridged APK tools for SO analysis; use so_open.")
+        .put("deep_analysis", "For an AI-driven deep analysis of a SO: call taffy_analyze_guide (path or workspaceId) to receive a forensics guide tailored to the target, then follow its steps by calling taffy_analyze_functions/taffy_analyze_cfg/taffy_analyze_xrefs/taffy_search_strings/taffy_read_disasm/taffy_analyze_crypto/taffy_emulate_call as instructed and synthesize the report yourself. Set includeEvidence=true on taffy_analyze_guide to also get a full local evidence snapshot (ELF sections, functions, strings, crypto) without extra tool calls. taffy_analyze_guide itself performs NO AI inference — you are the reasoner.")
+        .put("file_tools", "taffy_file_list/taffy_file_read/taffy_file_write/taffy_file_search/taffy_file_replace/taffy_file_diff/taffy_file_rename/taffy_file_copy/taffy_file_delete/taffy_file_batch_rename are general file & text utilities for reading/writing/editing/comparing/batch-renaming files on the device; useful to view or prepare analysis artifacts.")
+        .put("archive_tools", "taffy_archive_list/taffy_archive_extract/taffy_archive_create/taffy_archive_add/taffy_archive_delete/taffy_archive_rename operate on ZIP/TAR/TAR.GZ archives: list, extract, create, or modify ZIP entries.")
+        .put("arsc", "taffy_arsc_analyze parses Android binary resource tables (.arsc / resources.arsc, or extract from an APK) to enumerate packages/types/entries.")
+        .put("workflow", "taffy_so_open (action=list) -> taffy_session_open -> analyze_*/edit_* -> taffy_build_so. Use bridged APK tools only for the outer APK layer.")
+        .put("common_mistake", "Do not call bridged APK tools for SO analysis; use taffy_so_open.")
 
     private fun callTool(params: JSONObject): JSONObject {
         val name = params.str("name")
@@ -593,7 +593,7 @@ $historyRows
             .put("apkBridgeAutoCompaction", true)
             .put("apkBridgedAdvertised", apkBridged)
             .put("perCategory", perCategory)
-            .put("hint", "Use meta_info (action=tools/describe) to fetch schemas for tools not in the advertised list."))
+            .put("hint", "Use taffy_meta_info (action=tools/describe) to fetch schemas for tools not in the advertised list."))
     }
 
     private fun advertisedCountOf(arr: JSONArray, category: String): Int {
@@ -770,7 +770,7 @@ $historyRows
                 val schema = td.inputSchema ?: JSONObject().put("type", "object").put("properties", JSONObject())
                 val obj = JSONObject()
                     .put("name", td.name)
-                    .put("description", "[APK ONLY — NOT for SO/native files] ${td.description ?: td.title ?: "APK MCP tool"} Use so_open + analyze_* + edit_* for SO file tasks.")
+                    .put("description", "[APK ONLY — NOT for SO/native files] ${td.description ?: td.title ?: "APK MCP tool"} Use taffy_so_open + analyze_* + edit_* for SO file tasks.")
                     .put("inputSchema", schema)
                 if (includeCategory) obj.put("category", "apk-bridge")
                 if (td.outputSchema != null) obj.put("outputSchema", td.outputSchema)
@@ -790,7 +790,7 @@ $historyRows
         .put("collectToolStats", SettingsStore(context).collectToolStats)
         .put("uptimeMillis", System.currentTimeMillis() - startedAt)
         .put("nativeBackends", nativeBackendStatus())
-        .put("hint", "Call meta_info (action=stats) for per-tool call counts and latency. Call system_control (action=status) to check SO+APK combo, tunnel state, and native backend status."))
+        .put("hint", "Call taffy_meta_info (action=stats) for per-tool call counts and latency. Call taffy_system_control (action=status) to check SO+APK combo, tunnel state, and native backend status."))
 
     private fun nativeBackendStatus(): JSONObject {
         val rizin = NativeEngine.active()
@@ -812,20 +812,20 @@ $historyRows
         val onlinePrefixes = apkBridge.allPrefixes()
         val integrationOnline = onlinePrefixes.isNotEmpty()
         val integrationHint = when {
-            onlineBridgeCount == 0 -> "APK MCP is offline. Install MT Manager or NP Manager, enable the APK MCP feature, keep it running in background, then set its /mcp URL in settings and call system_control (action=apk_probe)."
+            onlineBridgeCount == 0 -> "APK MCP is offline. Install MT Manager or NP Manager, enable the APK MCP feature, keep it running in background, then set its /mcp URL in settings and call taffy_system_control (action=apk_probe)."
             onlineBridgeCount == 1 -> {
                 val prefix = apkBridge.bridgedPrefix()
                 val label = ApkMcpBridge.prefixLabel(prefix)
                 if (prefix == ApkMcpBridge.MT_PREFIX)
-                    "MT Manager APK MCP is online. Use MT Manager's mt_apk_* capabilities for APK open / smali+axml edit / signed APK build, and use this app as the SO assistant for so_open/analyze_*/edit_* on embedded lib/*/*.so. Workflow: mt_apk_open -> mt_apk_list (lib/<abi>) -> so_open -> analyze_*/edit_* -> build_so."
+                    "MT Manager APK MCP is online. Use MT Manager's mt_apk_* capabilities for APK open / smali+axml edit / signed APK build, and use this app as the SO assistant for taffy_so_open/analyze_*/edit_* on embedded lib/*/*.so. Workflow: mt_apk_open -> mt_apk_list (lib/<abi>) -> taffy_so_open -> analyze_*/edit_* -> taffy_build_so."
                 else
-                    "$label APK MCP is online. Use ${prefix}* capabilities for APK open / smali+axml edit / signed APK build, and use this app as the SO assistant for so_open/analyze_*/edit_* on embedded lib/*/*.so. Workflow: ${prefix}open -> ${prefix}list (lib/<abi>) -> so_open -> analyze_*/edit_* -> build_so."
+                    "$label APK MCP is online. Use ${prefix}* capabilities for APK open / smali+axml edit / signed APK build, and use this app as the SO assistant for taffy_so_open/analyze_*/edit_* on embedded lib/*/*.so. Workflow: ${prefix}open -> ${prefix}list (lib/<abi>) -> taffy_so_open -> analyze_*/edit_* -> taffy_build_so."
             }
             else -> {
                 val labels = onlinePrefixes.joinToString(" + ") { ApkMcpBridge.prefixLabel(it) }
                 val workflowLines = onlinePrefixes.map { p ->
                     val label = ApkMcpBridge.prefixLabel(p)
-                    "  $label (${p}*): ${p}open -> ${p}list (lib/<abi>) -> so_open -> analyze_*/edit_* -> build_so"
+                    "  $label (${p}*): ${p}open -> ${p}list (lib/<abi>) -> taffy_so_open -> analyze_*/edit_* -> taffy_build_so"
                 }.joinToString("\n")
                 "$onlineBridgeCount APK MCP bridges online ($labels). Each bridge exposes its own tool prefix and routes independently. Use the right tool prefix for each APK. Workflows:\n$workflowLines"
             }
@@ -909,64 +909,64 @@ $historyRows
                 .put("tools", apkNames))
         }
         return JSONObject()
-            .put("usage", "Use so_open (action=list to discover), then read/analyze tools with the returned workspaceId. Pass pagination.nextCursor to meta_info (action=continue) when hasMore=true.")
+            .put("usage", "Use taffy_so_open (action=list to discover), then read/analyze tools with the returned workspaceId. Pass pagination.nextCursor to taffy_meta_info (action=continue) when hasMore=true.")
             .put("toolRouting", JSONObject()
                 .put("rule", "IMPORTANT: Route SO/native library tasks to built-in tools. ONLY route APK-layer tasks to bridged tools.")
                 .put("use_so_open_for", JSONArray(listOf("Open SO files", "List available SO files", "Download SO from URL", "Any .so/ELF file task")))
                 .put("use_bridged_tools_only_for", JSONArray(listOf("Open APK packages", "List lib/ directories inside APK", "Smali/AXML editing", "Signed APK build")))
                 .put("never_do", JSONArray(listOf("Use bridged APK tools to open SO files", "Use bridged tools to list SO files", "Use bridged APK tools for anything related to .so/.elf files")))
-                .put("workflow", "so_open (action=list) -> analyze_*/edit_* -> build_so [for SO tasks]\nsystem_control (action=apk_probe) -> ${apkBridge.bridgedPrefix()}open -> ${apkBridge.bridgedPrefix()}list -> ... -> ${apkBridge.bridgedPrefix()}build [for APK tasks]"))
+                .put("workflow", "taffy_so_open (action=list) -> analyze_*/edit_* -> taffy_build_so [for SO tasks]\nsystem_control (action=apk_probe) -> ${apkBridge.bridgedPrefix()}open -> ${apkBridge.bridgedPrefix()}list -> ... -> ${apkBridge.bridgedPrefix()}build [for APK tasks]"))
             .put("auth", "If token auth is enabled, send Authorization: Bearer <token> header. URL query parameter ?token=xxx is also accepted for client compatibility.")
             .put("exposure", JSONObject()
                 .put("builtInToolsAlwaysAdvertised", true)
                 .put("advertisedCount", advertisedTools().length())
                 .put("totalCatalogCount", ToolCatalog.ALL.size)
-                .put("discoveryHint", "tools/list advertises the complete built-in catalog; meta_info action=describe/tools remains available for focused schemas and search."))
+                .put("discoveryHint", "tools/list advertises the complete built-in catalog; taffy_meta_info action=describe/tools remains available for focused schemas and search."))
             .put("categories", catMap)
             .put("workflows", JSONArray()
-                .put(JSONObject().put("name", "standard patch").put("steps", listOf("so_open (action=list first)", "session_open", "edit_asm (dryRun=true first)", "session_history (action=check)", "build_so")))
-                .put(JSONObject().put("name", "safe patch with rollback").put("steps", listOf("so_open", "session_history (action=snapshot)", "edit_asm", "session_history (action=check)", "session_history (action=undo) on failure", "session_history (action=rollback) on disaster", "build_so")))
-                .put(JSONObject().put("name", "triage").put("steps", listOf("so_open", "analyze_elf (view=stats)", "analyze_functions")))
-                .put(JSONObject().put("name", "deep analysis").put("steps", listOf("so_open", "analyze_functions", "analyze_cfg", "analyze_xrefs", "analyze_crypto")))
-                .put(JSONObject().put("name", "audit recovery").put("steps", listOf("session_audit (action=persist)", "<process restart>", "session_audit (action=list)", "session_audit (action=load)")))
+                .put(JSONObject().put("name", "standard patch").put("steps", listOf("taffy_so_open (action=list first)", "taffy_session_open", "taffy_edit_asm (dryRun=true first)", "taffy_session_history (action=check)", "taffy_build_so")))
+                .put(JSONObject().put("name", "safe patch with rollback").put("steps", listOf("taffy_so_open", "taffy_session_history (action=snapshot)", "taffy_edit_asm", "taffy_session_history (action=check)", "taffy_session_history (action=undo) on failure", "taffy_session_history (action=rollback) on disaster", "taffy_build_so")))
+                .put(JSONObject().put("name", "triage").put("steps", listOf("taffy_so_open", "taffy_analyze_elf (view=stats)", "taffy_analyze_functions")))
+                .put(JSONObject().put("name", "deep analysis").put("steps", listOf("taffy_so_open", "taffy_analyze_functions", "taffy_analyze_cfg", "taffy_analyze_xrefs", "taffy_analyze_crypto")))
+                .put(JSONObject().put("name", "audit recovery").put("steps", listOf("taffy_session_audit (action=persist)", "<process restart>", "taffy_session_audit (action=list)", "taffy_session_audit (action=load)")))
                 .put(JSONObject().put("name", "APK+SO bridge (needs APK MCP bridge online)").put("steps", listOf(
-                    "system_control (action=apk_probe)",
+                    "taffy_system_control (action=apk_probe)",
                     "${apkBridge.bridgedPrefix()}open",
                     "${apkBridge.bridgedPrefix()}list view=lib/<abi>",
-                    "so_open (path from apk list)",
-                    "analyze_functions",
-                    "edit_asm (dryRun first)",
-                    "session_history (action=check)",
-                    "build_so",
+                    "taffy_so_open (path from apk list)",
+                    "taffy_analyze_functions",
+                    "taffy_edit_asm (dryRun first)",
+                    "taffy_session_history (action=check)",
+                    "taffy_build_so",
                     "${apkBridge.bridgedPrefix()}edit_open",
                     "${apkBridge.bridgedPrefix()}build",
                 )))
-                .put(JSONObject().put("name", "emulation verify").put("steps", listOf("so_open", "session_open", "edit_asm", "emulate_call (symbolName=JNI_OnLoad)", "emulate_dump (addr=0x...)")))
-                .put(JSONObject().put("name", "section rebuild (xAnSo)").put("steps", listOf("so_open", "edit_fix_sections", "analyze_elf")))
-                .put(JSONObject().put("name", "public expose").put("steps", listOf("system_control (action=tunnel_start, mode=quick)", "read publicUrl from result", "client connects to publicUrl/mcp"))))
+                .put(JSONObject().put("name", "emulation verify").put("steps", listOf("taffy_so_open", "taffy_session_open", "taffy_edit_asm", "taffy_emulate_call (symbolName=JNI_OnLoad)", "taffy_emulate_dump (addr=0x...)")))
+                .put(JSONObject().put("name", "section rebuild (xAnSo)").put("steps", listOf("taffy_so_open", "taffy_edit_fix_sections", "taffy_analyze_elf")))
+                .put(JSONObject().put("name", "public expose").put("steps", listOf("taffy_system_control (action=tunnel_start, mode=quick)", "read publicUrl from result", "client connects to publicUrl/mcp"))))
             .put("tips", JSONArray()
-                .put("edits[] items schema is fully exposed via meta_info (action=describe) - no need to guess field names.")
-                .put("dryRun=true on edit_asm/edit_hex previews oldHex/newHex without writing.")
-                .put("session_history (action=check) detects claimed-but-unapplied patches - always run it before build_so.")
-                .put("analyze_esil does instruction-level emulation tracing via Rizin ESIL VM - lighter than emulate_call for quick semantic checks.")
-                .put("edit_fix_sections rebuilds stripped section headers (xAnSo) - essential for NDK SOs that IDA/Ghidra cannot parse."))
+                .put("edits[] items schema is fully exposed via taffy_meta_info (action=describe) - no need to guess field names.")
+                .put("dryRun=true on taffy_edit_asm/taffy_edit_hex previews oldHex/newHex without writing.")
+                .put("taffy_session_history (action=check) detects claimed-but-unapplied patches - always run it before taffy_build_so.")
+                .put("taffy_analyze_esil does instruction-level emulation tracing via Rizin ESIL VM - lighter than taffy_emulate_call for quick semantic checks.")
+                .put("taffy_edit_fix_sections rebuilds stripped section headers (xAnSo) - essential for NDK SOs that IDA/Ghidra cannot parse."))
     }
 
     private fun workflows(): JSONObject = ok(JSONObject()
         .put("templates", JSONArray()
-            .put(workflow("triage", "Open and summarize a SO", "so_open", "analyze_elf stats", "analyze_elf sections/dynsyms", "search_strings", "analyze_crypto", "meta_info suggest"))
-            .put(workflow("packed_or_stripped", "When functions are missing", "so_open", "analyze_elf sections", "read_disasm addr=<.text.virtualAddr>", "search_strings prefix=<keyword>", "edit_fix_sections if sections are missing"))
-            .put(workflow("safe_patch", "Atomic patch workflow", "so_open", "session_open", "session_history snapshot", "edit_hex/edit_asm dryRun=true", "edit_* dryRun=false", "session_history check", "session_audit persist", "build_so writeReport=true"))
-            .put(workflow("emulation_verify", "Validate JNI/export behavior", "so_open", "analyze_elf dynsyms", "emulate_call symbolName=JNI_OnLoad", "emulate_call trace=true for small exported functions", "emulate_dump addr=0x..."))
-            .put(workflow("full_report", "Persist complete analysis", "so_open", "meta_info report writeToFile=true", "read reportPath from result"))
-            .put(workflow("deep_analysis_guide", "AI-driven deep analysis (you reason, no relay)", "analyze_guide path=<path> (or workspaceId)", "follow guide: analyze_functions / analyze_cfg / analyze_xrefs / search_strings / read_disasm / analyze_crypto", "emulate_call for JNI/export verification", "analysis_report for engine-side summary", "synthesize final report yourself"))
-            .put(workflow("deep_analysis_evidence", "Grab full local evidence at once (no relay)", "analyze_guide workspaceId=<id> includeEvidence=true", "use returned evidence to synthesize report", "optionally enrich with the guide steps")))
+            .put(workflow("triage", "Open and summarize a SO", "taffy_so_open", "taffy_analyze_elf stats", "taffy_analyze_elf sections/dynsyms", "taffy_search_strings", "taffy_analyze_crypto", "taffy_meta_info suggest"))
+            .put(workflow("packed_or_stripped", "When functions are missing", "taffy_so_open", "taffy_analyze_elf sections", "taffy_read_disasm addr=<.text.virtualAddr>", "taffy_search_strings prefix=<keyword>", "taffy_edit_fix_sections if sections are missing"))
+            .put(workflow("safe_patch", "Atomic patch workflow", "taffy_so_open", "taffy_session_open", "taffy_session_history snapshot", "taffy_edit_hex/taffy_edit_asm dryRun=true", "edit_* dryRun=false", "taffy_session_history check", "taffy_session_audit persist", "taffy_build_so writeReport=true"))
+            .put(workflow("emulation_verify", "Validate JNI/export behavior", "taffy_so_open", "taffy_analyze_elf dynsyms", "taffy_emulate_call symbolName=JNI_OnLoad", "taffy_emulate_call trace=true for small exported functions", "taffy_emulate_dump addr=0x..."))
+            .put(workflow("full_report", "Persist complete analysis", "taffy_so_open", "taffy_meta_info report writeToFile=true", "read reportPath from result"))
+            .put(workflow("deep_analysis_guide", "AI-driven deep analysis (you reason, no relay)", "taffy_analyze_guide path=<path> (or workspaceId)", "follow guide: taffy_analyze_functions / taffy_analyze_cfg / taffy_analyze_xrefs / taffy_search_strings / taffy_read_disasm / taffy_analyze_crypto", "taffy_emulate_call for JNI/export verification", "taffy_analysis_report for engine-side summary", "synthesize final report yourself"))
+            .put(workflow("deep_analysis_evidence", "Grab full local evidence at once (no relay)", "taffy_analyze_guide workspaceId=<id> includeEvidence=true", "use returned evidence to synthesize report", "optionally enrich with the guide steps")))
         .put("batchPattern", JSONObject()
-            .put("tool", "meta_info")
+            .put("tool", "taffy_meta_info")
             .put("arguments", JSONObject().put("action", "batch").put("stopOnError", true).put("steps", JSONArray()
-                .put(JSONObject().put("tool", "so_open").put("arguments", JSONObject().put("path", "<path>")).put("resultKey", "open"))
-                .put(JSONObject().put("tool", "analyze_elf").put("arguments", JSONObject().put("workspaceId", "\${open.workspaceId}").put("view", "stats")).put("resultKey", "stats"))
-                .put(JSONObject().put("tool", "meta_info").put("arguments", JSONObject().put("action", "suggest").put("workspaceId", "\${open.workspaceId}")))))))
+                .put(JSONObject().put("tool", "taffy_so_open").put("arguments", JSONObject().put("path", "<path>")).put("resultKey", "open"))
+                .put(JSONObject().put("tool", "taffy_analyze_elf").put("arguments", JSONObject().put("workspaceId", "\${open.workspaceId}").put("view", "stats")).put("resultKey", "stats"))
+                .put(JSONObject().put("tool", "taffy_meta_info").put("arguments", JSONObject().put("action", "suggest").put("workspaceId", "\${open.workspaceId}")))))))
 
     private fun workflow(name: String, description: String, vararg steps: String): JSONObject = JSONObject()
         .put("name", name)
@@ -977,17 +977,17 @@ $historyRows
         val workspaceId = args.str("workspaceId")
         val native = EngineProvider.get(context)
         val base = JSONArray()
-            .put("Use meta_info(action=describe, tools=[...]) before calling unfamiliar tools")
-            .put("Use dryRun=true before edit_hex/edit_asm, then session_history(action=check)")
-            .put("Use meta_info(action=report, writeToFile=true) before final handoff")
+            .put("Use taffy_meta_info(action=describe, tools=[...]) before calling unfamiliar tools")
+            .put("Use dryRun=true before taffy_edit_hex/taffy_edit_asm, then taffy_session_history(action=check)")
+            .put("Use taffy_meta_info(action=report, writeToFile=true) before final handoff")
         if (workspaceId.isBlank()) return ok(JSONObject().put("nextActions", base).put("workflow", "triage"))
         val stats = native.readStats(workspaceId, args.str("editSessionId"))
         val next = JSONArray()
         for (i in 0 until base.length()) next.put(base.get(i))
         val counts = stats.optJSONObject("counts") ?: JSONObject()
-        if (counts.optInt("functions", 0) == 0) next.put("No functions were detected: use analyze_elf(view=list, subView=sections) then read_disasm(addr=<.text.virtualAddr>)")
-        if (counts.optInt("sections", 0) == 0) next.put("No section headers were detected: try edit_fix_sections before section-based patching")
-        next.put("For JNI behavior validation, inspect dynsyms then call emulate_call(symbolName=JNI_OnLoad or Java_*)")
+        if (counts.optInt("functions", 0) == 0) next.put("No functions were detected: use taffy_analyze_elf(view=list, subView=sections) then taffy_read_disasm(addr=<.text.virtualAddr>)")
+        if (counts.optInt("sections", 0) == 0) next.put("No section headers were detected: try taffy_edit_fix_sections before section-based patching")
+        next.put("For JNI behavior validation, inspect dynsyms then call taffy_emulate_call(symbolName=JNI_OnLoad or Java_*)")
         return ok(JSONObject().put("workspaceId", workspaceId).put("stats", stats).put("nextActions", next))
     }
 
@@ -1003,7 +1003,7 @@ $historyRows
         .put("contract", JSONObject()
             .put("success", "All tool payloads include ok=true unless they are raw JSON-RPC transport errors")
             .put("failure", "Tool failures include ok=false and error.code/error.message plus argument/badValue when applicable")
-            .put("recovery", "Call meta_info(action=suggest, workspaceId=...) after an error for next actions")))
+            .put("recovery", "Call taffy_meta_info(action=suggest, workspaceId=...) after an error for next actions")))
 
     private fun listTools(category: String, query: String): JSONObject {
         val q = query.trim().lowercase()
@@ -1028,7 +1028,7 @@ $historyRows
                 .filter { !hasQuery || (it.name + "\n" + (it.description ?: "")).lowercase().contains(qLower) }
                 .forEach { td ->
                     if (!grouped.has("apk-bridge")) grouped.put("apk-bridge", JSONArray())
-                    grouped.getJSONArray("apk-bridge").put(JSONObject().put("name", td.name).put("description", "[APK ONLY] ${td.description ?: (td.title ?: "APK MCP tool")} — NOT for SO files; use so_open for SO tasks."))
+                    grouped.getJSONArray("apk-bridge").put(JSONObject().put("name", td.name).put("description", "[APK ONLY] ${td.description ?: (td.title ?: "APK MCP tool")} — NOT for SO files; use taffy_so_open for SO tasks."))
                     matched++
                 }
         }
@@ -1037,7 +1037,7 @@ $historyRows
             .put("totalCount", ToolCatalog.ALL.size)
             .put("filtered", category.isNotBlank() || hasQuery)
             .put("matchedCount", matched)
-        if (hasQuery) res.put("query", query).put("hint", "Use meta_info (action=describe) to fetch full schema for any matched tool.")
+        if (hasQuery) res.put("query", query).put("hint", "Use taffy_meta_info (action=describe) to fetch full schema for any matched tool.")
         return ok(res)
     }
 

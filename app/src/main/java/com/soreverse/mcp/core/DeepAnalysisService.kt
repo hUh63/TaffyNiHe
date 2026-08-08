@@ -298,18 +298,18 @@ Only after gathering the necessary evidence, return the final Markdown report. D
                 emit(DeepAnalysisEvent.Kind.TOOL, if (zh) "调用工具 $name" else "Calling tool $name", name)
                 AppLog.i("AI tool call $name args=${args.toString().take(600)}")
                 val effectiveArgs = JSONObject(args.toString()).apply {
-                    if (name != "so_open" && optString("workspaceId").isBlank()) {
+                    if (name != "taffy_so_open" && optString("workspaceId").isBlank()) {
                         _workspaceId.value.takeIf(String::isNotBlank)?.let { put("workspaceId", it) }
                     }
                     // AI 深度分析打开的 SO 使用持久工作区（temporary=false），
                     // 使其分析后保留在"已打开的工作区"列表中，便于追溯与继续分析。
-                    if (name == "so_open" && !has("temporary")) {
+                    if (name == "taffy_so_open" && !has("temporary")) {
                         put("temporary", false)
                     }
                 }
                 runCatching { handler.handle(ctx, effectiveArgs) }
                     .onSuccess { payload ->
-                        if (name == "so_open") {
+                        if (name == "taffy_so_open") {
                             payload.optString("workspaceId").takeIf(String::isNotBlank)?.let {
                                 _workspaceId.value = it
                             }
@@ -325,7 +325,7 @@ Only after gathering the necessary evidence, return the final Markdown report. D
                         val limit = settings.toolResultMaxChars
                         val result = if (limit <= 0 || text.length <= limit) text else text.take(limit) + "…"
                         emit(DeepAnalysisEvent.Kind.TOOL, if (zh) "工具完成 $name" else "Tool completed $name", name)
-                        if (name == "analysis_report") emit(DeepAnalysisEvent.Kind.FINALIZING, if (zh) "MCP 取证已完成" else "MCP evidence complete")
+                        if (name == "taffy_analysis_report") emit(DeepAnalysisEvent.Kind.FINALIZING, if (zh) "MCP 取证已完成" else "MCP evidence complete")
                         result
                     }
             }
@@ -383,25 +383,25 @@ Only after gathering the necessary evidence, return the final Markdown report. D
 
     private companion object {
         val DEEP_TOOL_NAMES = listOf(
-            "so_open",
-            "analyze_functions",
-            "analyze_cfg",
-            "analyze_xrefs",
-            "analyze_crypto",
-            "analysis_report",
-            "search_strings",
-            "search_bytes",
-            "read_disasm",
-            "read_hexdump",
-            "meta_info",
+            "taffy_so_open",
+            "taffy_analyze_functions",
+            "taffy_analyze_cfg",
+            "taffy_analyze_xrefs",
+            "taffy_analyze_crypto",
+            "taffy_analysis_report",
+            "taffy_search_strings",
+            "taffy_search_bytes",
+            "taffy_read_disasm",
+            "taffy_read_hexdump",
+            "taffy_meta_info",
         )
         val REQUIRED_EVIDENCE_TOOLS = listOf(
-            "so_open",
-            "analyze_functions",
-            "analyze_cfg",
-            "analyze_xrefs",
-            "analyze_crypto",
-            "analysis_report",
+            "taffy_so_open",
+            "taffy_analyze_functions",
+            "taffy_analyze_cfg",
+            "taffy_analyze_xrefs",
+            "taffy_analyze_crypto",
+            "taffy_analysis_report",
         )
 
     }

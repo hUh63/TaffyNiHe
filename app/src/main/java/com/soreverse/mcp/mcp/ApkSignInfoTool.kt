@@ -57,7 +57,7 @@ object ApkSignInfoTool {
                         .put("sha256", fingerprint(cert, "SHA-256")))
                 }
                 ok(JSONObject()
-                    .put("tool", "apk_sign_info")
+                    .put("tool", "taffy_apk_sign_info")
                     .put("path", inputPath)
                     .put("verified", result.isVerified)
                     .put("schemes", JSONObject()

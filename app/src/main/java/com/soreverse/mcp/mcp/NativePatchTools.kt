@@ -77,7 +77,7 @@ object NativePatchTools {
 
             return if (writeResult.optBoolean("ok", false)) {
                 ok(JSONObject()
-                    .put("action", "native_patch_instructions")
+                    .put("action", "taffy_native_patch_instructions")
                     .put("address", "0x${addr.toString(16)}")
                     .put("assembly", asm)
                     .put("writtenHex", hexStr)
@@ -177,7 +177,7 @@ object NativePatchTools {
 
             return if (writeResult.optBoolean("ok", false)) {
                 ok(JSONObject()
-                    .put("action", "native_patch_string")
+                    .put("action", "taffy_native_patch_string")
                     .put("address", "0x${addr.toString(16)}")
                     .put("newText", newText)
                     .put("writtenSize", writeBytes.size)
@@ -326,7 +326,7 @@ object NativePatchTools {
             }
 
             return ok(JSONObject()
-                .put("action", "apk_unified_search")
+                .put("action", "taffy_apk_unified_search")
                 .put("keyword", keyword)
                 .put("scope", scope)
                 .put("total", total)

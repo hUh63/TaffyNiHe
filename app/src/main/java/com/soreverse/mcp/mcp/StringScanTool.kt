@@ -120,7 +120,7 @@ object StringScanTool {
                 }
 
                 val body = JSONObject()
-                    .put("tool", "string_scan")
+                    .put("tool", "taffy_string_scan")
                     .put("path", inputPath)
                     .put("scannedEntries", scannedEntries)
                 var totalHits = 0

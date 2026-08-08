@@ -88,7 +88,7 @@ object ApkBuildTool {
                     jobs = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
                 }
                 val success = Smali.assemble(opts, listOf(smaliDir))
-                if (success) ok(JSONObject().put("tool", "smali_assemble").put("success", true).put("outDex", out))
+                if (success) ok(JSONObject().put("tool", "taffy_smali_assemble").put("success", true).put("outDex", out))
                 else err("SMALI_ASSEMBLE_FAILED", "smali 汇编失败(检查 smali 语法)", "smaliDir", smaliDir)
             }.getOrElse { e -> err("SMALI_ASSEMBLE_FAILED", "smali 汇编异常: ${e.message ?: e.javaClass.simpleName}", "smaliDir", smaliDir) }
         }
@@ -129,7 +129,7 @@ object ApkBuildTool {
                     .build()
                     .sign()
                 ok(JSONObject()
-                    .put("tool", "apk_sign")
+                    .put("tool", "taffy_apk_sign")
                     .put("success", true)
                     .put("outputApk", output)
                     .put("signer", "CN=Taffy (内置自签名密钥)")

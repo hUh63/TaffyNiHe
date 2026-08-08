@@ -157,7 +157,7 @@ object DexKitTool {
 
         private fun resultJson(action: String, keyword: String, total: Int, arr: JSONArray): JSONObject =
             ok(JSONObject()
-                .put("tool", "dex_search")
+                .put("tool", "taffy_dex_search")
                 .put("action", action)
                 .put("keyword", keyword)
                 .put("total", total)

@@ -351,7 +351,7 @@ object DexAnalysisTools {
                 com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(dexFile, out, jobs, options)
                 val smaliCount = out.walkTopDown().count { it.isFile && it.extension == "smali" }
                 ok(JSONObject()
-                    .put("tool", "dex_deodex")
+                    .put("tool", "taffy_dex_deodex")
                     .put("success", true)
                     .put("outputDir", out.absolutePath)
                     .put("smaliFiles", smaliCount)
@@ -412,7 +412,7 @@ object DexAnalysisTools {
                     }
                     val success = com.android.tools.smali.smali.Smali.assemble(opts, listOf(smaliDir))
                     return@runCatching if (success) ok(JSONObject()
-                        .put("tool", "dex_incremental_rebuild")
+                        .put("tool", "taffy_dex_incremental_rebuild")
                         .put("mode", "full_rebuild")
                         .put("changedClasses", 0)
                         .put("outDex", outPath)
@@ -470,7 +470,7 @@ object DexAnalysisTools {
                 tempDex.delete()
 
                 ok(JSONObject()
-                    .put("tool", "dex_incremental_rebuild")
+                    .put("tool", "taffy_dex_incremental_rebuild")
                     .put("mode", "incremental")
                     .put("changedClasses", changedCount)
                     .put("outDex", outPath)

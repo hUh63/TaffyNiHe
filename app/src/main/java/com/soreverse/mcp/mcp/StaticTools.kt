@@ -54,7 +54,7 @@ object StaticTools {
                 val okDone = Baksmali.disassembleDexFile(dexFile, outDir, jobs, options)
                 val smaliCount = outDir.walkTopDown().count { it.isFile && it.extension == "smali" }
                 ok(JSONObject()
-                    .put("tool", "baksmali_decode")
+                    .put("tool", "taffy_baksmali_decode")
                     .put("success", okDone)
                     .put("outputDir", outDir.absolutePath)
                     .put("smaliFiles", smaliCount)
@@ -96,7 +96,7 @@ object StaticTools {
                         val arr = JSONArray()
                         files.take(limit).forEach { arr.put(it.filePath) }
                         ok(JSONObject()
-                            .put("tool", "apk_decode")
+                            .put("tool", "taffy_apk_decode")
                             .put("action", "resources")
                             .put("totalResFiles", files.size)
                             .put("returned", minOf(limit, files.size))
@@ -107,7 +107,7 @@ object StaticTools {
                         val xmlPath = args.str("xmlPath").ifBlank { "AndroidManifest.xml" }
                         val doc = apk.decodeXMLFile(xmlPath)
                         ok(JSONObject()
-                            .put("tool", "apk_decode")
+                            .put("tool", "taffy_apk_decode")
                             .put("action", "xml")
                             .put("xmlPath", xmlPath)
                             .put("xml", doc.toText(true, false)))
@@ -118,7 +118,7 @@ object StaticTools {
                         val perms = JSONArray()
                         runCatching { manifest.usesPermissions.forEach { perms.put(it) } }
                         ok(JSONObject()
-                            .put("tool", "apk_decode")
+                            .put("tool", "taffy_apk_decode")
                             .put("action", "manifest")
                             .put("packageName", runCatching { manifest.packageName }.getOrNull() ?: "")
                             .put("versionName", runCatching { manifest.versionName }.getOrNull() ?: "")

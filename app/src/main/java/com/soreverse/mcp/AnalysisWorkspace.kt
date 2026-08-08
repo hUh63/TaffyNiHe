@@ -587,7 +587,7 @@ private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
                         else if (name.isNotBlank()) name
                         else item.optString("address", item.toString())
                     }
-                    is org.json.JSONArray -> "[${item.length()}] ${item.joinToString(", ").take(120)}"
+                    is org.json.JSONArray -> "[${item.length()}] ${(0 until item.length()).joinToString(", ") { i -> item.opt(i).toString() }.take(120)}"
                     else -> item.toString()
                 }
                 Text("• $line", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
@@ -660,7 +660,7 @@ private fun JsonKeyValues(json: JSONObject, zh: Boolean, keys: List<String>) {
         }
         val vStr = when (v) {
             is Number -> {
-                if (k == "size") formatBytes(v.toLong()) else v.toString()
+                if (k == "size") fmtBytes(v.toLong()) else v.toString()
             }
             is Boolean -> if (v) (if (zh) "是" else "Yes") else (if (zh) "否" else "No")
             else -> v.toString()
@@ -703,7 +703,7 @@ private fun MetricRowFull(vararg pairs: Pair<String, String>) {
     }
 }
 
-private fun formatBytes(v: Long): String {
+private fun fmtBytes(v: Long): String {
     val units = arrayOf("B", "KB", "MB", "GB")
     var u = 0
     var value = v.toDouble()

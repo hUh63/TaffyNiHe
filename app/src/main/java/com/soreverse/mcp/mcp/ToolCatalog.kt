@@ -1001,6 +1001,8 @@ object ToolCatalog {
         SoStandaloneTools.disasm,
         SoStandaloneTools.elf,
         SoStandaloneTools.hexdump,
+        // 塔菲逆核: 设备信息/系统/应用/通讯/网络/实用工具(参考mcp-server)
+        *DeviceTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

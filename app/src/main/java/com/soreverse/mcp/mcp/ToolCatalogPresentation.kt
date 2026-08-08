@@ -28,6 +28,7 @@ object ToolCatalogPresentation {
         "dotnet" to (if (zh) "PE/.NET 分析与修改：PE 结构、.NET 元数据、IL 反汇编/编辑、PE 补丁构建" else "PE/.NET analysis & modification: PE structure, .NET metadata, IL disassembly/editing, PE patch build"),
         "file" to (if (zh) "文件与文本：读写、搜索替换、差异对比、批量重命名、复制删除" else "File & text: read/write, search/replace, diff, batch rename, copy/delete"),
         "archive" to (if (zh) "压缩与解压：ZIP/TAR/TAR.GZ 的列表、解压、创建、增删改" else "Archive: ZIP/TAR/TAR.GZ list, extract, create, add/delete/rename entries"),
+        "device" to (if (zh) "设备与系统：硬件信息、电池、存储、屏幕、应用管理、剪贴板、通知、网络请求、实用工具" else "Device & system: hardware info, battery, storage, screen, app management, clipboard, notification, network, utilities"),
     )
 
     fun grouped(zh: Boolean, includeApk: List<String> = emptyList()): List<Pair<String, List<Pair<String, String>>>> {

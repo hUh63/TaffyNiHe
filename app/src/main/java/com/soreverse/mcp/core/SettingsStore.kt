@@ -826,7 +826,7 @@ class SettingsStore(context: Context) {
                     }
                     if (configs.isNotEmpty()) apkMcpConfigs = configs
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch", e) }
         }
         applyBool(apk, "apkMcpAutoProbe") { apkMcpAutoProbe = it }
         applyBool(apk, "apkMcpMergeTools") { apkMcpMergeTools = it }

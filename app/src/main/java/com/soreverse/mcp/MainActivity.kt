@@ -291,7 +291,6 @@ private fun SoReverseApp() {
     var pendingDeepLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
     var backProgress by remember { mutableStateOf(0f) }
     var toolCategory by remember { mutableStateOf<String?>(null) }
-    var activeToolPage by remember { mutableStateOf<String?>(null) }
     var showMcpToolList by remember { mutableStateOf(false) }
     var mcpToolCategory by remember { mutableStateOf<String?>(null) }
     var showLogs by remember { mutableStateOf(false) }
@@ -380,7 +379,6 @@ private fun SoReverseApp() {
                         tab = MainTab.Home
                         settingsDest = SettingsDest.Root
                         toolCategory = null
-                        activeToolPage = null
                     }
                 }
             }
@@ -462,7 +460,6 @@ private fun SoReverseApp() {
                                         } else if (target == MainTab.Settings) {
                                             tab = MainTab.Settings
                                         }
-                                        activeToolPage = null
                                     },
                                     onNavigateSettings = { dest ->
                                         settingsDest = dest
@@ -517,6 +514,7 @@ private fun SoReverseApp() {
                                     onDest = { settingsDest = it },
                                     onBack = { settingsDest = SettingsDest.Root },
                                     onHome = { tab = MainTab.Home; toolCategory = null },
+                                    onLogs = { showLogs = true },
                                 )
                             }
                         }
@@ -601,7 +599,6 @@ private fun SoReverseApp() {
                     },
                 )
             }
-            BackHandler(enabled = activeToolPage != null) { activeToolPage = null }
             BackHandler(enabled = showMcpToolList) { showMcpToolList = false; mcpToolCategory = null }
             BackHandler(enabled = showLogs) { showLogs = false }
             if (showMcpToolList) {
@@ -622,25 +619,6 @@ private fun SoReverseApp() {
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     LogsTab(t = t, settings = settings, onBack = { showLogs = false })
-                }
-            }
-            val panel = activeToolPage
-            if (panel != null) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    if (panel == "emulate") {
-                        UnidbgPanel(t = t, context = context, onClose = { activeToolPage = null }, state = toolState)
-                    } else {
-                        ToolPanelHost(
-                            category = panel,
-                            t = t,
-                            context = context,
-                            state = toolState,
-                            onClose = { activeToolPage = null }
-                        )
-                    }
                 }
             }
         }

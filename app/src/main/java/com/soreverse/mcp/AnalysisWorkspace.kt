@@ -90,6 +90,10 @@ internal fun AnalysisWorkspace(
                 shape = RoundedCornerShape(6.dp)) {
                 Text((cur?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
             }
+            // 继续任务但工作区丢失时提示
+            if (cur != null && tools.sharedWorkspaceId.isBlank()) {
+                Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick file", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+            }
             Spacer(Modifier.weight(1f))
             WorkspacePicker(state, zh)
         }
@@ -158,13 +162,15 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
         }
     }
     Button(
-        onClick = { picker.launch(arrayOf("*/*")) },
+        onClick = { picker.launch(arrayOf("application/octet-stream", "application/zip", "application/vnd.android.package-archive", "*/*")) },
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
         enabled = !tools.opening,
         shape = RoundedCornerShape(6.dp),
     ) {
         if (tools.opening) {
             CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+            Spacer(Modifier.size(4.dp))
+            Text(if (zh) "加载中…" else "Loading…", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
         } else {
             Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp))
         }
@@ -194,59 +200,59 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     scope.launch { tools.decompileRunning = true; tools.decompileError = ""; tools.decompileResult = ""
                         val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzDecompile(tools.sharedWorkspaceId, "", loc, true) }.getOrNull() }
                         tools.decompileRunning = false
-                        if (r != null && r.optBoolean("ok", false)) tools.decompileResult = r.optString("pseudocode").ifBlank { toolSummarize(r) }
+                        if (r != null && r.optBoolean("ok", false)) tools.decompileResult = r.optString("pseudocode").ifBlank { r.toString() }
                         else tools.decompileError = r?.optJSONObject("error")?.optString("message").orEmpty().ifBlank { r?.optString("error") ?: if (zh) "反编译失败" else "Failed" }
                     }
                 }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.decompileTarget.isNotBlank() && !tools.decompileRunning, loading = tools.decompileRunning)
                 SmBtn(if (zh) "函数" else "Fns", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "functions", "", 30) }.getOrNull() }
-                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("Disasm", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr.ifBlank { "main" }, null, "auto") }.getOrNull() }
-                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "失败" else "failed"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank())
                 SmBtn("Hex", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
-                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "失败" else "failed"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "unpack" -> {
                 SmBtn(if (zh) "分析" else "Analyze", bm, bp, { scope.launch { tools.unpackRunning = true
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
-                    tools.unpackRunning = false; tools.unpackInfo = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.unpackRunning = false; tools.unpackInfo = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.unpackRunning, loading = tools.unpackRunning)
                 SmBtn("SO", bm, bp, { scope.launch { tools.unpackExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", ".so", 60) }.getOrNull() }
-                    tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.unpackExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("DEX", bm, bp, { scope.launch { tools.unpackExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "classes", "", 30) }.getOrNull() }
-                    tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.unpackExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "soanalyze" -> {
                 SmBtn(if (zh) "概览" else "Ovw", bm, bp, { scope.launch { tools.soAnalyzeRunning = true
                     val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
                     val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
-                    tools.soAnalyzeRunning = false; tools.soOverview = if (o?.optBoolean("ok", false) == true) toolSummarize(o) else o?.optString("error") ?: ""
-                    tools.soCrypto = if (c?.optBoolean("ok", false) == true) toolSummarize(c) else ""
+                    tools.soAnalyzeRunning = false; tools.soOverview = if (o?.optBoolean("ok", false) == true) o.toString() else o?.optString("error") ?: ""
+                    tools.soCrypto = if (c?.optBoolean("ok", false) == true) c.toString() else ""
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.soAnalyzeRunning, loading = tools.soAnalyzeRunning)
                 SmBtn("Sec", bm, bp, { scope.launch { tools.soExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 60) }.getOrNull() }
-                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("Imp", bm, bp, { scope.launch { tools.soExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "imports", "", 60) }.getOrNull() }
-                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("Exp", bm, bp, { scope.launch { tools.soExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "dynsyms", "", 60) }.getOrNull() }
-                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("CFG", bm, bp, { scope.launch { tools.soExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", tools.decompileTarget.ifBlank { "main" }) }.getOrNull() }
-                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "emulate" -> {
@@ -256,17 +262,17 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 SmBtn(if (zh) "模拟" else "Emu", bm, bp, { val sym = tools.emulateSymbol.trim(); if (sym.isEmpty()) return@SmBtn
                     scope.launch { tools.emulateRunning = true; tools.emulateError = ""
                         val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", sym, org.json.JSONArray(), true) }.getOrNull() }
-                        tools.emulateRunning = false; if (r != null && r.optBoolean("ok", false)) tools.emulateResult = toolSummarize(r)
+                        tools.emulateRunning = false; if (r != null && r.optBoolean("ok", false)) tools.emulateResult = r.toString()
                         else tools.emulateError = r?.optString("error") ?: if (zh) "失败" else "Failed"
                     }
                 }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.emulateSymbol.isNotBlank() && !tools.emulateRunning, loading = tools.emulateRunning)
                 SmBtn(if (zh) "寄存器" else "Regs", bm, bp, { scope.launch { tools.emulateExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", tools.emulateSymbol.ifBlank { "JNI_OnLoad" }, org.json.JSONArray(), true) }.getOrNull() }
-                    tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先模拟" else "emu first"
+                    tools.emulateExtra = if (r?.optBoolean("ok", false) == true) r.toString() else if (zh) "先模拟" else "emu first"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("Mem", bm, bp, { scope.launch { tools.emulateExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", 0L, 256) }.getOrNull() }
-                    tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先模拟" else "emu first"
+                    tools.emulateExtra = if (r?.optBoolean("ok", false) == true) r.toString() else if (zh) "先模拟" else "emu first"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "frida" -> {
@@ -277,25 +283,25 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
             "rebuild" -> {
                 SmBtn(if (zh) "回编" else "Build", bm, bp, { scope.launch { tools.rebuildRunning = true; tools.rebuildError = ""; tools.rebuildResult = ""
                     val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editCheck(tools.sharedWorkspaceId, "") }.getOrNull() }
-                    if (c != null && c.optBoolean("ok", false)) tools.rebuildCheck = toolSummarize(c)
+                    if (c != null && c.optBoolean("ok", false)) tools.rebuildCheck = c.toString()
                     else tools.rebuildError = c?.optString("error") ?: if (zh) "失败" else "fail"
                     val b = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
                     val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
-                    tools.rebuildRunning = false; if (b != null && b.optBoolean("ok", false)) tools.rebuildResult = toolSummarize(b)
+                    tools.rebuildRunning = false; if (b != null && b.optBoolean("ok", false)) tools.rebuildResult = b.toString()
                     else tools.rebuildError = b?.optString("error") ?: tools.rebuildError
-                    tools.rebuildOutputs = if (o?.optBoolean("ok", false) == true) toolSummarize(o) else if (zh) "无" else "none"
+                    tools.rebuildOutputs = if (o?.optBoolean("ok", false) == true) o.toString() else if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.rebuildRunning, loading = tools.rebuildRunning)
                 SmBtn(if (zh) "补丁" else "Patch", bm, bp, { scope.launch { tools.rebuildExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
-                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn(if (zh) "符号" else "Sym", bm, bp, { scope.launch { tools.rebuildExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "symbols", "", 60) }.getOrNull() }
-                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn(if (zh) "字符串" else "Str", bm, bp, { scope.launch { tools.rebuildExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 20) }.getOrNull() }
-                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "editor" -> {
@@ -304,19 +310,19 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     modifier = Modifier.width(55.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), shape = RoundedCornerShape(4.dp))
                 SmBtn("Hex", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
-                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "失败" else "failed"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn(if (zh) "文本" else "Text", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 30) }.getOrNull() }
-                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn(if (zh) "编辑" else "Edit", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editHex(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, org.json.JSONArray(), false) }.getOrNull() }
-                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "失败" else "failed"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn(if (zh) "对比" else "Diff", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 30) }.getOrNull() }
-                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) r.toString() else r?.optString("error") ?: if (zh) "无" else "none"
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
         }

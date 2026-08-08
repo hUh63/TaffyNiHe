@@ -180,7 +180,7 @@ internal fun CommandHubScreen(
                     if (zh) "塔菲逆核" else "Taffy NieHe",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFFFF375F),
+                    color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
                     if (zh) "聚合式逆向 · 命令中枢" else "Reverse Command Hub",
@@ -372,7 +372,7 @@ private fun ServiceStatusRow(
     }
     val tunnelRunning = tunnelStatus?.state == com.soreverse.mcp.core.CloudflareTunnelManager.State.RUNNING
     val tunnelStarting = tunnelStatus?.state == com.soreverse.mcp.core.CloudflareTunnelManager.State.STARTING
-    val tunnelColor = if (tunnelRunning) Color(0xFF34C759) else if (tunnelStarting) Color(0xFFFF9500) else MaterialTheme.colorScheme.onSurfaceVariant
+    val tunnelColor = if (tunnelRunning) MaterialTheme.colorScheme.primary else if (tunnelStarting) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
     val tunnelText = when {
         tunnelRunning -> (if (zh) "公网隧道 · 运行中" else "Tunnel · Running") + (tunnelStatus?.publicUrl?.let { " $it" } ?: "")
         tunnelStarting -> if (zh) "公网隧道 · 连接中…" else "Tunnel · Connecting…"
@@ -490,7 +490,7 @@ private fun ServiceStatusItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val green = Color(0xFF34C759)
+    val green = MaterialTheme.colorScheme.primary
     val gray = MaterialTheme.colorScheme.outline
     val shape = RoundedCornerShape(12.dp)
     val dotColor = if (configured) green else gray

@@ -117,7 +117,7 @@ object AnalyzeGuideTool {
                 arch = listing?.optString("architecture", "unknown") ?: "unknown"
                 val r = engine.readStats(workspaceId, "").optJSONObject("dynamic") ?: JSONObject()
                 statsHint = " ELF结构/节区/符号可经 taffy_analyze_elf 获取"
-            } catch (_: Throwable) { }
+            } catch (e: Throwable) { com.soreverse.mcp.core.AppLog.w("silent-catch", e) }
 
             val wsPrefix = workspaceId
             val step = { n: Int, tool: String, arg: String, why: String ->

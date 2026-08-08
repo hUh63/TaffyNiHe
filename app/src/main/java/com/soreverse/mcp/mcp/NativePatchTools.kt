@@ -271,7 +271,7 @@ object NativePatchTools {
                                     if (results.length() >= limit) { nextCursor = "dex:$total"; break }
                                     results.put(dexMatches.get(i))
                                 }
-                            } catch (_: Exception) { }
+                            } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch", e) }
                         }
 
                         "native" -> {

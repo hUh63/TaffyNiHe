@@ -140,6 +140,7 @@ internal fun SettingsHub(
     onPredictiveBack: (Boolean) -> Unit,
     dest: SettingsDest,
     onDest: (SettingsDest) -> Unit,
+    onLogs: () -> Unit = {},
     onBack: () -> Unit,
     onHome: (() -> Unit)? = null,
 ) {
@@ -192,6 +193,8 @@ internal fun SettingsHub(
                     NavRow(if (t.zh) "工具调用审计" else "Tool audit", if (t.zh) "调用统计与失败率" else "Stats and failures", Icons.Default.Analytics, onClick = { onDest(SettingsDest.ToolStats) })
                     GroupDivider()
                     NavRow(if (t.zh) "隧道稳定性" else "Tunnel stability", if (t.zh) "重启与探查" else "Restart and probe", Icons.Default.Cloud, onClick = { onDest(SettingsDest.TunnelStats) })
+                    GroupDivider()
+                    NavRow(if (t.zh) "日志" else "Logs", if (t.zh) "应用运行日志" else "App runtime logs", Icons.Default.Description, onClick = { onLogs() })
                     GroupDivider()
                     NavRow(t.instructions, if (t.zh) "推荐工作流" else "Workflow", Icons.Default.Description, onClick = { onDest(SettingsDest.Instructions) })
                     GroupDivider()

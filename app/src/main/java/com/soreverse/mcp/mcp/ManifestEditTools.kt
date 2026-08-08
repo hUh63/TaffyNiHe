@@ -335,7 +335,7 @@ object ManifestEditTools {
                                             .put("file", entry.name)
                                             .put("lines", JSONArray(lines.take(20))))
                                     }
-                                } catch (_: Exception) { }
+                                } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch", e) }
                             }
                         }
 

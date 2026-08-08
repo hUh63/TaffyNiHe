@@ -55,21 +55,25 @@ import com.soreverse.mcp.core.EngineProvider
 fun toolSummarize(root: JSONObject?): String {
     if (root == null) return "null"
     val parts = arrayListOf<String>()
-    fun walk(label: String, value: Any?) {
-        when (value) {
-            null -> parts.add("$label: —")
-            is String -> parts.add("$label: $value")
-            is Number, is Boolean -> parts.add("$label: $value")
-            is JSONObject -> {
+    val maxDepth = 5  // 深度限制,避免嵌套过深
+    val maxArrayItems = 20  // 数组最多显示20项
+    fun walk(label: String, value: Any?, depth: Int = 0) {
+        when {
+            depth > maxDepth -> parts.add("$label: <...>")
+            value == null -> parts.add("$label: —")
+            value is String -> parts.add("$label: $value")
+            value is Number || value is Boolean -> parts.add("$label: $value")
+            value is JSONObject -> {
                 parts.add("$label: {")
                 val it = value.keys()
-                while (it.hasNext()) { val k = it.next(); walk("  $k", value.opt(k)) }
+                while (it.hasNext()) { val k = it.next(); walk("  $k", value.opt(k), depth + 1) }
                 parts.add("}")
             }
-            is JSONArray -> {
-                parts.add("$label: [")
-                for (i in 0 until value.length()) walk("  [$i]", value.opt(i))
-                parts.add("]")
+            value is JSONArray -> {
+                val n = value.length().coerceAtMost(maxArrayItems)
+                parts.add("$label: [${value.length()} items]")
+                for (i in 0 until n) walk("  [$i]", value.opt(i), depth + 1)
+                if (value.length() > maxArrayItems) parts.add("  ... ${value.length() - maxArrayItems} more")
             }
             else -> parts.add("$label: $value")
         }

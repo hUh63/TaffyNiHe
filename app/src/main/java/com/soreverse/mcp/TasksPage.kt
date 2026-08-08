@@ -29,6 +29,17 @@ internal fun TasksPage(
     val active = state.tasks.filter { it.status == "active" }
     val done = state.tasks.filter { it.status == "completed" }
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (active.isEmpty() && done.isEmpty()) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (zh) "📭 暂无任务" else "📭 No tasks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.size(8.dp))
+                        Text(if (zh) "请在分析页选择文件开始分析" else "Pick a file in the analysis page to start", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
         item {
             Text(if (zh) "当前任务" else "Active tasks", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.size(6.dp))

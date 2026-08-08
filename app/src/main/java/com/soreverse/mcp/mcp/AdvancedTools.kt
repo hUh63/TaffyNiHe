@@ -244,17 +244,18 @@ object AdvancedTools {
     val apkPatchBytes: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "apk_patch_bytes",
-            "【APK 字节补丁】读取或写入 APK 内指定 ZIP 条目的原始字节。action=read: 读取指定条目的字节(支持 offset+length 截取); action=write: 写入字节到指定条目(直接修改 APK 文件中该条目的内容, 注意会破坏签名)。参考 MT管理器 mt_apk_read_bytes / mt_apk_patch_bytes。",
-            "Read or write raw bytes of a ZIP entry inside an APK. action=read: read bytes (with optional offset+length); action=write: write bytes (modifies APK, breaks signature). Inspired by MT mt_apk_read_bytes / mt_apk_patch_bytes.",
+            "【APK 字节补丁(CAS)】读取或写入 APK 内指定 ZIP 条目的原始字节。action=read: 读取指定条目的字节(支持 offset+length); action=write: 写入字节到指定条目(带 CAS 乐观锁: 先校验 expectedHex 匹配当前字节才写入, 不匹配返回当前字节让调用方重试); action=verify: 验证指定偏移的字节是否匹配。参考 MT管理器 mt_apk_read_bytes / mt_apk_patch_bytes 的 CAS 保护机制。",
+            "Read/write raw bytes of a ZIP entry inside APK with CAS protection. action=read; write (with expectedHex optimistic lock); verify. Inspired by MT mt_apk_read_bytes / mt_apk_patch_bytes CAS.",
             "apk", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
-                "action".oneOf("read | write", "read", "write")
+                "action".oneOf("read | write | verify", "read", "write", "verify")
                 "path" str "APK 文件路径"
-                "entry" str "ZIP 条目名(如 classes.dex, AndroidManifest.xml, lib/arm64-v8a/libnative.so)"
-                "offset" int "字节偏移(默认0, 仅read)"
-                "length" int "读取长度(默认全部, 仅read, 最大65536)"
-                "hex" str "写入的十六进制字节(仅write, 如 '90 31 FF 6B')"
+                "entry" str "ZIP 条目名(如 classes.dex, lib/arm64-v8a/libnative.so)"
+                "offset" int "字节偏移(默认0)"
+                "length" int "读取长度(默认全部, 最大65536)"
+                "hex" str "write: 写入的十六进制字节(如 '90 31 FF 6B')"
+                "expectedHex" str "write: CAS 乐观锁 — 当前偏移处的原始字节(十六进制), 为空则跳过校验直接写入(不推荐)"
             })
         }
 
@@ -289,57 +290,98 @@ object AdvancedTools {
                                     .put("hex", hex)
                                     .put("ascii", slice.joinToString("") {
                                         if (it in 32..126) it.toInt().toChar().toString() else "."
-                                    }))
+                                    })
+                                    .put("hint", "写入前用 expectedHex 传回当前 hex 做 CAS 校验"))
                             }
                         }
                     }
-                    "write" -> {
-                        val hexStr = args.str("hex")
-                        if (hexStr.isBlank()) return err("INVALID_ARGUMENT", "write 需要 hex 参数(十六进制字节)", "hex", "")
-                        val writeBytes = hexStr.split("\\s+".toRegex())
-                            .filter { it.isNotBlank() }
-                            .map { it.toInt(16).toByte() }
-                            .toByteArray()
-                        // 读取整个 APK, 修改指定条目, 写回
-                        // 注意: 直接修改 ZIP 中的条目内容很复杂, 这里只支持替换相同大小的条目
-                        val apkBytes = file.readBytes()
+
+                    "verify" -> {
+                        val offset = args.intValue("offset", 0).coerceAtLeast(0)
+                        val expectedHex = args.str("expectedHex")
+                        if (expectedHex.isBlank()) return err("INVALID_ARGUMENT", "verify 需要 expectedHex", "expectedHex", expectedHex)
                         ZipFile(file).use { zf ->
                             val entry = zf.getEntry(entryName)
                                 ?: return err("ENTRY_NOT_FOUND", "ZIP 条目不存在: $entryName", "entry", entryName)
-                            val origSize = entry.size
-                            if (writeBytes.size != origSize.toInt()) {
-                                return err("SIZE_MISMATCH",
-                                    "写入字节数(${writeBytes.size})与条目原始大小($origSize)不一致, 直接字节补丁要求大小相同。不同大小请用 apk_rebuild。",
-                                    "entry", entryName)
-                            }
-                            // 找到条目数据在文件中的偏移并替换
                             zf.getInputStream(entry).use { stream ->
-                                val tempFile = File.createTempFile("patch_", ".apk", file.parentFile)
-                                tempFile.delete()
-                                // 复制 APK, 替换目标条目
-                                file.copyTo(tempFile, overwrite = true)
-                                // 使用 ZipFile 读取, 重新构建 ZIP
-                                val zipOut = java.util.zip.ZipOutputStream(tempFile.outputStream())
-                                zf.entries().toList().forEach { e ->
-                                    zipOut.putNextEntry(java.util.zip.ZipEntry(e.name))
-                                    if (e.name == entryName) {
-                                        zipOut.write(writeBytes)
-                                    } else {
-                                        zf.getInputStream(e).use { it.copyTo(zipOut) }
+                                val allBytes = stream.readBytes()
+                                val expectedBytes = expectedHex.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
+                                val actualBytes = if (offset < allBytes.size) allBytes.sliceArray(offset until minOf(offset + expectedBytes.size, allBytes.size)) else ByteArray(0)
+                                val match = actualBytes.contentEquals(expectedBytes)
+                                ok(JSONObject()
+                                    .put("action", "verify")
+                                    .put("entry", entryName)
+                                    .put("offset", offset)
+                                    .put("match", match)
+                                    .put("expectedHex", expectedBytes.joinToString(" ") { "%02X".format(it) })
+                                    .put("actualHex", actualBytes.joinToString(" ") { "%02X".format(it) }))
+                            }
+                        }
+                    }
+
+                    "write" -> {
+                        val hexStr = args.str("hex")
+                        if (hexStr.isBlank()) return err("INVALID_ARGUMENT", "write 需要 hex 参数", "hex", hexStr)
+                        val offset = args.intValue("offset", 0).coerceAtLeast(0)
+                        val expectedHex = args.str("expectedHex")
+                        val writeBytes = hexStr.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
+
+                        ZipFile(file).use { zf ->
+                            val entry = zf.getEntry(entryName)
+                                ?: return err("ENTRY_NOT_FOUND", "ZIP 条目不存在: $entryName", "entry", entryName)
+
+                            // CAS 校验
+                            if (expectedHex.isNotBlank()) {
+                                zf.getInputStream(entry).use { stream ->
+                                    val allBytes = stream.readBytes()
+                                    val expectedBytes = expectedHex.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
+                                    val actualBytes = if (offset < allBytes.size) allBytes.sliceArray(offset until minOf(offset + expectedBytes.size, allBytes.size)) else ByteArray(0)
+                                    if (!actualBytes.contentEquals(expectedBytes)) {
+                                        return err("CAS_MISMATCH",
+                                            "expectedHex 不匹配当前字节, 可能已被修改. 请用返回的 actualHex 重试.",
+                                            "entry", entryName)
+                                            .put("expectedHex", expectedHex)
+                                            .put("actualHex", actualBytes.joinToString(" ") { "%02X".format(it) })
+                                            .put("offset", offset)
                                     }
-                                    zipOut.closeEntry()
                                 }
-                                zipOut.close()
+                            }
+
+                            // 写入: 重建 ZIP
+                            val origSize = entry.size
+                            zf.getInputStream(entry).use { stream ->
+                                val origBytes = stream.readBytes()
+                                val newBytes = origBytes.copyOf()
+                                if (offset + writeBytes.size > newBytes.size) {
+                                    return err("OUT_OF_BOUNDS",
+                                        "写入范围超出条目大小(offset=${offset}+writeSize=${writeBytes.size} > entrySize=${newBytes.size})",
+                                        "entry", entryName)
+                                }
+                                System.arraycopy(writeBytes, 0, newBytes, offset, writeBytes.size)
+
+                                val tempFile = File.createTempFile("patch_", ".apk", file.parentFile)
+                                file.copyTo(File(file.parentFile, "${file.nameWithoutExtension}.bak.apk"), overwrite = true)
+                                java.util.zip.ZipOutputStream(tempFile.outputStream()).use { zos ->
+                                    zf.entries().toList().forEach { e ->
+                                        zos.putNextEntry(java.util.zip.ZipEntry(e.name))
+                                        if (e.name == entryName) zos.write(newBytes)
+                                        else zf.getInputStream(e).use { it.copyTo(zos) }
+                                        zos.closeEntry()
+                                    }
+                                }
                                 tempFile.copyTo(file, overwrite = true)
                                 tempFile.delete()
                                 ok(JSONObject()
                                     .put("action", "write")
                                     .put("entry", entryName)
+                                    .put("offset", offset)
                                     .put("bytesWritten", writeBytes.size)
-                                    .put("hint", "字节已写入, APK 签名已失效, 用 apk_rebuild(build) 重新签名"))
+                                    .put("casVerified", expectedHex.isNotBlank())
+                                    .put("hint", "字节已写入, APK 签名已失效, 用 apk_rebuild(build) 重新签名. 用 apk_patch_bytes(read) 验证写入结果"))
                             }
                         }
                     }
+
                     else -> err("UNKNOWN_ACTION", "未知 action: $action", "action", action)
                 }
             }.getOrElse { e ->

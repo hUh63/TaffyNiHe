@@ -181,7 +181,7 @@ object LogcatTools {
                             .redirectErrorStream(true)
                             .redirectOutput(captureFile)
                             .start()
-                        capturePid = captureProcess?.pid()?.toInt() ?: 0
+                        capturePid = runCatching { captureProcess?.pid()?.toInt() ?: 0 }.getOrDefault(0)
 
                         ok(JSONObject()
                             .put("action", "start")

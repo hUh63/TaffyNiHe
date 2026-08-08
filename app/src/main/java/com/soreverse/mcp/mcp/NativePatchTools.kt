@@ -92,7 +92,7 @@ object NativePatchTools {
 
         private fun extractHexFromRzOutput(result: JSONObject): String {
             // rizin pxj 返回 JSON 数组
-            val data = result.optJSONArray("data") ?: result.opt("output")?.toString() ?: ""
+            val data: String = result.optJSONArray("data")?.toString() ?: result.optString("output", "")
             return if (data.startsWith("[")) {
                 // JSON 数组 → hex
                 val arr = JSONArray(data)

@@ -321,6 +321,7 @@ private fun SmBtn(label: String, modifier: Modifier, padding: PaddingValues, onC
         else Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp)
     }
 }
+@Composable
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     var detailMode by androidx.compose.runtime.remember { mutableStateOf(false) }
     // 结果标签页：收集所有非空的结果

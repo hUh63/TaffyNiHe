@@ -81,7 +81,8 @@ internal fun AnalysisWorkspace(
     val zh = t.zh
     val tools = state.tools
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
-        // 顶部栏：任务选择 + 工作区选择（紧凑）
+        var toolsExpanded by remember { mutableStateOf(false) }
+        // 顶部栏：任务选择 + 工具展开按钮 + 工作区选择（一行紧凑）
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val cur = state.currentTask()
             Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -90,25 +91,35 @@ internal fun AnalysisWorkspace(
                 shape = RoundedCornerShape(6.dp)) {
                 Text((cur?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
             }
-            // 继续任务但工作区丢失时提示
             if (cur != null && tools.sharedWorkspaceId.isBlank()) {
-                Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick file", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.weight(1f))
+            // 工具展开/收回按钮
+            Button(onClick = { toolsExpanded = !toolsExpanded },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(6.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                Text(if (toolsExpanded) "▼" else "◀", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                Spacer(Modifier.size(3.dp))
+                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+            }
             WorkspacePicker(state, zh)
         }
-        Spacer(Modifier.size(4.dp))
-        // 工具切换条
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            toolDefs.forEach { def ->
-                val sel = state.activeTool == def.key
-                Button(
-                    onClick = { state.activeTool = def.key },
-                    colors = if (sel) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                        else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(6.dp),
-                ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelSmall, fontSize = 12.sp) }
+        // 可折叠工具切换条
+        if (toolsExpanded) {
+            Spacer(Modifier.size(4.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                toolDefs.forEach { def ->
+                    val sel = state.activeTool == def.key
+                    Button(
+                        onClick = { state.activeTool = def.key; toolsExpanded = false },
+                        colors = if (sel) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(6.dp),
+                    ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelSmall, fontSize = 12.sp) }
+                }
             }
         }
         Spacer(Modifier.size(4.dp))
@@ -425,6 +436,160 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     }
 }
 
+/**
+ * 智能摘要：根据 JSON 结构自动选择最佳展示方式。
+ * 支持 overview / items列表 / 安全特性 / 加密扫描 / 通用键值。
+ */
+@Composable
+private fun SmartSummary(json: JSONObject, zh: Boolean, detailed: Boolean) {
+    val ov = json.optJSONObject("overview") ?: json
+
+    // 1. 如果有 items 数组 → 列表展示（imports/exports/sections/strings/functions）
+    val items = json.optJSONArray("items") ?: ov.optJSONArray("items")
+    if (items != null && items.length() > 0) {
+        val maxItems = if (detailed) 30 else 10
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(if (zh) "共 ${items.length()} 项" else "${items.length()} items", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            for (i in 0 until minOf(items.length(), maxItems)) {
+                val item = items.opt(i)
+                val line = when (item) {
+                    is JSONObject -> item.optString("name").ifBlank { item.optString("address", item.toString()) }
+                    is org.json.JSONArray -> "[${item.length()}]"
+                    else -> item.toString()
+                }
+                Text("• $line", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (items.length() > maxItems) {
+                Text(if (zh) "... 还有 ${items.length() - maxItems} 项" else "... ${items.length() - maxItems} more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        return
+    }
+
+    // 2. 如果有 securityFeatures → 安全特性展示（overview 的安全部分）
+    val sec = ov.optJSONArray("securityFeatures")
+    if (sec != null && sec.length() > 0) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (ov.has("fileName") || ov.has("architecture")) {
+                SectionCard(if (zh) "📦 基础属性" else "📦 Basics") {
+                    Kv(if (zh) "名称" else "Name", ov.optString("fileName", "—"))
+                    Kv(if (zh) "大小" else "Size", fmtBytes(ov.optLong("size", 0L)))
+                    val arch = ov.optString("architecture", "—")
+                    val bits = ov.optInt("bits", 0)
+                    Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
+                    Kv(if (zh) "类型" else "Type", ov.optString("elfType", "—"))
+                    if (detailed) {
+                        Kv(if (zh) "入口" else "Entry", ov.optString("entryPoint", "0x0"))
+                        Kv(if (zh) "字节序" else "Endian", ov.optString("endian", "—"))
+                        Kv(if (zh) "SHA256" else "SHA256", ov.optString("sha256", "—").take(16) + "...")
+                    }
+                }
+            }
+            val counts = listOf(
+                "sectionCount" to (if (zh) "节区" else "Sections"),
+                "functionCount" to (if (zh) "函数" else "Fns"),
+                "symbolCount" to (if (zh) "符号" else "Sym"),
+                "stringCount" to (if (zh) "字符串" else "Str"),
+                "importCount" to (if (zh) "导入" else "Imp"),
+                "exportCount" to (if (zh) "导出" else "Exp"),
+            ).filter { ov.has(it.first) }.map { (k, label) -> label to ov.optInt(k, 0).toString() }
+            if (counts.isNotEmpty()) {
+                SectionCard(if (zh) "📊 结构与规模" else "📊 Structure") {
+                    MetricRow(*counts.take(3).toTypedArray())
+                    if (counts.size > 3) MetricRow(*counts.drop(3).take(3).toTypedArray())
+                }
+            }
+            SectionCard(if (zh) "🔒 安全特性" else "🔒 Security") {
+                for (i in 0 until sec.length()) {
+                    val s = sec.optJSONObject(i) ?: continue
+                    val label = s.optString("label", s.optString("id", "?"))
+                    val active = s.optBoolean("active", false)
+                    val desc = s.optString("description", "")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                        Text(if (active) (if (zh) "✓ 启用" else "✓ Yes") else (if (zh) "✗ 未启用" else "✗ No"),
+                            style = MaterialTheme.typography.bodySmall, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    }
+                    if (detailed && desc.isNotBlank()) {
+                        Text("  $desc", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                    }
+                }
+            }
+            val diff = ov.optJSONObject("difficulty")
+            if (diff != null) {
+                SectionCard(if (zh) "🎯 分析难度" else "🎯 Difficulty") {
+                    Kv(if (zh) "评分" else "Score", diff.optString("score", "—") + " (" + diff.optString("level", "") + ")")
+                    if (detailed) {
+                        val factors = diff.optJSONArray("factors")
+                        if (factors != null) {
+                            for (i in 0 until factors.length()) {
+                                val f = factors.optJSONObject(i) ?: continue
+                                Text("• ${f.optString("title", "")}: ${f.optString("detail", "")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            }
+            val crypto = ov.optJSONArray("cryptoFindings") ?: json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings")
+            if (crypto != null && crypto.length() > 0) {
+                SectionCard(if (zh) "🔐 加密特征" else "🔐 Crypto") {
+                    for (i in 0 until minOf(crypto.length(), if (detailed) 20 else 8)) {
+                        val c = crypto.optJSONObject(i) ?: continue
+                        val name = c.optString("name", c.optString("algorithm", "?"))
+                        val count = c.optInt("count", c.optInt("matches", 0))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                            if (count > 0) Text("×$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    // 3. 如果有 crypto/findings → 加密扫描结果
+    val cryptoArr = json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings") ?: json.optJSONArray("scans")
+    if (cryptoArr != null && cryptoArr.length() > 0) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(if (zh) "共 ${cryptoArr.length()} 项发现" else "${cryptoArr.length()} findings", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            for (i in 0 until minOf(cryptoArr.length(), if (detailed) 30 else 10)) {
+                val c = cryptoArr.optJSONObject(i) ?: continue
+                val name = c.optString("name", c.optString("algorithm", c.optString("type", "?")))
+                val count = c.optInt("count", c.optInt("matches", 0))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("• $name", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                    if (count > 0) Text("×$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        return
+    }
+
+    // 4. 通用：扁平化所有键值
+    val keys = json.keys().asSequence().filter { it != "ok" && it != "pagination" }.toList()
+    if (keys.isEmpty()) {
+        Text(json.toString(2).take(600), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = if (detailed) 30 else 8, overflow = TextOverflow.Ellipsis)
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        keys.take(if (detailed) 40 else 12).forEach { k ->
+            val v = json.opt(k)
+            val vStr = when (v) {
+                is JSONObject -> "{${v.length()} fields}"
+                is org.json.JSONArray -> "[${v.length()} items]"
+                null -> "—"
+                else -> v.toString()
+            }
+            Kv(k, vStr.take(if (detailed) 80 else 40))
+        }
+        val maxK = if (detailed) 40 else 12
+        if (keys.size > maxK) {
+            Text(if (zh) "... 还有 ${keys.size - maxK} 个字段" else "... ${keys.size - maxK} more", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 private data class R2Tab(val label: String, val text: String)
 
 /** 简洁模式：结构化卡片，类似 ElfOverviewPanel 风格 */
@@ -441,106 +606,32 @@ internal fun DataCard(title: String, text: String, zh: Boolean) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.size(6.dp))
             if (json == null) {
-                // 纯文本：简洁前几行
                 Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
             } else {
-                // 简洁卡片：提取最关键的字段清晰展示，不堆原文
-                val ov = json.optJSONObject("overview") ?: json
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // 名称/架构/大小（核心三项）
-                    val name = ov.optString("fileName").ifBlank { ov.optString("name", "—") }
-                    if (name.isNotBlank() && name != "—") Kv(if (zh) "名称" else "Name", name)
-                    val arch = ov.optString("architecture")
-                    if (arch.isNotBlank()) {
-                        val bits = ov.optInt("bits", 0)
-                        Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
-                    }
-                    if (ov.has("size") || ov.has("fileSize")) {
-                        Kv(if (zh) "大小" else "Size", fmtBytes(ov.optLong("size", ov.optLong("fileSize", 0L))))
-                    }
-                    // 关键计数（节区/函数/符号/字符串/加密）
-                    val counts = listOf(
-                        "sectionCount" to (if (zh) "节区" else "Sections"),
-                        "functionCount" to (if (zh) "函数" else "Fn"),
-                        "symbolCount" to (if (zh) "符号" else "Sym"),
-                        "stringCount" to (if (zh) "字符串" else "Str"),
-                    ).filter { ov.has(it.first) }.map { (k, label) -> label to ov.optInt(k, 0).toString() }
-                    if (counts.isNotEmpty()) {
-                        MetricRow(*counts.take(3).toTypedArray())
-                    }
-                    // 若 overview 无关键信息，退化为扁平 JSON（限行数简洁展示）
-                    if (!ov.has("fileName") && !ov.has("architecture")) {
-                        Text(json.toString(2).take(600), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 8, overflow = TextOverflow.Ellipsis)
-                    }
-                }
+                SmartSummary(json, zh, detailed = false)
             }
         }
     }
 }
 
-/** 详细模式：完整结构化卡片（基础属性 + 结构规模 + 安全特性 + 原始JSON） */
+/** 详细模式：完整结构化展示 */
 @Composable
 private fun DetailCard(title: String, text: String, zh: Boolean) {
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
-    if (json == null) {
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-            Column(Modifier.padding(10.dp)) {
-                Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.size(6.dp))
-                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
-            }
-        }
-        return
-    }
-    val ov = json.optJSONObject("overview") ?: json
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(10.dp)) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            SectionCard(if (zh) "📦 基础属性" else "📦 Basics") {
-                Kv(if (zh) "名称" else "Name", ov.optString("fileName", "—"))
-                Kv(if (zh) "大小" else "Size", fmtBytes(ov.optLong("size", 0L)))
-                val arch = ov.optString("architecture", "—")
-                val bits = ov.optInt("bits", 0)
-                Kv(if (zh) "架构" else "Arch", if (bits > 0) "$arch/$bits" else arch)
-                Kv(if (zh) "入口" else "Entry", ov.optString("entryPoint", "0x0"))
-                Kv(if (zh) "类型" else "Type", ov.optString("elfType", "—"))
-                Kv(if (zh) "字节序" else "Endian", ov.optString("endian", "—"))
+            Spacer(Modifier.size(6.dp))
+            if (json == null) {
+                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+            } else {
+                SmartSummary(json, zh, detailed = true)
             }
-            SectionCard(if (zh) "📊 结构与规模" else "📊 Structure") {
-                MetricRow(
-                    (if (zh) "节区" else "Sections") to ov.optInt("sectionCount", 0).toString(),
-                    (if (zh) "程序段" else "Segments") to ov.optInt("segmentCount", 0).toString(),
-                    (if (zh) "函数" else "Fns") to ov.optInt("functionCount", 0).toString(),
-                )
-                MetricRow(
-                    (if (zh) "符号" else "Symbols") to ov.optInt("symbolCount", 0).toString(),
-                    (if (zh) "字符串" else "Strings") to ov.optInt("stringCount", 0).toString(),
-                )
-            }
-            val sec = ov.optJSONArray("securityFeatures") ?: org.json.JSONArray()
-            if (sec.length() > 0) {
-                SectionCard(if (zh) "🔒 安全特性" else "🔒 Security") {
-                    for (i in 0 until sec.length()) {
-                        val s = sec.optJSONObject(i) ?: continue
-                        val name = s.optString("name", "?")
-                        val present = s.optBoolean("present", false)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-                            Text(if (present) (if (zh) "有" else "Yes") else (if (zh) "无" else "No"),
-                                style = MaterialTheme.typography.bodySmall, color = if (present) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-            }
-            // 原始 JSON（收起）
-            Text(if (zh) "原始数据" else "Raw", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 8)
         }
     }
 }

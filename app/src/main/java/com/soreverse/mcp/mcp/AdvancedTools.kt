@@ -1,12 +1,10 @@
 package com.soreverse.mcp.mcp
 
-import com.soreverse.mcp.core.bool
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
-import com.soreverse.mcp.engine.EngineProvider
-import com.soreverse.mcp.engine.SettingsStore
+import com.soreverse.mcp.core.EngineProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import org.luckypray.dexkit.DexKitBridge
@@ -32,7 +30,7 @@ object AdvancedTools {
     val soXref: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "so_xref",
-            "【SO 交叉引用】查找谁调用了某函数/地址(to), 或某函数/地址调用了什么(from)。输入 workspaceId + locator(函数名/VA/符号), direction=to 查"被谁调用"(逆向最常用, 定位关键函数的调用者), direction=from 查"调用了谁"。包装 rizin rzXrefs。",
+            "【SO 交叉引用】查找谁调用了某函数/地址(to), 或某函数/地址调用了什么(from)。输入 workspaceId + locator(函数名/VA/符号), direction=to 查[被谁调用](逆向最常用, 定位关键函数的调用者), direction=from 查[调用了谁]。包装 rizin rzXrefs。",
             "Cross-reference search. direction=to finds who calls a function/address (most useful for locating callers); direction=from finds what it calls. Wraps rizin rzXrefs.",
             "soanalyze", ToolClass.EXTRA, heavy = false,
         ) {

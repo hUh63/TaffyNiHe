@@ -103,22 +103,22 @@ internal fun AnalysisWorkspace(
                 ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelMedium, fontSize = 13.sp) }
             }
         }
-        Spacer(Modifier.size(8.dp))
-        // 主体：控制台(上,紧凑) + 结果流(下,占大部分空间)
+        Spacer(Modifier.size(6.dp))
+        // 主体：控制台(极紧凑) + 结果流(占剩余空间)
         Column(Modifier.fillMaxSize()) {
-            // 控制台（水平紧凑条）
+            // 控制台（极紧凑水平条）
             Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().height(28.dp),
+                shape = RoundedCornerShape(6.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 ToolConsole(state, zh)
             }
-            Spacer(Modifier.size(6.dp))
+            Spacer(Modifier.size(4.dp))
             // 结果流（占剩余空间）
             Surface(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(6.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
             ) {
                 ResultStream(tools, zh)
@@ -171,329 +171,155 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
     val tools = state.tools
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // 工具名称 + 说明
-        val toolInfo = when (state.activeTool) {
-            "decompile" -> ToolInfo(if (zh) "反编译" else "Decompile", if (zh) "输入函数符号/VA，反编译为伪代码" else "Enter symbol/VA to decompile to pseudocode")
-            "unpack" -> ToolInfo(if (zh) "脱壳" else "Unpack", if (zh) "分析包体结构，提取SO，打包APK" else "Analyze package, extract SO, pack APK")
-            "soanalyze" -> ToolInfo(if (zh) "SO分析" else "SO Analyze", if (zh) "概览/加密/段/导入导出" else "Overview, crypto, sections, imports/exports")
-            "emulate" -> ToolInfo(if (zh) "模拟" else "Emulate", if (zh) "Unidbg 模拟执行 + 寄存器/内存查看" else "Unidbg emulate, regs, mem dump")
-            "frida" -> ToolInfo("Frida", if (zh) "编辑Frida脚本（下发需root）" else "Edit Frida script (needs root)")
-            "rebuild" -> ToolInfo(if (zh) "回编" else "Rebuild", if (zh) "校验回编，Hex补丁，重命名函数" else "Check build, hex patch, rename function")
-            "editor" -> ToolInfo(if (zh) "编辑器" else "Editor", if (zh) "Hex查看/编辑，文本查看，字节补丁，对比" else "Hex view/edit, text view, byte patch, diff")
-            else -> ToolInfo("", "")
-        }
-        Text(toolInfo.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-        Text(toolInfo.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-        Spacer(Modifier.size(4.dp))
-
-        // 通用小按钮样式
-        val btnMod = Modifier.fillMaxWidth()
-        val btnPad = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-
+    Row(Modifier.fillMaxWidth().height(28.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        val bm = Modifier.height(22.dp)
+        val bp = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
         when (state.activeTool) {
             "decompile" -> {
-                // 反编译主功能
                 OutlinedTextField(value = tools.decompileTarget, onValueChange = { tools.decompileTarget = it },
-                    label = { Text(if (zh) "符号/VA" else "Sym/VA") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(8.dp),
-                    placeholder = { Text("JNI_OnLoad", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) })
-                Button(onClick = {
-                    val loc = tools.decompileTarget.trim()
-                    if (loc.isEmpty()) { tools.decompileError = if (zh) "输入符号或地址" else "Enter sym/VA"; return@Button }
+                    label = { Text(if (zh) "符号" else "Sym") }, singleLine = true,
+                    modifier = Modifier.width(70.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall, fontSize = 9.sp, shape = RoundedCornerShape(4.dp))
+                SmBtn(if (zh) "反编译" else "Dec", bm, bp, {
+                    val loc = tools.decompileTarget.trim(); if (loc.isEmpty()) return@SmBtn
                     scope.launch { tools.decompileRunning = true; tools.decompileError = ""; tools.decompileResult = ""
                         val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzDecompile(tools.sharedWorkspaceId, "", loc, true) }.getOrNull() }
                         tools.decompileRunning = false
                         if (r != null && r.optBoolean("ok", false)) tools.decompileResult = r.optString("pseudocode").ifBlank { toolSummarize(r) }
                         else tools.decompileError = r?.optJSONObject("error")?.optString("message").orEmpty().ifBlank { r?.optString("error") ?: if (zh) "反编译失败" else "Failed" }
                     }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.decompileTarget.isNotBlank() && !tools.decompileRunning, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    if (tools.decompileRunning) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    else { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp)); Spacer(Modifier.size(4.dp)) }
-                    Text(if (zh) "反编译" else "Decompile", style = MaterialTheme.typography.labelMedium, fontSize = 12.sp)
-                }
-                if (tools.decompileError.isNotBlank()) Text(tools.decompileError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.size(4.dp))
-                // 额外功能：函数列表 + 搜索函数 + 反汇编
-                Button(onClick = {
-                    scope.launch { tools.decompileExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无数据" else "none"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📋 文件列表" else "📋 Files", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    // 用 rzFunctions 获取函数列表
-                    scope.launch { tools.decompileExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "functions", "", 30) }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无函数" else "no functions"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔍 函数列表" else "🔍 Functions", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                // 反汇编
-                OutlinedTextField(value = tools.disasmAddr, onValueChange = { tools.disasmAddr = it },
-                    label = { Text(if (zh) "反汇编地址" else "Disasm addr") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(8.dp),
-                    placeholder = { Text("0x1234", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) })
-                Button(onClick = {
-                    scope.launch { tools.decompileExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr.trim(), null, "auto") }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "反汇编失败" else "disasm failed"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "⚡ 反汇编" else "⚡ Disasm", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                // Hex 查看
-                Button(onClick = {
-                    scope.launch { tools.decompileExtra = ""
-                        val addr = tools.disasmAddr.ifBlank { "0x0" }
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr, 0, 256) }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "Hex查看失败" else "hexdump failed"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔢 Hex 查看" else "🔢 Hex View", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
+                }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.decompileTarget.isNotBlank() && !tools.decompileRunning, loading = tools.decompileRunning)
+                SmBtn(if (zh) "函数" else "Fns", bm, bp, { scope.launch { tools.decompileExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "functions", "", 30) }.getOrNull() }
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn("Disasm", bm, bp, { scope.launch { tools.decompileExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr.ifBlank { "main" }, null, "auto") }.getOrNull() }
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank())
+                SmBtn("Hex", bm, bp, { scope.launch { tools.decompileExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "unpack" -> {
-                Button(onClick = {
-                    scope.launch { tools.unpackRunning = true
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
-                        tools.unpackRunning = false
-                        tools.unpackInfo = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无数据" else "none"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.unpackRunning, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    if (tools.unpackRunning) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    else Text(if (zh) "📦 分析包体结构" else "📦 Analyze pkg", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                // 额外功能
-                Button(onClick = {
-                    scope.launch { tools.unpackExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", ".so", 60) }.getOrNull() }
-                        tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无SO" else "no SO"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔧 提取 SO" else "🔧 Extract SO", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                // DEX 类分析
-                Button(onClick = {
-                    scope.launch { tools.unpackExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "classes", "", 30) }.getOrNull() }
-                        tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无DEX类" else "no dex classes"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📚 DEX 类" else "📚 DEX Classes", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Text(if (zh) "需要 root + frida-server 才能脱壳" else "Needs root + frida-server for unpack", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                SmBtn(if (zh) "分析" else "Analyze", bm, bp, { scope.launch { tools.unpackRunning = true
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
+                    tools.unpackRunning = false; tools.unpackInfo = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.unpackRunning, loading = tools.unpackRunning)
+                SmBtn("SO", bm, bp, { scope.launch { tools.unpackExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", ".so", 60) }.getOrNull() }
+                    tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn("DEX", bm, bp, { scope.launch { tools.unpackExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "classes", "", 30) }.getOrNull() }
+                    tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "soanalyze" -> {
-                Button(onClick = {
-                    scope.launch { tools.soAnalyzeRunning = true
-                        val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
-                        val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
-                        tools.soAnalyzeRunning = false
-                        tools.soOverview = if (o?.optBoolean("ok", false) == true) toolSummarize(o) else o?.optString("error") ?: ""
-                        tools.soCrypto = if (c?.optBoolean("ok", false) == true) toolSummarize(c) else ""
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.soAnalyzeRunning, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    if (tools.soAnalyzeRunning) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    else Text(if (zh) "📊 概览+加密扫描" else "📊 Overview+Crypto", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                // 额外功能：段 + 导入 + 导出
-                Button(onClick = {
-                    scope.launch { tools.soExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 60) }.getOrNull() }
-                        tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无段信息" else "no sections"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📑 段信息" else "📑 Sections", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    scope.launch { tools.soExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "imports", "", 60) }.getOrNull() }
-                        tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无导入表" else "no imports"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔗 导入表" else "🔗 Imports", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    scope.launch { tools.soExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "dynsyms", "", 60) }.getOrNull() }
-                        tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无导出表" else "no exports"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📤 导出表" else "📤 Exports", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                // CFG 流程图
-                Button(onClick = {
-                    scope.launch { tools.soExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", tools.decompileTarget.ifBlank { "main" }) }.getOrNull() }
-                        tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无CFG" else "no CFG"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔀 CFG 流程图" else "🔀 CFG", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
+                SmBtn(if (zh) "概览" else "Ovw", bm, bp, { scope.launch { tools.soAnalyzeRunning = true
+                    val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
+                    val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
+                    tools.soAnalyzeRunning = false; tools.soOverview = if (o?.optBoolean("ok", false) == true) toolSummarize(o) else o?.optString("error") ?: ""
+                    tools.soCrypto = if (c?.optBoolean("ok", false) == true) toolSummarize(c) else ""
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.soAnalyzeRunning, loading = tools.soAnalyzeRunning)
+                SmBtn("Sec", bm, bp, { scope.launch { tools.soExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 60) }.getOrNull() }
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn("Imp", bm, bp, { scope.launch { tools.soExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "imports", "", 60) }.getOrNull() }
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn("Exp", bm, bp, { scope.launch { tools.soExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "dynsyms", "", 60) }.getOrNull() }
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn("CFG", bm, bp, { scope.launch { tools.soExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", tools.decompileTarget.ifBlank { "main" }) }.getOrNull() }
+                    tools.soExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "emulate" -> {
                 OutlinedTextField(value = tools.emulateSymbol, onValueChange = { tools.emulateSymbol = it },
-                    label = { Text(if (zh) "函数符号" else "Symbol") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(8.dp),
-                    placeholder = { Text("JNI_OnLoad", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) })
-                Button(onClick = {
-                    val sym = tools.emulateSymbol.trim()
-                    if (sym.isEmpty()) { tools.emulateError = if (zh) "输入函数符号" else "Enter symbol"; return@Button }
+                    label = { Text(if (zh) "符号" else "Sym") }, singleLine = true,
+                    modifier = Modifier.width(60.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall, fontSize = 9.sp, shape = RoundedCornerShape(4.dp))
+                SmBtn(if (zh) "模拟" else "Emu", bm, bp, { val sym = tools.emulateSymbol.trim(); if (sym.isEmpty()) return@SmBtn
                     scope.launch { tools.emulateRunning = true; tools.emulateError = ""
                         val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", sym, org.json.JSONArray(), true) }.getOrNull() }
-                        tools.emulateRunning = false
-                        if (r != null && r.optBoolean("ok", false)) tools.emulateResult = toolSummarize(r)
-                        else tools.emulateError = r?.optString("error") ?: if (zh) "模拟失败" else "Failed"
+                        tools.emulateRunning = false; if (r != null && r.optBoolean("ok", false)) tools.emulateResult = toolSummarize(r)
+                        else tools.emulateError = r?.optString("error") ?: if (zh) "失败" else "Failed"
                     }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.emulateSymbol.isNotBlank() && !tools.emulateRunning, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    if (tools.emulateRunning) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    else { Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp)); Spacer(Modifier.size(4.dp)) }
-                    Text(if (zh) "模拟执行" else "Emulate", style = MaterialTheme.typography.labelMedium, fontSize = 12.sp)
-                }
-                if (tools.emulateError.isNotBlank()) Text(tools.emulateError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.size(4.dp))
-                // 额外功能
-                Button(onClick = {
-                    scope.launch { tools.emulateExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", tools.emulateSymbol.ifBlank { "JNI_OnLoad" }, org.json.JSONArray(), true) }.getOrNull() }
-                        tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先执行模拟" else "Run emulate first"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📟 寄存器查看" else "📟 Registers", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    scope.launch { tools.emulateExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", 0L, 256) }.getOrNull() }
-                        tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先执行模拟" else "Run emulate first"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "💾 内存 Dump" else "💾 Mem Dump", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
+                }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.emulateSymbol.isNotBlank() && !tools.emulateRunning, loading = tools.emulateRunning)
+                SmBtn(if (zh) "寄存器" else "Regs", bm, bp, { scope.launch { tools.emulateExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", tools.emulateSymbol.ifBlank { "JNI_OnLoad" }, org.json.JSONArray(), true) }.getOrNull() }
+                    tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先模拟" else "emu first"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn("Mem", bm, bp, { scope.launch { tools.emulateExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", 0L, 256) }.getOrNull() }
+                    tools.emulateExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else if (zh) "先模拟" else "emu first"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "frida" -> {
-                OutlinedTextField(value = tools.fridaScript, onValueChange = { tools.fridaScript = it },
-                    label = { Text("Frida JS") }, modifier = Modifier.fillMaxWidth().height(80.dp),
-                    textStyle = MaterialTheme.typography.bodySmall, shape = RoundedCornerShape(8.dp))
-                // 主按钮：校验脚本
-                Button(onClick = { tools.fridaStatus = if (zh) "脚本已就绪，通过MCP下发" else "Script ready, deliver via MCP" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "✅ 校验脚本" else "✅ Validate", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Text(if (zh) "Frida 功能需 root + frida-server" else "Frida needs root + frida-server", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                Spacer(Modifier.size(2.dp))
-                // 扩展功能(需root)
-                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔗 连接设备" else "🔗 Attach", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📤 加载脚本" else "📤 Load Script", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔍 Hook 类" else "🔍 Hook Class", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = { tools.fridaStatus = if (zh) "需 root 设备 + 运行 frida-server" else "Needs root + frida-server" }, modifier = btnMod, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🛡️ SSL Pinning 绕过" else "🛡️ SSL Bypass", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
+                SmBtn(if (zh) "校验" else "Valid", bm, bp, { tools.fridaStatus = if (zh) "脚本已就绪" else "Ready" }, enabled = true)
+                SmBtn(if (zh) "连接" else "Attach", bm, bp, { tools.fridaStatus = if (zh) "需root" else "need root" }, enabled = true)
+                SmBtn("Hook", bm, bp, { tools.fridaStatus = if (zh) "需root" else "need root" }, enabled = true)
             }
             "rebuild" -> {
-                // 主功能
-                Button(onClick = {
-                    scope.launch { tools.rebuildRunning = true; tools.rebuildError = ""; tools.rebuildResult = ""
-                        val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editCheck(tools.sharedWorkspaceId, "") }.getOrNull() }
-                        if (c != null && c.optBoolean("ok", false)) tools.rebuildCheck = toolSummarize(c)
-                        else tools.rebuildError = c?.optString("error") ?: if (zh) "校验失败" else "Check failed"
-                        val b = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
-                        val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
-                        tools.rebuildRunning = false
-                        if (b != null && b.optBoolean("ok", false)) tools.rebuildResult = toolSummarize(b)
-                        else tools.rebuildError = b?.optString("error") ?: tools.rebuildError
-                        tools.rebuildOutputs = if (o?.optBoolean("ok", false) == true) toolSummarize(o) else if (zh) "无" else "none"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.rebuildRunning, shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    if (tools.rebuildRunning) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    else Text(if (zh) "🔨 校验并回编" else "🔨 Check & Build", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                if (tools.rebuildError.isNotBlank()) Text(tools.rebuildError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.size(4.dp))
-                // 额外功能
-                Button(onClick = {
-                    scope.launch { tools.rebuildExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
-                        tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无补丁" else "no patches"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🩹 Hex 补丁" else "🩹 Hex Patch", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    scope.launch { tools.rebuildExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "symbols", "", 60) }.getOrNull() }
-                        tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无符号" else "no symbols"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "✏️ 符号列表" else "✏️ Symbols", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                // 编辑文本
-                Button(onClick = {
-                    scope.launch { tools.rebuildExtra = ""
-                        val loc = tools.decompileTarget.ifBlank { "main" }
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 20) }.getOrNull() }
-                        tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无字符串" else "no strings"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📝 字符串列表" else "📝 Strings", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
+                SmBtn(if (zh) "回编" else "Build", bm, bp, { scope.launch { tools.rebuildRunning = true; tools.rebuildError = ""; tools.rebuildResult = ""
+                    val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editCheck(tools.sharedWorkspaceId, "") }.getOrNull() }
+                    if (c != null && c.optBoolean("ok", false)) tools.rebuildCheck = toolSummarize(c)
+                    else tools.rebuildError = c?.optString("error") ?: if (zh) "失败" else "fail"
+                    val b = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
+                    val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
+                    tools.rebuildRunning = false; if (b != null && b.optBoolean("ok", false)) tools.rebuildResult = toolSummarize(b)
+                    else tools.rebuildError = b?.optString("error") ?: tools.rebuildError
+                    tools.rebuildOutputs = if (o?.optBoolean("ok", false) == true) toolSummarize(o) else if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.rebuildRunning, loading = tools.rebuildRunning)
+                SmBtn(if (zh) "补丁" else "Patch", bm, bp, { scope.launch { tools.rebuildExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
+                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "符号" else "Sym", bm, bp, { scope.launch { tools.rebuildExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "symbols", "", 60) }.getOrNull() }
+                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "字符串" else "Str", bm, bp, { scope.launch { tools.rebuildExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 20) }.getOrNull() }
+                    tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "editor" -> {
-                Text(if (zh) "十六进制查看" else "Hex View", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 OutlinedTextField(value = tools.disasmAddr, onValueChange = { tools.disasmAddr = it },
-                    label = { Text(if (zh) "地址/偏移" else "Addr/Offset") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(8.dp),
-                    placeholder = { Text("0x0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) })
-                Button(onClick = {
-                    scope.launch { tools.decompileExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "Hex查看失败" else "hexdump failed"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "🔢 Hex 查看" else "🔢 Hex View", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    scope.launch { tools.decompileExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 30) }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无字符串" else "no strings"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📝 文本查看" else "📝 Text View", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    scope.launch { tools.decompileExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editHex(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, org.json.JSONArray(), false) }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "编辑失败" else "edit failed"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "✏️ Hex 编辑" else "✏️ Hex Edit", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
-                Button(onClick = {
-                    scope.launch { tools.decompileExtra = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 30) }.getOrNull() }
-                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无对比" else "no diff"
-                    }
-                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
-                    Text(if (zh) "📊 对比" else "📊 Diff", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
-                }
+                    label = { Text(if (zh) "地址" else "Addr") }, singleLine = true,
+                    modifier = Modifier.width(55.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall, fontSize = 9.sp, shape = RoundedCornerShape(4.dp))
+                SmBtn("Hex", bm, bp, { scope.launch { tools.decompileExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "文本" else "Text", bm, bp, { scope.launch { tools.decompileExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 30) }.getOrNull() }
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "编辑" else "Edit", bm, bp, { scope.launch { tools.decompileExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editHex(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, org.json.JSONArray(), false) }.getOrNull() }
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "对比" else "Diff", bm, bp, { scope.launch { tools.decompileExtra = ""
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 30) }.getOrNull() }
+                    tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无" else "none"
+                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
         }
     }
 }
 
 @Composable
+private fun SmBtn(label: String, modifier: Modifier, padding: PaddingValues, onClick: () -> Unit, enabled: Boolean = true, loading: Boolean = false) {
+    Button(onClick = onClick, modifier = modifier, enabled = enabled && !loading, shape = RoundedCornerShape(4.dp), contentPadding = padding) {
+        if (loading) CircularProgressIndicator(Modifier.size(10.dp), strokeWidth = 1.5.dp)
+        else Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp)
+    }
+}
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     var detailMode by androidx.compose.runtime.remember { mutableStateOf(false) }
     // 结果标签页：收集所有非空的结果
@@ -519,8 +345,15 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
         // 顶部：标题
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(if (zh) "输出结果" else "Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            if (resultTabs.isNotEmpty()) {
-                Text("${selectedTab + 1}/${resultTabs.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (resultTabs.isNotEmpty()) {
+                    Text("${selectedTab + 1}/${resultTabs.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Button(
+                    onClick = { detailMode = !detailMode },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp),
+                ) { Text(if (detailMode) (if (zh) "简洁" else "Simple") else (if (zh) "详细" else "Detail"), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp) }
             }
         }
         Spacer(Modifier.size(4.dp))

@@ -244,6 +244,16 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
                     Text(if (zh) "⚡ 反汇编" else "⚡ Disasm", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
                 }
+                // Hex 查看
+                Button(onClick = {
+                    scope.launch { tools.decompileExtra = ""
+                        val addr = tools.disasmAddr.ifBlank { "0x0" }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr, 0, 256) }.getOrNull() }
+                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "Hex查看失败" else "hexdump failed"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "🔢 Hex 查看" else "🔢 Hex View", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
             }
             "unpack" -> {
                 Button(onClick = {

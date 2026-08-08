@@ -28,6 +28,8 @@ class ToolPagesState {
     var decompileRunning by mutableStateOf(false)
     /** 反编译页的额外功能结果（函数列表/反汇编等） */
     var decompileExtra by mutableStateOf("")
+    /** 反汇编输入地址 */
+    var disasmAddr by mutableStateOf("")
 
     // ---- 模拟页 ----
     var emulateSymbol by mutableStateOf("")

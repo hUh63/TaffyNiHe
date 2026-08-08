@@ -230,6 +230,20 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
                     Text(if (zh) "🔍 函数列表" else "🔍 Functions", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
                 }
+                // 反汇编
+                OutlinedTextField(value = tools.disasmAddr, onValueChange = { tools.disasmAddr = it },
+                    label = { Text(if (zh) "反汇编地址" else "Disasm addr") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(8.dp),
+                    placeholder = { Text("0x1234", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) })
+                Button(onClick = {
+                    scope.launch { tools.decompileExtra = ""
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr.trim(), null, "auto") }.getOrNull() }
+                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "反汇编失败" else "disasm failed"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "⚡ 反汇编" else "⚡ Disasm", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
             }
             "unpack" -> {
                 Button(onClick = {
@@ -250,6 +264,15 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
                     Text(if (zh) "🔧 提取 SO" else "🔧 Extract SO", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                // DEX 类分析
+                Button(onClick = {
+                    scope.launch { tools.unpackExtra = ""
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "classes", "", 30) }.getOrNull() }
+                        tools.unpackExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无DEX类" else "no dex classes"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "📚 DEX 类" else "📚 DEX Classes", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
                 }
                 Text(if (zh) "需要 root + frida-server 才能脱壳" else "Needs root + frida-server for unpack", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
             }
@@ -392,6 +415,16 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
                     Text(if (zh) "✏️ 符号列表" else "✏️ Symbols", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                // 编辑文本
+                Button(onClick = {
+                    scope.launch { tools.rebuildExtra = ""
+                        val loc = tools.decompileTarget.ifBlank { "main" }
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 20) }.getOrNull() }
+                        tools.rebuildExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无字符串" else "no strings"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "📝 字符串列表" else "📝 Strings", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
                 }
             }
         }

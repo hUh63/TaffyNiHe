@@ -95,14 +95,14 @@ internal fun AnalysisWorkspace(
                 Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.weight(1f))
-            // 工具展开/收回按钮
+            // 工具展开/收回按钮（显示当前工具名）
+            val curTool = toolDefs.firstOrNull { it.key == state.activeTool }
             Button(onClick = { toolsExpanded = !toolsExpanded },
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                shape = RoundedCornerShape(6.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
-                Text(if (toolsExpanded) "▼" else "◀", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                shape = RoundedCornerShape(6.dp)) {
+                Text(if (zh) (curTool?.labelZh ?: "工具") else (curTool?.labelEn ?: "Tools"), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
                 Spacer(Modifier.size(3.dp))
-                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                Text(if (toolsExpanded) "▲" else "▼", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
             }
             WorkspacePicker(state, zh)
         }
@@ -595,6 +595,7 @@ private data class R2Tab(val label: String, val text: String)
 /** 简洁模式：结构化卡片，类似 ElfOverviewPanel 风格 */
 @Composable
 internal fun DataCard(title: String, text: String, zh: Boolean) {
+    // 简洁模式 = 中文总结分析出了什么（结构化卡片）
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
     Card(
@@ -606,15 +607,15 @@ internal fun DataCard(title: String, text: String, zh: Boolean) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.size(6.dp))
             if (json == null) {
-                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp, maxLines = 10, overflow = TextOverflow.Ellipsis)
             } else {
-                SmartSummary(json, zh, detailed = false)
+                SmartSummary(json, zh, detailed = true)
             }
         }
     }
 }
 
-/** 详细模式：完整结构化展示 */
+/** 详细模式：具体的分析数据（原始 JSON / 地址 / 字节等） */
 @Composable
 private fun DetailCard(title: String, text: String, zh: Boolean) {
     if (text.isBlank()) return
@@ -628,9 +629,11 @@ private fun DetailCard(title: String, text: String, zh: Boolean) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.size(6.dp))
             if (json == null) {
-                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+                // 纯文本：完整显示
+                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 16.sp)
             } else {
-                SmartSummary(json, zh, detailed = true)
+                // 原始 JSON 完整展示（格式化）
+                Text(json.toString(2), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 16.sp)
             }
         }
     }

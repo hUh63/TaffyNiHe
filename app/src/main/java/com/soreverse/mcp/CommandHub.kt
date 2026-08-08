@@ -186,11 +186,12 @@ internal fun CommandHubScreen(
             ConnDot(running = running, zh = zh)
         }
 
-        // 中央星系（星核 + 卫星环绕）
+        // 中央星系（星核 + 卫星环绕），限制最大高度
         Box(
             Modifier
                 .fillMaxWidth()
-                .weight(0.65f),
+                .weight(1f)
+                .heightIn(max = 360.dp),
             contentAlignment = Alignment.Center,
         ) {
             SatelliteSystem(
@@ -207,7 +208,6 @@ internal fun CommandHubScreen(
             settings = settings,
             onNavigateSettings = onNavigateSettings,
             onAnalyze = { onNavigate(MainTab.Tools, null) },
-            modifier = Modifier.weight(0.2f),
         )
 
         // 工具列表入口文本
@@ -338,7 +338,6 @@ private fun ServiceStatusRow(
     settings: SettingsStore,
     onNavigateSettings: (SettingsDest) -> Unit,
     onAnalyze: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val dirConfigured = settings.treeUri != null || settings.useDefaultWorkDir
@@ -411,7 +410,7 @@ private fun ServiceStatusRow(
             )
         }
         Row(
-            modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {

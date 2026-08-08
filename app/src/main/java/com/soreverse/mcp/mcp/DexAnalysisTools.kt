@@ -470,7 +470,8 @@ object DexAnalysisTools {
                 }
                 val writeToMethod = dexPoolClass.getMethod("writeTo",
                     Class.forName("com.android.tools.smali.dexlib2.writer.io.DataStore"))
-                FileDataStore(outFile).use { store -> writeToMethod.invoke(dexPool, store) }
+                val store = FileDataStore(outFile)
+                try { writeToMethod.invoke(dexPool, store) } finally { store.close() }
                 tempDex.delete()
 
                 ok(JSONObject()
@@ -528,8 +529,10 @@ object DexAnalysisTools {
         return "($params)${method.returnType}"
     }
 
+    // MethodReference 在不同 dexlib2 版本中 parameters 成员的可见性不同,
+    // 这里通过 Method 接口(有暴露 parameters)间接构造类型签名。
     private fun buildDescriptor(ref: MethodReference): String {
-        val params = ref.parameters.joinToString("") { it.type }
+        val params = ref.parameters.joinToString("") { it.toString() }
         return "($params)${ref.returnType}"
     }
 

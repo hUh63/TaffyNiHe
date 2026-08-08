@@ -49,8 +49,7 @@ object StringScanTool {
     )
 
     val scan: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "string_scan",
+        override val meta = ToolMeta("taffy_string_scan",
             "【敏感信息扫描】扫 APK/DEX/SO/任意文件里的敏感字符串: URL、IP、域名、邮箱、JWT、私钥、云 AK-SK(AWS/Google/阿里云)、疑似密钥密码字段。APK 会遍历内部所有条目。逆向找接口/后门/硬编码密钥/加密配置必备。可用 category 只看某一类。",
             "Scan APK/DEX/SO/any file for sensitive strings: URLs, IPs, domains, emails, JWTs, private keys, cloud AK-SK (AWS/Google/Aliyun), suspected key/password fields. APKs are scanned entry-by-entry. Essential for finding endpoints, backdoors, hardcoded secrets.",
             "search", ToolClass.EXTRA, heavy = true,

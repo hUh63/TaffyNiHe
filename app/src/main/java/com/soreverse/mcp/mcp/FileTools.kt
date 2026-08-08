@@ -21,8 +21,7 @@ object FileTools {
 
     // ── file_list ──
     val list = EngineToolHandler(
-        ToolMeta(
-            "file_list",
+        ToolMeta("taffy_file_list",
             "【文件列表】列出目录内容（文件名/大小/修改时间/是目录还是文件）。支持 limit/cursor 分页和 filter 过滤。",
             "List directory contents: name, size, modification time, type. Supports pagination and filtering.",
             "file", ToolClass.EXTRA,
@@ -92,8 +91,7 @@ object FileTools {
 
     // ── file_read ──
     val read = EngineToolHandler(
-        ToolMeta(
-            "file_read",
+        ToolMeta("taffy_file_read",
             "【文件读取】读文件内容。文字模式按行范围返回; base64 模式把文件以 base64 编码返回（用于二进制/图片/so 等）; hex 模式返回十六进制转储。",
             "Read file content. Text mode (default) returns lines in range; base64 mode returns base64-encoded bytes; hex mode returns a hex dump.",
             "file", ToolClass.CORE,
@@ -177,8 +175,7 @@ object FileTools {
 
     // ── file_write ──
     val write = EngineToolHandler(
-        ToolMeta(
-            "file_write",
+        ToolMeta("taffy_file_write",
             "【文件写入】写入或追加内容到文件。自动创建不存在的父目录。mode=append 追加到文件末尾; mode=overwrite 覆盖; mode=create 仅新建（已存在报错）。支持 text/base64 两种输入格式。",
             "Write or append text/base64 content to a file. Auto-creates parent directories. mode=append appends; overwrite replaces; create only writes to new files.",
             "file", ToolClass.CORE,
@@ -224,8 +221,7 @@ object FileTools {
 
     // ── file_search ──
     val search = EngineToolHandler(
-        ToolMeta(
-            "file_search",
+        ToolMeta("taffy_file_search",
             "【文件内容搜索】在文本文件中搜索匹配 pattern 的行。支持正则和纯文本匹配, 可限制搜索范围和结果数量。",
             "Search text files for lines matching a pattern. Supports regex and plain text matching.",
             "file", ToolClass.EXTRA,
@@ -280,8 +276,7 @@ object FileTools {
 
     // ── file_replace ──
     val replace = EngineToolHandler(
-        ToolMeta(
-            "file_replace",
+        ToolMeta("taffy_file_replace",
             "【文件内容替换】在文本文件中查找并替换文本。支持正则捕获组替换（如 $1）。mode=all 替换所有匹配; mode=first 替换第一个; mode=lines 只替换指定行号。",
             "Find and replace text in a file. Supports regex capture groups ($1). mode=all replaces all matches; mode=first replaces only the first; mode=lines replaces on specific line numbers.",
             "file", ToolClass.EXTRA,
@@ -418,8 +413,7 @@ object FileTools {
     }
 
     val diff = EngineToolHandler(
-        ToolMeta(
-            "file_diff",
+        ToolMeta("taffy_file_diff",
             "【文本差异对比】对比两个文件的差异, 输出格式类似 diff -u。支持文本和 base64 两种输入方式。",
             "Compare two text files. Output format similar to diff -u. Supports file paths and direct text input.",
             "file", ToolClass.EXTRA,
@@ -510,8 +504,7 @@ object FileTools {
 
     // ── file_rename ──
     val rename = EngineToolHandler(
-        ToolMeta(
-            "file_rename",
+        ToolMeta("taffy_file_rename",
             "【文件重命名/移动】重命名或移动文件/目录。如果目标路径在不同目录则执行移动。",
             "Rename or move a file/directory. Moving across directories is supported.",
             "file", ToolClass.EXTRA,
@@ -536,8 +529,7 @@ object FileTools {
 
     // ── file_copy ──
     val copy = EngineToolHandler(
-        ToolMeta(
-            "file_copy",
+        ToolMeta("taffy_file_copy",
             "【文件复制】复制文件或目录（目录递归复制）。",
             "Copy a file or directory (recursive for directories).",
             "file", ToolClass.EXTRA,
@@ -563,8 +555,7 @@ object FileTools {
 
     // ── file_delete ──
     val delete = EngineToolHandler(
-        ToolMeta(
-            "file_delete",
+        ToolMeta("taffy_file_delete",
             "【文件删除】删除文件或空目录。目录非空时需设置 recursive=true。",
             "Delete a file or empty directory. Set recursive=true for non-empty directories.",
             "file", ToolClass.EXTRA,
@@ -586,8 +577,7 @@ object FileTools {
 
     // ── file_batch_rename ──
     val batchRename = EngineToolHandler(
-        ToolMeta(
-            "file_batch_rename",
+        ToolMeta("taffy_file_batch_rename",
             "【批量重命名】按替换规则或正则批量重命名目录中的文件。支持前后缀添加、文本替换、正则替换、序号填充。dryRun=true 预览结果不执行。",
             "Batch rename files in a directory. Supports prefix/suffix, text replacement, regex replacement, and sequence numbering. dryRun previews without executing.",
             "file", ToolClass.EXTRA,

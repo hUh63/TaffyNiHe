@@ -23,8 +23,7 @@ object ApkEditTools {
 
     /** 修改已 decode 目录里的 AndroidManifest.xml: 包名重命名 / 加减权限 / 加减组件 */
     val manifestEdit: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_manifest_edit",
+        override val meta = ToolMeta("taffy_apk_manifest_edit",
             "【Manifest 编辑】修改已 decode 的 APK 目录里的 AndroidManifest.xml。action=rename_package 改包名; add_permission/remove_permission 加减权限; add_component/remove_component 加减组件(activity/service/receiver/provider); set_debuggable/set_exported 改属性。改完用 apk_rebuild(build) 回编。",
             "Edit AndroidManifest.xml in a decoded APK dir. action=rename_package; add_permission/remove_permission; add_component/remove_component; set_debuggable/set_exported. Rebuild with apk_rebuild(build) after editing.",
             "build", ToolClass.EXTRA, heavy = false,
@@ -138,8 +137,7 @@ object ApkEditTools {
 
     /** 向已 decode 目录注入 SO 文件到 lib/arm64-v8a/ (或其他 abi) */
     val injectSo: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_inject_so",
+        override val meta = ToolMeta("taffy_apk_inject_so",
             "【SO 注入】把 .so 文件注入到已 decode 的 APK 目录的 lib/<abi>/ 下。用于注入自定义 hook so、补缺失的 so、替换现有 so。改完用 apk_rebuild(build) 回编。",
             "Inject a .so file into a decoded APK dir under lib/<abi>/. Rebuild with apk_rebuild(build) after injecting.",
             "build", ToolClass.EXTRA, heavy = false,
@@ -178,8 +176,7 @@ object ApkEditTools {
 
     /** 替换已 decode 目录里的应用图标 */
     val setIcon: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_set_icon",
+        override val meta = ToolMeta("taffy_apk_set_icon",
             "【图标替换】替换已 decode APK 目录里的应用图标。自动找 res/mipmap-*/ic_launcher.png 和 res/drawable-*/ic_launcher.png 替换。改完用 apk_rebuild(build) 回编。",
             "Replace the app icon in a decoded APK dir. Finds and replaces ic_launcher.png in res/mipmap-*/ and res/drawable-*/. Rebuild with apk_rebuild(build).",
             "build", ToolClass.EXTRA, heavy = false,
@@ -220,8 +217,7 @@ object ApkEditTools {
 
     /** 计算文件哈希(MD5/SHA1/SHA256) — 参考"我的工具"的 hash_file */
     val hashFile: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_hash_file",
+        override val meta = ToolMeta("taffy_apk_hash_file",
             "【文件哈希】计算任意文件的 MD5/SHA1/SHA256 哈希。用于校验文件完整性、比对 APK/SO 是否被篡改、签名校验辅助。",
             "Compute MD5/SHA1/SHA256 hash of any file. For integrity checks, APK/SO tamper detection.",
             "utility", ToolClass.EXTRA, heavy = false,
@@ -254,8 +250,7 @@ object ApkEditTools {
 
     /** 验证 APK 签名完整性 — 参考"我的工具"的 verify_apk */
     val verifyApk: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_verify",
+        override val meta = ToolMeta("taffy_apk_verify",
             "【APK 签名验证】验证 APK 的签名完整性,检查 v1/v2/v3 签名是否有效、内容是否被篡改。用于确认 APK 未被二次打包或篡改。",
             "Verify APK signature integrity. Checks v1/v2/v3 signature validity and content tampering.",
             "build", ToolClass.EXTRA, heavy = false,

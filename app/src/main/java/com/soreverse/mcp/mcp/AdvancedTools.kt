@@ -28,8 +28,7 @@ object AdvancedTools {
 
     /** 交叉引用: 查谁引用了某地址/函数, 或某地址引用了谁 */
     val soXref: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "so_xref",
+        override val meta = ToolMeta("taffy_so_xref",
             "【SO 交叉引用】查找谁调用了某函数/地址(to), 或某函数/地址调用了什么(from)。输入 workspaceId + locator(函数名/VA/符号), direction=to 查[被谁调用](逆向最常用, 定位关键函数的调用者), direction=from 查[调用了谁]。包装 rizin rzXrefs。",
             "Cross-reference search. direction=to finds who calls a function/address (most useful for locating callers); direction=from finds what it calls. Wraps rizin rzXrefs.",
             "soanalyze", ToolClass.EXTRA, heavy = false,
@@ -54,8 +53,7 @@ object AdvancedTools {
 
     /** 函数控制流图 */
     val soCfg: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "so_cfg",
+        override val meta = ToolMeta("taffy_so_cfg",
             "【SO 控制流图】生成指定函数的控制流图(CFG), 展示基本块和跳转关系。输入 workspaceId + locator(函数名/VA)。通过 rizin agf 命令生成, 返回图的 JSON 描述(节点=基本块, 边=跳转)。用于分析函数分支逻辑、循环结构。",
             "Control flow graph for a function. Generates CFG via rizin agf command. Returns JSON with nodes (basic blocks) and edges (jumps). Useful for analyzing branching and loop structure.",
             "soanalyze", ToolClass.EXTRA, heavy = false,
@@ -80,8 +78,7 @@ object AdvancedTools {
 
     /** VA↔FileOffset 地址映射 */
     val soAddrMap: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "so_addr_map",
+        override val meta = ToolMeta("taffy_so_addr_map",
             "【地址映射】虚拟地址(VA)↔文件偏移(FileOffset)互转。action=va_to_offset: VA→偏移; action=offset_to_va: 偏移→VA; action=sections: 列出所有节区及其地址范围。逆向时定位 IDA/Ghidra 中的地址对应 SO 文件的哪个位置。通过 rizin 命令实现。",
             "VA↔FileOffset address mapping. action=va_to_offset, offset_to_va, or sections. Helps locate IDA/Ghidra addresses in the SO file. Uses rizin commands.",
             "soanalyze", ToolClass.EXTRA, heavy = false,
@@ -117,8 +114,7 @@ object AdvancedTools {
 
     /** 字节模式搜索 */
     val soSearchBytes: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "so_search_bytes",
+        override val meta = ToolMeta("taffy_so_search_bytes",
             "【SO 字节搜索】在 SO 文件中搜索十六进制字节模式(支持通配符 ??)。如搜索 90 31 FF 6B 找到指令位置, 搜索 48 8B ?? ?? 找到寄存器加载。返回匹配的虚拟地址和偏移。包装 rizin rzSearchBytes。",
             "Hex byte pattern search in SO file (supports ?? wildcards). Returns matched virtual addresses and offsets. Wraps rizin rzSearchBytes.",
             "soanalyze", ToolClass.EXTRA, heavy = false,
@@ -145,8 +141,7 @@ object AdvancedTools {
 
     /** APK 统一搜索: 跨 ZIP条目/DEX/资源 搜索 */
     val apkSearch: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_search",
+        override val meta = ToolMeta("taffy_apk_search",
             "【APK 统一搜索】在 APK 内统一搜索: action=zip_entries 按 ZIP 条目名搜(如 classes、AndroidManifest); action=file_names 搜文件路径; action=classes_dex 搜 DEX 中的类名; action=strings 搜 APK 内所有 DEX 的字符串(用 DexKit)。返回匹配条目列表。参考 MT管理器 mt_apk_search。",
             "Unified APK search. action=zip_entries (search ZIP entry names); file_names; classes_dex (class names in DEX); strings (DEX strings via DexKit). Returns matched entries. Inspired by MT mt_apk_search.",
             "apk", ToolClass.EXTRA, heavy = true,
@@ -242,8 +237,7 @@ object AdvancedTools {
 
     /** APK 内 ZIP 条目级字节读写(补丁) */
     val apkPatchBytes: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_patch_bytes",
+        override val meta = ToolMeta("taffy_apk_patch_bytes",
             "【APK 字节补丁(CAS)】读取或写入 APK 内指定 ZIP 条目的原始字节。action=read: 读取指定条目的字节(支持 offset+length); action=write: 写入字节到指定条目(带 CAS 乐观锁: 先校验 expectedHex 匹配当前字节才写入, 不匹配返回当前字节让调用方重试); action=verify: 验证指定偏移的字节是否匹配。参考 MT管理器 mt_apk_read_bytes / mt_apk_patch_bytes 的 CAS 保护机制。",
             "Read/write raw bytes of a ZIP entry inside APK with CAS protection. action=read; write (with expectedHex optimistic lock); verify. Inspired by MT mt_apk_read_bytes / mt_apk_patch_bytes CAS.",
             "apk", ToolClass.EXTRA, heavy = false,
@@ -392,8 +386,7 @@ object AdvancedTools {
 
     /** 列出 APK 内的资源文件 */
     val apkResourceList: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_resource_list",
+        override val meta = ToolMeta("taffy_apk_resource_list",
             "【APK 资源列表】列出 APK 内的资源文件。action=all 列出所有 res/ 和 assets/ 下的文件; action=drawable 列出图标/图片; action=layout 列出布局; action=values 列出值资源(strings/styles/themes); action=native 列出 lib/ 下的 SO 文件。参考 MT管理器的资源浏览能力。",
             "List resource files inside APK. action=all (all res/assets files); drawable; layout; values; native (lib/*.so). Inspired by MT resource browser.",
             "apk", ToolClass.EXTRA, heavy = false,

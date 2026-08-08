@@ -32,8 +32,7 @@ object SmaliEditTools {
 
     /** Smali 增量编辑 */
     val smaliEdit: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "smali_edit",
+        override val meta = ToolMeta("taffy_smali_edit",
             "【Smali 增量编辑】不改包整个 APK, 只提取/替换单个类的 smali。action=list_classes 列出 APK 中的类(按包名过滤); action=extract 提取指定类的 smali 代码; action=replace 用新 smali 替换指定类(自动定位 DEX→重编→写回 APK); action=list_methods 列出类的方法签名。参考 MT管理器的 edit_open/edit_text 增量流程, 但用 Google smali 库实现。多 DEX 自动定位。",
             "Incremental smali editing without full APK unpacking. action=list_classes lists classes (filter by package); extract gets smali for one class; replace writes new smali (auto-locates DEX→recompiles→writes back to APK); list_methods lists method signatures. Inspired by MT's edit_open/edit_text, uses Google smali library. Auto multi-DEX.",
             "build", ToolClass.EXTRA, heavy = true,

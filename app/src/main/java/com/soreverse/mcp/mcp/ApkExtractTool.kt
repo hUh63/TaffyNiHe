@@ -18,8 +18,7 @@ import java.util.zip.ZipFile
 object ApkExtractTool {
 
     val extract: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_extract",
+        override val meta = ToolMeta("taffy_apk_extract",
             "【资源提取】从 APK/ZIP 里按条件把文件抠到工作目录。action=list 先列条目(可配 filter 过滤); action=extract 提取匹配的文件到 filesDir/extracted/<apk名>/。典型: 抠 .so 喂给 so_open 分析、抠 assets 看配置、抠 dex 反编译。filter 支持前缀(lib/)或后缀(.so)或包含关键字。",
             "Extract files from an APK/ZIP to the work dir. action=list to list entries (with optional filter); action=extract to pull matching files into filesDir/extracted/<apk>/. Typical: pull .so for so_open, assets for config, dex for decompile.",
             "workspace", ToolClass.EXTRA, heavy = true,

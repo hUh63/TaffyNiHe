@@ -27,8 +27,7 @@ import java.io.File
 object ApkEditorTool {
 
     val rebuild: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_rebuild",
+        override val meta = ToolMeta("taffy_apk_rebuild",
             "【APK 完整回编/合并/去混淆】APKEditor 引擎(纯 Java,aapt 无关)。action=decode 把 APK 拆成可读可改的目录(资源+dex/smali); action=build 把改好的目录回编成完整 APK; action=merge 把拆分包(xapk/apks/apkm)合并成单个可安装 APK; action=refactor 还原被混淆的资源名。回编后记得用 apk_sign 签名再装。",
             "Full APK decode/build/merge/refactor via APKEditor (pure Java, aapt-independent). action=decode splits an APK into an editable dir (resources + dex/smali); action=build recompiles that dir back into a full APK; action=merge combines split bundles (xapk/apks/apkm) into a single installable APK; action=refactor restores obfuscated resource names. Sign the output with apk_sign before installing.",
             "build", ToolClass.EXTRA, heavy = true,

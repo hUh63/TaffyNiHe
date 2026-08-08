@@ -44,8 +44,7 @@ object JadxTool {
     }
 
     val decompile: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "jadx_decompile",
+        override val meta = ToolMeta("taffy_jadx_decompile",
             "【DEX→Java 反编译】用 jadx 把 APK/DEX/JAR 反编译成可读 Java 源码。action=save 导出全部到目录并返回路径; action=class 反编译单个类(className)直接返回源码; action=list 列出所有类名。",
             "Decompile APK/DEX/JAR to readable Java using jadx. action=save exports everything to a directory; action=class returns source of one class (className); action=list returns all class names.",
             "decompile", ToolClass.EXTRA, heavy = true,

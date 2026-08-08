@@ -24,8 +24,7 @@ object ApkSignInfoTool {
             .joinToString(":") { "%02X".format(it) }
 
     val info: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_sign_info",
+        override val meta = ToolMeta("taffy_apk_sign_info",
             "【APK 签名证书查看】读 APK 的签名方案(v1/v2/v3/v4)、签名者证书(主体 CN/O、颁发者、序列号、有效期)、证书指纹(MD5/SHA1/SHA256)。用于校验签名真伪、拿原包指纹比对是否被二次打包、看用了哪些签名方案。",
             "Inspect APK signature: schemes (v1/v2/v3/v4), signer certificate (subject/issuer/serial/validity), and fingerprints (MD5/SHA1/SHA256). For verifying signatures, comparing original fingerprints against repackaged APKs, and checking which schemes are used.",
             "build", ToolClass.EXTRA, heavy = false,

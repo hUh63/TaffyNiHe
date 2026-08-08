@@ -45,8 +45,7 @@ object ApkDiffTool {
     }.getOrDefault("?")
 
     val diff: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_diff",
+        override val meta = ToolMeta("taffy_apk_diff",
             "【两 APK 对比】比较新旧两版 APK 差异: 新增/删除/内容变化的文件、权限增减、版本号。用于看版本更新改了什么、找新增的 so/dex/后门、对比原版与破解版。传 path(旧) 和 path2(新)。",
             "Compare two APKs: added/removed/changed files, permission changes, version. For seeing what an update changed, finding newly added so/dex/backdoors, comparing original vs cracked. Pass path (old) and path2 (new).",
             "diff", ToolClass.EXTRA, heavy = true,

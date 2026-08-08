@@ -21,8 +21,7 @@ import org.json.JSONObject
 object AnalyzeGuideTool {
 
     val guide: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "analyze_guide",
+        override val meta = ToolMeta("taffy_analyze_guide",
             "【深度分析取证攻略】为指定 SO 生成深度逆向分析的取证攻略（guide），引导 AI 按步骤调用 MCP 取证工具（so_open → analyze_cfg → analyze_xrefs → search_strings → read_disasm → analyze_crypto → emulate_call → analysis_report）收集证据，再由 AI 自行综合为报告。本工具不调用任何 AI 中转站，推理由调用方（外部 AI）自己完成。可传 path（SO 路径）或 workspaceId（已打开工作区）。设置 includeEvidence=true 时，额外打包返回该 SO 的完整证据快照供直接分析。",
             "Generate a deep-reverse-engineering forensics guide for a given SO, guiding the AI to collect evidence via MCP tools (so_open → analyze_cfg → analyze_xrefs → search_strings → read_disasm → analyze_crypto → emulate_call → analysis_report) and then synthesize a report itself. This tool calls no AI relay — reasoning is done by the caller (external AI). Pass path (SO path) or workspaceId (an opened workspace). Set includeEvidence=true to also return the SO's full evidence snapshot gathered locally.",
             "analyze", ToolClass.EXTRA, heavy = true,

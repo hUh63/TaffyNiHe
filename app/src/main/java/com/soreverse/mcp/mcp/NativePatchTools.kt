@@ -22,8 +22,7 @@ object NativePatchTools {
 
     /** Native 指令补丁 — 汇编新指令 + CAS 乐观锁替换 */
     val nativePatchInstructions: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "native_patch_instructions",
+        override val meta = ToolMeta("taffy_native_patch_instructions",
             "【Native 指令补丁】汇编新 ARM/ARM64 指令, 用 CAS(乐观锁)替换 SO 中指定地址的旧指令。先读旧字节(expectedHex), 匹配后才写入新指令, 不匹配则返回当前字节让调用方重试。参考 MT管理器的 native_patch_instructions, 同样有 expectedHex 保护。支持 ARM32/ARM64/Thumb。",
             "Patch native instructions: assemble new ARM/ARM64 code, CAS-replace old bytes at target address (with expectedHex optimistic lock). If expected hex doesn't match, returns current bytes for retry. Same CAS protection as MT. Supports ARM32/ARM64/Thumb.",
             "soanalyze", ToolClass.EXTRA, heavy = false,
@@ -105,8 +104,7 @@ object NativePatchTools {
 
     /** Native 字符串补丁 — CAS 替换 */
     val nativePatchString: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "native_patch_string",
+        override val meta = ToolMeta("taffy_native_patch_string",
             "【Native 字符串补丁】替换 SO 中的字符串。CAS 保护: 先读旧字符串(expectedText), 匹配才写入新字符串。自动处理 NUL 终止符和长度差异(截断或 padding)。参考 MT管理器的 native_patch_string。",
             "Patch string in SO. CAS protection: read expected text first, only write if matches. Handles NUL terminator and length differences (truncate or pad). Same as MT native_patch_string.",
             "soanalyze", ToolClass.EXTRA, heavy = false,
@@ -194,8 +192,7 @@ object NativePatchTools {
 
     /** APK 统一搜索 — 跨 DEX/Native/资源/ZIP, 带分页游标 */
     val apkUnifiedSearch: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_unified_search",
+        override val meta = ToolMeta("taffy_apk_unified_search",
             "【APK 统一搜索】跨 DEX 类名/方法名/字符串、Native 符号、资源文件名、ZIP 条目名统一搜索。返回分页结果, 支持游标翻页。比 apk_search 更强: 同时搜索 DEX+Native+资源, 一次调用覆盖全部。参考 MT管理器的 mt_apk_search 统一搜索能力。",
             "Unified APK search across DEX class/method/strings, native symbols, resource files, ZIP entries. Returns paginated results with cursor. Stronger than apk_search: searches DEX+Native+resources in one call. Inspired by MT mt_apk_search.",
             "apk", ToolClass.EXTRA, heavy = true,

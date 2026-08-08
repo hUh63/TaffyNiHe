@@ -200,8 +200,7 @@ object ArchiveTools {
 
     // ── archive_list ──
     val list = EngineToolHandler(
-        ToolMeta(
-            "archive_list",
+        ToolMeta("taffy_archive_list",
             "【压缩包列表】列出压缩包内的文件清单。支持 ZIP、TAR、TAR.GZ、GZip 格式。自动检测格式。",
             "List contents of an archive. Supports ZIP, TAR, TAR.GZ, GZip. Auto-detects format by magic bytes.",
             "archive", ToolClass.EXTRA,
@@ -313,8 +312,7 @@ object ArchiveTools {
 
     // ── archive_extract ──
     val extract = EngineToolHandler(
-        ToolMeta(
-            "archive_extract",
+        ToolMeta("taffy_archive_extract",
             "【压缩包解压】解压压缩包到指定目录。支持 ZIP、TAR、TAR.GZ。自动检测格式。",
             "Extract archive to a directory. Supports ZIP, TAR, TAR.GZ. Auto-detects format.",
             "archive", ToolClass.CORE,
@@ -429,8 +427,7 @@ object ArchiveTools {
 
     // ── archive_create ──
     val create = EngineToolHandler(
-        ToolMeta(
-            "archive_create",
+        ToolMeta("taffy_archive_create",
             "【压缩包创建】创建新的压缩包。支持 ZIP、TAR、TAR.GZ 格式。可添加多个文件/目录, 目录递归添加。支持压缩级别设置。",
             "Create a new archive. Supports ZIP, TAR, TAR.GZ. Add multiple files/directories (recursive).",
             "archive", ToolClass.CORE,
@@ -528,8 +525,7 @@ object ArchiveTools {
 
     // archive_add: add files to existing ZIP
     val add = EngineToolHandler(
-        ToolMeta(
-            "archive_add",
+        ToolMeta("taffy_archive_add",
             "【ZIP 添加文件】向已有的 ZIP 压缩包中添加新文件。如需更新已有文件请先 archive_delete 再 archive_add。",
             "Add new files to an existing ZIP archive. To update existing entries, delete first then add.",
             "archive", ToolClass.EXTRA,
@@ -611,8 +607,7 @@ object ArchiveTools {
 
     // archive_delete: remove entries from ZIP
     val delete = EngineToolHandler(
-        ToolMeta(
-            "archive_delete",
+        ToolMeta("taffy_archive_delete",
             "【ZIP 删除条目】从 ZIP 压缩包中删除指定文件/目录条目。支持通配符匹配。",
             "Delete entries from a ZIP archive. Supports wildcard patterns (*, ?).",
             "archive", ToolClass.EXTRA,
@@ -680,8 +675,7 @@ object ArchiveTools {
 
     // archive_rename: rename entry inside ZIP
     val rename = EngineToolHandler(
-        ToolMeta(
-            "archive_rename",
+        ToolMeta("taffy_archive_rename",
             "【ZIP 重命名条目】重命名 ZIP 压缩包中的条目（文件或目录）。支持单个条目重命名。",
             "Rename an entry inside a ZIP archive. Supports renaming individual files or directories.",
             "archive", ToolClass.EXTRA,

@@ -18,8 +18,7 @@ import org.json.JSONObject
 object FridaTool {
 
     val control: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "frida_control",
+        override val meta = ToolMeta("taffy_frida_control",
             "【Frida 动态插桩】管理内置 frida-server(需 root)。action=status 查状态; start 启动; stop 停止; ps 列出运行中的进程/应用(用于确定 hook 目标)。启动后 frida-server 监听 127.0.0.1:27042,可用 frida CLI 连接做 hook/spawn/脚本注入。",
             "Manage the built-in frida-server (requires root). action=status/start/stop/ps. Once started, frida-server listens on 127.0.0.1:27042 for hook/spawn/script injection.",
             "dynamic", ToolClass.EXTRA, heavy = true,

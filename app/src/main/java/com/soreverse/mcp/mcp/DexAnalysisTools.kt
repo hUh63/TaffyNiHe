@@ -30,8 +30,7 @@ object DexAnalysisTools {
 
     /** 方法级交叉引用 */
     val dexXref: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "dex_xref",
+        override val meta = ToolMeta("taffy_dex_xref",
             "【DEX 方法交叉引用】精确分析谁调用了某方法(to), 或某方法调用了什么(from)。用 dexlib2 AnalyzedInstruction 做指令级分析, 精确到调用指令和调用位置(方法+偏移)。比 MT管理器的 dex_xref 更详细: 返回调用者类名/方法名/指令偏移/调用类型(invoke-virtual/direct/static/super)。自动扫描多 DEX。",
             "Method-level cross-reference using dexlib2. Finds who calls a method (to) or what a method calls (from). Returns caller class/method/instruction offset/invoke type. More detailed than MT. Auto multi-DEX.",
             "decompile", ToolClass.EXTRA, heavy = true,
@@ -130,8 +129,7 @@ object DexAnalysisTools {
 
     /** 类大纲 */
     val dexClassOutline: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "dex_class_outline",
+        override val meta = ToolMeta("taffy_dex_class_outline",
             "【DEX 类大纲】完整类结构分析: 继承链(递归到Object)、接口列表、所有字段(含类型/修饰符)、所有方法(含签名/参数/返回值/修饰符/注解)。比 MT管理器的 dex_outline_class 更详细。自动定位多 DEX。",
             "Full class structure analysis: inheritance chain, interfaces, fields, methods, annotations. More detailed than MT. Auto multi-DEX.",
             "decompile", ToolClass.EXTRA, heavy = true,
@@ -234,8 +232,7 @@ object DexAnalysisTools {
 
     /** 方法字节码提取 */
     val dexMethodCode: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "dex_method_code",
+        override val meta = ToolMeta("taffy_dex_method_code",
             "【DEX 方法字节码】提取方法的 Dalvik 字节码(指令级), 含每条指令的偏移/操作码/寄存器/操作数。用于逆向分析加密算法、关键逻辑流程。自动定位多 DEX。",
             "Extract Dalvik bytecode (instruction-level) for a method. Auto multi-DEX.",
             "decompile", ToolClass.EXTRA, heavy = true,
@@ -323,8 +320,7 @@ object DexAnalysisTools {
 
     /** odex→正常DEX 转换 */
     val dexDeodex: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "dex_deodex",
+        override val meta = ToolMeta("taffy_dex_deodex",
             "【DEX Deodex】把 odexed/oat 文件转换为正常 DEX。用 BaksmaliOptions.deodex + dexlib2 分析器还原原始调用。",
             "Convert odexed/oat files to normal DEX. Uses BaksmaliOptions.deodex.",
             "build", ToolClass.EXTRA, heavy = true,
@@ -368,8 +364,7 @@ object DexAnalysisTools {
 
     /** 增量重编 */
     val dexIncrementalRebuild: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "dex_incremental_rebuild",
+        override val meta = ToolMeta("taffy_dex_incremental_rebuild",
             "【DEX 增量重编】只重编改动的类, 不全量重编整个 DEX。用 dexlib2 DexPool 保留未改动类的原始字节。比 smali_assemble(全量重编)快 10-50 倍。",
             "Incremental DEX rebuild: only recompile changed classes. 10-50x faster than full smali_assemble.",
             "build", ToolClass.EXTRA, heavy = true,

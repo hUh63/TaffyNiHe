@@ -42,8 +42,7 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val deviceInfo = object : ToolHandler {
-        override val meta = ToolMeta(
-            "device_info",
+        override val meta = ToolMeta("taffy_device_info",
             "获取手机硬件与系统信息（品牌、型号、Android 版本、指纹等）",
             "Get device hardware and system info (brand, model, Android version, fingerprint, etc.)",
             "device", ToolClass.EXTRA,
@@ -72,8 +71,7 @@ object DeviceTools {
     }
 
     val battery = object : ToolHandler {
-        override val meta = ToolMeta(
-            "battery",
+        override val meta = ToolMeta("taffy_battery",
             "获取电池状态（电量、充电状态、温度、电压、健康度等）",
             "Get battery status (level, charging state, temperature, voltage, health, etc.)",
             "device", ToolClass.EXTRA,
@@ -121,8 +119,7 @@ object DeviceTools {
     }
 
     val storageInfo = object : ToolHandler {
-        override val meta = ToolMeta(
-            "storage_info",
+        override val meta = ToolMeta("taffy_storage_info",
             "获取内部/外部存储空间使用情况（字节）",
             "Get internal/external storage space usage in bytes",
             "device", ToolClass.EXTRA,
@@ -146,8 +143,7 @@ object DeviceTools {
     }
 
     val screenInfo = object : ToolHandler {
-        override val meta = ToolMeta(
-            "screen_info",
+        override val meta = ToolMeta("taffy_screen_info",
             "获取屏幕信息（分辨率、密度、刷新率、亮度等）",
             "Get screen info (resolution, density, refresh rate, brightness, etc.)",
             "device", ToolClass.EXTRA,
@@ -177,8 +173,7 @@ object DeviceTools {
     }
 
     val localeInfo = object : ToolHandler {
-        override val meta = ToolMeta(
-            "locale_info",
+        override val meta = ToolMeta("taffy_locale_info",
             "获取系统语言与时区信息",
             "Get system language and timezone info",
             "device", ToolClass.EXTRA,
@@ -198,8 +193,7 @@ object DeviceTools {
     }
 
     val systemProperties = object : ToolHandler {
-        override val meta = ToolMeta(
-            "system_properties",
+        override val meta = ToolMeta("taffy_system_properties",
             "读取系统属性（build 相关等），可按 filter 过滤",
             "Read system properties (build-related), optional filter",
             "device", ToolClass.EXTRA,
@@ -240,8 +234,7 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val installedApps = object : ToolHandler {
-        override val meta = ToolMeta(
-            "installed_apps",
+        override val meta = ToolMeta("taffy_installed_apps",
             "列出已安装应用（包名、名称、版本、安装时间等）",
             "List installed apps (package name, label, version, install time, etc.)",
             "device", ToolClass.EXTRA,
@@ -285,8 +278,7 @@ object DeviceTools {
     }
 
     val appInfo = object : ToolHandler {
-        override val meta = ToolMeta(
-            "app_info",
+        override val meta = ToolMeta("taffy_app_info",
             "获取单个应用的详细信息（包名、版本、安装时间、UID 等）",
             "Get detailed info for a single app by package name",
             "device", ToolClass.EXTRA,
@@ -327,8 +319,7 @@ object DeviceTools {
     }
 
     val runningProcesses = object : ToolHandler {
-        override val meta = ToolMeta(
-            "running_processes",
+        override val meta = ToolMeta("taffy_running_processes",
             "获取当前正在运行的进程信息（可能受限）",
             "Get currently running process info (may be restricted)",
             "device", ToolClass.EXTRA,
@@ -352,8 +343,7 @@ object DeviceTools {
     }
 
     val stopApp = object : ToolHandler {
-        override val meta = ToolMeta(
-            "stop_app",
+        override val meta = ToolMeta("taffy_stop_app",
             "强制停止指定应用（需 Root/Shizuku 高级权限执行 am force-stop，否则回退到 killBackgroundProcesses）",
             "Force stop an app (requires Root/Shizuku for am force-stop, falls back to killBackgroundProcesses)",
             "device", ToolClass.EXTRA,
@@ -384,8 +374,7 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val clipboard = object : ToolHandler {
-        override val meta = ToolMeta(
-            "clipboard",
+        override val meta = ToolMeta("taffy_clipboard",
             "读取或写入设备系统剪贴板。operation=read（默认）读取; operation=write 写入（需 text）",
             "Read or write the system clipboard. operation=read (default) or write (requires text)",
             "device", ToolClass.EXTRA,
@@ -420,8 +409,7 @@ object DeviceTools {
     }
 
     val sendNotification = object : ToolHandler {
-        override val meta = ToolMeta(
-            "send_notification",
+        override val meta = ToolMeta("taffy_send_notification",
             "在设备上发送一条系统通知。content 必填; priority 可选 low/normal/high/max",
             "Send a system notification on the device. content is required; priority: low/normal/high/max",
             "device", ToolClass.EXTRA,
@@ -477,8 +465,7 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val checkPermission = object : ToolHandler {
-        override val meta = ToolMeta(
-            "check_permission",
+        override val meta = ToolMeta("taffy_check_permission",
             "检查应用是否已获得指定权限（传入权限名，如 READ_SMS）",
             "Check if the app has a given permission (e.g. READ_SMS)",
             "device", ToolClass.EXTRA,
@@ -498,8 +485,7 @@ object DeviceTools {
     }
 
     val permissionState = object : ToolHandler {
-        override val meta = ToolMeta(
-            "permission_state",
+        override val meta = ToolMeta("taffy_permission_state",
             "汇总检查关键权限的授予状态（所有文件访问、悬浮窗、通知等）",
             "Summarize key permission states (all files access, overlay, notification, etc.)",
             "device", ToolClass.EXTRA,
@@ -525,8 +511,7 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val httpRequest = object : ToolHandler {
-        override val meta = ToolMeta(
-            "http_request",
+        override val meta = ToolMeta("taffy_http_request",
             "发起 HTTP(S) 请求。method 支持 GET/POST/PUT/PATCH/DELETE/HEAD; 支持 body/bodyJson/form/headers",
             "Make an HTTP(S) request. Methods: GET/POST/PUT/PATCH/DELETE/HEAD; supports body/bodyJson/form/headers",
             "device", ToolClass.EXTRA,
@@ -602,8 +587,7 @@ object DeviceTools {
     }
 
     val shortenUrl = object : ToolHandler {
-        override val meta = ToolMeta(
-            "shorten_url",
+        override val meta = ToolMeta("taffy_shorten_url",
             "使用 tinyurl 服务生成短链接",
             "Shorten a URL using the tinyurl service",
             "device", ToolClass.EXTRA,
@@ -631,8 +615,7 @@ object DeviceTools {
     }
 
     val webDownload = object : ToolHandler {
-        override val meta = ToolMeta(
-            "web_download",
+        override val meta = ToolMeta("taffy_web_download",
             "下载远程文件到本地存储。url 为下载地址; path 为目标文件路径",
             "Download a remote file to local storage. url is the download URL; path is the target file path",
             "file", ToolClass.EXTRA,
@@ -679,8 +662,7 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val timeNow = object : ToolHandler {
-        override val meta = ToolMeta(
-            "time_now",
+        override val meta = ToolMeta("taffy_time_now",
             "获取当前时间戳（秒/毫秒）与格式化时间",
             "Get current timestamp (seconds/millis) and formatted time",
             "device", ToolClass.EXTRA,
@@ -699,8 +681,7 @@ object DeviceTools {
     }
 
     val jsonFormat = object : ToolHandler {
-        override val meta = ToolMeta(
-            "json_format",
+        override val meta = ToolMeta("taffy_json_format",
             "格式化、压缩或验证 JSON 字符串。operation=pretty（默认）/ minify / validate",
             "Format, minify, or validate a JSON string. operation: pretty (default) / minify / validate",
             "device", ToolClass.EXTRA,
@@ -729,8 +710,7 @@ object DeviceTools {
     }
 
     val textConvert = object : ToolHandler {
-        override val meta = ToolMeta(
-            "text_convert",
+        override val meta = ToolMeta("taffy_text_convert",
             "文本格式转换。operation: upper/lower/trim/trim_lines/remove_empty_lines/normalize_newlines/reverse/count",
             "Text conversion. operation: upper/lower/trim/trim_lines/remove_empty_lines/normalize_newlines/reverse/count",
             "device", ToolClass.EXTRA,
@@ -763,8 +743,7 @@ object DeviceTools {
     }
 
     val decryptXor = object : ToolHandler {
-        override val meta = ToolMeta(
-            "decrypt_xor",
+        override val meta = ToolMeta("taffy_decrypt_xor",
             "XOR 异或解密/加密。data 为待处理字符串; key 为密钥; encoding 可选 hex/base64/utf8",
             "XOR encrypt/decrypt. data is the input; key is the key; encoding: hex/base64/utf8",
             "device", ToolClass.EXTRA,
@@ -805,8 +784,7 @@ object DeviceTools {
     }
 
     val base64Encode = object : ToolHandler {
-        override val meta = ToolMeta(
-            "base64_encode",
+        override val meta = ToolMeta("taffy_base64_encode",
             "Base64 编码/解码。decode=true 时解码",
             "Base64 encode/decode. Set decode=true to decode",
             "device", ToolClass.EXTRA,
@@ -839,8 +817,7 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val fileInfo = object : ToolHandler {
-        override val meta = ToolMeta(
-            "file_info",
+        override val meta = ToolMeta("taffy_file_info",
             "获取文件或目录的详细信息（大小、权限、修改时间; hash=true 时计算 MD5/SHA256）",
             "Get file or directory details (size, permissions, modified time; hash=true for MD5/SHA256)",
             "file", ToolClass.EXTRA,
@@ -881,8 +858,7 @@ object DeviceTools {
     }
 
     val createDirectory = object : ToolHandler {
-        override val meta = ToolMeta(
-            "create_directory",
+        override val meta = ToolMeta("taffy_create_directory",
             "创建目录（自动创建父目录）",
             "Create a directory (creates parent directories as needed)",
             "file", ToolClass.EXTRA,
@@ -904,8 +880,7 @@ object DeviceTools {
     }
 
     val touch = object : ToolHandler {
-        override val meta = ToolMeta(
-            "touch",
+        override val meta = ToolMeta("taffy_touch",
             "创建空文件（文件已存在时更新时间戳）。truncate=true 时清空文件内容",
             "Create an empty file (updates timestamp if exists). truncate=true to clear contents",
             "file", ToolClass.EXTRA,

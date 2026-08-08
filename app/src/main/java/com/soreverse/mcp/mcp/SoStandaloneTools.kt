@@ -26,8 +26,7 @@ object SoStandaloneTools {
     // ── 纯 Java ARM64 反汇编 ──
 
     val disasm: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "so_standalone_disasm",
+        override val meta = ToolMeta("taffy_so_standalone_disasm",
             "【纯 Java ARM64 反汇编】读取 .so/.elf 文件并用内置纯 Java 反汇编引擎解码 AArch64 指令。不依赖任何 native 库（rizin/capstone）。适用于 arm64-v8a SO 文件。",
             "【Pure Java ARM64 Disassembly】Read .so/.elf files and decode AArch64 instructions using the built-in pure Java disassembler. No native dependencies (rizin/capstone). Works with arm64-v8a SO files.",
             "analyze",
@@ -105,8 +104,7 @@ object SoStandaloneTools {
     // ── 纯 Java ELF 解析 ──
 
     val elf: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "so_standalone_elf",
+        override val meta = ToolMeta("taffy_so_standalone_elf",
             "【纯 Java ELF 分析】读取 .so/.elf 文件并用内置解析器提取 ELF 结构信息（头/节区/符号表/重定位/字符串）。可独立运行，不依赖 rizin/LIEF 等 native 引擎。",
             "【Pure Java ELF Analysis】Parse .so/.elf files with the built-in pure Java parser to extract ELF structure info (header/sections/symbols/relocations/strings). Standalone — no rizin/LIEF native dependencies required.",
             "analyze",
@@ -166,8 +164,7 @@ object SoStandaloneTools {
     // ── 纯 Java 十六进制转储 ──
 
     val hexdump: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "so_standalone_hexdump",
+        override val meta = ToolMeta("taffy_so_standalone_hexdump",
             "【纯 Java 十六进制转储】读取 .so/.elf 或任意二进制文件的十六进制+ASCII 转储。独立于 rizin 等 native 引擎。",
             "【Pure Java Hex Dump】Read .so/.elf or any binary file and show hex+ASCII dump. Standalone — no rizin native dependency.",
             "read",

@@ -18,7 +18,7 @@ object ToolCatalog {
     // ── WORKSPACE ──
 
     private val soOpen = EngineToolHandler(
-        ToolMeta("so_open",
+        ToolMeta("taffy_so_open",
             "【SO 分析入口】打开 SO 文件并创建工作区（action=list 列出可用 SO）。所有 .so/.ELF 文件操作必须从 so_open 开始，不要使用 mt_apk_* 或 np_*。",
             "【PRIMARY SO ENTRY POINT】Open a SO file and create a workspace. Use action=list to discover available SO files. Use action=open_url to download a http(s) SO into the selected work directory, then open and analyze it. All .so/ELF tasks MUST start from so_open — do NOT use mt_apk_* or np_* for SO files.",
             "workspace", ToolClass.CORE, heavy = true,
@@ -42,7 +42,7 @@ object ToolCatalog {
     }
 
     private val soClose = EngineToolHandler(
-        ToolMeta("so_close",
+        ToolMeta("taffy_so_close",
             "关闭工作区（action=list 列出已打开工作区）",
             "Close an open workspace. Use action=list to see open workspaces.",
             "workspace", ToolClass.CORE,
@@ -58,8 +58,7 @@ object ToolCatalog {
     }
 
     private val apkAnalyze = EngineToolHandler(
-        ToolMeta(
-            "apk_analyze",
+        ToolMeta("taffy_apk_analyze",
             "独立解析本地 APK：ZIP 条目、Manifest 格式、DEX 头、ABI/SO、资源与 v1 签名文件；不依赖外部 APK MCP。",
             "Standalone local APK parser for ZIP entries, manifest format, DEX headers, ABI/SO inventory, resources, and v1 signature files; no external APK MCP required.",
             "workspace",
@@ -73,8 +72,7 @@ object ToolCatalog {
     ) { engine, args, _ -> engine.analyzeApk(args.str("path").ifBlank { args.str("filePath") }, args.intValue("entryLimit", 500)) }
 
     private val flutterBlutter = EngineToolHandler(
-        ToolMeta(
-            "flutter_blutter",
+        ToolMeta("taffy_flutter_blutter",
             "Flutter AOT/Blutter 聚合工具：识别 Flutter APK、提取版本指纹，并使用内置 Flutter 3.44.x / Dart 3.12.2 arm64 Runner 完成本地分析。其他版本会明确返回不支持。",
             "Aggregated Flutter AOT and Blutter tool using the embedded Flutter 3.44.x / Dart 3.12.2 arm64 runner. Other versions return an explicit unsupported-version result.",
             "analyze",
@@ -98,7 +96,7 @@ object ToolCatalog {
     // ── ANALYZE (Rizin-backed deep analysis) ──
 
     private val analyzeElf = EngineToolHandler(
-        ToolMeta("analyze_elf",
+        ToolMeta("taffy_analyze_elf",
             "ELF 结构与统计（LIEF 解析：节区/符号/重定位/程序头/动态段）",
             "Full ELF structure and triage stats via LIEF: sections, symbols, relocations, program headers, dynamic entries.",
             "analyze", ToolClass.CORE, heavy = true,
@@ -120,7 +118,7 @@ object ToolCatalog {
     }
 
     private val readStats = EngineToolHandler(
-        ToolMeta("read_stats",
+        ToolMeta("taffy_read_stats",
             "SO 快速统计（analyze_elf view=stats 的直观别名）",
             "Direct alias for analyze_elf(view=stats). Useful for clients that expect a standalone read_stats tool.",
             "analyze", ToolClass.CORE, heavy = true,
@@ -131,7 +129,7 @@ object ToolCatalog {
     ) { e, a, _ -> e.readStats(a.str("workspaceId"), a.str("editSessionId")) }
 
     private val analysisReport = EngineToolHandler(
-        ToolMeta("analysis_report",
+        ToolMeta("taffy_analysis_report",
             "生成综合分析报告（meta_info action=report 的直观别名）",
             "Generate a full analysis report. Direct alias for meta_info(action=report)/lief_api(action=report).",
             "analyze", ToolClass.CORE, heavy = true,
@@ -143,7 +141,7 @@ object ToolCatalog {
     ) { e, a, _ -> e.analysisReport(a.str("workspaceId"), a.str("editSessionId"), a.optBoolean("writeToFile", true)) }
 
     private val analyzeFunctions = EngineToolHandler(
-        ToolMeta("analyze_functions",
+        ToolMeta("taffy_analyze_functions",
             "列出 Rizin 自动分析发现的所有函数（含地址/大小/调用数）",
             "List all functions discovered by Rizin auto-analysis (address, size, call count).",
             "analyze", ToolClass.CORE, heavy = true,
@@ -156,7 +154,7 @@ object ToolCatalog {
     ) { e, a, s -> e.rzFunctions(a.str("workspaceId"), a.str("editSessionId"), a.intValue("limit", s.defaultLimit), a.str("cursor")) }
 
     private val analyzeCfg = EngineToolHandler(
-        ToolMeta("analyze_cfg",
+        ToolMeta("taffy_analyze_cfg",
             "函数控制流图（Rizin CFG：基本块 + 跳转边）",
             "Control flow graph for a function via Rizin: basic blocks and jump edges.",
             "analyze", ToolClass.CORE, heavy = true,
@@ -168,7 +166,7 @@ object ToolCatalog {
     ) { e, a, _ -> e.rzCfg(a.str("workspaceId"), a.str("editSessionId"), a.str("locator")) }
 
     private val analyzeCrypto = EngineToolHandler(
-        ToolMeta("analyze_crypto",
+        ToolMeta("taffy_analyze_crypto",
             "密码学特征扫描（AES/RSA/ECC 常量 + 熵分析）",
             "Scan for cryptographic material (AES/RSA/ECC constants) and high-entropy regions via Rizin.",
             "analyze", ToolClass.CORE, heavy = true,
@@ -179,7 +177,7 @@ object ToolCatalog {
     ) { e, a, _ -> e.rzScanCrypto(a.str("workspaceId"), a.str("editSessionId")) }
 
     private val analyzeXrefs = EngineToolHandler(
-        ToolMeta("analyze_xrefs",
+        ToolMeta("taffy_analyze_xrefs",
             "交叉引用（Rizin：direction=to 入引用 / from 出引用 / both 双向）",
             "Cross-references via Rizin. direction: to (incoming refs) | from (outgoing refs) | both.",
             "analyze", ToolClass.CORE, heavy = true,
@@ -193,7 +191,7 @@ object ToolCatalog {
     ) { e, a, s -> e.rzXrefs(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.str("direction", "to")) }
 
     private val analyzeEsil = EngineToolHandler(
-        ToolMeta("analyze_esil",
+        ToolMeta("taffy_analyze_esil",
             "ESIL 指令级模拟追踪（Rizin ESIL VM：寄存器快照 + 内存读写）",
             "ESIL instruction-level emulation trace via Rizin: register snapshots and memory reads/writes.",
             "analyze", ToolClass.EXTRA, heavy = true,
@@ -209,7 +207,7 @@ object ToolCatalog {
     // ── SEARCH ──
 
     private val searchBytes = EngineToolHandler(
-        ToolMeta("search_bytes",
+        ToolMeta("taffy_search_bytes",
             "十六进制模式搜索（Rizin byte pattern：紧凑 hex，MCP 会兼容空格和 ??）",
             "Hex pattern search via Rizin byte-pattern syntax. Native syntax is compact hex/nibble wildcard, e.g. 5F2403D5, 5F24..D5, bytes:mask; MCP also normalizes spaced hex like '5F 24 ?? D5'.",
             "search", ToolClass.CORE, heavy = true,
@@ -223,7 +221,7 @@ object ToolCatalog {
     ) { e, a, _ -> e.rzSearchBytes(a.str("workspaceId"), a.str("editSessionId"), a.str("pattern"), HexCodec.long(a.str("fromVa")) ?: 0L, HexCodec.long(a.str("toVa")) ?: 0L) }
 
     private val searchStrings = EngineToolHandler(
-        ToolMeta("search_strings",
+        ToolMeta("taffy_search_strings",
             "字符串搜索（prefix 过滤，扫描 .rodata/.strtab/.dynstr）",
             "Search extracted UTF-8 and UTF-16LE strings, including Chinese text, with optional prefix/content filter.",
             "search", ToolClass.CORE, heavy = true,
@@ -243,7 +241,7 @@ object ToolCatalog {
     // ── READ ──
 
     private val readDisasm = EngineToolHandler(
-        ToolMeta("read_disasm",
+        ToolMeta("taffy_read_disasm",
             "反汇编（Rizin：按函数/地址返回汇编和 Ghidra 伪代码）",
             "Disassemble via Rizin and include rizin-ghidra pseudocode when the Android native backend has pdg available.",
             "read", ToolClass.CORE, heavy = true,
@@ -263,7 +261,7 @@ object ToolCatalog {
     ) { e, a, s -> e.disasm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), a.str("addr"), if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")) }
 
     private val readHexdump = EngineToolHandler(
-        ToolMeta("read_hexdump",
+        ToolMeta("taffy_read_hexdump",
             "十六进制转储（按偏移/地址读取原始字节）",
             "Hex dump: read raw bytes at a given offset or address.",
             "read", ToolClass.CORE, heavy = true,
@@ -279,7 +277,7 @@ object ToolCatalog {
     // ── EDIT ──
 
     private val editHex = EngineToolHandler(
-        ToolMeta("edit_hex",
+        ToolMeta("taffy_edit_hex",
             "字节级补丁（edits[] 写 newHex；或 va+patch 通过 LIEF patch_address）",
             "Patch raw bytes. Use edits[] with byteOffset for offset-based patching, or va+patchHex for VA-based patching via LIEF.",
             "edit", ToolClass.CORE, heavy = true,
@@ -306,7 +304,7 @@ object ToolCatalog {
     }
 
     private val editAsm = EngineToolHandler(
-        ToolMeta("edit_asm",
+        ToolMeta("taffy_edit_asm",
             "汇编级补丁（Rizin assemble：edits[] 替换指令；dryRun 预览）",
             "Patch assembly using Rizin assembler. edits[] each replace one or more instructions; dryRun=true previews.",
             "edit", ToolClass.CORE, heavy = true,
@@ -320,7 +318,7 @@ object ToolCatalog {
     ) { e, a, _ -> e.editAsm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.getJSONArray("edits"), a.bool("dryRun")) }
 
     private val editSymbol = EngineToolHandler(
-        ToolMeta("edit_symbol",
+        ToolMeta("taffy_edit_symbol",
             "符号管理（rename 重命名 / add 添加导出函数 / remove 移除符号）",
             "Symbol management: rename (same-or-shorter), add exported function via LIEF, or remove symbol via LIEF.",
             "edit", ToolClass.EXTRA, heavy = true,
@@ -350,7 +348,7 @@ object ToolCatalog {
     }
 
     private val editFixSections = EngineToolHandler(
-        ToolMeta("edit_fix_sections",
+        ToolMeta("taffy_edit_fix_sections",
             "xAnSo 节区头重建（LIEF Builder：从 .dynamic 段重建节区头）",
             "Reconstruct ELF section headers from the .dynamic segment via LIEF Builder (xAnSo algorithm). Essential for NDK-compiled SOs with stripped section headers.",
             "edit", ToolClass.EXTRA, heavy = true,
@@ -363,7 +361,7 @@ object ToolCatalog {
     // ── EMULATE (Unidbg + DalvikVM) ──
 
     private val emulateCall = EngineToolHandler(
-        ToolMeta("emulate_call",
+        ToolMeta("taffy_emulate_call",
             "函数模拟执行（Unidbg + DalvikVM：导出函数/JNI_OnLoad/Java_*，返回阶段化诊断）",
             "Emulate an exported function via Unidbg with DalvikVM JNI support. Best for JNI_OnLoad, exported functions, Java_* JNI methods, and patch validation; failures include stage and nextActions diagnostics.",
             "emulate", ToolClass.CORE, heavy = true,
@@ -377,7 +375,7 @@ object ToolCatalog {
     ) { e, a, s -> if (!s.emulationEnabled) err("EMULATION_DISABLED", "Emulation is disabled in settings. Enable emulationEnabled to use this feature.", "emulationEnabled", false) else e.emulate(a.str("workspaceId"), a.str("editSessionId"), a.str("symbolName"), a.optJSONArray("args") ?: JSONArray(), a.bool("trace", false)) }
 
     private val emulateDump = EngineToolHandler(
-        ToolMeta("emulate_dump",
+        ToolMeta("taffy_emulate_dump",
             "内存转储（Unidbg：加载 SO 后读取指定地址的内存）",
             "Dump memory at an Unidbg runtime absolute virtual address after loading the SO. Add the module base to an ELF RVA/VA.",
             "emulate", ToolClass.CORE, heavy = true,
@@ -399,7 +397,7 @@ object ToolCatalog {
     // ── DIFF ──
 
     private val diffSo = EngineToolHandler(
-        ToolMeta("diff_so",
+        ToolMeta("taffy_diff_so",
             "结构化差异对比（Rizin：字节级 + 函数级相似度）",
             "Structural diff between two SO versions via Rizin: byte-level differences and function similarity ratio.",
             "diff", ToolClass.EXTRA, heavy = true,
@@ -422,7 +420,7 @@ object ToolCatalog {
     // ── LOW-LEVEL API GATEWAYS ──
 
     private val rizinApi = EngineToolHandler(
-        ToolMeta("rizin_api",
+        ToolMeta("taffy_rizin_api",
             "Rizin 底层能力网关（analyze/functions/cfg/xrefs/search_bytes/crypto/esil/diff/asm/disasm）",
             "Low-level Rizin gateway with enum actions for analyze, functions, cfg, xrefs, search_bytes, crypto, esil, diff, asm, and disasm.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
@@ -467,7 +465,7 @@ object ToolCatalog {
     }
 
     private val liefApi = EngineToolHandler(
-        ToolMeta("lief_api",
+        ToolMeta("taffy_lief_api",
             "LIEF 全格式能力网关（ELF/PE/Mach-O/DEX/ART/OAT/VDEX）",
             "Full-format LIEF gateway for ELF, PE, Mach-O, DEX, ART, OAT, and VDEX parsing plus format-specific mutations.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
@@ -510,7 +508,7 @@ object ToolCatalog {
     }
 
     private val unidbgApi = EngineToolHandler(
-        ToolMeta("unidbg_api",
+        ToolMeta("taffy_unidbg_api",
             "Unidbg 底层能力网关（session/call/memory/registers/trace/breakpoints）",
             "Low-level Unidbg gateway for live sessions, function/address calls, memory map/read/write/protect/unmap, registers, modules, exports, trace, and breakpoints.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
@@ -540,7 +538,7 @@ object ToolCatalog {
     }
 
     private val unidbgSession = EngineToolHandler(
-        ToolMeta("unidbg_session",
+        ToolMeta("taffy_unidbg_session",
             "Unidbg 会话工具（open/list/close/call/dump/modules/exports/registers/maps）",
             "Typed Unidbg session tool for shell-friendly live emulator workflows: open/list/close/call/call_address/dump/modules/exports/registers/memory_maps.",
             "emulate", ToolClass.CORE, heavy = true,
@@ -586,7 +584,7 @@ object ToolCatalog {
     }
 
     private val unidbgMemory = EngineToolHandler(
-        ToolMeta("unidbg_memory",
+        ToolMeta("taffy_unidbg_memory",
             "Unidbg 内存工具（map/read/write/protect/unmap/maps）",
             "Typed Unidbg memory tool for command-line scripts: map/read/write/protect/unmap/maps on a live emulator session.",
             "emulate", ToolClass.CORE, heavy = true,
@@ -624,7 +622,7 @@ object ToolCatalog {
     }
 
     private val unidbgDebug = EngineToolHandler(
-        ToolMeta("unidbg_debug",
+        ToolMeta("taffy_unidbg_debug",
             "Unidbg 调试生命周期（trace/breakpoint/step/stop/status）",
             "Typed Unidbg debugger lifecycle for trace, breakpoint add/list/remove, single-step configuration, stop, and status.",
             "emulate", ToolClass.CORE, heavy = true,
@@ -682,7 +680,7 @@ object ToolCatalog {
     }
 
     private val unidbgBatch = EngineToolHandler(
-        ToolMeta("unidbg_batch",
+        ToolMeta("taffy_unidbg_batch",
             "Unidbg 批处理工具（一条 JSON 顺序执行多个 Unidbg op）",
             "Run a serial Unidbg pipeline in one MCP call. Steps support ${'$'}{key.path} placeholders, ideal for curl/PowerShell batch scripts.",
             "emulate", ToolClass.CORE, heavy = true,
@@ -696,7 +694,7 @@ object ToolCatalog {
     ) { e, a, _ -> UnidbgBatchRunner.run(e, a) }
 
     private val xansoApi = EngineToolHandler(
-        ToolMeta("xanso_api",
+        ToolMeta("taffy_xanso_api",
             "真实 xAnSo 上游能力网关（status/help/build-section）",
             "Real freakishfox/xAnSo upstream gateway covering its complete public CLI/core functionality.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
@@ -720,7 +718,7 @@ object ToolCatalog {
     // ── SESSION ──
 
     private val sessionOpen = EngineToolHandler(
-        ToolMeta("session_open",
+        ToolMeta("taffy_session_open",
             "打开编辑会话（基于当前工作区 SO 的副本）",
             "Open an edit session: creates a mutable copy of the workspace SO for patching.",
             "session", ToolClass.CORE,
@@ -730,7 +728,7 @@ object ToolCatalog {
     ) { e, a, _ -> e.editOpen(a.str("workspaceId")) }
 
     private val sessionHistory = object : ToolHandler {
-        override val meta = ToolMeta("session_history",
+        override val meta = ToolMeta("taffy_session_history",
             "编辑历史管理（snapshot/rollback/undo/redo/reset/check）",
             "Edit session history: snapshot, rollback, undo, redo, reset, or check integrity.",
             "session", ToolClass.CORE, heavy = true,
@@ -757,7 +755,7 @@ object ToolCatalog {
     }
 
     private val sessionAudit = object : ToolHandler {
-        override val meta = ToolMeta("session_audit",
+        override val meta = ToolMeta("taffy_session_audit",
             "审计日志（audit/persist/list/load）",
             "Edit session audit trail: view audit, persist to file, list saved audits, or load a saved audit.",
             "session", ToolClass.EXTRA, heavy = true,
@@ -784,7 +782,7 @@ object ToolCatalog {
     // ── BUILD ──
 
     private val buildSo = object : ToolHandler {
-        override val meta = ToolMeta("build_so",
+        override val meta = ToolMeta("taffy_build_so",
             "构建补丁后的 SO（action=build 输出文件 / action=list 列出已构建）",
             "Build patched SO to file, or list built outputs. Supports single and multi-variant build.",
             "build", ToolClass.CORE, heavy = true,
@@ -820,7 +818,7 @@ object ToolCatalog {
     // ── SYSTEM ──
 
     private val systemControl = object : ToolHandler {
-        override val meta = ToolMeta("system_control",
+        override val meta = ToolMeta("taffy_system_control",
             "系统控制（tunnel/apk_mcp/status）",
             "System control: tunnel start/stop/status, APK MCP bridge status/probe/ping, overall system status.",
             "system", ToolClass.META,
@@ -848,8 +846,7 @@ object ToolCatalog {
     }
 
     private val appConfig = object : ToolHandler {
-        override val meta = ToolMeta(
-            "app_config",
+        override val meta = ToolMeta("taffy_app_config",
             "读写应用配置（外观/服务/引擎/隧道/桥接）。安全敏感字段（authEnabled/bindHost/accessToken）不可通过此工具修改。",
             "Read and write app settings: appearance, engine limits, tunnel, APK bridge. Security-sensitive fields (authEnabled, bindHost, accessToken) are read-only via this tool for safety.",
             "system", ToolClass.META,
@@ -902,7 +899,7 @@ object ToolCatalog {
     // ── META ──
 
     private val metaInfo = object : ToolHandler {
-        override val meta = ToolMeta("meta_info",
+        override val meta = ToolMeta("taffy_meta_info",
             "元信息（help/tools/stats/batch/continue/health）",
             "Meta information: help text, tool list/describe, stats, batch pipeline, continue pagination, health check.",
             "meta", ToolClass.META,

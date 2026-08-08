@@ -32,8 +32,7 @@ object UnicornTools {
 
     /** 直接 CPU 模拟: 汇编→映射→执行→读寄存器 */
     val ucEmulate: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "uc_emulate",
+        override val meta = ToolMeta("taffy_uc_emulate",
             "【Unicorn 直接模拟】绕过 Android 框架, 直接用 Unicorn2 做 CPU 级模拟。输入 ARM/ARM64 汇编代码(或十六进制字节), 自动汇编→映射内存→执行→返回寄存器+内存状态。action=run 执行代码; action=asm_only 只汇编不执行; action=disasm 反汇编。适合验证 shellcode、模拟单个函数、调试指令逻辑、复现加密算法片段。",
             "Direct Unicorn2 CPU emulation without Android framework. Input ARM/ARM64 assembly or hex bytes, auto-assemble→map memory→execute→return registers+memory. action=run executes; asm_only assembles; disasm disassembles. For shellcode verification, single-function emulation, instruction debugging, crypto algorithm reproduction.",
             "emulate", ToolClass.EXTRA, heavy = true,

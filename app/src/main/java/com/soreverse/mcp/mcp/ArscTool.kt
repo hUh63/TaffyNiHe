@@ -440,8 +440,7 @@ object ArscTool {
     // ── MCP 工具 ──
 
     val analyze = EngineToolHandler(
-        ToolMeta(
-            "arsc_analyze",
+        ToolMeta("taffy_arsc_analyze",
             "【ARSC 资源表分析】解析 Android 二进制资源文件 (.arsc / resources.arsc)。列出所有包(package)、资源类型(type)、资源条目(entry)及值。支持从 APK 内提取或直接解析 .arsc 文件。返回完整结构。",
             "Parse Android binary resource tables (.arsc / resources.arsc). Lists all packages, types, entries and their decoded values. Supports both standalone .arsc files and APK extraction.",
             "analyze", ToolClass.EXTRA, heavy = true,

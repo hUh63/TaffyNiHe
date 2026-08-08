@@ -22,8 +22,7 @@ object StaticTools {
 
     /** DEX → smali 反汇编。 */
     val baksmali: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "baksmali_decode",
+        override val meta = ToolMeta("taffy_baksmali_decode",
             "【DEX→smali 反汇编】用 baksmali 把 dex 反汇编成 smali 源码,导出到目录。适合看/改字节码逻辑。",
             "Disassemble a DEX file to smali source with baksmali, exported to a directory.",
             "decompile", ToolClass.EXTRA, heavy = true,
@@ -68,8 +67,7 @@ object StaticTools {
 
     /** APK 资源/清单解析(ARSCLib)。 */
     val apkDecode: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_decode",
+        override val meta = ToolMeta("taffy_apk_decode",
             "【APK 清单/资源解析】用 ARSCLib 读取 APK 的包名、版本、权限、Manifest 与资源文件清单(不依赖 aapt)。action=manifest 看清单概览; action=resources 列资源文件; action=xml 解码指定 XML(如 AndroidManifest.xml)。",
             "Parse APK manifest/resources with ARSCLib (no aapt). action=manifest for package/version/permissions overview; action=resources to list resource files; action=xml to decode a specific binary XML.",
             "workspace", ToolClass.EXTRA, heavy = true,

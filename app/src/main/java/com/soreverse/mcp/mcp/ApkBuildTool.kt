@@ -63,8 +63,7 @@ object ApkBuildTool {
 
     /** smali → dex。 */
     val smaliAssemble: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "smali_assemble",
+        override val meta = ToolMeta("taffy_smali_assemble",
             "【smali→dex 回编】把 smali 目录汇编成 dex 文件(baksmali 的逆操作)。改完 smali 后用它生成新 dex。",
             "Assemble a smali directory back into a dex file (reverse of baksmali).",
             "build", ToolClass.EXTRA, heavy = true,
@@ -97,8 +96,7 @@ object ApkBuildTool {
 
     /** APK 签名。 */
     val apkSign: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "apk_sign",
+        override val meta = ToolMeta("taffy_apk_sign",
             "【APK 签名】用内置密钥给 APK 做 v1/v2/v3 签名,签完即可安装。改完/回编后的 APK 用它签名。首次自动生成签名密钥(存本地复用)。",
             "Sign an APK with v1/v2/v3 schemes using a built-in auto-generated key, so it can be installed.",
             "build", ToolClass.EXTRA, heavy = true,

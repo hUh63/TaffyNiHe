@@ -26,8 +26,7 @@ object ManifestEditTools {
 
     /** 精确 manifest XML 编辑 — 用 ARSCLib 解码 AXML → DOM 操作 → 编码回写 */
     val manifestEdit: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "manifest_xml_edit",
+        override val meta = ToolMeta("taffy_manifest_xml_edit",
             "【Manifest 精确编辑】用 ARSCLib 解码 AndroidManifest.xml 的二进制 AXML 为文本, 做精确的 DOM 级编辑后写回 APK。action=get 读取 manifest; action=set_package 改包名; action=add_perm 加权限; action=remove_perm 删权限; action=add_component 加组件; action=remove_component 删组件; action=set_debuggable 改 debuggable; action=set_exported 改 exported; action=add_meta 加 meta-data; action=remove_meta 删 meta-data。不再用正则, 用 ARSCLib 做 AXML 级精确操作。",
             "Precise manifest editing via ARSCLib AXML decode/encode. action=get/set_package/add_perm/remove_perm/add_component/remove_component/set_debuggable/set_exported/add_meta/remove_meta. Uses ARSCLib binary AXML parsing, not regex.",
             "build", ToolClass.EXTRA, heavy = true,
@@ -270,8 +269,7 @@ object ManifestEditTools {
 
     /** 资源交叉引用 — 谁引用了某个资源 ID */
     val resourceXref: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "resource_xref",
+        override val meta = ToolMeta("taffy_resource_xref",
             "【资源交叉引用】查找谁引用了某个资源(如 @string/app_name / @drawable/icon / @layout/main)。用 ARSCLib 解析 resources.arsc + 扫描所有 XML 中的资源引用。action=by_id 按 resource ID 查; action=list 列出所有资源定义; action=where_used 查资源在哪些 XML 中被引用。参考 MT管理器的 resource_xref。",
             "Resource cross-reference. Find who references a resource (e.g. @string/app_name). Uses ARSCLib to parse resources.arsc + scans XML. action=by_id, list, where_used. Inspired by MT resource_xref.",
             "apk", ToolClass.EXTRA, heavy = true,

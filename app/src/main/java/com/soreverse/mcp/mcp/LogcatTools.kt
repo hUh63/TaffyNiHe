@@ -26,8 +26,7 @@ object LogcatTools {
 
     /** 采集 logcat 日志 */
     val collect: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "logcat_collect",
+        override val meta = ToolMeta("taffy_logcat_collect",
             "【Logcat 采集】采集系统 logcat 日志。action=recent 获取最近 N 行(默认200); action=search 按关键字搜索; action=dump 一次性 dump 全部日志(小心输出过大)。支持按 tag/level/pid 过滤。需 root 或 ADB 才能读全系统日志,否则只能读自己应用的。",
             "Collect system logcat logs. action=recent gets last N lines; action=search filters by keyword; action=dump gets all. Supports tag/level/pid filtering. Root or ADB needed for system-wide logs.",
             "device", ToolClass.EXTRA, heavy = true,
@@ -95,8 +94,7 @@ object LogcatTools {
 
     /** 采集崩溃日志 */
     val crash: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "logcat_crash",
+        override val meta = ToolMeta("taffy_logcat_crash",
             "【崩溃日志】采集最近的崩溃日志(JAVA/ANR/NATIVE CRASH)。自动过滤 crash/fatal/ANR/died 关键字。",
             "Collect recent crash logs (JAVA/ANR/NATIVE CRASH). Auto-filters crash/fatal/ANR/died keywords.",
             "device", ToolClass.EXTRA, heavy = true,
@@ -137,8 +135,7 @@ object LogcatTools {
 
     /** 后台持久 logcat 采集 — 参考 NexusBridge LogFox 的 start/stop/status */
     val capture: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "logcat_capture",
+        override val meta = ToolMeta("taffy_logcat_capture",
             "【Logcat 后台录制】后台持久采集 logcat 日志到文件。action=start 启动后台采集(指定 tag/level/pid 过滤); action=stop 停止采集; action=status 查看采集状态; action=read 读取已采集的日志(支持关键字搜索); action=clear 清空已采集日志。参考 NexusBridge LogFox 的持久录制能力。",
             "Background persistent logcat capture. action=start (with tag/level/pid filter); stop; status; read (with keyword search); clear. Inspired by NexusBridge LogFox persistent recording.",
             "device", ToolClass.EXTRA, heavy = true,

@@ -25,8 +25,7 @@ import java.io.File
 object DexKitTool {
 
     val search: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta(
-            "dex_search",
+        override val meta = ToolMeta("taffy_dex_search",
             "【DexKit 反混淆查找】混淆 App 里靠特征反查被混淆的真实类/方法(C++ 高性能)。action=method_by_string 查\"用了某字符串的方法\"(逆向定位关键逻辑最常用,如搜 sign/pay/vip 找到签名/支付/会员相关方法); class_by_string 查用了某字符串的类; method_by_name 按方法名查; class_by_name 按类名查。输入 APK 路径,返回匹配的类名/方法签名。",
             "DexKit anti-obfuscation search (high-performance C++). Find obfuscated classes/methods by feature. action=method_by_string (find methods using a given string — most useful for locating key logic like sign/pay/vip); class_by_string; method_by_name; class_by_name. Input an APK path, returns matched class names / method descriptors.",
             "decompile", ToolClass.EXTRA, heavy = true,

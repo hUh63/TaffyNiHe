@@ -66,6 +66,7 @@ internal val toolDefs = listOf(
     ToolDef("emulate", "模拟", "Emulate"),
     ToolDef("frida", "Frida", "Frida"),
     ToolDef("rebuild", "回编", "Rebuild"),
+    ToolDef("editor", "编辑", "Editor"),
 )
 
 @Composable
@@ -178,6 +179,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
             "emulate" -> ToolInfo(if (zh) "模拟" else "Emulate", if (zh) "Unidbg 模拟执行 + 寄存器/内存查看" else "Unidbg emulate, regs, mem dump")
             "frida" -> ToolInfo("Frida", if (zh) "编辑Frida脚本（下发需root）" else "Edit Frida script (needs root)")
             "rebuild" -> ToolInfo(if (zh) "回编" else "Rebuild", if (zh) "校验回编，Hex补丁，重命名函数" else "Check build, hex patch, rename function")
+            "editor" -> ToolInfo(if (zh) "编辑器" else "Editor", if (zh) "Hex查看/编辑，文本查看，字节补丁，对比" else "Hex view/edit, text view, byte patch, diff")
             else -> ToolInfo("", "")
         }
         Text(toolInfo.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -444,6 +446,46 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     }
                 }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
                     Text(if (zh) "📝 字符串列表" else "📝 Strings", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+            }
+            "editor" -> {
+                Text(if (zh) "十六进制查看" else "Hex View", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                OutlinedTextField(value = tools.disasmAddr, onValueChange = { tools.disasmAddr = it },
+                    label = { Text(if (zh) "地址/偏移" else "Addr/Offset") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(8.dp),
+                    placeholder = { Text("0x0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) })
+                Button(onClick = {
+                    scope.launch { tools.decompileExtra = ""
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
+                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "Hex查看失败" else "hexdump failed"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "🔢 Hex 查看" else "🔢 Hex View", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                Button(onClick = {
+                    scope.launch { tools.decompileExtra = ""
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 30) }.getOrNull() }
+                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无字符串" else "no strings"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "📝 文本查看" else "📝 Text View", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                Button(onClick = {
+                    scope.launch { tools.decompileExtra = ""
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editHex(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, org.json.JSONArray(), false) }.getOrNull() }
+                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "编辑失败" else "edit failed"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "✏️ Hex 编辑" else "✏️ Hex Edit", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                }
+                Button(onClick = {
+                    scope.launch { tools.decompileExtra = ""
+                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 30) }.getOrNull() }
+                        tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "无对比" else "no diff"
+                    }
+                }, modifier = btnMod, enabled = tools.sharedWorkspaceId.isNotBlank(), shape = RoundedCornerShape(8.dp), contentPadding = btnPad) {
+                    Text(if (zh) "📊 对比" else "📊 Diff", style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
                 }
             }
         }

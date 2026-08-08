@@ -1007,6 +1007,8 @@ object ToolCatalog {
         *ApkEditTools.ALL.toTypedArray(),
         // 塔菲逆核: Logcat 日志采集(参考NexusBridge LogFox)
         *LogcatTools.ALL.toTypedArray(),
+        // 塔菲逆核: 进阶逆向辅助(参考MT管理器 native_xref/cfg/patch_bytes/apk_search)
+        *AdvancedTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

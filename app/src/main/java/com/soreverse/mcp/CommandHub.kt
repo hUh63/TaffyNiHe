@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -185,11 +186,12 @@ internal fun CommandHubScreen(
             ConnDot(running = running, zh = zh)
         }
 
-        // 中央星系（星核 + 卫星环绕）
+        // 中央星系（星核 + 卫星环绕），限制最大高度
         Box(
             Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .weight(1f)
+                .heightIn(max = 360.dp),
             contentAlignment = Alignment.Center,
         ) {
             SatelliteSystem(
@@ -605,9 +607,10 @@ private fun SatelliteNode(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(20.dp)
+    val sizeDp = 60.dp
     Column(
         modifier
-            .size(width = 66.dp, height = 66.dp)
+            .size(width = sizeDp, height = sizeDp)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
             .clickable(

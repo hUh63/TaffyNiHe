@@ -104,20 +104,21 @@ internal fun AnalysisWorkspace(
             }
         }
         Spacer(Modifier.size(8.dp))
-        // 主体：B 布局
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // 左控制台
+        // 主体：控制台(上,紧凑) + 结果流(下,占大部分空间)
+        Column(Modifier.fillMaxSize()) {
+            // 控制台（水平紧凑条）
             Surface(
-                modifier = Modifier.width(160.dp).fillMaxHeight(),
-                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 ToolConsole(state, zh)
             }
-            // 右结果流
+            Spacer(Modifier.size(6.dp))
+            // 结果流（占剩余空间）
             Surface(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
             ) {
                 ResultStream(tools, zh)
@@ -514,17 +515,12 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
         ).filter { it.text.isNotBlank() }
     var selectedTab by androidx.compose.runtime.remember { mutableStateOf(0) }
 
-    Column(Modifier.fillMaxSize().padding(10.dp)) {
-        // 顶部：标题 + 简洁/详细切换 + 标签页数量
+    Column(Modifier.fillMaxSize().padding(8.dp)) {
+        // 顶部：标题
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(if (zh) "输出结果" else "Results", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (resultTabs.isNotEmpty()) {
                 Text("${selectedTab + 1}/${resultTabs.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(
-                    onClick = { detailMode = !detailMode },
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(6.dp),
-                ) { Text(if (detailMode) (if (zh) "简洁" else "Simple") else (if (zh) "详细" else "Detail"), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp) }
             }
         }
         Spacer(Modifier.size(4.dp))

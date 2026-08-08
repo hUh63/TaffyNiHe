@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -178,7 +179,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
             "decompile" -> {
                 OutlinedTextField(value = tools.decompileTarget, onValueChange = { tools.decompileTarget = it },
                     label = { Text(if (zh) "符号" else "Sym") }, singleLine = true,
-                    modifier = Modifier.width(70.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall, fontSize = 9.sp, shape = RoundedCornerShape(4.dp))
+                    modifier = Modifier.width(70.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), shape = RoundedCornerShape(4.dp))
                 SmBtn(if (zh) "反编译" else "Dec", bm, bp, {
                     val loc = tools.decompileTarget.trim(); if (loc.isEmpty()) return@SmBtn
                     scope.launch { tools.decompileRunning = true; tools.decompileError = ""; tools.decompileResult = ""
@@ -242,7 +243,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
             "emulate" -> {
                 OutlinedTextField(value = tools.emulateSymbol, onValueChange = { tools.emulateSymbol = it },
                     label = { Text(if (zh) "符号" else "Sym") }, singleLine = true,
-                    modifier = Modifier.width(60.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall, fontSize = 9.sp, shape = RoundedCornerShape(4.dp))
+                    modifier = Modifier.width(60.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), shape = RoundedCornerShape(4.dp))
                 SmBtn(if (zh) "模拟" else "Emu", bm, bp, { val sym = tools.emulateSymbol.trim(); if (sym.isEmpty()) return@SmBtn
                     scope.launch { tools.emulateRunning = true; tools.emulateError = ""
                         val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", sym, org.json.JSONArray(), true) }.getOrNull() }
@@ -291,7 +292,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
             "editor" -> {
                 OutlinedTextField(value = tools.disasmAddr, onValueChange = { tools.disasmAddr = it },
                     label = { Text(if (zh) "地址" else "Addr") }, singleLine = true,
-                    modifier = Modifier.width(55.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall, fontSize = 9.sp, shape = RoundedCornerShape(4.dp))
+                    modifier = Modifier.width(55.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), shape = RoundedCornerShape(4.dp))
                 SmBtn("Hex", bm, bp, { scope.launch { tools.decompileExtra = ""
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
                     tools.decompileExtra = if (r?.optBoolean("ok", false) == true) toolSummarize(r) else r?.optString("error") ?: if (zh) "失败" else "failed"

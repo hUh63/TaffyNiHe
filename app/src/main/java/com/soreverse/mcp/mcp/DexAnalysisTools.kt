@@ -81,7 +81,7 @@ object DexAnalysisTools {
                     for (searchClass in searchDex.classes) {
                         for (searchMethod in searchClass.methods) {
                             val impl = searchMethod.implementation ?: continue
-                            for (insn in impl.instructions) {
+                            for ((offIdx, insn) in impl.instructions.withIndex()) {
                                 val ref = extractMethodRef(insn) ?: continue
                                 if (ref.definingClass == classDescriptor &&
                                     ref.name == methodName &&
@@ -92,7 +92,7 @@ object DexAnalysisTools {
                                         .put("callerDescriptor", buildDescriptor(searchMethod))
                                         .put("callerDex", searchDexName)
                                         .put("instruction", insn.opcode.name)
-                                        .put("codeOffset", runCatching { insn.codeOffset }.getOrDefault(0))
+                                        .put("codeOffset", offIdx)
                                         .put("invokeType", insn.opcode.name.substringAfter("invoke-").substringBefore("/")))
                                     if (results.length() >= limit) break@outer
                                 }
@@ -104,14 +104,14 @@ object DexAnalysisTools {
                 // from: targetMethod 调用了什么
                 val impl = targetMethod.implementation
                 if (impl != null) {
-                    for (insn in impl.instructions) {
+                    for ((offIdx, insn) in impl.instructions.withIndex()) {
                         val ref = extractMethodRef(insn) ?: continue
                         results.put(JSONObject()
                             .put("calleeClass", typeToName(ref.definingClass))
                             .put("calleeMethod", ref.name)
                             .put("calleeDescriptor", buildDescriptor(ref))
                             .put("instruction", insn.opcode.name)
-                            .put("codeOffset", runCatching { insn.codeOffset }.getOrDefault(0))
+                            .put("codeOffset", offIdx)
                             .put("invokeType", insn.opcode.name.substringAfter("invoke-").substringBefore("/")))
                         if (results.length() >= limit) break
                     }
@@ -207,12 +207,8 @@ object DexAnalysisTools {
             // 注解 (简化)
             val annotations = JSONArray()
             runCatching {
-                classDef.annotations?.forEach { annSet ->
-                    annSet.annotations.forEach { ann ->
-                        annotations.put(JSONObject()
-                            .put("type", ann.type)
-                            .put("visibility", annSet.visibility.toString()))
-                    }
+                classDef.annotations.forEach { ann ->
+                    annotations.put(JSONObject().put("type", ann.type))
                 }
             }
 
@@ -278,10 +274,10 @@ object DexAnalysisTools {
 
                 val instructions = JSONArray()
                 var count = 0
-                for (insn in impl.instructions) {
+                for ((offIdx, insn) in impl.instructions.withIndex()) {
                     if (count >= limit) break
                     val insnObj = JSONObject()
-                        .put("offset", "0x${runCatching { insn.codeOffset }.getOrDefault(0).toString(16)}")
+                        .put("offset", "0x${offIdx.toString(16)}")
                         .put("opcode", insn.opcode.name)
                         .put("format", insn.opcode.format.toString())
 
@@ -461,13 +457,13 @@ object DexAnalysisTools {
                 val dexPoolClass = Class.forName("com.android.tools.smali.dexlib2.writer.pool.DexPool")
                 val dexPool = dexPoolClass.getConstructor(Opcodes::class.java).newInstance(opcodes)
                 val internMethod = dexPoolClass.getMethod("intern", Class.forName("com.android.tools.smali.dexlib2.iface.ClassDef"))
-                for (classDef in origDex.classes) {
+                for (classDef: ClassDef in origDex.classes) {
                     val toIntern: Any = if (classDef.type in changedClasses) {
                         changedClassMap[classDef.type] ?: classDef
                     } else {
                         classDef
                     }
-                    internMethod.invoke(dexPool, toIntern)
+                    internMethod.invoke(dexPool, toIntern as Any)
                 }
                 for (classDef in changedDex.classes) {
                     if (classDef.type !in origClassTypes) internMethod.invoke(dexPool, classDef)
@@ -533,7 +529,8 @@ object DexAnalysisTools {
     }
 
     private fun buildDescriptor(ref: MethodReference): String {
-        return ref.descriptor
+        val params = ref.parameters.joinToString("") { it.type }
+        return "($params)${ref.returnType}"
     }
 
     private fun typeToName(type: String): String =

@@ -1003,6 +1003,10 @@ object ToolCatalog {
         SoStandaloneTools.hexdump,
         // 塔菲逆核: 设备信息/系统/应用/通讯/网络/实用工具(参考mcp-server)
         *DeviceTools.ALL.toTypedArray(),
+        // 塔菲逆核: APK 细粒度编辑(参考"我的工具"APK)
+        *ApkEditTools.ALL.toTypedArray(),
+        // 塔菲逆核: Logcat 日志采集(参考NexusBridge LogFox)
+        *LogcatTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

@@ -181,7 +181,7 @@ object LogcatTools {
                             .redirectErrorStream(true)
                             .redirectOutput(captureFile)
                             .start()
-                        capturePid = runCatching { captureProcess?.pid()?.toInt() ?: 0 }.getOrDefault(0)
+                        capturePid = 0 // Android Process 没有 pid() API, 用 status 查询时可用 /proc
 
                         ok(JSONObject()
                             .put("action", "start")

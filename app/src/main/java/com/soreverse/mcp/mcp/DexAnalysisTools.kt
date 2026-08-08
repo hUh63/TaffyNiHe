@@ -6,15 +6,12 @@ import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.dexlib2.iface.ClassDef
 import com.android.tools.smali.dexlib2.iface.DexFile
 import com.android.tools.smali.dexlib2.iface.Method
-import com.android.tools.smali.dexlib2.iface.MethodImplementation
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.StringReference
 import com.android.tools.smali.dexlib2.iface.reference.TypeReference
-import com.android.tools.smali.dexlib2.iface.reference.Reference
-import com.android.tools.smali.dexlib2.writer.pool.DexPool
 import com.android.tools.smali.dexlib2.writer.io.FileDataStore
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
@@ -71,7 +68,7 @@ object DexAnalysisTools {
             for ((_, dexFile) in dexFiles) {
                 val cls = dexFile.classes.firstOrNull { it.type == classDescriptor } ?: continue
                 targetMethod = cls.methods.firstOrNull {
-                    it.name == methodName && (descriptor.isBlank() || it.descriptor == descriptor)
+                    it.name == methodName && (descriptor.isBlank() || buildDescriptor(it) == descriptor)
                 }
                 if (targetMethod != null) break
             }
@@ -88,14 +85,14 @@ object DexAnalysisTools {
                                 val ref = extractMethodRef(insn) ?: continue
                                 if (ref.definingClass == classDescriptor &&
                                     ref.name == methodName &&
-                                    (descriptor.isBlank() || ref.descriptor == descriptor)) {
+                                    (descriptor.isBlank() || buildDescriptor(ref) == descriptor)) {
                                     results.put(JSONObject()
                                         .put("callerClass", typeToName(searchClass.type))
                                         .put("callerMethod", searchMethod.name)
-                                        .put("callerDescriptor", searchMethod.descriptor)
+                                        .put("callerDescriptor", buildDescriptor(searchMethod))
                                         .put("callerDex", searchDexName)
                                         .put("instruction", insn.opcode.name)
-                                        .put("codeOffset", insn.codeOffset)
+                                        .put("codeOffset", runCatching { insn.codeOffset }.getOrDefault(0))
                                         .put("invokeType", insn.opcode.name.substringAfter("invoke-").substringBefore("/")))
                                     if (results.length() >= limit) break@outer
                                 }
@@ -112,9 +109,9 @@ object DexAnalysisTools {
                         results.put(JSONObject()
                             .put("calleeClass", typeToName(ref.definingClass))
                             .put("calleeMethod", ref.name)
-                            .put("calleeDescriptor", ref.descriptor)
+                            .put("calleeDescriptor", buildDescriptor(ref))
                             .put("instruction", insn.opcode.name)
-                            .put("codeOffset", insn.codeOffset)
+                            .put("codeOffset", runCatching { insn.codeOffset }.getOrDefault(0))
                             .put("invokeType", insn.opcode.name.substringAfter("invoke-").substringBefore("/")))
                         if (results.length() >= limit) break
                     }
@@ -199,7 +196,7 @@ object DexAnalysisTools {
                     .put("name", method.name)
                     .put("returnType", method.returnType)
                     .put("parameters", params)
-                    .put("descriptor", method.descriptor)
+                    .put("descriptor", buildDescriptor(method))
                     .put("accessFlags", accessFlagsToString(method.accessFlags))
                     .put("isStatic", method.accessFlags and 0x0008 != 0)
                     .put("isNative", method.accessFlags and 0x0100 != 0)
@@ -207,13 +204,15 @@ object DexAnalysisTools {
                     .put("instructionCount", impl?.instructions?.toList()?.size ?: 0))
             }
 
-            // 注解
+            // 注解 (简化)
             val annotations = JSONArray()
-            classDef.annotations?.forEach { annSet ->
-                annSet.annotations.forEach { ann ->
-                    annotations.put(JSONObject()
-                        .put("type", ann.type)
-                        .put("visibility", annSet.visibility.toString()))
+            runCatching {
+                classDef.annotations?.forEach { annSet ->
+                    annSet.annotations.forEach { ann ->
+                        annotations.put(JSONObject()
+                            .put("type", ann.type)
+                            .put("visibility", annSet.visibility.toString()))
+                    }
                 }
             }
 
@@ -271,7 +270,7 @@ object DexAnalysisTools {
             for ((dexName, dexFile) in dexFiles) {
                 val classDef = dexFile.classes.firstOrNull { it.type == classDescriptor } ?: continue
                 val method = classDef.methods.firstOrNull {
-                    it.name == methodName && (descriptor.isBlank() || it.descriptor == descriptor)
+                    it.name == methodName && (descriptor.isBlank() || buildDescriptor(it) == descriptor)
                 } ?: continue
 
                 val impl = method.implementation
@@ -282,7 +281,7 @@ object DexAnalysisTools {
                 for (insn in impl.instructions) {
                     if (count >= limit) break
                     val insnObj = JSONObject()
-                        .put("offset", "0x${insn.codeOffset.toString(16)}")
+                        .put("offset", "0x${runCatching { insn.codeOffset }.getOrDefault(0).toString(16)}")
                         .put("opcode", insn.opcode.name)
                         .put("format", insn.opcode.format.toString())
 
@@ -312,7 +311,7 @@ object DexAnalysisTools {
                 return ok(JSONObject()
                     .put("className", className)
                     .put("methodName", methodName)
-                    .put("descriptor", method.descriptor)
+                    .put("descriptor", buildDescriptor(method))
                     .put("dex", dexName)
                     .put("registerCount", impl.registerCount)
                     .put("parameters", params)
@@ -353,7 +352,7 @@ object DexAnalysisTools {
 
             return runCatching {
                 val opcodes = if (api > 0) Opcodes.forApi(api) else Opcodes.getDefault()
-                val dexFile = DexFileFactory.loadDexFile(file, opcodes, true)
+                val dexFile = DexFileFactory.loadDexFile(file, opcodes)
                 val out = File(outDir).apply { mkdirs() }
                 val options = BaksmaliOptions().apply { this.deodex = true }
                 val jobs = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
@@ -457,20 +456,25 @@ object DexAnalysisTools {
                 val changedClassMap = changedDex.classes.associateBy { it.type }
                 val origClassTypes = origDex.classes.map { it.type }.toSet()
 
-                val dexPool = DexPool(opcodes)
+                // 合并: 用反射调用 DexPool (API 可能因版本不同)
+                val outFile = File(outPath)
+                val dexPoolClass = Class.forName("com.android.tools.smali.dexlib2.writer.pool.DexPool")
+                val dexPool = dexPoolClass.getConstructor(Opcodes::class.java).newInstance(opcodes)
+                val internMethod = dexPoolClass.getMethod("intern", Class.forName("com.android.tools.smali.dexlib2.iface.ClassDef"))
                 for (classDef in origDex.classes) {
-                    if (classDef.type in changedClasses) {
-                        changedClassMap[classDef.type]?.let { dexPool.intern(it) } ?: dexPool.intern(classDef)
+                    val toIntern: Any = if (classDef.type in changedClasses) {
+                        changedClassMap[classDef.type] ?: classDef
                     } else {
-                        dexPool.intern(classDef)
+                        classDef
                     }
+                    internMethod.invoke(dexPool, toIntern)
                 }
                 for (classDef in changedDex.classes) {
-                    if (classDef.type !in origClassTypes) dexPool.intern(classDef)
+                    if (classDef.type !in origClassTypes) internMethod.invoke(dexPool, classDef)
                 }
-
-                val outFile = File(outPath)
-                FileDataStore(outFile).use { store -> dexPool.writeTo(store) }
+                val writeToMethod = dexPoolClass.getMethod("writeTo",
+                    Class.forName("com.android.tools.smali.dexlib2.writer.io.DataStore"))
+                FileDataStore(outFile).use { store -> writeToMethod.invoke(dexPool, store) }
                 tempDex.delete()
 
                 ok(JSONObject()
@@ -521,6 +525,15 @@ object DexAnalysisTools {
             if (ref is MethodReference) return ref
         }
         return null
+    }
+
+    private fun buildDescriptor(method: Method): String {
+        val params = method.parameters.joinToString("") { it.type }
+        return "($params)${method.returnType}"
+    }
+
+    private fun buildDescriptor(ref: MethodReference): String {
+        return ref.descriptor
     }
 
     private fun typeToName(type: String): String =

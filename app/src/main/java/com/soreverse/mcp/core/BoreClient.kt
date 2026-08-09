@@ -58,13 +58,13 @@ class BoreClient(
 
     companion object {
         const val DEFAULT_BORE_PORT = 7835
-        const val CONNECT_TIMEOUT_MS = 10000L
-        const val LOCAL_CONNECT_TIMEOUT_MS = 5000L
-        const val CONTROL_READ_TIMEOUT_MS = 20000L
+        const val CONNECT_TIMEOUT_MS = 10000
+        const val LOCAL_CONNECT_TIMEOUT_MS = 5000
+        const val CONTROL_READ_TIMEOUT_MS = 20000
         const val MAX_CONSECUTIVE_TIMEOUTS = 3
         const val MAX_RECONNECT_ATTEMPTS = 100
-        const val RECONNECT_DELAY_MS = 1000L
-        const val CONNECT_TIMEOUT_TOTAL_MS = 60000L
+        const val RECONNECT_DELAY_MS = 1000
+        const val CONNECT_TIMEOUT_TOTAL_MS = 60000
         const val MAX_FRAME_LENGTH = 65536
     
 
@@ -326,7 +326,7 @@ class BoreClient(
     private fun startConnectTimeoutChecker(runGeneration: Int) {
         connectTimeoutThread = Thread {
             try {
-                Thread.sleep(CONNECT_TIMEOUT_TOTAL_MS)
+                Thread.sleep(CONNECT_TIMEOUT_TOTAL_MS.toLong())
                 if (running && generation.get() == runGeneration && assignedPort < 0) {
                     fireEvent("${now()} 连接超时(${CONNECT_TIMEOUT_TOTAL_MS/1000}s)")
                     stop()
@@ -351,7 +351,7 @@ class BoreClient(
         }
         reconnectThread = Thread {
             try {
-                Thread.sleep(RECONNECT_DELAY_MS)
+                Thread.sleep(RECONNECT_DELAY_MS.toLong())
                 if (stopRequested || generation.get() != runGeneration) return@Thread
                 reconnectAttempts.incrementAndGet()
                 fireEvent("${now()} 重连中 (${reconnectAttempts.get()})...")

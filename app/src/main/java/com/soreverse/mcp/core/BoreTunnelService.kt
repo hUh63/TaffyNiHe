@@ -84,7 +84,7 @@ class BoreTunnelService : Service() {
             eventLog.add(event)
             while (eventLog.size > MAX_EVENTS) eventLog.removeAt(0)
         }
-        context.sendBroadcast(
+        this@BoreTunnelService.sendBroadcast(
             Intent(ACTION_TUNNEL_EVENT).putExtra("event", event)
         )
     }
@@ -158,7 +158,7 @@ class BoreTunnelService : Service() {
     }
 
     private fun broadcastStatus(connected: Boolean, url: String?) {
-        context.sendBroadcast(
+        this@BoreTunnelService.sendBroadcast(
             Intent(ACTION_TUNNEL_STATUS)
                 .putExtra("connected", connected)
                 .putExtra("url", url)

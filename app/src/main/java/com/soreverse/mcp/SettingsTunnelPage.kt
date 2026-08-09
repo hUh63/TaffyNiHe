@@ -473,17 +473,20 @@ private fun stopCfTunnel(context: Context, onDone: () -> Unit) {
     }
 }
 
-private fun startBoreTunnel(context: Context, settings: SettingsStore, tunnelMode: String, host: String, port: String, localPort: String) {
-    if (tunnelMode == "off" || settings.boreMode == "off") {
+private fun startBoreTunnel(context: Context, settings: SettingsStore, boreMode: String, host: String, port: String, localPort: String) {
+    if (boreMode == "off") {
         Toast.makeText(context, if (settings.language == "zh") "请先选择 Bore 隧道模式" else "Select a bore tunnel mode first", Toast.LENGTH_SHORT).show()
         return
     }
     val hp = host.ifBlank { "bore.pub" }
     val bp = port.toIntOrNull() ?: 7835
     val lp = localPort.toIntOrNull() ?: 8080
+    val secret = settings.boreSecret
     val intent = Intent(context, BoreTunnelService::class.java).apply {
         putExtra(BoreTunnelService.EXTRA_BORE_HOST, hp)
+        putExtra(BoreTunnelService.EXTRA_BORE_PORT, bp)
         putExtra(BoreTunnelService.EXTRA_LOCAL_PORT, lp)
+        putExtra(BoreTunnelService.EXTRA_BORE_SECRET, secret)
     }
     if (android.os.Build.VERSION.SDK_INT >= 26) {
         context.startForegroundService(intent)

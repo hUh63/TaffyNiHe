@@ -22,7 +22,9 @@ class BoreTunnelService : Service() {
         const val ACTION_TUNNEL_EVENT = "com.soreverse.mcp.BORE_TUNNEL_EVENT"
         const val ACTION_STOP = "com.soreverse.mcp.boretunnel.STOP"
         const val EXTRA_BORE_HOST = "bore_host"
+        const val EXTRA_BORE_PORT = "bore_port"
         const val EXTRA_LOCAL_PORT = "local_port"
+        const val EXTRA_BORE_SECRET = "bore_secret"
         const val NOTIFICATION_ID = 3001
 
         private const val PREF_TUNNEL_URL = "bore_tunnel_url"
@@ -58,13 +60,15 @@ class BoreTunnelService : Service() {
         }
 
         val boreHost = intent.getStringExtra(EXTRA_BORE_HOST) ?: "bore.pub"
+        val borePort = intent.getIntExtra(EXTRA_BORE_PORT, 7835)
         val localPort = intent.getIntExtra(EXTRA_LOCAL_PORT, 8080)
+        val boreSecret = intent.getStringExtra(EXTRA_BORE_SECRET) ?: ""
 
         startForeground(NOTIFICATION_ID, buildNotification("Bore 隧道启动中..."))
 
         synchronized(eventLog) { eventLog.clear() }
 
-        startTunnel(boreHost, localPort)
+        startTunnel(boreHost, borePort, localPort, boreSecret)
         return START_NOT_STICKY
     }
 
@@ -89,9 +93,9 @@ class BoreTunnelService : Service() {
         )
     }
 
-    private fun startTunnel(boreHost: String, localPort: Int) {
+    private fun startTunnel(boreHost: String, borePort: Int, localPort: Int, boreSecret: String) {
         stopTunnel()
-        boreClient = BoreClient(boreHost, localPort = localPort)
+        boreClient = BoreClient(boreHost, borePort, localPort, boreSecret.ifBlank { null })
         boreClient!!.setListener(object : BoreClient.BoreListener {
             override fun onConnected(publicUrl: String) {
                 lastTunnelUrl = publicUrl

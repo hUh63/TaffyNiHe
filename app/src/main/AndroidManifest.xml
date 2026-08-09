@@ -67,6 +67,11 @@
             android:isolatedProcess="true"
             android:process=":blutter" />
 
+        <service
+            android:name=".core.BoreTunnelService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <receiver
             android:name=".service.BootReceiver"
             android:enabled="true"

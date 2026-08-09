@@ -122,12 +122,14 @@ class BoreClient(
         tunnelThread = Thread {
             var controlSocket: Socket? = null
             try {
-                fireEvent("${now()} 正在连接 ${boreHost}:${borePort}...")
+                fireEvent("${now()} ▶ 正在连接 ${boreHost}:${borePort}...")
                 controlSocket = Socket()
                 controlSocket.connect(InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS)
+                fireEvent("${now()} ✓ TCP 连接已建立")
                 controlSocket.soTimeout = 0
                 val controlIn = controlSocket.getInputStream()
                 val controlOut = controlSocket.getOutputStream()
+                fireEvent("${now()} → 发送 Hello(localPort=$localPort)")
                 val assigned = handshake(controlIn, controlOut)
                 if (assigned <= 0) {
                     running = false
@@ -136,15 +138,18 @@ class BoreClient(
                 }
                 assignedPort = assigned
                 val publicUrl = "http://${boreHost}:${assignedPort}"
+                fireEvent("${now()} ✓ 握手成功，分配端口: $assigned")
                 listener?.onConnected(publicUrl)
-                fireEvent("${now()} 隧道已建立: ${publicUrl}")
+                fireEvent("${now()} ✓ 隧道已建立: ${publicUrl}")
                 startConnectTimeoutChecker(runGeneration)
                 controlLoop(controlIn, controlOut, runGeneration, controlSocket)
             } catch (e: InterruptedException) {
-                // 正常停止
+                fireEvent("${now()} ⏹ 隧道线程被中断")
             } catch (e: Exception) {
                 if (!stopRequested && generation.get() == runGeneration) {
-                    listener?.onError(if (e.message != null) "Bore: ${e.message}" else "Bore: ${e.javaClass.simpleName}")
+                    val msg = if (e.message != null) "Bore: ${e.message}" else "Bore: ${e.javaClass.simpleName}"
+                    fireEvent("${now()} ✗ 异常: $msg")
+                    listener?.onError(msg)
                 }
             } finally {
                 running = false
@@ -167,12 +172,20 @@ class BoreClient(
         controlOut.write(hello)
         controlOut.write(0x00)
         controlOut.flush()
+        fireEvent("${now()} ↻ 等待服务器响应...")
         val resp = readFrame(controlIn)
-            ?: return -1
-        val json = JSONObject(String(resp, StandardCharsets.UTF_8))
+        if (resp == null) {
+            fireEvent("${now()} ✗ 服务器无响应（连接已关闭）")
+            return -1
+        }
+        val respStr = String(resp, StandardCharsets.UTF_8)
+        fireEvent("${now()} ← 收到: $respStr")
+        val json = JSONObject(respStr)
         if (json.has("Hello")) {
             val port = json.getInt("Hello")
+            fireEvent("${now()} ✓ 服务器分配端口: $port")
             if (secret != null) {
+                fireEvent("${now()} → 发送 Authenticate(secret)")
                 val authMsg = JSONObject().apply { put("Authenticate", secret) }.toString()
                 controlOut.write(authMsg.toByteArray(StandardCharsets.UTF_8))
                 controlOut.write(0x00)
@@ -181,21 +194,28 @@ class BoreClient(
                 if (authResp != null) {
                     val authJson = JSONObject(String(authResp, StandardCharsets.UTF_8))
                     if (authJson.has("Error")) {
-                        listener?.onError("Auth failed: ${authJson.getString("Error")}")
+                        val err = authJson.getString("Error")
+                        fireEvent("${now()} ✗ 认证失败: $err")
+                        listener?.onError("Auth failed: $err")
                         return -1
                     }
+                    fireEvent("${now()} ✓ 认证通过")
                 }
             }
             return port
         } else if (json.has("Error")) {
-            listener?.onError("Server: ${json.getString("Error")}")
+            val err = json.getString("Error")
+            fireEvent("${now()} ✗ 服务器错误: $err")
+            listener?.onError("Server: $err")
             return -1
         }
+        fireEvent("${now()} ⚠ 未知响应格式")
         return -1
     }
 
     private fun controlLoop(controlIn: InputStream, controlOut: OutputStream, runGeneration: Int, controlSocket: Socket) {
         var consecutiveTimeouts = 0
+        fireEvent("${now()} ↻ 进入控制循环，等待服务器消息...")
         while (!stopRequested && generation.get() == runGeneration) {
             try {
                 controlSocket.soTimeout = CONTROL_READ_TIMEOUT_MS.toInt()
@@ -204,7 +224,7 @@ class BoreClient(
                     if (stopRequested || generation.get() != runGeneration) break
                     consecutiveTimeouts++
                     if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
-                        fireEvent("${now()} 连接超时，准备重连")
+                        fireEvent("${now()} ⏱ 连续 ${MAX_CONSECUTIVE_TIMEOUTS} 次超时，准备重连")
                         break
                     }
                     continue
@@ -216,20 +236,26 @@ class BoreClient(
                     continue
                 }
                 if (frameStr.contains("\"Connection\"")) {
+                    fireEvent("${now()} ⇄ 收到新连接通知")
                     val json = JSONObject(frameStr)
                     val connId = json.optString("Connection", json.opt("Connection")?.toString() ?: "")
                     if (connId.isNotBlank()) {
+                        fireEvent("${now()} ⇄ 连接 ID: $connId")
                         handleDataConnection(connId, runGeneration)
                     }
                     continue
                 }
                 if (frameStr.contains("\"Error\"")) {
                     val json = JSONObject(frameStr)
-                    listener?.onError("Server: ${json.optString("Error", "unknown")}")
+                    val err = json.optString("Error", "unknown")
+                    fireEvent("${now()} ✗ 服务器错误: $err")
+                    listener?.onError("Server: $err")
                     break
                 }
                 if (frameStr.contains("\"Challenge\"")) {
+                    fireEvent("${now()} 🔐 收到挑战认证请求")
                     if (secret != null) {
+                        fireEvent("${now()} → 发送认证响应")
                         val authMsg = JSONObject().apply { put("Authenticate", secret) }.toString()
                         controlOut.write(authMsg.toByteArray(StandardCharsets.UTF_8))
                         controlOut.write(0x00)
@@ -237,19 +263,22 @@ class BoreClient(
                     }
                     continue
                 }
+                fireEvent("${now()} ⚠ 未知消息: ${frameStr.take(100)}")
             } catch (e: SocketTimeoutException) {
                 consecutiveTimeouts++
                 if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
-                    fireEvent("${now()} 连接超时，准备重连")
+                    fireEvent("${now()} ⏱ 连接超时（${consecutiveTimeouts}次），准备重连")
                     break
                 }
             } catch (e: InterruptedException) {
+                fireEvent("${now()} ⏹ 控制循环被中断")
                 break
             } catch (e: Exception) {
-                if (!stopRequested) fireEvent("${now()} 控制连接异常: ${e.message}")
+                fireEvent("${now()} ✗ 控制连接异常: ${e.message}")
                 break
             }
         }
+        fireEvent("${now()} ⏹ 控制循环结束")
     }
 
     private fun handleDataConnection(connId: String, runGeneration: Int) {
@@ -257,21 +286,25 @@ class BoreClient(
             var dataSocket: Socket? = null
             var localSocket: Socket? = null
             try {
-                fireEvent("${now()} 收到新连接: ${connId}")
+                fireEvent("${now()} ⇄ 处理数据连接: $connId")
                 dataSocket = Socket()
                 dataSocket.connect(InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS)
+                fireEvent("${now()} ⇄ 数据连接已建立")
                 dataSocket.soTimeout = 0
                 val dataOut = dataSocket.getOutputStream()
                 val accept = JSONObject().apply { put("Accept", connId) }.toString()
+                fireEvent("${now()} → 发送 Accept")
                 dataOut.write(accept.toByteArray(StandardCharsets.UTF_8))
                 dataOut.write(0x00)
                 dataOut.flush()
                 localSocket = Socket()
                 localSocket.connect(InetSocketAddress("127.0.0.1", localPort), LOCAL_CONNECT_TIMEOUT_MS)
+                fireEvent("${now()} ⇄ 已连接本地 127.0.0.1:$localPort")
                 localSocket.soTimeout = 0
                 val localIn = localSocket.getInputStream()
                 val localOut = localSocket.getOutputStream()
                 val dataIn = dataSocket.getInputStream()
+                fireEvent("${now()} ⇄ 开始双向转发")
                 val forwarder1 = Thread {
                     try {
                         pipe(dataIn, localOut)
@@ -287,10 +320,11 @@ class BoreClient(
                 forwarder2.start()
                 forwarder1.join()
                 forwarder2.join(5000)
+                fireEvent("${now()} ⇄ 数据连接 $connId 关闭")
             } catch (e: InterruptedException) {
-                // 正常停止
+                fireEvent("${now()} ⇄ 数据连接 $connId 被中断")
             } catch (e: Exception) {
-                fireEvent("${now()} 数据连接异常: ${e.message}")
+                fireEvent("${now()} ✗ 数据连接异常: ${e.message}")
             } finally {
                 connectionThreads.remove(connId)
                 try { dataSocket?.close() } catch (_: Exception) {}
@@ -355,12 +389,15 @@ class BoreClient(
         }
         reconnectThread = Thread {
             try {
+                val attempt = reconnectAttempts.incrementAndGet()
+                fireEvent("${now()} ↻ ${attempt}秒后重连 (第${attempt}次)...")
                 Thread.sleep(RECONNECT_DELAY_MS.toLong())
                 if (stopRequested || generation.get() != runGeneration) return@Thread
-                reconnectAttempts.incrementAndGet()
-                fireEvent("${now()} 重连中 (${reconnectAttempts.get()})...")
+                fireEvent("${now()} ↻ 开始第${attempt}次重连...")
                 start()
-            } catch (_: InterruptedException) {}
+            } catch (_: InterruptedException) {
+                fireEvent("${now()} ⏹ 重连被取消")
+            }
         }.apply {
             isDaemon = true
             name = "bore-reconnect"
@@ -378,6 +415,7 @@ class BoreClient(
 
     @Synchronized
     fun stop() {
+        fireEvent("${now()} ⏹ 停止隧道...")
         autoReconnect = false
         running = false
         stopRequested = true
@@ -387,10 +425,12 @@ class BoreClient(
         reconnectThread = null
         tunnelThread?.interrupt()
         tunnelThread = null
+        val count = connectionThreads.size
         connectionThreads.values.forEach { it.interrupt() }
         connectionThreads.clear()
         dataExecutor?.shutdownNow()
         dataExecutor = null
+        fireEvent("${now()} ⏹ 隧道已停止（中断 $count 个数据连接）")
     }
 
     fun isRunning(): Boolean = running

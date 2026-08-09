@@ -107,7 +107,7 @@ object ToolCatalog {
             "subView".oneOf("Sub-view when view=list", "sections", "symbols", "dynsyms", "functions", "relocations", "strings", "imports")
             "prefix" str "Name prefix filter (view=list)"
             "limit" int "Maximum items (view=list)"
-        }, required = listOf("path")) }
+        }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         val view = a.str("view", "full")
         when (view) {

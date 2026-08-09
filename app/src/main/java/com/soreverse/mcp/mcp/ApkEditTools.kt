@@ -220,7 +220,7 @@ object ApkEditTools {
         override val meta = ToolMeta("taffy_apk_hash_file",
             "【文件哈希】计算任意文件的 MD5/SHA1/SHA256 哈希。用于校验文件完整性、比对 APK/SO 是否被篡改、签名校验辅助。",
             "Compute MD5/SHA1/SHA256 hash of any file. For integrity checks, APK/SO tamper detection.",
-            "utility", ToolClass.EXTRA, heavy = false,
+            "file", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
                 "path" str "文件路径"

@@ -31,7 +31,7 @@ object AdvancedTools {
         override val meta = ToolMeta("taffy_so_xref",
             "【SO 交叉引用】查找谁调用了某函数/地址(to), 或某函数/地址调用了什么(from)。输入 workspaceId + locator(函数名/VA/符号), direction=to 查[被谁调用](逆向最常用, 定位关键函数的调用者), direction=from 查[调用了谁]。包装 rizin rzXrefs。",
             "Cross-reference search. direction=to finds who calls a function/address (most useful for locating callers); direction=from finds what it calls. Wraps rizin rzXrefs.",
-            "soanalyze", ToolClass.EXTRA, heavy = false,
+            "analyze", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
                 "workspaceId" str "SO 工作区 ID(engine.open 返回)"
@@ -56,7 +56,7 @@ object AdvancedTools {
         override val meta = ToolMeta("taffy_so_cfg",
             "【SO 控制流图】生成指定函数的控制流图(CFG), 展示基本块和跳转关系。输入 workspaceId + locator(函数名/VA)。通过 rizin agf 命令生成, 返回图的 JSON 描述(节点=基本块, 边=跳转)。用于分析函数分支逻辑、循环结构。",
             "Control flow graph for a function. Generates CFG via rizin agf command. Returns JSON with nodes (basic blocks) and edges (jumps). Useful for analyzing branching and loop structure.",
-            "soanalyze", ToolClass.EXTRA, heavy = false,
+            "analyze", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
                 "workspaceId" str "SO 工作区 ID"
@@ -81,7 +81,7 @@ object AdvancedTools {
         override val meta = ToolMeta("taffy_so_addr_map",
             "【地址映射】虚拟地址(VA)↔文件偏移(FileOffset)互转。action=va_to_offset: VA→偏移; action=offset_to_va: 偏移→VA; action=sections: 列出所有节区及其地址范围。逆向时定位 IDA/Ghidra 中的地址对应 SO 文件的哪个位置。通过 rizin 命令实现。",
             "VA↔FileOffset address mapping. action=va_to_offset, offset_to_va, or sections. Helps locate IDA/Ghidra addresses in the SO file. Uses rizin commands.",
-            "soanalyze", ToolClass.EXTRA, heavy = false,
+            "analyze", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
                 "workspaceId" str "SO 工作区 ID"
@@ -117,7 +117,7 @@ object AdvancedTools {
         override val meta = ToolMeta("taffy_so_search_bytes",
             "【SO 字节搜索】在 SO 文件中搜索十六进制字节模式(支持通配符 ??)。如搜索 90 31 FF 6B 找到指令位置, 搜索 48 8B ?? ?? 找到寄存器加载。返回匹配的虚拟地址和偏移。包装 rizin rzSearchBytes。",
             "Hex byte pattern search in SO file (supports ?? wildcards). Returns matched virtual addresses and offsets. Wraps rizin rzSearchBytes.",
-            "soanalyze", ToolClass.EXTRA, heavy = false,
+            "search", ToolClass.EXTRA, heavy = false,
         ) {
             objectSchema(props {
                 "workspaceId" str "SO 工作区 ID"

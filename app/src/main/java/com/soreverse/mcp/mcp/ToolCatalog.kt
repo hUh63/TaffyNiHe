@@ -43,8 +43,8 @@ object ToolCatalog {
 
     private val soClose = EngineToolHandler(
         ToolMeta("taffy_so_close",
-            "关闭工作区（action=list 列出已打开工作区）",
-            "Close an open workspace. Use action=list to see open workspaces.",
+            "关闭工作区（action=list 列出已打开工作区）；关闭同时回收该工作区的 SO 编辑会话",
+            "Close an open workspace (action=list lists open workspaces); closing also releases the SO edit session of that workspace.",
             "workspace", ToolClass.CORE,
         ) { objectSchema(props {
             "action".oneOf("close (默认) | list", "close", "list")
@@ -579,8 +579,8 @@ object ToolCatalog {
 
     private val unidbgSession = EngineToolHandler(
         ToolMeta("taffy_unidbg_session",
-            "Unidbg 会话工具（open/list/close/call/dump/modules/exports/registers/maps）",
-            "Typed Unidbg session tool for shell-friendly live emulator workflows: open/list/close/call/call_address/dump/modules/exports/registers/memory_maps.",
+            "Unidbg 会话工具（open/list/close/call/dump/modules/exports/registers/maps）【模拟运行时会话，不修改任何文件；与 SO 编辑会话 taffy_session_open / PE 编辑会话 taffy_pe_edit_session 相互独立】",
+            "Typed Unidbg session tool for shell-friendly live emulator workflows: open/list/close/call/call_address/dump/modules/exports/registers/memory_maps. [EMULATION RUNTIME session — does NOT patch files; independent from SO edit session (taffy_session_open) and PE edit session (taffy_pe_edit_session).]",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("Session action — open(需workspaceId+editSessionId) | list(无参数) | close(需emulatorSessionId) | call(需emulatorSessionId+symbolName) | call_address(需emulatorSessionId+addr) | dump(需emulatorSessionId+addr) | modules(需emulatorSessionId) | exports(需emulatorSessionId) | registers(需emulatorSessionId) | memory_maps(需emulatorSessionId) | Session action — open(needs workspaceId+editSessionId) | list(no args) | close(session) | call(session+symbolName) | call_address(session+addr) | dump(session+addr) | modules/exports/registers/memory_maps(session)", "open", "list", "close", "call", "call_address", "dump", "modules", "exports", "registers", "memory_maps")
@@ -759,8 +759,8 @@ object ToolCatalog {
 
     private val sessionOpen = EngineToolHandler(
         ToolMeta("taffy_session_open",
-            "打开编辑会话（基于当前工作区 SO 的副本）",
-            "Open an edit session: creates a mutable copy of the workspace SO for patching.",
+            "【SO 编辑会话】基于当前工作区 SO 创建可修改副本，配合 taffy_edit_hex/asm/symbol / taffy_build_so 进行补丁。注意区别于：taffy_unidbg_session（模拟运行，不改文件）、taffy_pe_edit_session（PE/DLL 编辑）",
+            "[SO EDIT SESSION] Open an edit session: creates a mutable copy of the workspace SO for patching. Use with taffy_edit_hex/asm/symbol / taffy_build_so. Distinguish from taffy_unidbg_session (emulation runtime, does NOT patch files) and taffy_pe_edit_session (PE/DLL editing).",
             "session", ToolClass.CORE,
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"
@@ -769,8 +769,8 @@ object ToolCatalog {
 
     private val sessionHistory = object : ToolHandler {
         override val meta = ToolMeta("taffy_session_history",
-            "编辑历史管理（snapshot/rollback/undo/redo/reset/check）",
-            "Edit session history: snapshot, rollback, undo, redo, reset, or check integrity.",
+            "【SO 编辑会话】编辑历史管理（snapshot/rollback/undo/redo/reset/check）",
+            "[SO EDIT SESSION] Edit session history: snapshot, rollback, undo, redo, reset, or check integrity.",
             "session", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("snapshot（默认）| rollback | undo | redo | reset | check", "snapshot", "rollback", "undo", "redo", "reset", "check")
@@ -796,8 +796,8 @@ object ToolCatalog {
 
     private val sessionAudit = object : ToolHandler {
         override val meta = ToolMeta("taffy_session_audit",
-            "审计日志（audit/persist/list/load）",
-            "Edit session audit trail: view audit, persist to file, list saved audits, or load a saved audit.",
+            "【SO 编辑会话】审计日志（audit/persist/list/load）",
+            "[SO EDIT SESSION] Edit session audit trail: view audit, persist to file, list saved audits, or load a saved audit.",
             "session", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("audit（默认）| persist | list | load", "audit", "persist", "list", "load")

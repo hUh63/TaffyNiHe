@@ -318,8 +318,8 @@ object DotnetTools {
 
     val peEditSession = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_edit_session",
-            "PE 编辑会话管理（action=open|snapshot|undo|redo|reset|history）",
-            "Manage PE edit sessions: open, snapshot, undo, redo, reset, history.",
+            "PE 编辑会话管理（action=open|snapshot|undo|redo|reset|history）【PE/DLL 文件编辑会话；区别于 SO 编辑会话 taffy_session_open / Unidbg 模拟会话 taffy_unidbg_session】",
+            "Manage PE edit sessions: open, snapshot, undo, redo, reset, history. [PE/DLL FILE EDIT session — independent from SO edit session (taffy_session_open) and Unidbg emulation session (taffy_unidbg_session).]",
             "dotnet", ToolClass.CORE,
         ) { objectSchema(props {
             "action".oneOf("open (default) | snapshot | undo | redo | rollback | reset | history", "open", "snapshot", "undo", "redo", "rollback", "reset", "history")

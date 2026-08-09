@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.soreverse.mcp.MainActivity
 import com.soreverse.mcp.R
 import java.util.ArrayList
@@ -85,7 +84,7 @@ class BoreTunnelService : Service() {
             eventLog.add(event)
             while (eventLog.size > MAX_EVENTS) eventLog.removeAt(0)
         }
-        LocalBroadcastManager.getInstance(this).sendBroadcast(
+        context.sendBroadcast(
             Intent(ACTION_TUNNEL_EVENT).putExtra("event", event)
         )
     }
@@ -159,7 +158,7 @@ class BoreTunnelService : Service() {
     }
 
     private fun broadcastStatus(connected: Boolean, url: String?) {
-        LocalBroadcastManager.getInstance(this).sendBroadcast(
+        context.sendBroadcast(
             Intent(ACTION_TUNNEL_STATUS)
                 .putExtra("connected", connected)
                 .putExtra("url", url)

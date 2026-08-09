@@ -56,17 +56,47 @@ class BoreClient(
     private val generation = AtomicInteger(0)
     private var connectTimeoutThread: Thread? = null
 
-    private companion object {
+    companion object {
         const val DEFAULT_BORE_PORT = 7835
-        const val CONNECT_TIMEOUT_MS = 10000
-        const val LOCAL_CONNECT_TIMEOUT_MS = 5000
-        const val CONTROL_READ_TIMEOUT_MS = 20000
+        const val CONNECT_TIMEOUT_MS = 10000L
+        const val LOCAL_CONNECT_TIMEOUT_MS = 5000L
+        const val CONTROL_READ_TIMEOUT_MS = 20000L
         const val MAX_CONSECUTIVE_TIMEOUTS = 3
         const val MAX_RECONNECT_ATTEMPTS = 100
-        const val RECONNECT_DELAY_MS = 1000
-        const val CONNECT_TIMEOUT_TOTAL_MS = 60000
+        const val RECONNECT_DELAY_MS = 1000L
+        const val CONNECT_TIMEOUT_TOTAL_MS = 60000L
         const val MAX_FRAME_LENGTH = 65536
-    }
+    
+
+        fun parseHost(hostPort: String): String {
+            var raw = hostPort.trim()
+            if (raw.startsWith("https://")) raw = raw.substring(8)
+            else if (raw.startsWith("http://")) raw = raw.substring(7)
+            val colonIdx = raw.indexOf(':')
+            return if (colonIdx > 0) raw.substring(0, colonIdx) else raw
+        }
+        fun parsePort(hostPort: String, defaultPort: Int = DEFAULT_BORE_PORT): Int {
+            var raw = hostPort.trim()
+            if (raw.startsWith("https://")) raw = raw.substring(8)
+            else if (raw.startsWith("http://")) raw = raw.substring(7)
+            val colonIdx = raw.indexOf(':')
+            return if (colonIdx > 0 && colonIdx < raw.length - 1) {
+                raw.substring(colonIdx + 1).toIntOrNull() ?: defaultPort
+            } else defaultPort
+        }
+        fun parseSecret(hostPort: String): String? {
+            var raw = hostPort.trim()
+            if (raw.startsWith("https://")) raw = raw.substring(8)
+            else if (raw.startsWith("http://")) raw = raw.substring(7)
+            val firstColon = raw.indexOf(':')
+            if (firstColon <= 0) return null
+            val secondColon = raw.indexOf(':', firstColon + 1)
+            return if (secondColon > 0 && secondColon < raw.length - 1) {
+                raw.substring(secondColon + 1)
+            } else null
+        }
+    
+}
 
     fun setListener(l: BoreListener?) { listener = l }
     fun setAutoReconnect(ar: Boolean) { autoReconnect = ar }
@@ -361,33 +391,5 @@ class BoreClient(
 
     fun isRunning(): Boolean = running
 
-    companion object {
-        fun parseHost(hostPort: String): String {
-            var raw = hostPort.trim()
-            if (raw.startsWith("https://")) raw = raw.substring(8)
-            else if (raw.startsWith("http://")) raw = raw.substring(7)
-            val colonIdx = raw.indexOf(':')
-            return if (colonIdx > 0) raw.substring(0, colonIdx) else raw
-        }
-        fun parsePort(hostPort: String, defaultPort: Int = DEFAULT_BORE_PORT): Int {
-            var raw = hostPort.trim()
-            if (raw.startsWith("https://")) raw = raw.substring(8)
-            else if (raw.startsWith("http://")) raw = raw.substring(7)
-            val colonIdx = raw.indexOf(':')
-            return if (colonIdx > 0 && colonIdx < raw.length - 1) {
-                raw.substring(colonIdx + 1).toIntOrNull() ?: defaultPort
-            } else defaultPort
-        }
-        fun parseSecret(hostPort: String): String? {
-            var raw = hostPort.trim()
-            if (raw.startsWith("https://")) raw = raw.substring(8)
-            else if (raw.startsWith("http://")) raw = raw.substring(7)
-            val firstColon = raw.indexOf(':')
-            if (firstColon <= 0) return null
-            val secondColon = raw.indexOf(':', firstColon + 1)
-            return if (secondColon > 0 && secondColon < raw.length - 1) {
-                raw.substring(secondColon + 1)
-            } else null
-        }
-    }
+    
 }

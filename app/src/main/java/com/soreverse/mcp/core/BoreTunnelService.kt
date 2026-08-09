@@ -149,7 +149,7 @@ class BoreTunnelService : Service() {
                 addEvent(event)
             }
         })
-        boreClient!!.start()
+        boreClient!!.startTunnel()
     }
 
     private fun stopTunnel() {

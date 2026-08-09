@@ -103,6 +103,12 @@ class BoreClient(
     fun setListener(l: BoreListener?) { listener = l }
     fun setAutoReconnect(ar: Boolean) { autoReconnect = ar }
 
+    /** 用户手动启动，重置重连计数 */
+    fun startTunnel() {
+        reconnectAttempts.set(0)
+        start()
+    }
+
     private fun fireEvent(event: String) {
         listener?.onConnectionEvent(event)
     }
@@ -118,7 +124,6 @@ class BoreClient(
         stopRequested = false
         generation.incrementAndGet()
         running = true
-        reconnectAttempts.set(0)
         val runGeneration = generation.get()
 
         tunnelThread = Thread {
@@ -442,6 +447,7 @@ class BoreClient(
         stopRequested = true
         generation.incrementAndGet()
         autoReconnect = false
+        reconnectAttempts.set(0)
         reconnectThread?.interrupt()
         reconnectThread = null
     }

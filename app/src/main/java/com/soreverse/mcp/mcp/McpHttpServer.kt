@@ -399,8 +399,8 @@ code{background:#f0f0f0;padding:2px 6px;border-radius:4px;font-size:13px}
 .cat-count{background:#FF375F;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:600}
 .cat-tools{display:flex;flex-direction:column;gap:4px}
 .tool-item{display:flex;gap:8px;align-items:baseline;padding:4px 0}
-.tool-item code{min-width:180px;font-size:12px}
-.tool-desc{font-size:12px;color:#888;flex:1}
+.tool-item code{min-width:120px;max-width:200px;font-size:12px;word-wrap:break-word;overflow-wrap:break-word}
+.tool-desc{font-size:12px;color:#888;flex:1;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word;min-width:0}
 .fail-badge{background:#fbe9e7;color:#c62828;padding:1px 6px;border-radius:4px;font-size:11px}
 .row.has-fail{background:#fff5f5}
 </style></head><body>

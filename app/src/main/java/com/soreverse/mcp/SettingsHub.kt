@@ -60,7 +60,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Export -> if (t.zh) "导出" else "Export"
     SettingsDest.Audit -> if (t.zh) "编辑校验与审计" else "Edit & Audit"
     SettingsDest.Blutter -> "Blutter"
-    SettingsDest.Tunnel -> if (t.zh) "Cloudflare 隧道" else "Cloudflare Tunnel"
+    SettingsDest.Tunnel -> if (t.zh) "隧道" else "Tunnel"
     SettingsDest.ApkBridge -> "APK MCP"
     SettingsDest.AiDeep -> if (t.zh) "AI 深度分析" else "AI Deep Analysis"
     SettingsDest.Updates -> if (t.zh) "版本更新" else "Software Update"
@@ -331,3 +331,4 @@ internal fun SettingsHub(
     }
 }
 }
+

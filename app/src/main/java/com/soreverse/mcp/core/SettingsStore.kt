@@ -416,6 +416,23 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("tunnelHistoryEnabled", true)
         set(value) = prefs.edit().putBoolean("tunnelHistoryEnabled", value).apply()
 
+    // ---- Bore Tunnel ----
+    var tunnelType: String
+        get() = prefs.getString("tunnelType", "cloudflare") ?: "cloudflare"
+        set(value) = prefs.edit().putString("tunnelType", if (value in setOf("cloudflare", "bore")) value else "cloudflare").apply()
+
+    var boreHost: String
+        get() = prefs.getString("boreHost", "bore.pub") ?: "bore.pub"
+        set(value) = prefs.edit().putString("boreHost", value.trim()).apply()
+
+    var borePort: Int
+        get() = prefs.getInt("borePort", 7835)
+        set(value) = prefs.edit().putInt("borePort", value.coerceIn(1, 65535)).apply()
+
+    var boreSecret: String
+        get() = prefs.getString("boreSecret", "") ?: ""
+        set(value) = prefs.edit().putString("boreSecret", value.trim()).apply()
+
     var tunnelProtocol: String
         get() = prefs.getString("tunnelProtocol", "http2") ?: "http2"
         set(value) = prefs.edit().putString("tunnelProtocol", if (value in setOf("http2", "quic", "auto")) value else "http2").apply()

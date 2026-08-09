@@ -302,8 +302,16 @@ class McpForegroundService : Service() {
             return
         }
         if (floating != null) {
-            // 悬浮窗已存在，仅更新状态文字
+            // 悬浮窗已存在，更新状态文字和透明度/自动吸边
             updateFloatingStatus()
+            val op = settings.floatingOpacity / 100f
+            floating?.alpha = op
+            if (settings.floatingAutoEdge) {
+                val params = floatingParams ?: return
+                val width = resources.displayMetrics.widthPixels
+                params.x = if (params.x > width / 2) width - (floating?.width ?: 0) else 0
+                runCatching { windowManager?.updateViewLayout(floating, params) }
+            }
             return
         }
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -326,7 +334,7 @@ class McpForegroundService : Service() {
                 cornerRadius = 999f
             }
             elevation = 8 * density
-            alpha = 0.7f
+            alpha = settings.floatingOpacity / 100f
         }
         bubbleText = tv
         val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE

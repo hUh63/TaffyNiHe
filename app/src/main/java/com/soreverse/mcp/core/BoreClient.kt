@@ -133,13 +133,16 @@ class BoreClient(
                 controlSocket = Socket()
                 controlSocket.connect(InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS)
                 fireEvent("${now()} ✓ TCP 连接已建立")
-                controlSocket.soTimeout = CONTROL_READ_TIMEOUT_MS
-                controlSocket.keepAlive = true
-                controlSocket.tcpNoDelay = true
+                // 先设为无限阻塞，握手时再设超时
+                controlSocket.soTimeout = 0
+                // TCP keepalive 防止连接异常断开
+                runCatching { controlSocket.keepAlive = true }
+                // 禁用 Nagle 算法减少延迟
+                runCatching { controlSocket.tcpNoDelay = true }
                 val controlIn = controlSocket.getInputStream()
                 val controlOut = controlSocket.getOutputStream()
                 fireEvent("${now()} → 发送 Hello(localPort=$localPort)")
-                val assigned = handshake(controlIn, controlOut)
+                val assigned = handshake(controlIn, controlOut, controlSocket)
                 if (assigned <= 0) {
                     running = false
                     listener?.onError("handshake failed")
@@ -177,50 +180,96 @@ class BoreClient(
         tunnelThread?.start()
     }
 
-    private fun handshake(controlIn: InputStream, controlOut: OutputStream): Int {
-        val hello = JSONObject().apply { put("Hello", localPort) }.toString().toByteArray(StandardCharsets.UTF_8)
+    private fun handshake(controlIn: InputStream, controlOut: OutputStream, controlSocket: Socket): Int {
+        // bore 协议: Hello 的值是期望的远程公网端口，0 = 让服务器自动分配
+        // 注意: 不是本地端口！本地端口仅用于收到连接后转发
+        val hello = "{\"Hello\":0}\u0000".toByteArray(StandardCharsets.UTF_8)
         controlOut.write(hello)
-        controlOut.write(0x00)
         controlOut.flush()
-        fireEvent("${now()} ↻ 等待服务器响应...")
+        fireEvent("${now()} → 发送 Hello(0=自动分配端口)")
+        // 握手阶段设 10 秒超时
+        controlSocket?.soTimeout = 10000
         val resp = readFrame(controlIn)
         if (resp == null) {
             fireEvent("${now()} ✗ 服务器无响应（连接已关闭）")
             return -1
         }
-        val respStr = String(resp, StandardCharsets.UTF_8)
+        var respStr = String(resp, StandardCharsets.UTF_8)
         fireEvent("${now()} ← 收到: $respStr")
-        val json = JSONObject(respStr)
-        if (json.has("Hello")) {
-            val port = json.getInt("Hello")
-            fireEvent("${now()} ✓ 服务器分配端口: $port")
-            if (secret != null) {
-                fireEvent("${now()} → 发送 Authenticate(secret)")
-                val authMsg = JSONObject().apply { put("Authenticate", secret) }.toString()
-                controlOut.write(authMsg.toByteArray(StandardCharsets.UTF_8))
-                controlOut.write(0x00)
-                controlOut.flush()
-                val authResp = readFrame(controlIn)
-                if (authResp != null) {
-                    val authJson = JSONObject(String(authResp, StandardCharsets.UTF_8))
-                    if (authJson.has("Error")) {
-                        val err = authJson.getString("Error")
-                        fireEvent("${now()} ✗ 认证失败: $err")
-                        listener?.onError("Auth failed: $err")
-                        return -1
-                    }
-                    fireEvent("${now()} ✓ 认证通过")
-                }
+
+        // 处理可能的 Challenge 认证（在 Hello 之前）
+        if (respStr.contains("\"Challenge\"")) {
+            if (secret.isNullOrEmpty()) {
+                fireEvent("${now()} ✗ 服务器需要认证但未提供密码")
+                listener?.onError("Server requires authentication but no secret provided")
+                return -1
             }
-            return port
-        } else if (json.has("Error")) {
-            val err = json.getString("Error")
+            fireEvent("${now()} 🔐 服务器要求认证")
+            val authMsg = "{\"Authenticate\":\"${escapeJson(secret)}\"}\u0000".toByteArray(StandardCharsets.UTF_8)
+            controlOut.write(authMsg)
+            controlOut.flush()
+            fireEvent("${now()} → 发送认证响应")
+            // 认证后读取 Hello 响应
+            val afterAuth = readFrame(controlIn)
+            if (afterAuth == null) {
+                fireEvent("${now()} ✗ 认证后无响应")
+                return -1
+            }
+            respStr = String(afterAuth, StandardCharsets.UTF_8)
+            fireEvent("${now()} ← 收到: $respStr")
+        }
+
+        // 解析 Hello 响应（用字符串解析，避免 JSONObject 兼容问题）
+        if (respStr.contains("\"Hello\"")) {
+            val port = parseHelloResponse(respStr)
+            if (port > 0) {
+                fireEvent("${now()} ✓ 服务器分配端口: $port")
+                return port
+            }
+        }
+        if (respStr.contains("\"Error\"")) {
+            val err = parseStringValue(respStr, "Error") ?: "unknown"
             fireEvent("${now()} ✗ 服务器错误: $err")
             listener?.onError("Server: $err")
             return -1
         }
-        fireEvent("${now()} ⚠ 未知响应格式")
+        // 兼容非标准服务器：可能直接发 Connection
+        if (respStr.contains("\"Connection\"")) {
+            fireEvent("${now()} ⚠ 收到 Connection 而非 Hello，视为已连接")
+            return 1
+        }
+        fireEvent("${now()} ⚠ 未知响应: ${respStr.take(80)}")
         return -1
+    }
+
+    private fun escapeJson(s: String): String =
+        s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
+
+    private fun parseHelloResponse(json: String): Int {
+        val keyIdx = json.indexOf("\"Hello\"")
+        if (keyIdx < 0) return -1
+        val colonIdx = json.indexOf(':', keyIdx)
+        if (colonIdx < 0) return -1
+        var startIdx = colonIdx + 1
+        while (startIdx < json.length && json[startIdx] == ' ') startIdx++
+        var endIdx = startIdx
+        while (endIdx < json.length && json[endIdx] in '0'..'9') endIdx++
+        return if (startIdx == endIdx) -1 else json.substring(startIdx, endIdx).toIntOrNull() ?: -1
+    }
+
+    private fun parseStringValue(json: String, key: String): String? {
+        val keyStr = "\"$key\""
+        val keyIdx = json.indexOf(keyStr)
+        if (keyIdx < 0) return null
+        val colonIdx = json.indexOf(':', keyIdx)
+        if (colonIdx < 0) return null
+        var startIdx = colonIdx + 1
+        while (startIdx < json.length && json[startIdx] == ' ') startIdx++
+        if (startIdx < json.length && json[startIdx] == '"') {
+            val endIdx = json.indexOf('"', startIdx + 1)
+            return if (endIdx > 0) json.substring(startIdx + 1, endIdx) else null
+        }
+        return null
     }
 
     private fun controlLoop(controlIn: InputStream, controlOut: OutputStream, runGeneration: Int, controlSocket: Socket) {

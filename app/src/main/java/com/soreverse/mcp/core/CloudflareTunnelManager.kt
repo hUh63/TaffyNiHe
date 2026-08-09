@@ -655,20 +655,20 @@ class CloudflareTunnelManager(private val context: Context, private val settings
             "6" -> listOf("region1.v2.argotunnel.com", "region2.v2.argotunnel.com")
             else -> listOf("region1.argotunnel.com", "region2.argotunnel.com")
         }
-        // Resolve hosts concurrently so the upper bound on DNS time is one
-        // host lookup rather than N lookups serialised on the caller. Prior
-        // version used InetAddress.getAllByName(h) in a loop, which on a
-        // device with a flaky resolver could block the start path for ~10s.
+        addEvent("🌐 解析边缘节点 (IPv${if (preferV4) "4" else "6"})...")
         val executor = java.util.concurrent.Executors.newFixedThreadPool(hosts.size.coerceAtLeast(1)) { r ->
             Thread(r, "clfl-dns").apply { isDaemon = true }
         }
         val futures = hosts.map { h ->
             executor.submit<List<String>?> {
                 try {
-                    InetAddress.getAllByName(h)
-                        .filter { !preferV4 || it is Inet4Address }
-                        .map { "${it.hostAddress}:7844" }
+                    val addrs = InetAddress.getAllByName(h)
+                    val filtered = addrs.filter { !preferV4 || it is Inet4Address }
+                    val result = filtered.map { "${it.hostAddress}:7844" }
+                    addEvent("  ✓ $h -> ${result.joinToString(", ")}")
+                    result
                 } catch (e: Exception) {
+                    addEvent("  ✗ $h 解析失败: ${e.message}")
                     AppLog.w("edge resolve $h failed: ${e.message}")
                     null
                 }
@@ -687,6 +687,12 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         } finally {
             executor.shutdownNow()
         }
+        if (out.isEmpty()) {
+            addEvent("⚠ 未解析到任何边缘节点 IP，cloudflared 将使用内置 DNS")
+        } else {
+            addEvent("✓ 共解析到 ${out.size} 个边缘节点 IP")
+        }
+        return out
     }
 
     private var tunnelCredsFile: String? = null

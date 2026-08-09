@@ -674,8 +674,8 @@ class CloudflareTunnelManager(private val context: Context, private val settings
                 }
             }
         }
-        return try {
-            val out = mutableListOf<String>()
+        val out = mutableListOf<String>()
+        try {
             futures.forEach { f ->
                 try {
                     f.get(4_000, java.util.concurrent.TimeUnit.MILLISECONDS)?.let(out::addAll)
@@ -683,7 +683,6 @@ class CloudflareTunnelManager(private val context: Context, private val settings
                     f.cancel(true)
                 }
             }
-            out
         } finally {
             executor.shutdownNow()
         }

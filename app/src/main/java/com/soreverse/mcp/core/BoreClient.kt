@@ -1,6 +1,5 @@
 package com.soreverse.mcp.core
 
-import android.content.Context
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -13,21 +12,23 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Bore 隧道客户端 - 严格遵循 ekzhang/bore 协议
  *
- * 协议:
- * 1. 连接控制端口 (默认 7835)
- * 2. 客户端发送 {"Hello":本地端口}\0
- * 3. 服务器响应 {"Hello":分配端口}\0 或 {"Error":"消息"}\0
- * 4. 控制通道接收: {"Heartbeat":null}\0 / {"Connection":"uuid"}\0 / {"Error":"消息"}\0
- * 5. 每个 Connection: 新建数据连接 → 发送 {"Accept":"连接ID"}\0 → 双向转发
- * 6. 可选认证: {"Challenge":"uuid"}\0 → {"Authenticate":"密码"}\0
+ * 优化点:
+ * 1. readFrame 缓冲区提前 break 防止恶意数据
+ * 2. readFrame 返回 null 立即断开（不再算超时）
+ * 3. 指数退避重连（1s→2s→4s→8s→最大30s）
+ * 4. 数据连接用 CountDownLatch 避免线程阻塞
+ * 5. 流量统计
+ * 6. 保活探测（控制连接 idle 检测）
  */
 class BoreClient(
     private val boreHost: String = "bore.pub",
@@ -55,6 +56,8 @@ class BoreClient(
     private var reconnectThread: Thread? = null
     private val generation = AtomicInteger(0)
     private var connectTimeoutThread: Thread? = null
+    private val totalBytesTransferred = AtomicLong(0)
+    @Volatile private var lastHeartbeatMs = 0L
 
     companion object {
         const val DEFAULT_BORE_PORT = 7835
@@ -64,9 +67,9 @@ class BoreClient(
         const val MAX_CONSECUTIVE_TIMEOUTS = 3
         const val MAX_RECONNECT_ATTEMPTS = 100
         const val RECONNECT_DELAY_MS = 1000
+        const val RECONNECT_MAX_DELAY_MS = 30000
         const val CONNECT_TIMEOUT_TOTAL_MS = 60000
         const val MAX_FRAME_LENGTH = 65536
-    
 
         fun parseHost(hostPort: String): String {
             var raw = hostPort.trim()
@@ -95,8 +98,7 @@ class BoreClient(
                 raw.substring(secondColon + 1)
             } else null
         }
-    
-}
+    }
 
     fun setListener(l: BoreListener?) { listener = l }
     fun setAutoReconnect(ar: Boolean) { autoReconnect = ar }
@@ -126,7 +128,9 @@ class BoreClient(
                 controlSocket = Socket()
                 controlSocket.connect(InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS)
                 fireEvent("${now()} ✓ TCP 连接已建立")
-                controlSocket.soTimeout = 0
+                controlSocket.soTimeout = CONTROL_READ_TIMEOUT_MS
+                controlSocket.keepAlive = true
+                controlSocket.tcpNoDelay = true
                 val controlIn = controlSocket.getInputStream()
                 val controlOut = controlSocket.getOutputStream()
                 fireEvent("${now()} → 发送 Hello(localPort=$localPort)")
@@ -141,7 +145,8 @@ class BoreClient(
                 fireEvent("${now()} ✓ 握手成功，分配端口: $assigned")
                 listener?.onConnected(publicUrl)
                 fireEvent("${now()} ✓ 隧道已建立: ${publicUrl}")
-                startConnectTimeoutChecker(runGeneration)
+                lastHeartbeatMs = System.currentTimeMillis()
+                cancelConnectTimeout()
                 controlLoop(controlIn, controlOut, runGeneration, controlSocket)
             } catch (e: InterruptedException) {
                 fireEvent("${now()} ⏹ 隧道线程被中断")
@@ -218,20 +223,18 @@ class BoreClient(
         fireEvent("${now()} ↻ 进入控制循环，等待服务器消息...")
         while (!stopRequested && generation.get() == runGeneration) {
             try {
-                controlSocket.soTimeout = CONTROL_READ_TIMEOUT_MS.toInt()
+                controlSocket.soTimeout = CONTROL_READ_TIMEOUT_MS
                 val frame = readFrame(controlIn)
                 if (frame == null) {
-                    if (stopRequested || generation.get() != runGeneration) break
-                    consecutiveTimeouts++
-                    if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
-                        fireEvent("${now()} ⏱ 连续 ${MAX_CONSECUTIVE_TIMEOUTS} 次超时，准备重连")
-                        break
+                    // readFrame 返回 null 说明流已关闭（EOF），立即断开
+                    if (!stopRequested && generation.get() == runGeneration) {
+                        fireEvent("${now()} ✗ 控制连接已断开（EOF）")
                     }
-                    continue
+                    break
                 }
                 consecutiveTimeouts = 0
+                lastHeartbeatMs = System.currentTimeMillis()
                 val frameStr = String(frame, StandardCharsets.UTF_8)
-                // 用字符串匹配处理 heartbeat 避免 JSON 解析问题
                 if (frameStr.contains("\"Heartbeat\"")) {
                     continue
                 }
@@ -265,11 +268,14 @@ class BoreClient(
                 }
                 fireEvent("${now()} ⚠ 未知消息: ${frameStr.take(100)}")
             } catch (e: SocketTimeoutException) {
+                // 超时不一定是断开，检查是否超过最大连续超时次数
                 consecutiveTimeouts++
+                val idleSec = if (lastHeartbeatMs > 0) (System.currentTimeMillis() - lastHeartbeatMs) / 1000 else 0
                 if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
-                    fireEvent("${now()} ⏱ 连接超时（${consecutiveTimeouts}次），准备重连")
+                    fireEvent("${now()} ⏱ 连续 ${MAX_CONSECUTIVE_TIMEOUTS} 次超时（空闲 ${idleSec}s），准备重连")
                     break
                 }
+                fireEvent("${now()} ⏱ 读超时 #${consecutiveTimeouts}（空闲 ${idleSec}s）")
             } catch (e: InterruptedException) {
                 fireEvent("${now()} ⏹ 控制循环被中断")
                 break
@@ -291,6 +297,7 @@ class BoreClient(
                 dataSocket.connect(InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS)
                 fireEvent("${now()} ⇄ 数据连接已建立")
                 dataSocket.soTimeout = 0
+                dataSocket.tcpNoDelay = true
                 val dataOut = dataSocket.getOutputStream()
                 val accept = JSONObject().apply { put("Accept", connId) }.toString()
                 fireEvent("${now()} → 发送 Accept")
@@ -301,26 +308,39 @@ class BoreClient(
                 localSocket.connect(InetSocketAddress("127.0.0.1", localPort), LOCAL_CONNECT_TIMEOUT_MS)
                 fireEvent("${now()} ⇄ 已连接本地 127.0.0.1:$localPort")
                 localSocket.soTimeout = 0
+                localSocket.tcpNoDelay = true
                 val localIn = localSocket.getInputStream()
                 val localOut = localSocket.getOutputStream()
                 val dataIn = dataSocket.getInputStream()
                 fireEvent("${now()} ⇄ 开始双向转发")
+                // 用 CountDownLatch 替代 join，避免线程阻塞
+                val latch = CountDownLatch(2)
                 val forwarder1 = Thread {
                     try {
                         pipe(dataIn, localOut)
-                    } catch (_: Exception) {}
+                    } catch (_: Exception) {
+                    } finally {
+                        latch.countDown()
+                    }
                 }.apply { isDaemon = true; name = "bore-pipe-c2l-$connId" }
                 val forwarder2 = Thread {
                     try {
                         pipe(localIn, dataOut)
-                    } catch (_: Exception) {}
+                    } catch (_: Exception) {
+                    } finally {
+                        latch.countDown()
+                    }
                 }.apply { isDaemon = true; name = "bore-pipe-l2c-$connId" }
                 connectionThreads[connId] = forwarder1
                 forwarder1.start()
                 forwarder2.start()
-                forwarder1.join()
-                forwarder2.join(5000)
-                fireEvent("${now()} ⇄ 数据连接 $connId 关闭")
+                // 等待任一方向结束，最多等 30 秒
+                latch.await(30, TimeUnit.SECONDS)
+                // 强制关闭两端 socket 以中断另一方向的 pipe
+                runCatching { dataSocket.close() }
+                runCatching { localSocket.close() }
+                latch.await(2, TimeUnit.SECONDS)
+                fireEvent("${now()} ⇄ 数据连接 $connId 关闭 (已传输 ${totalBytesTransferred.get()} 字节)")
             } catch (e: InterruptedException) {
                 fireEvent("${now()} ⇄ 数据连接 $connId 被中断")
             } catch (e: Exception) {
@@ -339,24 +359,33 @@ class BoreClient(
     }
 
     private fun pipe(input: InputStream, output: OutputStream) {
-        val buf = ByteArray(8192)
+        val buf = ByteArray(16384)
         while (!stopRequested) {
             val n = input.read(buf)
             if (n < 0) break
             output.write(buf, 0, n)
             output.flush()
+            val total = totalBytesTransferred.addAndGet(n.toLong())
+            listener?.onBytesTransferred(total)
         }
     }
 
+    /**
+     * 读取一个 \0 结尾的 JSON 帧。
+     * 优化: 检查 MAX_FRAME_LENGTH 后立即返回 null，防止恶意数据导致内存无限增长。
+     * 如果 input.read() 返回 -1（流关闭），立即返回 null。
+     */
     private fun readFrame(input: InputStream): ByteArray? {
-        val bos = ByteArrayOutputStream()
-        var last: Int
+        val bos = ByteArrayOutputStream(256)
         while (true) {
-            last = input.read()
-            if (last < 0) return null
-            if (last == 0x00) break
-            bos.write(last)
-            if (bos.size() > MAX_FRAME_LENGTH) return null
+            val b = input.read()
+            if (b < 0) return null
+            if (b == 0x00) break
+            bos.write(b)
+            if (bos.size() > MAX_FRAME_LENGTH) {
+                fireEvent("${now()} ⚠ 帧超过最大长度 ${MAX_FRAME_LENGTH}，丢弃")
+                return null
+            }
         }
         return if (bos.size() == 0) null else bos.toByteArray()
     }
@@ -366,7 +395,7 @@ class BoreClient(
             try {
                 Thread.sleep(CONNECT_TIMEOUT_TOTAL_MS.toLong())
                 if (running && generation.get() == runGeneration && assignedPort < 0) {
-                    fireEvent("${now()} 连接超时(${CONNECT_TIMEOUT_TOTAL_MS/1000}s)")
+                    fireEvent("${now()} ⏱ 连接总超时(${CONNECT_TIMEOUT_TOTAL_MS/1000}s)")
                     stop()
                 }
             } catch (_: InterruptedException) {}
@@ -382,16 +411,20 @@ class BoreClient(
         connectTimeoutThread = null
     }
 
+    /**
+     * 指数退避重连: 1s → 2s → 4s → 8s → 16s → 30s (上限)
+     */
     private fun scheduleReconnect(runGeneration: Int) {
         if (reconnectAttempts.get() >= MAX_RECONNECT_ATTEMPTS) {
             listener?.onError("max reconnect attempts reached")
             return
         }
+        val attempt = reconnectAttempts.incrementAndGet()
+        val delay = Math.min(RECONNECT_DELAY_MS * (1L shl (attempt - 1).coerceAtMost(5)), RECONNECT_MAX_DELAY_MS.toLong())
         reconnectThread = Thread {
             try {
-                val attempt = reconnectAttempts.incrementAndGet()
-                fireEvent("${now()} ↻ ${attempt}秒后重连 (第${attempt}次)...")
-                Thread.sleep(RECONNECT_DELAY_MS.toLong())
+                fireEvent("${now()} ↻ ${delay/1000}秒后重连 (第${attempt}次，上限${MAX_RECONNECT_ATTEMPTS}次)...")
+                Thread.sleep(delay)
                 if (stopRequested || generation.get() != runGeneration) return@Thread
                 fireEvent("${now()} ↻ 开始第${attempt}次重连...")
                 start()
@@ -430,10 +463,11 @@ class BoreClient(
         connectionThreads.clear()
         dataExecutor?.shutdownNow()
         dataExecutor = null
-        fireEvent("${now()} ⏹ 隧道已停止（中断 $count 个数据连接）")
+        val totalBytes = totalBytesTransferred.get()
+        fireEvent("${now()} ⏹ 隧道已停止（中断 $count 个数据连接，总传输 ${totalBytes} 字节）")
     }
 
     fun isRunning(): Boolean = running
-
-    
+    fun getAssignedPort(): Int = assignedPort
+    fun getTotalBytesTransferred(): Long = totalBytesTransferred.get()
 }

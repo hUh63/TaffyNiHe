@@ -259,6 +259,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
     }
 
     fun stop() {
+        addEvent("⏹ 停止隧道...")
         stopRequested = true
         generation.incrementAndGet()
         runCatching { client.dispatcher.cancelAll() }
@@ -271,10 +272,14 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         val p = process
         process = null
         if (p != null) {
+            addEvent("⏹ 终止 cloudflared 进程 (pid=${soReverseChildPid(p)})")
             Thread({
                 runCatching { p.destroy() }
                 val exited = runCatching { p.waitFor(800, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(false)
-                if (!exited) runCatching { p.destroyForcibly() }
+                if (!exited) {
+                    addEvent("⏹ 强制终止进程")
+                    runCatching { p.destroyForcibly() }
+                }
             }, "cloudflared-stop").apply { isDaemon = true }.start()
         }
         transitionTo(State.STOPPED, mode = Mode.OFF, publicUrl = null, message = "stopped")
@@ -403,7 +408,9 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         process = p
         transitionTo(State.STARTING, mode, publicUrl = url, message = "starting", targetPort = targetPort, pid = soReverseChildPid(p))
         publish()
+        addEvent("cloudflared 进程已启动 (pid=${soReverseChildPid(p)})")
         val capturedUrl = url
+        val startTimeMs = System.currentTimeMillis()
         val t = Thread({
             try {
                 BufferedReader(InputStreamReader(p.inputStream, Charsets.UTF_8)).useLines { lines ->
@@ -411,10 +418,18 @@ class CloudflareTunnelManager(private val context: Context, private val settings
                         if (line.isBlank()) return@forEach
                         AppLog.i("clfl: $line")
                         if (generation.get() != runGeneration || process !== p) return@forEach
+                        // 进程启动超时检测: 30 秒内未变为 RUNNING 则标记 FAILED
+                        val current = _status.get()
+                        if (current.state == State.STARTING && System.currentTimeMillis() - startTimeMs > 30_000) {
+                            addEvent("⏱ 进程启动超时 (30s)，标记为失败")
+                            fail(mode, targetPort, "startup timeout: cloudflared did not register within 30s")
+                            runCatching { p.destroyForcibly() }
+                            return@forEach
+                        }
                         parseTunnelLine(line, mode, runGeneration, p)?.let { detectedUrl ->
-                            val current = _status.get()
                             if (generation.get() == runGeneration && current.state in setOf(State.STARTING, State.RUNNING)) {
                                 transitionTo(State.RUNNING, mode, publicUrl = detectedUrl, message = "running")
+                                addEvent("✓ 隧道运行中: $detectedUrl")
                                 publish()
                                 if (mode == Mode.NAMED) addHistoryUrl(detectedUrl)
                             }
@@ -565,6 +580,14 @@ class CloudflareTunnelManager(private val context: Context, private val settings
             runCatching { owner.destroy() }
         } else if (line.contains("ERR", true) && (line.contains("tunnel") || line.contains("connect"))) {
             AppLog.w("tunnel error: $line")
+            // DNS 错误特殊标记
+            if (line.contains("DNS", true) || line.contains("lookup", true) || line.contains("resolver", true)) {
+                addEvent("🌐 DNS 解析错误: ${line.take(120)}")
+            } else if (line.contains("refused", true) || line.contains("timeout", true)) {
+                addEvent("🔌 连接错误: ${line.take(120)}")
+            } else {
+                addEvent("⚠ 隧道错误: ${line.take(120)}")
+            }
         }
         return null
     }
@@ -593,13 +616,11 @@ class CloudflareTunnelManager(private val context: Context, private val settings
     private data class QuickTunnel(val tunnelId: String, val hostname: String, val accountTag: String, val secret: String)
 
     private fun registerQuickTunnel(): QuickTunnel {
-        // Two attempts with a short fixed backoff. Earlier 3-attempt ×
-        // growing backoff could hold the caller for ~6s; the tunnel start
-        // is for human-driven or health-thread requests, so we keep the
-        // upper bound low and let the health loop retry on next tick.
+        // Three attempts with exponential backoff (800ms → 1600ms → 3200ms).
         var lastErr: Exception? = null
-        repeat(2) { attempt ->
+        repeat(3) { attempt ->
             try {
+                addEvent("注册临时隧道 (尝试 ${attempt + 1}/3)...")
                 val req = Request.Builder()
                     .url("https://api.trycloudflare.com/tunnel")
                     .header("User-Agent", "SOMCP")
@@ -609,6 +630,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
                     val body = resp.body.string()
                     if (!resp.isSuccessful) throw IllegalStateException("trycloudflare ${resp.code}: ${body.take(200)}")
                     val result = JSONObject(body).getJSONObject("result")
+                    addEvent("✓ 临时隧道注册成功: ${result.getString("hostname")}")
                     return QuickTunnel(
                         tunnelId = result.getString("id"),
                         hostname = result.getString("hostname"),
@@ -619,8 +641,9 @@ class CloudflareTunnelManager(private val context: Context, private val settings
             } catch (e: Exception) {
                 if (stopRequested) throw e
                 lastErr = e
+                addEvent("✗ 注册失败 (${attempt + 1}/3): ${e.message}")
                 AppLog.w("tunnel register attempt ${attempt + 1} failed: ${e.message}")
-                if (attempt < 1 && !stopRequested) Thread.sleep(800)
+                if (attempt < 2 && !stopRequested) Thread.sleep((800 * (1 shl attempt)).toLong())
             }
         }
         throw lastErr ?: IllegalStateException("failed to register quick tunnel")

@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -79,7 +78,7 @@ internal fun AnalysisWorkspace(
     val tools = state.tools
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
         var toolsExpanded by remember { mutableStateOf(false) }
-        // 顶部栏：任务选择 + 工具展开按钮 + 工作区选择（一行紧凑）
+        // 顶部栏
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val cur = state.currentTask()
             Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -92,7 +91,6 @@ internal fun AnalysisWorkspace(
                 Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.weight(1f))
-            // 工具展开/收回按钮（显示当前工具名）
             val curTool = toolDefs.firstOrNull { it.key == state.activeTool }
             Button(onClick = { toolsExpanded = !toolsExpanded },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
@@ -120,18 +118,19 @@ internal fun AnalysisWorkspace(
             }
         }
         Spacer(Modifier.size(4.dp))
-        // 主体：控制台 + 结果流
         Column(Modifier.fillMaxSize()) {
-            // 控制台（极紧凑水平条）
-            Surface(
-                modifier = Modifier.fillMaxWidth().height(28.dp),
-                shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-            ) {
-                ToolConsole(state, zh)
+            // 控制台：只有选择了工具才显示，否则隐藏
+            if (state.activeTool.isNotBlank()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().height(28.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                ) {
+                    ToolConsole(state, zh)
+                }
+                Spacer(Modifier.size(4.dp))
             }
-            Spacer(Modifier.size(4.dp))
-            // 结果流（占剩余空间）
+            // 结果流
             Surface(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 shape = RoundedCornerShape(6.dp),
@@ -199,7 +198,6 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
     val tools = state.tools
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    val toolLabel = { def: ToolDef -> if (zh) def.labelZh else def.labelEn }
     val curDef = toolDefs.firstOrNull { it.key == state.activeTool }
     val tl = curDef?.let { if (zh) it.labelZh else it.labelEn } ?: ""
 
@@ -250,10 +248,12 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
                     val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
                     tools.soAnalyzeRunning = false
-                    val ovText = if (o?.optBoolean("ok", false) == true) o.toString() else ""
-                    val cryptoText = if (c?.optBoolean("ok", false) == true) c.toString() else ""
-                    tools.addTab(tl, if (zh) "概览" else "Overview", ovText)
-                    if (cryptoText.isNotBlank()) tools.addTab(tl, if (zh) "加密" else "Crypto", cryptoText)
+                    // 合并概览和加密结果到一个标签
+                    val merged = JSONObject()
+                    if (o != null) merged.put("overview", o)
+                    if (c != null) merged.put("cryptoFindings", c.optJSONArray("cryptoFindings") ?: c.optJSONArray("findings") ?: c.optJSONArray("scans"))
+                    val text = if (merged.length() > 0) merged.toString() else ""
+                    tools.addTab(tl, if (zh) "概览" else "Overview", text)
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.soAnalyzeRunning, loading = tools.soAnalyzeRunning)
                 SmBtn("Sec", bm, bp, { scope.launch {
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 60) }.getOrNull() }
@@ -294,7 +294,6 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
             }
             "frida" -> {
                 SmBtn(if (zh) "校验" else "Valid", bm, bp, { scope.launch { tools.fridaStatus = if (zh) "校验中..." else "Validating..."
-                    // 先校验脚本语法（JSON 格式检查 + 基本 JS 语法检查）
                     val script = tools.fridaScript.trim()
                     val errors = mutableListOf<String>()
                     if (script.isBlank()) errors.add(if (zh) "脚本为空" else "empty script")
@@ -323,9 +322,12 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     val b = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
                     val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
                     tools.rebuildRunning = false
-                    if (c != null) tools.addTab(tl, if (zh) "检查" else "Check", c.toString())
-                    if (b != null) tools.addTab(tl, if (zh) "回编" else "Build", b.toString())
-                    if (o != null) tools.addTab(tl, if (zh) "输出" else "Outputs", o.toString())
+                    // 合并检查/回编/输出到一个标签
+                    val merged = JSONObject()
+                    if (c != null) merged.put("editCheck", c)
+                    if (b != null) merged.put("build", b)
+                    if (o != null) merged.put("outputs", o)
+                    tools.addTab(tl, if (zh) "回编" else "Build", merged.toString())
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.rebuildRunning, loading = tools.rebuildRunning)
                 SmBtn(if (zh) "补丁" else "Patch", bm, bp, { scope.launch {
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
@@ -355,12 +357,9 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     tools.addTab(tl, if (zh) "文本" else "Text", tools.editorTextResult)
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn(if (zh) "编辑" else "Edit", bm, bp, { scope.launch {
-                    // 编辑功能：用 editHex 先读取该地址处的数据，然后模拟编辑操作
                     val addr = tools.disasmAddr.ifBlank { "0x0" }
-                    // 先读取
                     val read = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr, 0, 32) }.getOrNull() }
                     val hexData = read?.optString("hex") ?: read?.optString("data") ?: read?.optString("result") ?: ""
-                    // 基于读取的数据构造一个可编辑的展示
                     val edit = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editHex(tools.sharedWorkspaceId, "", addr, org.json.JSONArray(), false) }.getOrNull() }
                     val result = JSONObject()
                     result.put("address", addr)
@@ -371,7 +370,6 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     tools.addTab(tl, if (zh) "编辑" else "Edit", tools.editorEditResult)
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn(if (zh) "对比" else "Diff", bm, bp, { scope.launch {
-                    // 对比功能：读取两个地址处的数据并进行对比展示
                     val addr1 = tools.disasmAddr.ifBlank { "0x0" }
                     val addr2 = tools.decompileTarget.ifBlank { "0x100" }
                     val r1 = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr1, 0, 64) }.getOrNull() }
@@ -381,7 +379,6 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     val result = JSONObject()
                     result.put("addr1", addr1)
                     result.put("addr2", addr2)
-                    // 对比：逐字节找出不同
                     val diffBytes = mutableListOf<String>()
                     val bytes1 = hex1.replace(" ", "").replace("\n", "")
                     val bytes2 = hex2.replace(" ", "").replace("\n", "")
@@ -431,46 +428,86 @@ private fun SmBtn(label: String, modifier: Modifier, padding: PaddingValues, onC
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     val tabs = tools.resultTabs
     val selectedTab = tools.selectedTabIndex
+    var detailMode by remember { mutableStateOf(false) }
 
     if (tabs.isNotEmpty()) {
         Column(Modifier.fillMaxSize().padding(4.dp)) {
-            // 标签导航栏（可横向滚动，支持关闭）
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.size(2.dp))
-                tabs.forEachIndexed { idx, tab ->
-                    val isSel = idx == selectedTab
-                    Surface(
-                        modifier = Modifier,
-                        shape = RoundedCornerShape(4.dp),
-                        color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
-                    ) {
-                        Row(Modifier.clickable { tools.selectedTabIndex = idx }.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.size(2.dp))
-                            IconButton(
-                                onClick = { tools.closeTab(idx) },
-                                modifier = Modifier.size(14.dp),
-                            ) { Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            // 顶部：标签栏 + 简洁/详细切换
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                // 标签导航栏（左）
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.size(2.dp))
+                    tabs.forEachIndexed { idx, tab ->
+                        val isSel = idx == selectedTab
+                        Surface(
+                            modifier = Modifier,
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                        ) {
+                            Row(Modifier.clickable { tools.selectedTabIndex = idx }.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.size(2.dp))
+                                IconButton(
+                                    onClick = { tools.closeTab(idx) },
+                                    modifier = Modifier.size(14.dp),
+                                ) { Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
                         }
                     }
+                    IconButton(
+                        onClick = { tools.clearTabs() },
+                        modifier = Modifier.size(14.dp),
+                    ) { Text("×", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error) }
                 }
-                // 清除所有标签按钮
-                IconButton(
-                    onClick = { tools.clearTabs() },
-                    modifier = Modifier.size(14.dp),
-                ) { Text("×", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error) }
+                // 简洁/详细切换按钮（右）
+                Spacer(Modifier.size(4.dp))
+                Surface(
+                    onClick = { detailMode = !detailMode },
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (detailMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        if (detailMode) (if (zh) "详细" else "Detail") else (if (zh) "简洁" else "Simple"),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall, fontSize = 10.sp,
+                        color = if (detailMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Spacer(Modifier.size(4.dp))
-            // 当前选中的标签页内容
+            // 内容区
             val current = tabs.getOrNull(selectedTab) ?: return
             Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                DetailCardFull(current.label, current.text, zh)
+                if (detailMode) {
+                    StructuredJsonView(current.text, zh)
+                } else {
+                    TextSummary(current.text, zh)
+                }
+            }
+            // 底部导航：上一页 / 页码 / 下一页
+            Spacer(Modifier.size(4.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { if (selectedTab > 0) tools.selectedTabIndex-- },
+                    enabled = selectedTab > 0,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp),
+                ) { Text("◀ " + if (zh) "上一页" else "Prev", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
+                Spacer(Modifier.size(12.dp))
+                Text("${selectedTab + 1} / ${tabs.size}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.size(12.dp))
+                Button(
+                    onClick = { if (selectedTab < tabs.size - 1) tools.selectedTabIndex++ },
+                    enabled = selectedTab < tabs.size - 1,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(6.dp),
+                ) { Text(if (zh) "下一页" else "Next" + " ▶", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
             }
         }
     } else {
@@ -480,42 +517,194 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     }
 }
 
-/** 完整展示结果：可滚动全文，无省略号 */
+// ============================================================
+// 简洁模式：用文字完整描述分析结果
+// ============================================================
+
 @Composable
-private fun DetailCardFull(title: String, text: String, zh: Boolean) {
+private fun TextSummary(text: String, zh: Boolean) {
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(Modifier.padding(10.dp)) {
-            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.size(6.dp))
-            if (json == null) {
-                // 纯文本：完整显示，无省略号
-                Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
-            } else {
-                // JSON → 结构化展示，无省略号
-                StructuredJsonView(json, zh)
+    if (json == null) {
+        Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+        return
+    }
+    val sb = StringBuilder()
+    describeJson(json, sb, zh, 0)
+    Text(sb.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+}
+
+private fun describeJson(json: JSONObject, sb: StringBuilder, zh: Boolean, indent: Int) {
+    val pad = "  ".repeat(indent)
+    // overview 对象 → 文字描述
+    val ov = json.optJSONObject("overview")
+    if (ov != null) {
+        describeOverview(ov, sb, zh)
+        return
+    }
+    // items 数组 → 列表
+    val items = json.optJSONArray("items")
+    if (items != null && items.length() > 0) {
+        sb.append(if (zh) "共 ${items.length()} 项:\n" else "${items.length()} items:\n")
+        for (i in 0 until items.length()) {
+            val item = items.opt(i)
+            when (item) {
+                is JSONObject -> {
+                    val name = item.optString("name")
+                    val addr = item.optString("address")
+                    sb.append("$pad• ${if (name.isNotBlank()) name else "?"}")
+                    if (addr.isNotBlank()) sb.append(" @ $addr")
+                    sb.append("\n")
+                }
+                is String -> sb.append("$pad• $item\n")
+                else -> sb.append("$pad• $item\n")
             }
+        }
+        return
+    }
+    // 加密发现
+    val cryptoArr = json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings") ?: json.optJSONArray("scans")
+    if (cryptoArr != null && cryptoArr.length() > 0) {
+        if (zh) sb.append("发现 ${cryptoArr.length()} 项加密特征:\n") else sb.append("${cryptoArr.length()} crypto findings:\n")
+        for (i in 0 until cryptoArr.length()) {
+            val c = cryptoArr.optJSONObject(i) ?: continue
+            val name = c.optString("name", c.optString("algorithm", c.optString("type", "?")))
+            val count = c.optInt("count", c.optInt("matches", 0))
+            sb.append("$pad• $name")
+            if (count > 0) sb.append(" ×$count")
+            sb.append("\n")
+        }
+        return
+    }
+    // 通用键值
+    json.keys().asSequence().filter { it != "ok" }.forEach { k ->
+        val v = json.opt(k)
+        when (v) {
+            is JSONObject -> { sb.append("$pad$k:\n"); describeJson(v, sb, zh, indent + 1) }
+            is JSONArray -> { sb.append("$pad$k: ${v.length()} 项\n") }
+            else -> sb.append("$pad$k: $v\n")
         }
     }
 }
 
-/** 结构化 JSON 展示：完整展示所有字段，无省略号 */
+private fun describeOverview(ov: JSONObject, sb: StringBuilder, zh: Boolean) {
+    val name = ov.optString("fileName", "?")
+    val arch = ov.optString("architecture", "?")
+    val bits = ov.optInt("bits", 0)
+    val size = ov.optLong("size", 0L)
+    val elfType = ov.optString("elfType", "?")
+    val entry = ov.optString("entryPoint", "0x0")
+    val endian = ov.optString("endian", "?")
+    val sha256 = ov.optString("sha256", "—")
+    val compiler = ov.optString("compiler", "")
+    val packer = ov.optString("packer", "")
+
+    if (zh) {
+        sb.append("文件: $name\n")
+        sb.append("架构: $arch/${bits}bit\n")
+        sb.append("大小: ${fmtBytes(size)}\n")
+        sb.append("类型: $elfType\n")
+        sb.append("入口: $entry\n")
+        sb.append("字节序: $endian\n")
+        sb.append("SHA256: $sha256\n")
+        if (compiler.isNotBlank()) sb.append("编译器: $compiler\n")
+        if (packer.isNotBlank()) sb.append("加壳: $packer\n")
+    } else {
+        sb.append("File: $name\n")
+        sb.append("Architecture: $arch/${bits}bit\n")
+        sb.append("Size: ${fmtBytes(size)}\n")
+        sb.append("Type: $elfType\n")
+        sb.append("Entry: $entry\n")
+        sb.append("Endian: $endian\n")
+        sb.append("SHA256: $sha256\n")
+        if (compiler.isNotBlank()) sb.append("Compiler: $compiler\n")
+        if (packer.isNotBlank()) sb.append("Packer: $packer\n")
+    }
+
+    // 结构计数
+    val counts = listOf("sectionCount" to (if (zh) "节区" else "Sections"),
+        "functionCount" to (if (zh) "函数" else "Functions"),
+        "symbolCount" to (if (zh) "符号" else "Symbols"),
+        "stringCount" to (if (zh) "字符串" else "Strings"),
+        "importCount" to (if (zh) "导入" else "Imports"),
+        "exportCount" to (if (zh) "导出" else "Exports")
+    ).filter { ov.has(it.first) && ov.optInt(it.first, 0) > 0 }
+    if (counts.isNotEmpty()) {
+        if (zh) sb.append("\n结构分析:\n") else sb.append("\nStructure:\n")
+        counts.forEach { (k, label) -> sb.append("  $label: ${ov.optInt(k, 0)}\n") }
+    }
+
+    // 安全特性
+    val sec = ov.optJSONArray("securityFeatures")
+    if (sec != null && sec.length() > 0) {
+        if (zh) sb.append("\n安全特性:\n") else sb.append("\nSecurity:\n")
+        for (i in 0 until sec.length()) {
+            val s = sec.optJSONObject(i) ?: continue
+            val label = s.optString("label", s.optString("id", "?"))
+            val active = s.optBoolean("active", false)
+            val desc = s.optString("description", "")
+            sb.append("  $label: ${if (active) (if (zh) "启用" else "Yes") else (if (zh) "未启用" else "No")}\n")
+            if (desc.isNotBlank()) sb.append("    $desc\n")
+        }
+    }
+
+    // 加密特征（从 cryptoFindings 或内嵌的 findings）
+    val crypto = ov.optJSONArray("cryptoFindings") ?: ov.optJSONArray("findings")
+    if (crypto != null && crypto.length() > 0) {
+        if (zh) sb.append("\n加密特征:\n") else sb.append("\nCrypto:\n")
+        for (i in 0 until crypto.length()) {
+            val c = crypto.optJSONObject(i) ?: continue
+            val name = c.optString("name", c.optString("algorithm", "?"))
+            val count = c.optInt("count", c.optInt("matches", 0))
+            sb.append("  $name")
+            if (count > 0) sb.append(" ×$count")
+            sb.append("\n")
+        }
+    }
+
+    // 其他字段
+    val shown = setOf("fileName", "size", "architecture", "bits", "elfType", "entryPoint", "endian", "sha256", "sha1", "md5", "compiler", "packer",
+        "sectionCount", "functionCount", "symbolCount", "stringCount", "importCount", "exportCount", "securityFeatures", "cryptoFindings", "findings", "difficulty", "ok", "items")
+    val extra = ov.keys().asSequence().filter { it !in shown && !ov.isNull(it) }.toList()
+    if (extra.isNotEmpty()) {
+        if (zh) sb.append("\n其他:\n") else sb.append("\nOthers:\n")
+        extra.forEach { k -> sb.append("  $k: ${ov.opt(k)}\n") }
+    }
+
+    // 如果 json 顶层还有 cryptoFindings（即 overview 外部的）
+    val rootCrypto = json.optJSONArray("cryptoFindings")
+    if (rootCrypto != null && rootCrypto.length() > 0) {
+        if (zh) sb.append("\n加密特征:\n") else sb.append("\nCrypto:\n")
+        for (i in 0 until rootCrypto.length()) {
+            val c = rootCrypto.optJSONObject(i) ?: continue
+            val name = c.optString("name", c.optString("algorithm", "?"))
+            val count = c.optInt("count", c.optInt("matches", 0))
+            sb.append("  $name")
+            if (count > 0) sb.append(" ×$count")
+            sb.append("\n")
+        }
+    }
+}
+
+// ============================================================
+// 详细模式：结构化数据展示
+// ============================================================
+
 @Composable
-private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
-    // 1. overview 对象 → 卡片式展示
+private fun StructuredJsonView(text: String, zh: Boolean) {
+    if (text.isBlank()) return
+    val json = runCatching { JSONObject(text) }.getOrNull()
+    if (json == null) {
+        Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 16.sp)
+        return
+    }
+    // overview 对象 → 卡片式展示
     val ov = json.optJSONObject("overview")
     if (ov != null) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            // 基础属性
             SectionCard(if (zh) "📦 基础属性" else "📦 Basics") {
                 JsonKeyValues(ov, zh, listOf("fileName", "size", "architecture", "bits", "elfType", "entryPoint", "endian", "sha256", "sha1", "md5", "compiler", "packer"))
             }
-            // 计数指标
             val counts = listOf("sectionCount", "functionCount", "symbolCount", "stringCount", "importCount", "exportCount")
                 .filter { ov.has(it) }
             if (counts.isNotEmpty()) {
@@ -523,7 +712,6 @@ private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
                     MetricRowFull(*counts.map { k -> (if (zh) k.replace("Count","") else k.replace("Count","")) to ov.optInt(k, 0).toString() }.toTypedArray())
                 }
             }
-            // 安全特性
             val sec = ov.optJSONArray("securityFeatures")
             if (sec != null && sec.length() > 0) {
                 SectionCard(if (zh) "🔒 安全特性" else "🔒 Security") {
@@ -543,8 +731,8 @@ private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
                     }
                 }
             }
-            // 加密特征
-            val crypto = ov.optJSONArray("cryptoFindings") ?: json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings")
+            // 加密特征（从 overview 内部的 cryptoFindings）
+            val crypto = ov.optJSONArray("cryptoFindings")
             if (crypto != null && crypto.length() > 0) {
                 SectionCard(if (zh) "🔐 加密特征" else "🔐 Crypto") {
                     for (i in 0 until crypto.length()) {
@@ -558,21 +746,23 @@ private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
                     }
                 }
             }
-            // 其他未展示的字段
             val shown = setOf("fileName", "size", "architecture", "bits", "elfType", "entryPoint", "endian", "sha256", "sha1", "md5", "compiler", "packer",
-                "sectionCount", "functionCount", "symbolCount", "stringCount", "importCount", "exportCount",
-                "securityFeatures", "cryptoFindings", "findings", "difficulty", "ok", "items")
-            val extra = ov.keys().asSequence().filter { it !in shown }.toList()
+                "sectionCount", "functionCount", "symbolCount", "stringCount", "importCount", "exportCount", "securityFeatures", "cryptoFindings", "findings", "difficulty", "ok", "items")
+            val extra = ov.keys().asSequence().filter { it !in shown && !ov.isNull(it) }.toList()
             if (extra.isNotEmpty()) {
                 SectionCard(if (zh) "📋 其他信息" else "📋 Others") {
                     JsonKeyValues(ov, zh, extra)
                 }
             }
         }
+        // 外部加密特征
+        val extCrypto = json.optJSONArray("cryptoFindings")
+        if (extCrypto != null && extCrypto.length() > 0) {
+            StructuredCryptoCard(extCrypto, zh)
+        }
         return
     }
-
-    // 2. items 数组 → 列表展示，完整显示
+    // items 数组
     val items = json.optJSONArray("items")
     if (items != null && items.length() > 0) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -583,9 +773,7 @@ private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
                     is JSONObject -> {
                         val name = item.optString("name")
                         val addr = item.optString("address")
-                        if (name.isNotBlank() && addr.isNotBlank()) "$name  @ $addr"
-                        else if (name.isNotBlank()) name
-                        else item.optString("address", item.toString())
+                        if (name.isNotBlank() && addr.isNotBlank()) "$name  @ $addr" else if (name.isNotBlank()) name else item.optString("address", item.toString())
                     }
                     is org.json.JSONArray -> "[${item.length()}] ${(0 until item.length()).joinToString(", ") { i -> item.opt(i).toString() }.take(120)}"
                     else -> item.toString()
@@ -595,30 +783,13 @@ private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
         }
         return
     }
-
-    // 3. cryptoFindings/findings/scans 数组
+    // cryptoFindings
     val cryptoArr = json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings") ?: json.optJSONArray("scans")
     if (cryptoArr != null && cryptoArr.length() > 0) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(if (zh) "共 ${cryptoArr.length()} 项发现" else "${cryptoArr.length()} findings", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            for (i in 0 until cryptoArr.length()) {
-                val c = cryptoArr.optJSONObject(i) ?: continue
-                val name = c.optString("name", c.optString("algorithm", c.optString("type", "?")))
-                val count = c.optInt("count", c.optInt("matches", 0))
-                val detail = c.optString("detail", c.optString("description", ""))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("• $name", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
-                    if (count > 0) Text("×$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (detail.isNotBlank()) {
-                    Text("  $detail", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                }
-            }
-        }
+        StructuredCryptoCard(cryptoArr, zh)
         return
     }
-
-    // 4. 通用：所有键值完整展示
+    // 通用键值
     val keys = json.keys().asSequence().filter { it != "ok" && it != "pagination" }.toList()
     if (keys.isEmpty()) {
         Text(json.toString(2), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
@@ -638,7 +809,26 @@ private fun StructuredJsonView(json: JSONObject, zh: Boolean) {
     }
 }
 
-/** 从 JSON 对象中提取指定键值对 */
+@Composable
+private fun StructuredCryptoCard(cryptoArr: JSONArray, zh: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(if (zh) "共 ${cryptoArr.length()} 项发现" else "${cryptoArr.length()} findings", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        for (i in 0 until cryptoArr.length()) {
+            val c = cryptoArr.optJSONObject(i) ?: continue
+            val name = c.optString("name", c.optString("algorithm", c.optString("type", "?")))
+            val count = c.optInt("count", c.optInt("matches", 0))
+            val detail = c.optString("detail", c.optString("description", ""))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("• $name", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                if (count > 0) Text("×$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+            if (detail.isNotBlank()) {
+                Text("  $detail", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+            }
+        }
+    }
+}
+
 @Composable
 private fun JsonKeyValues(json: JSONObject, zh: Boolean, keys: List<String>) {
     keys.filter { json.has(it) && !json.isNull(it) }.forEach { k ->
@@ -659,9 +849,7 @@ private fun JsonKeyValues(json: JSONObject, zh: Boolean, keys: List<String>) {
             else -> k
         }
         val vStr = when (v) {
-            is Number -> {
-                if (k == "size") fmtBytes(v.toLong()) else v.toString()
-            }
+            is Number -> { if (k == "size") fmtBytes(v.toLong()) else v.toString() }
             is Boolean -> if (v) (if (zh) "是" else "Yes") else (if (zh) "否" else "No")
             else -> v.toString()
         }
@@ -687,7 +875,7 @@ private fun SectionCard(title: String, content: @Composable androidx.compose.fou
 private fun Kv(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 8, overflow = TextOverflow.Visible)
+        Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 

@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -324,7 +325,41 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 GroupDivider()
                 history.forEach { url ->
                     val finalUrl = url
-                    Text(url, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp).clickable { copy(context, finalUrl, t.copied) }, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(url, modifier = Modifier.weight(1f).clickable { copy(context, finalUrl, t.copied) }, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                GroupDivider()
+                TextButton(onClick = {
+                    settings.tunnelHistoryUrls = ""
+                    history = emptyList()
+                }, modifier = Modifier.padding(horizontal = 14.dp)) {
+                    Text(if (t.zh) "清除历史" else "Clear history", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+        // 隧道运行日志
+        GlassGroup(title = if (t.zh) "运行日志" else "Event log") {
+            var showLog by remember { mutableStateOf(false) }
+            ToggleRow(if (t.zh) "显示日志" else "Show log", showLog) { showLog = it }
+            if (showLog) {
+                GroupDivider()
+                val logLines = if (tunnelType == "cloudflare") {
+                    cfTunnelLog() ?: listOf(if (t.zh) "无日志" else "No log")
+                } else {
+                    BoreTunnelService.getEventLog().ifEmpty { listOf(if (t.zh) "无日志" else "No log") }
+                }
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp).fillMaxWidth()) {
+                    logLines.takeLast(50).forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 14.sp)
+                    }
+                }
+                GroupDivider()
+                TextButton(onClick = {
+                    if (tunnelType == "cloudflare") clearCfTunnelLog()
+                    else BoreTunnelService.clearEventLog()
+                }, modifier = Modifier.padding(horizontal = 14.dp)) {
+                    Text(if (t.zh) "清除日志" else "Clear log", color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -507,6 +542,9 @@ private fun activeTunnel(context: Context): CloudflareTunnelManager? =
 
 private fun tunnelStatusOf(context: Context): CloudflareTunnelManager.TunnelStatus =
     activeServer(context)?.tunnel?.status() ?: CloudflareTunnelManager.TunnelStatus()
+
+private fun cfTunnelLog(): List<String>? = activeServer(context)?.tunnel?.eventLog()
+private fun clearCfTunnelLog() { activeServer(context)?.tunnel?.clearEventLog() }
 
 private fun maskToken(token: String): String {
     if (token.length <= 8) return if (token.isBlank()) "(empty)" else "****"

@@ -54,6 +54,15 @@ class CloudflareTunnelManager(private val context: Context, private val settings
     private val probeOks = java.util.concurrent.atomic.AtomicInteger(0)
     private val totalRestarts = java.util.concurrent.atomic.AtomicInteger(0)
 
+    private val _eventLog = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val maxEventLog = 200
+    fun eventLog(): List<String> = ArrayList(_eventLog)
+    fun clearEventLog() { _eventLog.clear() }
+    private fun addEvent(msg: String) {
+        _eventLog.add(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date()) + " $msg")
+        while (_eventLog.size > maxEventLog) _eventLog.removeAt(0)
+    }
+
     /**
      * Return the OS pid of a freshly spawned child [Process]. android.jar only
      * surfaced `Process.pid()` from API 35+ even though ART shipped it earlier;
@@ -147,6 +156,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         }
         if (!settings.authEnabled) {
             AppLog.w("Starting Cloudflare tunnel WITHOUT authentication: the MCP service will be reachable publicly with no token. Enable authentication in settings if this is not intended.")
+            addEvent("⚠ 无鉴权启动隧道")
         }
         // Already running on the same target with the same mode and a live
         // process — nothing to do. Avoids costly stop/restart churn from
@@ -221,6 +231,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
     private fun fail(mode: Mode, targetPort: Int, msg: String): TunnelStatus {
         val s = transitionTo(State.FAILED, mode, publicUrl = null, message = msg, targetPort = targetPort)
         AppLog.w("tunnel: $msg")
+        addEvent("❌ $msg")
         publish()
         return s
     }
@@ -303,6 +314,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
 
     private fun startQuick(bin: File, targetPort: Int, runGeneration: Int) {
         AppLog.i("cloudflare tunnel: registering quick tunnel…")
+        addEvent("注册临时隧道...")
         val tunnel = registerQuickTunnel()
         if (stopRequested || generation.get() != runGeneration) return
         val credsFile = File(context.cacheDir, "tunnel_creds.json")
@@ -383,7 +395,8 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         val p = try {
             pb.start()
         } catch (e: Exception) {
-            AppLog.w("cloudflared process spawn failed: ${e.message}")
+            AppLog.i("cloudflared process spawn failed: ${e.message}")
+            addEvent("进程启动失败: ${e.message ?: e.javaClass.simpleName}")
             fail(mode, targetPort, "spawn failed: ${e.message ?: e.javaClass.simpleName}")
             return
         }
@@ -411,6 +424,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
             } catch (_: InterruptedException) {
             } catch (e: Exception) {
                 if (!stopRequested) AppLog.w("tunnel stream end: ${e.message}")
+                addEvent("流结束: ${e.message}")
             } finally {
                 val exit = runCatching { p.exitValue() }.getOrDefault(-1)
                 val wasRunning = _status.get().state
@@ -424,6 +438,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
                 }
                 if (generation.get() == runGeneration && wasRunning != State.STOPPED) {
                     AppLog.w("cloudflare tunnel process exited code=$exit stopRequested=$stopRequested")
+                addEvent("进程退出 (code=$exit)")
                 }
                 if (generation.get() == runGeneration) publish()
             }
@@ -432,6 +447,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         watchThread = t
         t.start()
         AppLog.i("cloudflare tunnel ${mode.name.lowercase()} started -> ${capturedUrl ?: "(url pending)"} targeting :$targetPort")
+        addEvent("隧道启动 -> ${capturedUrl ?: "等待URL"}")
         startHealthCheck(mode, targetPort, runGeneration)
     }
 
@@ -495,11 +511,13 @@ class CloudflareTunnelManager(private val context: Context, private val settings
                                     break
                                 }
                                 AppLog.w("tunnel keepalive: local probe failed, restarting tunnel")
+                                addEvent("保活检测失败，重启隧道")
                                 try {
                                     startInternal(targetPort, mode, settings.tunnelNamedToken, userInitiated = false)
                                     downSince = 0L
                                 } catch (e: Exception) {
                                     AppLog.w("tunnel keepalive restart failed: ${e.message}")
+                                addEvent("保活重启失败: ${e.message}")
                                 }
                             }
                         }
@@ -707,3 +725,4 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         }
     }
 }
+

@@ -35,6 +35,7 @@ class BoreTunnelService : Service() {
         private const val MAX_EVENTS = 100
 
         fun getEventLog(): List<String> = synchronized(eventLog) { ArrayList(eventLog) }
+        fun clearEventLog() { synchronized(eventLog) { eventLog.clear() } }
 
         fun isRunning(context: Context): Boolean =
             context.getSharedPreferences("bore_tunnel", MODE_PRIVATE)

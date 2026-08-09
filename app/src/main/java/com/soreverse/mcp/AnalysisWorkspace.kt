@@ -227,7 +227,6 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr.ifBlank { "main" }, null, "auto") }.getOrNull() }
                     tools.addTab(tl, "Disasm", r?.toString() ?: if (zh) "失败" else "failed")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank())
-                // Hex 查看（从编辑移到这里）
                 SmBtn("Hex", bm, bp, { scope.launch {
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
                     tools.addTab(tl, "Hex", r?.toString() ?: if (zh) "失败" else "failed")
@@ -247,26 +246,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "classes", "", 30) }.getOrNull() }
                     tools.addTab(tl, "DEX", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                // 脱壳：提取SO（真正脱壳功能）
-                SmBtn(if (zh) "提取SO" else "Extract", bm, bp, { scope.launch { tools.unpackRunning = true
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", ".so", 60) }.getOrNull() }
-                    val result = JSONObject()
-                    if (r != null) {
-                        val items = r.optJSONArray("items")
-                        if (items != null) {
-                            for (i in 0 until items.length()) {
-                                val item = items.optJSONObject(i) ?: continue
-                                val name = item.optString("name")
-                                val path = item.optString("path", item.optString("filePath", ""))
-                                if (name.endsWith(".so", true)) {
-                                    result.append("soFiles", JSONObject().put("name", name).put("path", path))
-                                }
-                            }
-                        }
-                    }
-                    result.put("note", if (zh) "以上为可提取的SO文件列表，需root或MT管理器提取" else "SO files listed above, requires root or MT Manager to extract")
-                    tools.unpackRunning = false; tools.addTab(tl, if (zh) "提取SO" else "Extract", result.toString(2))
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.unpackRunning, loading = tools.unpackRunning)
+            }
             "soanalyze" -> {
                 SmBtn(if (zh) "概览" else "Ovw", bm, bp, { scope.launch { tools.soAnalyzeRunning = true
                     val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
@@ -344,15 +324,11 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     result.put("requirements", if (zh) "需要: root权限 + frida-server 运行在设备上" else "requires: root + frida-server running on device")
                     val steps = JSONArray()
                     if (zh) {
-                        steps.put("1. 确保设备已 root")
-                        steps.put("2. adb push frida-server /data/local/tmp/")
-                        steps.put("3. adb shell chmod 755 /data/local/tmp/frida-server")
-                        steps.put("4. adb shell /data/local/tmp/frida-server &")
+                        steps.put("1. 确保设备已 root"); steps.put("2. adb push frida-server /data/local/tmp/")
+                        steps.put("3. adb shell chmod 755 /data/local/tmp/frida-server"); steps.put("4. adb shell /data/local/tmp/frida-server &")
                     } else {
-                        steps.put("1. root device")
-                        steps.put("2. adb push frida-server /data/local/tmp/")
-                        steps.put("3. adb shell chmod 755 /data/local/tmp/frida-server")
-                        steps.put("4. adb shell /data/local/tmp/frida-server &")
+                        steps.put("1. root device"); steps.put("2. adb push frida-server /data/local/tmp/")
+                        steps.put("3. adb shell chmod 755 /data/local/tmp/frida-server"); steps.put("4. adb shell /data/local/tmp/frida-server &")
                     }
                     result.put("steps", steps)
                     tools.fridaStatus = result.toString(2)
@@ -396,13 +372,11 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                 OutlinedTextField(value = tools.disasmAddr, onValueChange = { tools.disasmAddr = it },
                     label = { Text(if (zh) "地址" else "Addr") }, singleLine = true,
                     modifier = Modifier.width(55.dp).height(22.dp), textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), shape = RoundedCornerShape(4.dp))
-                // 文本查看（读取字符串列表）
                 SmBtn(if (zh) "文本" else "Text", bm, bp, { scope.launch {
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 30) }.getOrNull() }
                     tools.editorTextResult = r?.toString() ?: if (zh) "无" else "none"
                     tools.addTab(tl, if (zh) "文本" else "Text", tools.editorTextResult)
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                // 编辑：读取地址数据展示可编辑格式
                 SmBtn(if (zh) "编辑" else "Edit", bm, bp, { scope.launch {
                     val addr = tools.disasmAddr.ifBlank { "0x0" }
                     val read = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr, 0, 64) }.getOrNull() }
@@ -411,18 +385,15 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     val result = JSONObject()
                     result.put("address", addr)
                     result.put("hexData", hexData)
-                    // ASCII 展示
                     val ascii = hexData.split(" ").filter { it.length == 2 }.map {
                         val c = it.toInt(16).toChar(); if (c.isISOControl() || c.code > 127) '.' else c.toString()
                     }.joinToString("")
                     result.put("ascii", ascii)
                     if (edit != null) result.put("editResult", edit)
-                    result.put("editMode", if (zh) "编辑模式" else "Edit Mode")
                     result.put("instruction", if (zh) "在地址栏输入目标地址查看数据，输入十六进制字节修改" else "enter address to view data, enter hex bytes to modify")
                     tools.editorEditResult = result.toString(2)
                     tools.addTab(tl, if (zh) "编辑" else "Edit", tools.editorEditResult)
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                // 对比：对比当前地址与符号栏地址的数据差异
                 SmBtn(if (zh) "对比" else "Diff", bm, bp, { scope.launch {
                     val addr1 = tools.disasmAddr.ifBlank { "0x0" }
                     val addr2 = tools.decompileTarget.ifBlank { "0x100" }
@@ -607,7 +578,6 @@ private fun describeJson(json: JSONObject, sb: StringBuilder, zh: Boolean, inden
                     val name = item.optString("name", "")
                     val addr = item.optString("address", item.optString("vaddr", item.optString("offset", "")))
                     val typ = item.optString("type", "")
-                    // 优先显示 name，没有 name 显示 address，都没有显示 type
                     val display = when {
                         name.isNotBlank() -> name
                         addr.isNotBlank() -> "@$addr"
@@ -650,14 +620,14 @@ private fun describeJson(json: JSONObject, sb: StringBuilder, zh: Boolean, inden
 }
 
 private fun describeOverview(ov: JSONObject, json: JSONObject?, sb: StringBuilder, zh: Boolean) {
-    val name = ov.optString("fileName", "-")
-    val arch = ov.optString("architecture", "-")
+    val name = ov.optString("fileName", "?")
+    val arch = ov.optString("architecture", "?")
     val bits = ov.optInt("bits", 0)
     val size = ov.optLong("size", 0L)
-    val elfType = ov.optString("elfType", "-")
+    val elfType = ov.optString("elfType", "?")
     val entry = ov.optString("entryPoint", "0x0")
-    val endian = ov.optString("endian", "-")
-    val sha256 = ov.optString("sha256", "")
+    val endian = ov.optString("endian", "?")
+    val sha256 = ov.optString("sha256", "—")
     val compiler = ov.optString("compiler", "")
     val packer = ov.optString("packer", "")
 
@@ -702,10 +672,10 @@ private fun describeOverview(ov: JSONObject, json: JSONObject?, sb: StringBuilde
         if (zh) sb.append("\n安全特性:\n") else sb.append("\nSecurity:\n")
         for (i in 0 until sec.length()) {
             val s = sec.optJSONObject(i) ?: continue
-            val label = s.optString("label", s.optString("id", ""))
+            val label = s.optString("label", s.optString("id", "?"))
             val active = s.optBoolean("active", false)
             val desc = s.optString("description", "")
-            sb.append("  ${if (label.isNotBlank()) label else (if (zh) "特性#${i+1}" else "feature#${i+1}")}: ${if (active) (if (zh) "启用" else "Yes") else (if (zh) "未启用" else "No")}\n")
+            sb.append("  $label: ${if (active) (if (zh) "启用" else "Yes") else (if (zh) "未启用" else "No")}\n")
             if (desc.isNotBlank()) sb.append("    $desc\n")
         }
     }
@@ -716,10 +686,9 @@ private fun describeOverview(ov: JSONObject, json: JSONObject?, sb: StringBuilde
         if (zh) sb.append("\n加密特征:\n") else sb.append("\nCrypto:\n")
         for (i in 0 until crypto.length()) {
             val c = crypto.optJSONObject(i) ?: continue
-            val name = c.optString("name", c.optString("algorithm", ""))
+            val name = c.optString("name", c.optString("algorithm", "?"))
             val count = c.optInt("count", c.optInt("matches", 0))
-            val displayName = if (name.isNotBlank()) name else (if (zh) "特征#${i+1}" else "feature#${i+1}")
-            sb.append("  $displayName")
+            sb.append("  $name")
             if (count > 0) sb.append(" ×$count")
             sb.append("\n")
         }
@@ -740,10 +709,9 @@ private fun describeOverview(ov: JSONObject, json: JSONObject?, sb: StringBuilde
         if (zh) sb.append("\n加密特征:\n") else sb.append("\nCrypto:\n")
         for (i in 0 until rootCrypto.length()) {
             val c = rootCrypto.optJSONObject(i) ?: continue
-            val name = c.optString("name", c.optString("algorithm", ""))
+            val name = c.optString("name", c.optString("algorithm", "?"))
             val count = c.optInt("count", c.optInt("matches", 0))
-            val displayName = if (name.isNotBlank()) name else (if (zh) "特征#${i+1}" else "feature#${i+1}")
-            sb.append("  $displayName")
+            sb.append("  $name")
             if (count > 0) sb.append(" ×$count")
             sb.append("\n")
         }
@@ -961,5 +929,4 @@ private fun fmtBytes(v: Long): String {
     var value = v.toDouble()
     while (value >= 1024 && u < units.size - 1) { value /= 1024; u++ }
     return "%.1f %s".format(value, units[u])
-}
 }

@@ -198,7 +198,7 @@ class BoreClient(
         var consecutiveTimeouts = 0
         while (!stopRequested && generation.get() == runGeneration) {
             try {
-                controlSocket.soTimeout = CONTROL_READ_TIMEOUT_MS
+                controlSocket.soTimeout = CONTROL_READ_TIMEOUT_MS.toInt()
                 val frame = readFrame(controlIn)
                 if (frame == null) {
                     if (stopRequested || generation.get() != runGeneration) break
@@ -210,21 +210,25 @@ class BoreClient(
                     continue
                 }
                 consecutiveTimeouts = 0
-                val json = JSONObject(String(frame, StandardCharsets.UTF_8))
-                if (json.has("Heartbeat")) {
+                val frameStr = String(frame, StandardCharsets.UTF_8)
+                // 用字符串匹配处理 heartbeat 避免 JSON 解析问题
+                if (frameStr.contains("\"Heartbeat\"")) {
                     continue
                 }
-                if (json.has("Connection")) {
-                    val connId = json.optString("Connection", json.opt("Connection").toString())
-                    handleDataConnection(connId, runGeneration)
+                if (frameStr.contains("\"Connection\"")) {
+                    val json = JSONObject(frameStr)
+                    val connId = json.optString("Connection", json.opt("Connection")?.toString() ?: "")
+                    if (connId.isNotBlank()) {
+                        handleDataConnection(connId, runGeneration)
+                    }
                     continue
                 }
-                if (json.has("Error")) {
-                    listener?.onError("Server: ${json.getString("Error")}")
+                if (frameStr.contains("\"Error\"")) {
+                    val json = JSONObject(frameStr)
+                    listener?.onError("Server: ${json.optString("Error", "unknown")}")
                     break
                 }
-                if (json.has("Challenge")) {
-                    val challenge = json.getString("Challenge")
+                if (frameStr.contains("\"Challenge\"")) {
                     if (secret != null) {
                         val authMsg = JSONObject().apply { put("Authenticate", secret) }.toString()
                         controlOut.write(authMsg.toByteArray(StandardCharsets.UTF_8))

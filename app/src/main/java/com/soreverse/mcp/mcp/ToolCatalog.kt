@@ -24,15 +24,15 @@ object ToolCatalog {
             "workspace", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("open (default) | list | open_url", "open", "list", "open_url")
-            "path" str "Absolute path or content:// URI (action=open)"
+            "path" str "Absolute path or content:// URI (action=open). Required for action=open."
             "filePath" str "Alias of path"
-            "url" str "http(s) URL pointing directly to a .so/ELF file (action=open_url). A work directory must be selected first."
+            "url" str "http(s) URL pointing directly to a .so/ELF file (action=open_url). Required for action=open_url."
             "outputName" str "Optional file name to save the downloaded SO in the work directory"
             "prefix" str "Path or file prefix filter (action=list)"
             "limit" int "Maximum items (action=list)"
             "cursor" str "Pagination cursor (action=list)"
             "temporary" bool "If true, workspace won't persist across restarts"
-        }) }
+        }, required = listOf("action")) }
     ) { e, a, s ->
         when (a.str("action", "open")) {
             "list" -> e.listAvailableSos(a.str("prefix"), a.intValue("limit", s.defaultLimit), a.str("cursor"))
@@ -49,7 +49,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "action".oneOf("close (default) | list", "close", "list")
             "workspaceId" str "Workspace id (action=close)"
-        }) }
+        }), required = listOf("action")) }
     ) { e, a, _ ->
         when (a.str("action", "close")) {
             "list" -> e.listWorkspaces()
@@ -107,7 +107,7 @@ object ToolCatalog {
             "subView".oneOf("Sub-view when view=list", "sections", "symbols", "dynsyms", "functions", "relocations", "strings", "imports")
             "prefix" str "Name prefix filter (view=list)"
             "limit" int "Maximum items (view=list)"
-        }) }
+        }), required = listOf("path")) }
     ) { e, a, s ->
         val view = a.str("view", "full")
         when (view) {
@@ -125,7 +125,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ -> e.readStats(a.str("workspaceId"), a.str("editSessionId")) }
 
     private val analysisReport = EngineToolHandler(
@@ -150,7 +150,7 @@ object ToolCatalog {
             "editSessionId" str "Edit session ID (optional)"
             "limit" int "Maximum functions to return"
             "cursor" str "Pagination cursor"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s -> e.rzFunctions(a.str("workspaceId"), a.str("editSessionId"), a.intValue("limit", s.defaultLimit), a.str("cursor")) }
 
     private val analyzeCfg = EngineToolHandler(
@@ -162,7 +162,7 @@ object ToolCatalog {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
             "locator" str "Function locator. Accepts full locator from taffy_analyze_functions (so_function:file!Name) or short function name."
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ -> e.rzCfg(a.str("workspaceId"), a.str("editSessionId"), a.str("locator")) }
 
     private val analyzeCrypto = EngineToolHandler(
@@ -173,7 +173,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID (optional)"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ -> e.rzScanCrypto(a.str("workspaceId"), a.str("editSessionId")) }
 
     private val analyzeXrefs = EngineToolHandler(
@@ -187,7 +187,7 @@ object ToolCatalog {
             "locator" str "Symbol/function locator. Accepts full locator from taffy_analyze_elf/taffy_analyze_functions or short symbol name."
             "direction".oneOf("to (default) | from | both", "to", "from", "both")
             "limit" int "Maximum references"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s -> e.rzXrefs(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.str("direction", "to")) }
 
     private val analyzeEsil = EngineToolHandler(
@@ -217,7 +217,7 @@ object ToolCatalog {
             "pattern" str "Rizin byte pattern: compact hex such as 5F2403D5, nibble wildcard using . such as 5F24..D5, optional bytes:mask; spaced hex and ?? are normalized for compatibility"
             "fromVa" str "Start VA hex string (blank/0 = from beginning)"
             "toVa" str "End VA hex string (blank/0 = to end)"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ -> e.rzSearchBytes(a.str("workspaceId"), a.str("editSessionId"), a.str("pattern"), HexCodec.long(a.str("fromVa")) ?: 0L, HexCodec.long(a.str("toVa")) ?: 0L) }
 
     private val searchStrings = EngineToolHandler(
@@ -235,7 +235,7 @@ object ToolCatalog {
             "minConfidence" num "Minimum string confidence score in [0,1]; useful to drop noisy UTF-16 candidates"
             "limit" int "Maximum results"
             "cursor" str "Pagination cursor"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s -> e.strings(a.str("workspaceId"), a.str("editSessionId"), "", a.str("prefix"), a.intValue("limit", s.defaultLimit), "", a.str("cursor"), a.bool("regex"), a.bool("ignoreCase", true), a.str("encoding"), a.doubleValue("minConfidence", 0.0)) }
 
     // ── READ ──
@@ -257,7 +257,7 @@ object ToolCatalog {
             "addr" str "Hex virtual address fallback; ARM32 Thumb may use odd address or thumb=true"
             "thumb" bool "Force ARM32 Thumb mode"
             "mode".oneOf("Instruction mode", "auto", "arm", "thumb")
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s -> e.disasm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), a.str("addr"), if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")) }
 
     private val readHexdump = EngineToolHandler(
@@ -271,7 +271,7 @@ object ToolCatalog {
             "locator" str "Section locator. Accepts full locator from taffy_analyze_elf sections, so_section:.text, or short section name like .text."
             "byteOffset" int "Byte offset within the section"
             "maxBytes" int "Max bytes to dump"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ -> e.hexdump(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096)) }
 
     // ── EDIT ──
@@ -289,7 +289,7 @@ object ToolCatalog {
             "va" str "Virtual address for VA-based patching (hex, e.g. 0x1234)"
             "patchHex" str "Hex bytes to write at va (e.g. '20 00 80 52')"
             "dryRun" bool "If true, return a preview without applying changes"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ ->
         val vaStr = a.str("va")
         if (vaStr.isNotEmpty()) {
@@ -314,7 +314,7 @@ object ToolCatalog {
             "locator" str "Function or address locator. Accepts so_function:file!name@0xVA, function name, or bare 0xVA."
             "dryRun" bool "If true, return a preview without applying changes"
             "edits" arr ("Array of asm edits" to SchemaBuilder.editsAsmSchema())
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ -> e.editAsm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.getJSONArray("edits"), a.bool("dryRun")) }
 
     private val editSymbol = EngineToolHandler(
@@ -331,7 +331,7 @@ object ToolCatalog {
             "addr" str "Hex VA for new exported function (add op, shortcut)"
             "name" str "Symbol name (add: new function name, remove: symbol to remove, shortcut)"
             "op".oneOf("rename | add | remove (shortcut, bypasses edits[])", "rename", "add", "remove")
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ ->
         val op = a.str("op")
         if (op.isNotEmpty()) {
@@ -371,7 +371,7 @@ object ToolCatalog {
             "symbolName" str "Exported symbol to call, e.g. JNI_OnLoad or Java_com_example_Class_method. Use taffy_analyze_elf dynsyms first."
             "args" arr "Array of integer/string arguments after implicit JNI args for Java_* methods"
             "trace" bool "Enable verbose Unidbg tracing for diagnostics; use only on small functions"
-        }) }
+        }), required = listOf("workspaceId", "symbolName")) }
     ) { e, a, s -> if (!s.emulationEnabled) err("EMULATION_DISABLED", "Emulation is disabled in settings. Enable emulationEnabled to use this feature.", "emulationEnabled", false) else e.emulate(a.str("workspaceId"), a.str("editSessionId"), a.str("symbolName"), a.optJSONArray("args") ?: JSONArray(), a.bool("trace", false)) }
 
     private val emulateDump = EngineToolHandler(
@@ -384,7 +384,7 @@ object ToolCatalog {
             "editSessionId" str "Edit session ID (optional)"
             "addr" str "Unidbg runtime absolute virtual address. Add the module base from taffy_unidbg_session(action=modules) to an ELF RVA/VA."
             "size" int "Number of bytes to dump (1-65536)"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s ->
         if (!s.emulationEnabled) err("EMULATION_DISABLED", "Emulation is disabled in settings. Enable emulationEnabled to use this feature.", "emulationEnabled", false)
         else {
@@ -407,7 +407,7 @@ object ToolCatalog {
             "workspaceIdB" str "Workspace B ID"
             "editSessionIdB" str "Edit session B ID (optional)"
             "limit" int "Maximum diff hunks (0 = all)"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s ->
         val wsB = a.str("workspaceIdB")
         if (wsB.isNotEmpty()) {
@@ -444,7 +444,7 @@ object ToolCatalog {
             "limit" int "Instruction/result limit"
             "stepCount" int "ESIL step count"
             "strict" bool "For decompile: fail if rizin-ghidra is unavailable"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "analyze")) {
             "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("rizin"))
@@ -489,7 +489,7 @@ object ToolCatalog {
             "method" str "Method name for dispatcher call"
             "args" arr "Dispatcher arguments"
             "dryRun" bool "Preview dispatcher mutation/build without applying it"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "parse")) {
             "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("lief"))
@@ -525,7 +525,7 @@ object ToolCatalog {
             "method" str "Dispatcher method/symbol name. For native_tool, use an upstream Unidbg MCP tool name returned by native_schemas."
             "args" arr "For native_tool: [emulatorSessionId, toolName, toolArgumentsObject]. Other dispatch operations use their documented positional arguments."
             "dispatchArgs" arr "Alias for args when action=dispatch; kept for schema compatibility"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "status")) {
             "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("unidbg"))
@@ -553,7 +553,7 @@ object ToolCatalog {
             "trace" bool "Enable trace for call"
             "size" int "Dump size"
             "callJniOnLoad" bool "Call JNI_OnLoad when opening the session"
-        }) }
+        }), required = listOf("action")) }
     ) { e, a, _ ->
         val sessionId = a.str("emulatorSessionId")
         val callArgs = a.optJSONArray("args") ?: JSONArray()
@@ -597,7 +597,7 @@ object ToolCatalog {
             "size" int "Size in bytes"
             "prot" int "Memory protection flags: 1=r, 2=w, 4=x"
             "hex" str "Hex bytes for write"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ ->
         val sessionId = a.str("emulatorSessionId")
         val dispatchArgs = when (a.str("action", "maps")) {
@@ -641,7 +641,7 @@ object ToolCatalog {
             "limit" int "Trace event page size, max 1000"
             "hookType".oneOf("Backend hook type", "syscall", "interrupt", "code", "read", "write")
             "hookId" str "Backend hook ID"
-        }) }
+        }), required = listOf("action")) }
     ) { e, a, _ ->
         val action = a.str("action", "debugger_plan")
         val op = when (action) {
@@ -704,7 +704,7 @@ object ToolCatalog {
             "editSessionId" str "Edit session ID"
             "op".oneOf("Dispatcher operation", "status", "roots", "methods", "capabilities", "help", "build-section", "fix_sections")
             "force" bool "Rebuild even when a parseable section table is already present"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ ->
         when (a.str("action", "status")) {
             "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("xanso"))
@@ -724,7 +724,7 @@ object ToolCatalog {
             "session", ToolClass.CORE,
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
-        }) }
+        }), required = listOf("workspaceId")) }
     ) { e, a, _ -> e.editOpen(a.str("workspaceId")) }
 
     private val sessionHistory = object : ToolHandler {
@@ -739,7 +739,7 @@ object ToolCatalog {
             "label" str "Snapshot label (action=snapshot)"
             "snapshotIndex" int "Snapshot index for rollback (-1 = latest, action=rollback)"
             "count" int "Undo/redo count (action=undo|redo)"
-        }) }
+        }), required = listOf("workspaceId")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val e = ctx.engine
             return when (args.str("action", "snapshot")) {
@@ -766,7 +766,7 @@ object ToolCatalog {
             "prefix" str "File prefix filter (list)"
             "limit" int "Maximum items (list)"
             "file" str "Audit file path (load)"
-        }) }
+        }), required = listOf("workspaceId")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val e = ctx.engine
             return when (args.str("action", "audit")) {
@@ -797,7 +797,7 @@ object ToolCatalog {
             "writeToWorkDir" bool "Mirror output into work directory"
             "prefix" str "File prefix filter (list)"
             "limit" int "Maximum items (list)"
-        }) }
+        }), required = listOf("workspaceId")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val e = ctx.engine
             val s = ctx.settings
@@ -828,7 +828,7 @@ object ToolCatalog {
             "targetPort" int "Tunnel target port (tunnel_start)"
             "publicUrl" str "Named tunnel public HTTPS hostname/URL to display and persist (tunnel_start)"
             "probe" bool "Force re-probe (apk_status/status)"
-        }) }
+        }), required = listOf("action")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val hooked = ctx as? HookedContext ?: return JSONObject().put("error", "System hooks not available")
             return when (args.str("action", "status")) {
@@ -916,7 +916,7 @@ object ToolCatalog {
             "format".oneOf("Report format", "json")
             "writeToFile" bool "Write report JSON to app files (report)"
             "reset" bool "Reset stats (stats)"
-        }) }
+        }), required = listOf("action")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val hooked = ctx as? HookedContext ?: return JSONObject().put("error", "Meta hooks not available")
             return when (args.str("action", "help")) {

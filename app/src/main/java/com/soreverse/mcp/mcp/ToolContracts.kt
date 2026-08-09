@@ -13,8 +13,10 @@ annotation class SchemaDsl
 object SchemaBuilder {
     fun emptyObject(): JSONObject = JSONObject().put("type", "object").put("properties", JSONObject())
 
-    fun objectSchema(properties: JSONObject): JSONObject = JSONObject()
-        .put("type", "object").put("properties", properties)
+    fun objectSchema(properties: JSONObject, required: List<String> = emptyList()): JSONObject = JSONObject()
+        .put("type", "object").put("properties", properties).apply {
+            if (required.isNotEmpty()) put("required", JSONArray(required))
+        }
 
     private fun strProp(description: String): JSONObject = JSONObject().put("type", "string").put("description", description)
     private fun enumProp(description: String, vararg values: String): JSONObject = strProp(description).put("enum", JSONArray(values.toList()))

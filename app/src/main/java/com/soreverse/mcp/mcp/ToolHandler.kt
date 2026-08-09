@@ -32,9 +32,9 @@ data class ToolMeta(
     val category: String,
     val cls: ToolClass,
     val heavy: Boolean = false,
-    val schemaBuilder: SchemaBuilder.() -> JSONObject = { SchemaBuilder.emptyObject() },
-    val outputSchema: JSONObject? = null,
     val generic: Boolean = false,
+    val outputSchema: JSONObject? = null,
+    val schemaBuilder: SchemaBuilder.() -> JSONObject = { SchemaBuilder.emptyObject() },
 )
 
 // ToolClass is defined in ToolCatalog.kt and reused here to avoid a redeclaration.

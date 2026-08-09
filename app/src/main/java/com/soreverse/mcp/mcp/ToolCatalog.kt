@@ -147,12 +147,13 @@ object ToolCatalog {
             "analyze", ToolClass.CORE, heavy = true,
             outputSchema = SchemaBuilder.outputSchema(
                 "Function list result: { ok, total, functions: [[name, va, size, calls]] }.",
-                required = listOf("ok")
-            ) {
-                "ok" bool "成功时为 true"
-                "total" int "返回的函数数量"
-                "functions" arr "[name, va, size, calls] 元组数组"
-            }
+                required = listOf("ok"),
+                {
+                    "ok" bool "成功时为 true"
+                    "total" int "返回的函数数量"
+                    "functions" arr "[name, va, size, calls] 元组数组"
+                }
+            )
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"
             "editSessionId" str "编辑会话 ID（可选，为空则用原始 SO）"
@@ -168,13 +169,14 @@ object ToolCatalog {
             "analyze", ToolClass.CORE, heavy = true,
             outputSchema = SchemaBuilder.outputSchema(
                 "CFG result: { ok, function, basic_blocks: [{va,size,insns}...], edges: [[from,to]...] }.",
-                required = listOf("ok")
-            ) {
-                "ok" bool "成功时为 true"
-                "function" str "解析后的函数定位符"
-                "basic_blocks" arr "基本块对象数组 {va, size, insns}"
-                "edges" arr "[fromVa, toVa] 跳转边数组"
-            }
+                required = listOf("ok"),
+                {
+                    "ok" bool "成功时为 true"
+                    "function" str "解析后的函数定位符"
+                    "basic_blocks" arr "基本块对象数组 {va, size, insns}"
+                    "edges" arr "[fromVa, toVa] 跳转边数组"
+                }
+            )
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"
             "editSessionId" str "编辑会话 ID（可选）"
@@ -189,12 +191,13 @@ object ToolCatalog {
             "analyze", ToolClass.CORE, heavy = true,
             outputSchema = SchemaBuilder.outputSchema(
                 "Crypto scan result: { ok, algorithms: [{name,count,variants}...], entropy_regions: [{va,size,entropy}...] }.",
-                required = listOf("ok")
-            ) {
-                "ok" bool "成功时为 true"
-                "algorithms" arr "匹配到的加密算法：[{name, count, variants}]"
-                "entropy_regions" arr "高熵区域：[{va, size, entropy}]"
-            }
+                required = listOf("ok"),
+                {
+                    "ok" bool "成功时为 true"
+                    "algorithms" arr "匹配到的加密算法：[{name, count, variants}]"
+                    "entropy_regions" arr "高熵区域：[{va, size, entropy}]"
+                }
+            )
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"
             "editSessionId" str "编辑会话 ID（可选）"
@@ -392,15 +395,16 @@ object ToolCatalog {
             "emulate", ToolClass.CORE, heavy = true,
             outputSchema = SchemaBuilder.outputSchema(
                 "Emulation result: { ok, returnValue, backend, durationMs; on failure: stage, nextActions }.",
-                required = listOf("ok")
-            ) {
-                "ok" bool "模拟成功时为 true"
-                "returnValue" str "函数返回值（来自目标 ABI）"
-                "backend" str "使用的模拟后端，例如 unidbg"
-                "durationMs" num "模拟耗时（毫秒）"
-                "stage" str "失败阶段（若 ok 不为 true）"
-                "nextActions" arr "失败时的建议后续步骤"
-            }
+                required = listOf("ok"),
+                {
+                    "ok" bool "模拟成功时为 true"
+                    "returnValue" str "函数返回值（来自目标 ABI）"
+                    "backend" str "使用的模拟后端，例如 unidbg"
+                    "durationMs" num "模拟耗时（毫秒）"
+                    "stage" str "失败阶段（若 ok 不为 true）"
+                    "nextActions" arr "失败时的建议后续步骤"
+                }
+            )
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"
             "editSessionId" str "编辑会话 ID（设置后使用打过补丁的字节）"

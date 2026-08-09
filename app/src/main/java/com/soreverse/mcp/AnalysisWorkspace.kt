@@ -672,7 +672,7 @@ private fun describeOverview(ov: JSONObject, json: JSONObject?, sb: StringBuilde
     }
 
     // 如果 json 顶层还有 cryptoFindings（即 overview 外部的）
-    val rootCrypto = json.optJSONArray("cryptoFindings")
+    val rootCrypto = json?.optJSONArray("cryptoFindings")
     if (rootCrypto != null && rootCrypto.length() > 0) {
         if (zh) sb.append("\n加密特征:\n") else sb.append("\nCrypto:\n")
         for (i in 0 until rootCrypto.length()) {

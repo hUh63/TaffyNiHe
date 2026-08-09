@@ -34,7 +34,7 @@ object ApkEditorTool {
         ) {
             objectSchema(props {
                 "action".oneOf(
-                    "decode(APK→目录) | build(目录→APK) | merge(拆分包→单APK) | refactor(去混淆)",
+                    "decode(需path: APK) | build(需path: decode目录) | merge(需path: 拆分包) | refactor(需path: APK) | decode(needs path=APK) | build(needs path=decoded dir) | merge(needs path=split bundle) | refactor(needs path=APK)",
                     "decode", "build", "merge", "refactor",
                 )
                 "path" str "输入路径:APK 文件(decode/merge/refactor)或 decode 出的目录(build)"

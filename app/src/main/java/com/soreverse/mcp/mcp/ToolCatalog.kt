@@ -119,8 +119,8 @@ object ToolCatalog {
 
     private val readStats = EngineToolHandler(
         ToolMeta("taffy_read_stats",
-            "SO 快速统计（taffy_analyze_elf view=stats 的直观别名）",
-            "Direct alias for taffy_analyze_elf(view=stats). Useful for clients that expect a standalone taffy_read_stats tool.",
+            "【DEPRECATED】SO 快速统计（taffy_analyze_elf view=stats 的直观别名）建议改用 taffy_analyze_elf",
+            "[DEPRECATED] Direct alias for taffy_analyze_elf(view=stats). Prefer taffy_analyze_elf(view=stats) — this alias is kept only for legacy clients.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
@@ -130,8 +130,8 @@ object ToolCatalog {
 
     private val analysisReport = EngineToolHandler(
         ToolMeta("taffy_analysis_report",
-            "生成综合分析报告（taffy_meta_info action=report 的直观别名）",
-            "Generate a full analysis report. Direct alias for taffy_meta_info(action=report)/taffy_lief_api(action=report).",
+            "【DEPRECATED】生成综合分析报告（taffy_meta_info action=report 的直观别名）建议改用 taffy_meta_info",
+            "[DEPRECATED] Generate a full analysis report. Direct alias for taffy_meta_info(action=report)/taffy_lief_api(action=report). Prefer taffy_meta_info.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "workspaceId" str "Workspace ID"
@@ -421,8 +421,8 @@ object ToolCatalog {
 
     private val rizinApi = EngineToolHandler(
         ToolMeta("taffy_rizin_api",
-            "Rizin 底层能力网关（analyze/functions/cfg/xrefs/search_bytes/crypto/esil/diff/asm/disasm）",
-            "Low-level Rizin gateway with enum actions for analyze, functions, cfg, xrefs, search_bytes, crypto, esil, diff, asm, and disasm.",
+            "Rizin 底层能力网关（analyze/functions/cfg/xrefs/search_bytes/crypto/esil/diff/asm/disasm）⚠️ 优先使用高级工具（analyze_*/search_*/read_*），仅当高级工具无法满足时再使用本低级 API",
+            "Low-level Rizin gateway with enum actions for analyze, functions, cfg, xrefs, search_bytes, crypto, esil, diff, asm, and disasm. ⚠️ PREFER high-level tools (analyze_*/search_*/read_*) — use this low-level API ONLY when no high-level tool covers the need.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("Rizin operation", "capabilities", "command", "analyze", "functions", "cfg", "xrefs", "search_bytes", "crypto", "esil", "diff", "asm", "disasm", "decompile")
@@ -466,8 +466,8 @@ object ToolCatalog {
 
     private val liefApi = EngineToolHandler(
         ToolMeta("taffy_lief_api",
-            "LIEF 全格式能力网关（ELF/PE/Mach-O/DEX/ART/OAT/VDEX）",
-            "Full-format LIEF gateway for ELF, PE, Mach-O, DEX, ART, OAT, and VDEX parsing plus format-specific mutations.",
+            "LIEF 全格式能力网关（ELF/PE/Mach-O/DEX/ART/OAT/VDEX）⚠️ 优先使用高级工具（analyze_elf/apk_*/so_*），仅当高级工具无法满足时再使用本低级 API",
+            "Full-format LIEF gateway for ELF, PE, Mach-O, DEX, ART, OAT, and VDEX parsing plus format-specific mutations. ⚠️ PREFER high-level tools (analyze_elf, apk_*, so_*). Use this low-level API ONLY when no high-level tool covers the need.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("LIEF operation", "capabilities", "dispatch", "parse", "parse_any", "list", "patch_address", "add_export", "remove_symbol", "build", "fix_sections", "report")
@@ -509,8 +509,8 @@ object ToolCatalog {
 
     private val unidbgApi = EngineToolHandler(
         ToolMeta("taffy_unidbg_api",
-            "Unidbg 底层能力网关（session/call/memory/registers/trace/breakpoints）",
-            "Low-level Unidbg gateway for live sessions, function/address calls, memory map/read/write/protect/unmap, registers, modules, exports, trace, and breakpoints.",
+            "Unidbg 底层能力网关（session/call/memory/registers/trace/breakpoints）⚠️ 优先使用高级工具（emulate_call/unidbg_session/unidbg_memory/unidbg_debug），仅当高级工具无法满足时再使用本低级 API",
+            "Low-level Unidbg gateway for live sessions, function/address calls, memory map/read/write/protect/unmap, registers, modules, exports, trace, and breakpoints. ⚠️ PREFER high-level tools (emulate_call, unidbg_session, unidbg_memory, unidbg_debug) — use this low-level API ONLY when no high-level tool covers the need.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("Unidbg operation", "capabilities", "dispatch", "status", "call", "dump")
@@ -543,7 +543,7 @@ object ToolCatalog {
             "Typed Unidbg session tool for shell-friendly live emulator workflows: open/list/close/call/call_address/dump/modules/exports/registers/memory_maps.",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("Session action", "open", "list", "close", "call", "call_address", "dump", "modules", "exports", "registers", "memory_maps")
+            "action".oneOf("Session action — open(需workspaceId+editSessionId) | list(无参数) | close(需emulatorSessionId) | call(需emulatorSessionId+symbolName) | call_address(需emulatorSessionId+addr) | dump(需emulatorSessionId+addr) | modules(需emulatorSessionId) | exports(需emulatorSessionId) | registers(需emulatorSessionId) | memory_maps(需emulatorSessionId) | Session action — open(needs workspaceId+editSessionId) | list(no args) | close(session) | call(session+symbolName) | call_address(session+addr) | dump(session+addr) | modules/exports/registers/memory_maps(session)", "open", "list", "close", "call", "call_address", "dump", "modules", "exports", "registers", "memory_maps")
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID"
             "emulatorSessionId" str "Live Unidbg emulator session ID"
@@ -627,7 +627,7 @@ object ToolCatalog {
             "Typed Unidbg debugger lifecycle for trace, breakpoint add/list/remove, single-step configuration, stop, and status.",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("Debug action", "trace_code", "trace_start", "trace_events", "trace_stop", "trace_clear", "hook_start", "hook_list", "hook_stop", "breakpoint_add", "breakpoint_remove", "status", "single_step", "stop", "debugger_plan", "trace_plan", "breakpoints_plan")
+            "action".oneOf("Debug action — 均需emulatorSessionId trace_code/start_events(可加begin/end/traceType/cursor/limit) trace_stop(+traceId) trace_clear hook_start(+hookType/begin/end) hook_list hook_stop(+hookId) breakpoint_add/remove(+addr) single_step(+count) status stop | Debug action — all need emulatorSessionId; trace_stop adds traceId, hook_stop adds hookId, breakpoint_add/remove add addr, single_step adds count", "trace_code", "trace_start", "trace_events", "trace_stop", "trace_clear", "hook_start", "hook_list", "hook_stop", "breakpoint_add", "breakpoint_remove", "status", "single_step", "stop", "debugger_plan", "trace_plan", "breakpoints_plan")
             "workspaceId" str "Workspace ID"
             "editSessionId" str "Edit session ID"
             "emulatorSessionId" str "Live Unidbg emulator session ID"
@@ -848,7 +848,7 @@ object ToolCatalog {
     private val appConfig = object : ToolHandler {
         override val meta = ToolMeta("taffy_app_config",
             "读写应用配置（外观/服务/引擎/隧道/桥接）。安全敏感字段（authEnabled/bindHost/accessToken）不可通过此工具修改。",
-            "Read and write app settings: appearance, engine limits, tunnel, APK bridge. Security-sensitive fields (authEnabled, bindHost, accessToken) are read-only via this tool for safety.",
+            "Read and write app settings: appearance, engine limits, tunnel, APK bridge. Security-sensitive fields (authEnabled, bindHost, accessToken) are read-only via this tool for safety. ⚠️ For UI changes prefer the in-app Settings pages; use this tool only when you need programmatic batch configuration.",
             "system", ToolClass.META,
         ) {
             objectSchema(props {

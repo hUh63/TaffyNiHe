@@ -539,7 +539,7 @@ private fun describeJson(json: JSONObject, sb: StringBuilder, zh: Boolean, inden
     // overview 对象 → 文字描述
     val ov = json.optJSONObject("overview")
     if (ov != null) {
-        describeOverview(ov, sb, zh)
+        describeOverview(ov, json, sb, zh)
         return
     }
     // items 数组 → 列表
@@ -587,7 +587,7 @@ private fun describeJson(json: JSONObject, sb: StringBuilder, zh: Boolean, inden
     }
 }
 
-private fun describeOverview(ov: JSONObject, sb: StringBuilder, zh: Boolean) {
+private fun describeOverview(ov: JSONObject, json: JSONObject?, sb: StringBuilder, zh: Boolean) {
     val name = ov.optString("fileName", "?")
     val arch = ov.optString("architecture", "?")
     val bits = ov.optInt("bits", 0)

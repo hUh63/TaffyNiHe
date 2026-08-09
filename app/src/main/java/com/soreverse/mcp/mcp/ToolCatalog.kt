@@ -23,15 +23,15 @@ object ToolCatalog {
             "【PRIMARY SO ENTRY POINT】Open a SO file and create a workspace. Use action=list to discover available SO files. Use action=open_url to download a http(s) SO into the selected work directory, then open and analyze it. All .so/ELF tasks MUST start from taffy_so_open — do NOT use mt_apk_* or np_* for SO files.",
             "workspace", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("open (default) | list | open_url", "open", "list", "open_url")
-            "path" str "Absolute path or content:// URI (action=open). Required for action=open."
-            "filePath" str "Alias of path"
-            "url" str "http(s) URL pointing directly to a .so/ELF file (action=open_url). Required for action=open_url."
-            "outputName" str "Optional file name to save the downloaded SO in the work directory"
-            "prefix" str "Path or file prefix filter (action=list)"
-            "limit" int "Maximum items (action=list)"
-            "cursor" str "Pagination cursor (action=list)"
-            "temporary" bool "If true, workspace won't persist across restarts"
+            "action".oneOf("open (默认) | list | open_url", "open", "list", "open_url")
+            "path" str "SO 文件绝对路径或 content:// URI（action=open 必需）"
+            "filePath" str "path 的别名"
+            "url" str "指向 .so/ELF 文件的 http(s) URL（action=open_url 必需）"
+            "outputName" str "open_url 下载到工作目录后保存的文件名（可选）"
+            "prefix" str "文件路径或前缀过滤（action=list）"
+            "limit" int "返回条数上限（action=list）"
+            "cursor" str "分页游标（action=list）"
+            "temporary" bool "为 true 时工作区重启后不保留"
         }, required = listOf("action")) }
     ) { e, a, s ->
         when (a.str("action", "open")) {
@@ -47,8 +47,8 @@ object ToolCatalog {
             "Close an open workspace. Use action=list to see open workspaces.",
             "workspace", ToolClass.CORE,
         ) { objectSchema(props {
-            "action".oneOf("close (default) | list", "close", "list")
-            "workspaceId" str "Workspace id (action=close)"
+            "action".oneOf("close (默认) | list", "close", "list")
+            "workspaceId" str "工作区 ID（action=close）"
         }, required = listOf("action")) }
     ) { e, a, _ ->
         when (a.str("action", "close")) {
@@ -65,8 +65,8 @@ object ToolCatalog {
             ToolClass.CORE,
         ) {
             objectSchema(props {
-                "path" str "Local APK path or path relative to the selected work directory."
-                "entryLimit" int "Maximum ZIP entries returned, 1..5000 (default 500)."
+                "path" str "本地 APK 路径，或相对于所选工作目录的路径"
+                "entryLimit" int "返回的 ZIP 条目数上限，1..5000（默认 500）"
             })
         },
     ) { engine, args, _ -> engine.analyzeApk(args.str("path").ifBlank { args.str("filePath") }, args.intValue("entryLimit", 500)) }
@@ -81,14 +81,14 @@ object ToolCatalog {
         ) {
             objectSchema(props {
                 "action".oneOf("inspect | analyze | status | result | cancel | packages | prune", "inspect", "analyze", "status", "result", "cancel", "packages", "prune")
-                "path" str "APK path or directory containing libapp.so and libflutter.so."
-                "jobId" str "Persistent Blutter job id for status, result, or cancel."
-                "abi".oneOf("Target ABI", "auto", "arm64-v8a", "x86_64", "armeabi-v7a", "x86")
-                "backend".oneOf("Execution backend", "auto", "embedded")
-                "limit" int "Maximum result entities, 1..1000."
-                "kind".oneOf("Paged result collection", "libraries", "classes", "functions", "objects")
-                "cursor" str "Opaque cursor returned by a previous result page."
-                "olderThanMillis" int "Prune cached results older than this duration."
+                "path" str "APK 路径，或包含 libapp.so 和 libflutter.so 的目录"
+                "jobId" str "查询状态/结果/取消用的持久化 Blutter 任务 ID"
+                "abi".oneOf("目标 ABI", "auto", "arm64-v8a", "x86_64", "armeabi-v7a", "x86")
+                "backend".oneOf("执行后端", "auto", "embedded")
+                "limit" int "返回结果实体数上限，1..1000"
+                "kind".oneOf("分页结果集", "libraries", "classes", "functions", "objects")
+                "cursor" str "上一页结果返回的不透明游标"
+                "olderThanMillis" int "清理比该时长更早的缓存结果"
             })
         },
     ) { engine, args, _ -> engine.flutterBlutter(args) }
@@ -101,12 +101,12 @@ object ToolCatalog {
             "Full ELF structure and triage stats via LIEF: sections, symbols, relocations, program headers, dynamic entries.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional, uses original SO if blank)"
-            "view".oneOf("full (default) | stats | list", "full", "stats", "list")
-            "subView".oneOf("Sub-view when view=list", "sections", "symbols", "dynsyms", "functions", "relocations", "strings", "imports")
-            "prefix" str "Name prefix filter (view=list)"
-            "limit" int "Maximum items (view=list)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选，为空则用原始 SO）"
+            "view".oneOf("full（默认）| stats | list", "full", "stats", "list")
+            "subView".oneOf("view=list 时的子视图", "sections", "symbols", "dynsyms", "functions", "relocations", "strings", "imports")
+            "prefix" str "名称前缀过滤（view=list）"
+            "limit" int "返回条数上限（view=list）"
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         val view = a.str("view", "full")
@@ -123,8 +123,8 @@ object ToolCatalog {
             "[DEPRECATED] Direct alias for taffy_analyze_elf(view=stats). Prefer taffy_analyze_elf(view=stats) — this alias is kept only for legacy clients.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ -> e.readStats(a.str("workspaceId"), a.str("editSessionId")) }
 
@@ -134,45 +134,70 @@ object ToolCatalog {
             "[DEPRECATED] Generate a full analysis report. Direct alias for taffy_meta_info(action=report)/taffy_lief_api(action=report). Prefer taffy_meta_info.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "writeToFile" bool "Write report JSON to app files"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "writeToFile" bool "将报告 JSON 写入应用文件"
         }) }
     ) { e, a, _ -> e.analysisReport(a.str("workspaceId"), a.str("editSessionId"), a.optBoolean("writeToFile", true)) }
 
     private val analyzeFunctions = EngineToolHandler(
         ToolMeta("taffy_analyze_functions",
             "列出 Rizin 自动分析发现的所有函数（含地址/大小/调用数）",
-            "List all functions discovered by Rizin auto-analysis (address, size, call count).",
+            "List all functions discovered by Rizin auto-analysis (address, size, call count). Example: analyzeFunctions(workspaceId='ws1', limit=50) to list the first 50 symbols.",
             "analyze", ToolClass.CORE, heavy = true,
+            outputSchema = SchemaBuilder.outputSchema(
+                "Function list result: { ok, total, functions: [[name, va, size, calls]] }.",
+                required = listOf("ok")
+            ) {
+                "ok" bool "成功时为 true"
+                "total" int "返回的函数数量"
+                "functions" arr "[name, va, size, calls] 元组数组"
+            }
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "limit" int "Maximum functions to return"
-            "cursor" str "Pagination cursor"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选，为空则用原始 SO）"
+            "limit" int "返回函数条数上限"
+            "cursor" str "分页游标"
         }, required = listOf("workspaceId")) }
     ) { e, a, s -> e.rzFunctions(a.str("workspaceId"), a.str("editSessionId"), a.intValue("limit", s.defaultLimit), a.str("cursor")) }
 
     private val analyzeCfg = EngineToolHandler(
         ToolMeta("taffy_analyze_cfg",
             "函数控制流图（Rizin CFG：基本块 + 跳转边）",
-            "Control flow graph for a function via Rizin: basic blocks and jump edges.",
+            "Control flow graph for a function via Rizin: basic blocks and jump edges. Example: analyzeCfg(workspaceId='ws1', locator='so_function:lib.so!check') to get the CFG of function check.",
             "analyze", ToolClass.CORE, heavy = true,
+            outputSchema = SchemaBuilder.outputSchema(
+                "CFG result: { ok, function, basic_blocks: [{va,size,insns}...], edges: [[from,to]...] }.",
+                required = listOf("ok")
+            ) {
+                "ok" bool "成功时为 true"
+                "function" str "解析后的函数定位符"
+                "basic_blocks" arr "基本块对象数组 {va, size, insns}"
+                "edges" arr "[fromVa, toVa] 跳转边数组"
+            }
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Function locator. Accepts full locator from taffy_analyze_functions (so_function:file!Name) or short function name."
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "locator" str "函数定位符：可接受 taffy_analyze_functions 返回的完整 locator（so_function:file!Name）或短函数名"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ -> e.rzCfg(a.str("workspaceId"), a.str("editSessionId"), a.str("locator")) }
 
     private val analyzeCrypto = EngineToolHandler(
         ToolMeta("taffy_analyze_crypto",
             "密码学特征扫描（AES/RSA/ECC 常量 + 熵分析）",
-            "Scan for cryptographic material (AES/RSA/ECC constants) and high-entropy regions via Rizin.",
+            "Scan for cryptographic material (AES/RSA/ECC constants) and high-entropy regions via Rizin. Example: analyzeCrypto(workspaceId='ws1') to reveal cipher algorithm hints before emulating an export.",
             "analyze", ToolClass.CORE, heavy = true,
+            outputSchema = SchemaBuilder.outputSchema(
+                "Crypto scan result: { ok, algorithms: [{name,count,variants}...], entropy_regions: [{va,size,entropy}...] }.",
+                required = listOf("ok")
+            ) {
+                "ok" bool "成功时为 true"
+                "algorithms" arr "匹配到的加密算法：[{name, count, variants}]"
+                "entropy_regions" arr "高熵区域：[{va, size, entropy}]"
+            }
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ -> e.rzScanCrypto(a.str("workspaceId"), a.str("editSessionId")) }
 
@@ -182,11 +207,11 @@ object ToolCatalog {
             "Cross-references via Rizin. direction: to (incoming refs) | from (outgoing refs) | both.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Symbol/function locator. Accepts full locator from taffy_analyze_elf/taffy_analyze_functions or short symbol name."
-            "direction".oneOf("to (default) | from | both", "to", "from", "both")
-            "limit" int "Maximum references"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "locator" str "符号/函数定位符：可接受 taffy_analyze_elf/taffy_analyze_functions 的完整定位符或短符号名"
+            "direction".oneOf("to（默认）| from | both", "to", "from", "both")
+            "limit" int "引用数量上限"
         }, required = listOf("workspaceId")) }
     ) { e, a, s -> e.rzXrefs(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.str("direction", "to")) }
 
@@ -196,11 +221,11 @@ object ToolCatalog {
             "ESIL instruction-level emulation trace via Rizin: register snapshots and memory reads/writes.",
             "analyze", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Function locator or hex VA. Accepts full locator from taffy_analyze_functions, short function name, or 0x... address."
-            "addr" str "Hex virtual address fallback when no function symbol is available, e.g. 0x1234."
-            "stepCount" int "Number of instructions to emulate (default 1, max 1000)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "locator" str "函数定位符或十六进制 VA：可接受 taffy_analyze_functions 的完整定位符、短函数名或 0x… 地址"
+            "addr" str "无函数符号可用时的十六进制虚拟地址兜底，例如 0x1234"
+            "stepCount" int "模拟执行的指令条数（默认 1，最大 1000）"
         }) }
     ) { e, a, _ -> e.rzEsilStep(a.str("workspaceId"), a.str("editSessionId"), a.str("locator").ifBlank { a.str("addr") }, a.intValue("stepCount", 1)) }
 
@@ -212,11 +237,11 @@ object ToolCatalog {
             "Hex pattern search via Rizin byte-pattern syntax. Native syntax is compact hex/nibble wildcard, e.g. 5F2403D5, 5F24..D5, bytes:mask; MCP also normalizes spaced hex like '5F 24 ?? D5'.",
             "search", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "pattern" str "Rizin byte pattern: compact hex such as 5F2403D5, nibble wildcard using . such as 5F24..D5, optional bytes:mask; spaced hex and ?? are normalized for compatibility"
-            "fromVa" str "Start VA hex string (blank/0 = from beginning)"
-            "toVa" str "End VA hex string (blank/0 = to end)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "pattern" str "Rizin 字节模式：紧凑 hex 如 5F2403D5、用 . 表示半字节通配如 5F24..D5、可选 bytes:mask；为兼容会归一化带空格的 hex 和 ??"
+            "fromVa" str "起始 VA 十六进制字符串（空/0 表示从开头）"
+            "toVa" str "结束 VA 十六进制字符串（空/0 表示到结尾）"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ -> e.rzSearchBytes(a.str("workspaceId"), a.str("editSessionId"), a.str("pattern"), HexCodec.long(a.str("fromVa")) ?: 0L, HexCodec.long(a.str("toVa")) ?: 0L) }
 
@@ -226,15 +251,15 @@ object ToolCatalog {
             "Search extracted UTF-8 and UTF-16LE strings, including Chinese text, with optional prefix/content filter.",
             "search", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "prefix" str "String contains filter or regex pattern, supports Chinese/UTF-8 text"
-            "regex" bool "If true, treat prefix as a Kotlin regular expression"
-            "ignoreCase" bool "Case-insensitive matching (default true)"
-            "encoding" str "Optional encoding filter: UTF-8, UTF-16LE, or empty for any"
-            "minConfidence" num "Minimum string confidence score in [0,1]; useful to drop noisy UTF-16 candidates"
-            "limit" int "Maximum results"
-            "cursor" str "Pagination cursor"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "prefix" str "字符串包含过滤或正则模式，支持中文/UTF-8 文本"
+            "regex" bool "为 true 时把 prefix 当作 Kotlin 正则表达式"
+            "ignoreCase" bool "忽略大小写匹配（默认 true）"
+            "encoding" str "可选编码过滤：UTF-8、UTF-16LE，或留空表示任意"
+            "minConfidence" num "字符串置信度下限 [0,1]；可用于过滤嘈杂的 UTF-16 候选"
+            "limit" int "结果数量上限"
+            "cursor" str "分页游标"
         }, required = listOf("workspaceId")) }
     ) { e, a, s -> e.strings(a.str("workspaceId"), a.str("editSessionId"), "", a.str("prefix"), a.intValue("limit", s.defaultLimit), "", a.str("cursor"), a.bool("regex"), a.bool("ignoreCase", true), a.str("encoding"), a.doubleValue("minConfidence", 0.0)) }
 
@@ -246,17 +271,17 @@ object ToolCatalog {
             "Disassemble via Rizin and include rizin-ghidra pseudocode when the Android native backend has pdg available.",
             "read", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Function locator. Accepts full locator from taffy_analyze_functions or short function name."
-            "limit" int "Maximum instructions"
-            "cursor" str "Pagination cursor"
-            "instructionOffset" int "Skip N instructions"
-            "byteOffset" int "Byte offset within function"
-            "maxBytes" int "Max bytes to read"
-            "addr" str "Hex virtual address fallback; ARM32 Thumb may use odd address or thumb=true"
-            "thumb" bool "Force ARM32 Thumb mode"
-            "mode".oneOf("Instruction mode", "auto", "arm", "thumb")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "locator" str "函数定位符：可接受 taffy_analyze_functions 的完整定位符或短函数名"
+            "limit" int "指令条数上限"
+            "cursor" str "分页游标"
+            "instructionOffset" int "跳过 N 条指令"
+            "byteOffset" int "函数内的字节偏移"
+            "maxBytes" int "最多读取的字节数"
+            "addr" str "十六进制虚拟地址兜底；ARM32 Thumb 可用奇数地址或 thumb=true"
+            "thumb" bool "强制 ARM32 Thumb 模式"
+            "mode".oneOf("指令模式", "auto", "arm", "thumb")
         }, required = listOf("workspaceId")) }
     ) { e, a, s -> e.disasm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), a.str("addr"), if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")) }
 
@@ -266,11 +291,11 @@ object ToolCatalog {
             "Hex dump: read raw bytes at a given offset or address.",
             "read", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "locator" str "Section locator. Accepts full locator from taffy_analyze_elf sections, so_section:.text, or short section name like .text."
-            "byteOffset" int "Byte offset within the section"
-            "maxBytes" int "Max bytes to dump"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "locator" str "节区定位符：可接受 taffy_analyze_elf 的完整定位符、so_section:.text 或类似 .text 的短节区名"
+            "byteOffset" int "节区内字节偏移"
+            "maxBytes" int "最多转储的字节数"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ -> e.hexdump(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096)) }
 
@@ -282,13 +307,13 @@ object ToolCatalog {
             "Patch raw bytes. Use edits[] with byteOffset for offset-based patching, or va+patchHex for VA-based patching via LIEF.",
             "edit", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "locator" str "Section locator for offset-based patching. Accepts full locator from taffy_analyze_elf sections, so_section:.text, or short section name like .text."
-            "edits" arr ("Array of hex edits" to SchemaBuilder.editsHexSchema())
-            "va" str "Virtual address for VA-based patching (hex, e.g. 0x1234)"
-            "patchHex" str "Hex bytes to write at va (e.g. '20 00 80 52')"
-            "dryRun" bool "If true, return a preview without applying changes"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "locator" str "基于偏移打补丁用的节区定位符：可接受 taffy_analyze_elf 的完整定位符、so_section:.text 或短节区名"
+            "edits" arr ("十六进制编辑数组" to SchemaBuilder.editsHexSchema())
+            "va" str "基于 VA 打补丁的虚拟地址（hex，例如 0x1234）"
+            "patchHex" str "写入 va 处的十六进制字节（例如 '20 00 80 52'）"
+            "dryRun" bool "为 true 时返回预览而不实际应用改动"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ ->
         val vaStr = a.str("va")
@@ -309,11 +334,11 @@ object ToolCatalog {
             "Patch assembly using Rizin assembler. edits[] each replace one or more instructions; dryRun=true previews.",
             "edit", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "locator" str "Function or address locator. Accepts so_function:file!name@0xVA, function name, or bare 0xVA."
-            "dryRun" bool "If true, return a preview without applying changes"
-            "edits" arr ("Array of asm edits" to SchemaBuilder.editsAsmSchema())
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "locator" str "函数或地址定位符：可接受 so_function:file!name@0xVA、函数名或裸 0xVA"
+            "dryRun" bool "为 true 时返回预览而不实际应用改动"
+            "edits" arr ("汇编编辑数组" to SchemaBuilder.editsAsmSchema())
         }, required = listOf("workspaceId")) }
     ) { e, a, _ -> e.editAsm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.getJSONArray("edits"), a.bool("dryRun")) }
 
@@ -323,14 +348,14 @@ object ToolCatalog {
             "Symbol management: rename (same-or-shorter), add exported function via LIEF, or remove symbol via LIEF.",
             "edit", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "locator" str "Symbol locator for rename. Accepts full locator from taffy_analyze_elf symbols or short symbol name."
-            "edits" arr ("Array of symbol edits" to SchemaBuilder.editsSymbolSchema())
-            "dryRun" bool "If true, return a preview (rename only)"
-            "addr" str "Hex VA for new exported function (add op, shortcut)"
-            "name" str "Symbol name (add: new function name, remove: symbol to remove, shortcut)"
-            "op".oneOf("rename | add | remove (shortcut, bypasses edits[])", "rename", "add", "remove")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "locator" str "重命名的符号定位符：可接受 taffy_analyze_elf 的完整符号定位符或短符号名"
+            "edits" arr ("符号编辑数组" to SchemaBuilder.editsSymbolSchema())
+            "dryRun" bool "为 true 时返回预览（仅重命名）"
+            "addr" str "新增导出函数的十六进制 VA（add 操作，快捷方式）"
+            "name" str "符号名（add：新函数名，remove：要移除的符号，快捷方式）"
+            "op".oneOf("rename | add | remove（快捷方式，绕过 edits[]）", "rename", "add", "remove")
         }, required = listOf("workspaceId")) }
     ) { e, a, _ ->
         val op = a.str("op")
@@ -353,8 +378,8 @@ object ToolCatalog {
             "Reconstruct ELF section headers from the .dynamic segment via LIEF Builder (xAnSo algorithm). Essential for NDK-compiled SOs with stripped section headers.",
             "edit", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
         }) }
     ) { e, a, _ -> e.fixSections(a.str("workspaceId"), a.str("editSessionId")) }
 
@@ -363,14 +388,25 @@ object ToolCatalog {
     private val emulateCall = EngineToolHandler(
         ToolMeta("taffy_emulate_call",
             "函数模拟执行（Unidbg + DalvikVM：导出函数/JNI_OnLoad/Java_*，返回阶段化诊断）",
-            "Emulate an exported function via Unidbg with DalvikVM JNI support. Best for JNI_OnLoad, exported functions, Java_* JNI methods, and patch validation; failures include stage and nextActions diagnostics.",
+            "Emulate an exported function via Unidbg with DalvikVM JNI support. Best for JNI_OnLoad, exported functions, Java_* JNI methods, and patch validation; failures include stage and nextActions diagnostics. Example: emulateCall(workspaceId='ws1', symbolName='JNI_OnLoad') to force initialization.",
             "emulate", ToolClass.CORE, heavy = true,
+            outputSchema = SchemaBuilder.outputSchema(
+                "Emulation result: { ok, returnValue, backend, durationMs; on failure: stage, nextActions }.",
+                required = listOf("ok")
+            ) {
+                "ok" bool "模拟成功时为 true"
+                "returnValue" str "函数返回值（来自目标 ABI）"
+                "backend" str "使用的模拟后端，例如 unidbg"
+                "durationMs" num "模拟耗时（毫秒）"
+                "stage" str "失败阶段（若 ok 不为 true）"
+                "nextActions" arr "失败时的建议后续步骤"
+            }
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (uses patched bytes if set)"
-            "symbolName" str "Exported symbol to call, e.g. JNI_OnLoad or Java_com_example_Class_method. Use taffy_analyze_elf dynsyms first."
-            "args" arr "Array of integer/string arguments after implicit JNI args for Java_* methods"
-            "trace" bool "Enable verbose Unidbg tracing for diagnostics; use only on small functions"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（设置后使用打过补丁的字节）"
+            "symbolName" str "要调用的导出符号，例如 JNI_OnLoad 或 Java_com_example_Class_method。先用 taffy_analyze_elf 查看 dynsyms"
+            "args" arr "Java_* 方法隐式 JNI 参数之后的整数/字符串参数数组"
+            "trace" bool "启用详细 Unidbg 追踪用于诊断；仅适用于小函数"
         }, required = listOf("workspaceId", "symbolName")) }
     ) { e, a, s -> if (!s.emulationEnabled) err("EMULATION_DISABLED", "Emulation is disabled in settings. Enable emulationEnabled to use this feature.", "emulationEnabled", false) else e.emulate(a.str("workspaceId"), a.str("editSessionId"), a.str("symbolName"), a.optJSONArray("args") ?: JSONArray(), a.bool("trace", false)) }
 
@@ -380,10 +416,10 @@ object ToolCatalog {
             "Dump memory at an Unidbg runtime absolute virtual address after loading the SO. Add the module base to an ELF RVA/VA.",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "addr" str "Unidbg runtime absolute virtual address. Add the module base from taffy_unidbg_session(action=modules) to an ELF RVA/VA."
-            "size" int "Number of bytes to dump (1-65536)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "addr" str "Unidbg 运行时绝对虚拟地址：用 taffy_unidbg_session(action=modules) 得到的模块基址加上 ELF 的 RVA/VA"
+            "size" int "转储的字节数（1-65536）"
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         if (!s.emulationEnabled) err("EMULATION_DISABLED", "Emulation is disabled in settings. Enable emulationEnabled to use this feature.", "emulationEnabled", false)
@@ -402,11 +438,11 @@ object ToolCatalog {
             "Structural diff between two SO versions via Rizin: byte-level differences and function similarity ratio.",
             "diff", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace A ID"
-            "editSessionId" str "Edit session A ID (optional)"
-            "workspaceIdB" str "Workspace B ID"
-            "editSessionIdB" str "Edit session B ID (optional)"
-            "limit" int "Maximum diff hunks (0 = all)"
+            "workspaceId" str "工作区 A ID"
+            "editSessionId" str "编辑会话 A ID（可选）"
+            "workspaceIdB" str "工作区 B ID"
+            "editSessionIdB" str "编辑会话 B ID（可选）"
+            "limit" int "最大差异块数（0 = 全部）"
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         val wsB = a.str("workspaceIdB")
@@ -425,25 +461,25 @@ object ToolCatalog {
             "Low-level Rizin gateway with enum actions for analyze, functions, cfg, xrefs, search_bytes, crypto, esil, diff, asm, and disasm. ⚠️ PREFER high-level tools (analyze_*/search_*/read_*) — use this low-level API ONLY when no high-level tool covers the need.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("Rizin operation", "capabilities", "command", "analyze", "functions", "cfg", "xrefs", "search_bytes", "crypto", "esil", "diff", "asm", "disasm", "decompile")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "workspaceIdB" str "Workspace B ID (diff)"
-            "editSessionIdB" str "Edit session B ID (diff)"
-            "locator" str "Function/symbol locator or hex VA"
-            "direction".oneOf("xref direction", "to", "from", "both")
-            "pattern" str "Hex pattern for search_bytes"
-            "fromVa" str "Start VA hex for search_bytes"
-            "toVa" str "End VA hex for search_bytes"
-            "asm" str "Assembly text for asm"
-            "command" str "Any Rizin core command for action=command. Mutating/file/shell/debugger commands require unsafe=true."
-            "unsafe" bool "Allow mutating, file, shell, debugger, and external commands. Requires authenticated MCP access."
-            "addr" str "Hex VA for asm/disasm/esil"
-            "thumb" bool "Force ARM32 Thumb mode for asm/disasm"
-            "mode".oneOf("Instruction mode", "auto", "arm", "thumb")
-            "limit" int "Instruction/result limit"
-            "stepCount" int "ESIL step count"
-            "strict" bool "For decompile: fail if rizin-ghidra is unavailable"
+            "action".oneOf("Rizin 操作", "capabilities", "command", "analyze", "functions", "cfg", "xrefs", "search_bytes", "crypto", "esil", "diff", "asm", "disasm", "decompile")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "workspaceIdB" str "工作区 B ID（diff）"
+            "editSessionIdB" str "编辑会话 B ID（diff）"
+            "locator" str "函数/符号定位符或十六进制 VA"
+            "direction".oneOf("xref 方向", "to", "from", "both")
+            "pattern" str "search_bytes 的十六进制模式"
+            "fromVa" str "search_bytes 的起始 VA 十六进制"
+            "toVa" str "search_bytes 的结束 VA 十六进制"
+            "asm" str "asm 的汇编文本"
+            "command" str "action=command 时任意 Rizin core 命令。变更/文件/shell/调试器命令需要 unsafe=true"
+            "unsafe" bool "允许变更、文件、shell、调试器和外部命令。需要已认证的 MCP 访问"
+            "addr" str "asm/disasm/esil 的十六进制 VA"
+            "thumb" bool "为 asm/disasm 强制 ARM32 Thumb 模式"
+            "mode".oneOf("指令模式", "auto", "arm", "thumb")
+            "limit" int "指令/结果数量上限"
+            "stepCount" int "ESIL 步进数"
+            "strict" bool "decompile 时：若 rizin-ghidra 不可用则失败"
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "analyze")) {
@@ -470,25 +506,25 @@ object ToolCatalog {
             "Full-format LIEF gateway for ELF, PE, Mach-O, DEX, ART, OAT, and VDEX parsing plus format-specific mutations. ⚠️ PREFER high-level tools (analyze_elf, apk_*, so_*). Use this low-level API ONLY when no high-level tool covers the need.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("LIEF operation", "capabilities", "dispatch", "parse", "parse_any", "list", "patch_address", "add_export", "remove_symbol", "build", "fix_sections", "report")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "subView".oneOf("list sub-view", "sections", "symbols", "dynsyms", "functions", "relocations", "strings", "imports")
-            "query" str "Filter query"
-            "limit" int "Maximum list results"
-            "va" str "Patch/add-export VA hex"
-            "patchHex" str "Hex bytes for patch_address"
-            "name" str "Symbol/export name"
-            "outputName" str "Build output name"
-            "conflictStrategy".oneOf("build conflict strategy", "skip", "overwrite", "rename")
-            "writeReport" bool "Write patch report"
-            "writeToFile" bool "Write analysis report file"
-            "format".oneOf("Input format for parse_any", "auto", "elf", "pe", "macho", "dex", "art", "oat", "vdex")
-            "op".oneOf("Dispatcher operation", "roots", "methods", "parse_any", "validate", "get", "list", "set", "call")
-            "objectPath" str "Object path, e.g. sections[0].name or binary.entry"
-            "method" str "Method name for dispatcher call"
-            "args" arr "Dispatcher arguments"
-            "dryRun" bool "Preview dispatcher mutation/build without applying it"
+            "action".oneOf("LIEF 操作", "capabilities", "dispatch", "parse", "parse_any", "list", "patch_address", "add_export", "remove_symbol", "build", "fix_sections", "report")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "subView".oneOf("list 子视图", "sections", "symbols", "dynsyms", "functions", "relocations", "strings", "imports")
+            "query" str "过滤查询"
+            "limit" int "列表结果上限"
+            "va" str "打补丁/新增导出的 VA 十六进制"
+            "patchHex" str "patch_address 的十六进制字节"
+            "name" str "符号/导出名"
+            "outputName" str "构建输出名"
+            "conflictStrategy".oneOf("构建冲突策略", "skip", "overwrite", "rename")
+            "writeReport" bool "写入补丁报告"
+            "writeToFile" bool "写入分析报告文件"
+            "format".oneOf("parse_any 的输入格式", "auto", "elf", "pe", "macho", "dex", "art", "oat", "vdex")
+            "op".oneOf("分发器操作", "roots", "methods", "parse_any", "validate", "get", "list", "set", "call")
+            "objectPath" str "对象路径，例如 sections[0].name 或 binary.entry"
+            "method" str "分发器调用的方法名"
+            "args" arr "分发器参数"
+            "dryRun" bool "预览分发器的变更/构建而不实际应用"
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "parse")) {
@@ -513,18 +549,18 @@ object ToolCatalog {
             "Low-level Unidbg gateway for live sessions, function/address calls, memory map/read/write/protect/unmap, registers, modules, exports, trace, and breakpoints. ⚠️ PREFER high-level tools (emulate_call, unidbg_session, unidbg_memory, unidbg_debug) — use this low-level API ONLY when no high-level tool covers the need.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("Unidbg operation", "capabilities", "dispatch", "status", "call", "dump")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "symbolName" str "Exported symbol to call"
-            "args" arr "Integer/string arguments"
-            "trace" bool "Enable trace"
-            "addr" str "Memory dump VA hex"
-            "size" int "Dump size"
-            "op".oneOf("Dispatcher operation", "status", "roots", "methods", "session_open", "session_list", "session_close", "session_call", "session_call_address", "session_dump", "session_memory_maps", "session_registers", "session_modules", "session_exports", "session_trace_code", "session_breakpoint_add", "session_debugger_status", "session_breakpoint_remove", "session_single_step", "session_emu_stop", "session_memory_write", "session_memory_map", "session_memory_protect", "session_memory_unmap", "reflect_roots", "reflect_methods", "reflect_invoke", "native_schemas", "native_tool", "call", "dump", "modules", "exports", "imports", "debugger_plan", "memory_map_plan", "registers_plan", "breakpoints_plan", "trace_plan", "framework_matrix", "stub_template", "hook_template", "env_template")
-            "method" str "Dispatcher method/symbol name. For native_tool, use an upstream Unidbg MCP tool name returned by native_schemas."
-            "args" arr "For native_tool: [emulatorSessionId, toolName, toolArgumentsObject]. Other dispatch operations use their documented positional arguments."
-            "dispatchArgs" arr "Alias for args when action=dispatch; kept for schema compatibility"
+            "action".oneOf("Unidbg 操作", "capabilities", "dispatch", "status", "call", "dump")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "symbolName" str "要调用的导出符号"
+            "args" arr "整数/字符串参数"
+            "trace" bool "启用追踪"
+            "addr" str "内存转储 VA 十六进制"
+            "size" int "转储大小"
+            "op".oneOf("分发器操作", "status", "roots", "methods", "session_open", "session_list", "session_close", "session_call", "session_call_address", "session_dump", "session_memory_maps", "session_registers", "session_modules", "session_exports", "session_trace_code", "session_breakpoint_add", "session_debugger_status", "session_breakpoint_remove", "session_single_step", "session_emu_stop", "session_memory_write", "session_memory_map", "session_memory_protect", "session_memory_unmap", "reflect_roots", "reflect_methods", "reflect_invoke", "native_schemas", "native_tool", "call", "dump", "modules", "exports", "imports", "debugger_plan", "memory_map_plan", "registers_plan", "breakpoints_plan", "trace_plan", "framework_matrix", "stub_template", "hook_template", "env_template")
+            "method" str "分发器方法/符号名。native_tool 请用 native_schemas 返回的上游 Unidbg MCP 工具名"
+            "args" arr "native_tool：[emulatorSessionId, toolName, toolArgumentsObject]。其他分发操作使用其文档化的位置参数"
+            "dispatchArgs" arr "action=dispatch 时 args 的别名；为 schema 兼容保留"
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "status")) {
@@ -544,15 +580,15 @@ object ToolCatalog {
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("Session action — open(需workspaceId+editSessionId) | list(无参数) | close(需emulatorSessionId) | call(需emulatorSessionId+symbolName) | call_address(需emulatorSessionId+addr) | dump(需emulatorSessionId+addr) | modules(需emulatorSessionId) | exports(需emulatorSessionId) | registers(需emulatorSessionId) | memory_maps(需emulatorSessionId) | Session action — open(needs workspaceId+editSessionId) | list(no args) | close(session) | call(session+symbolName) | call_address(session+addr) | dump(session+addr) | modules/exports/registers/memory_maps(session)", "open", "list", "close", "call", "call_address", "dump", "modules", "exports", "registers", "memory_maps")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "emulatorSessionId" str "Live Unidbg emulator session ID"
-            "symbolName" str "Symbol to call"
-            "addr" str "Hex address for call_address or dump"
-            "args" arr "Function arguments"
-            "trace" bool "Enable trace for call"
-            "size" int "Dump size"
-            "callJniOnLoad" bool "Call JNI_OnLoad when opening the session"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "emulatorSessionId" str "实时 Unidbg 模拟器会话 ID"
+            "symbolName" str "要调用的符号"
+            "addr" str "call_address 或 dump 的十六进制地址"
+            "args" arr "函数参数"
+            "trace" bool "为 call 启用追踪"
+            "size" int "转储大小"
+            "callJniOnLoad" bool "打开会话时调用 JNI_OnLoad"
         }, required = listOf("action")) }
     ) { e, a, _ ->
         val sessionId = a.str("emulatorSessionId")
@@ -589,14 +625,14 @@ object ToolCatalog {
             "Typed Unidbg memory tool for command-line scripts: map/read/write/protect/unmap/maps on a live emulator session.",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("Memory action", "map", "read", "write", "protect", "unmap", "maps")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "emulatorSessionId" str "Live Unidbg emulator session ID"
-            "addr" str "Hex virtual address"
-            "size" int "Size in bytes"
-            "prot" int "Memory protection flags: 1=r, 2=w, 4=x"
-            "hex" str "Hex bytes for write"
+            "action".oneOf("内存操作", "map", "read", "write", "protect", "unmap", "maps")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "emulatorSessionId" str "实时 Unidbg 模拟器会话 ID"
+            "addr" str "十六进制虚拟地址"
+            "size" int "字节大小"
+            "prot" int "内存保护标志：1=r，2=w，4=x"
+            "hex" str "write 的十六进制字节"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ ->
         val sessionId = a.str("emulatorSessionId")
@@ -628,19 +664,19 @@ object ToolCatalog {
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("Debug action — 均需emulatorSessionId trace_code/start_events(可加begin/end/traceType/cursor/limit) trace_stop(+traceId) trace_clear hook_start(+hookType/begin/end) hook_list hook_stop(+hookId) breakpoint_add/remove(+addr) single_step(+count) status stop | Debug action — all need emulatorSessionId; trace_stop adds traceId, hook_stop adds hookId, breakpoint_add/remove add addr, single_step adds count", "trace_code", "trace_start", "trace_events", "trace_stop", "trace_clear", "hook_start", "hook_list", "hook_stop", "breakpoint_add", "breakpoint_remove", "status", "single_step", "stop", "debugger_plan", "trace_plan", "breakpoints_plan")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "emulatorSessionId" str "Live Unidbg emulator session ID"
-            "begin" str "Trace begin address"
-            "end" str "Trace end address"
-            "addr" str "Breakpoint address"
-            "count" int "Single-step instruction count"
-            "traceType".oneOf("Trace callback type", "code", "read", "write")
-            "traceId" str "Trace hook ID"
-            "cursor" int "Trace event cursor"
-            "limit" int "Trace event page size, max 1000"
-            "hookType".oneOf("Backend hook type", "syscall", "interrupt", "code", "read", "write")
-            "hookId" str "Backend hook ID"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "emulatorSessionId" str "实时 Unidbg 模拟器会话 ID"
+            "begin" str "追踪起始地址"
+            "end" str "追踪结束地址"
+            "addr" str "断点地址"
+            "count" int "单步指令条数"
+            "traceType".oneOf("追踪回调类型", "code", "read", "write")
+            "traceId" str "追踪钩子 ID"
+            "cursor" int "追踪事件游标"
+            "limit" int "追踪事件页大小，最大 1000"
+            "hookType".oneOf("后端钩子类型", "syscall", "interrupt", "code", "read", "write")
+            "hookId" str "后端钩子 ID"
         }, required = listOf("action")) }
     ) { e, a, _ ->
         val action = a.str("action", "debugger_plan")
@@ -685,11 +721,11 @@ object ToolCatalog {
             "Run a serial Unidbg pipeline in one MCP call. Steps support ${'$'}{key.path} placeholders, ideal for curl/PowerShell batch scripts.",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Default Workspace ID for steps"
-            "editSessionId" str "Default edit session ID for steps"
-            "steps" arr "Array of steps: {op, method?, args?, resultKey?}. Placeholders like ${'$'}{open.emulatorSessionId} are supported."
-            "stopOnError" bool "Abort on first failed step, default true"
-            "maxSteps" int "Maximum steps, default 30, max 100"
+            "workspaceId" str "步骤的默认工作区 ID"
+            "editSessionId" str "步骤的默认编辑会话 ID"
+            "steps" arr "步骤数组：{op, method?, args?, resultKey?}。支持类似 ${'$'}{open.emulatorSessionId} 的占位符"
+            "stopOnError" bool "首个步骤失败即终止，默认 true"
+            "maxSteps" int "最大步骤数，默认 30，最大 100"
         }) }
     ) { e, a, _ -> UnidbgBatchRunner.run(e, a) }
 
@@ -699,11 +735,11 @@ object ToolCatalog {
             "Real freakishfox/xAnSo upstream gateway covering its complete public CLI/core functionality.",
             "lowlevel", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("xAnSo operation", "capabilities", "dispatch", "status", "help", "build-section", "fix_sections")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "op".oneOf("Dispatcher operation", "status", "roots", "methods", "capabilities", "help", "build-section", "fix_sections")
-            "force" bool "Rebuild even when a parseable section table is already present"
+            "action".oneOf("xAnSo 操作", "capabilities", "dispatch", "status", "help", "build-section", "fix_sections")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "op".oneOf("分发器操作", "status", "roots", "methods", "capabilities", "help", "build-section", "fix_sections")
+            "force" bool "即使已完成可解析的节区表也强制重建"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ ->
         when (a.str("action", "status")) {
@@ -723,7 +759,7 @@ object ToolCatalog {
             "Open an edit session: creates a mutable copy of the workspace SO for patching.",
             "session", ToolClass.CORE,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
+            "workspaceId" str "工作区 ID"
         }, required = listOf("workspaceId")) }
     ) { e, a, _ -> e.editOpen(a.str("workspaceId")) }
 
@@ -733,12 +769,12 @@ object ToolCatalog {
             "Edit session history: snapshot, rollback, undo, redo, reset, or check integrity.",
             "session", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("snapshot (default) | rollback | undo | redo | reset | check", "snapshot", "rollback", "undo", "redo", "reset", "check")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "label" str "Snapshot label (action=snapshot)"
-            "snapshotIndex" int "Snapshot index for rollback (-1 = latest, action=rollback)"
-            "count" int "Undo/redo count (action=undo|redo)"
+            "action".oneOf("snapshot（默认）| rollback | undo | redo | reset | check", "snapshot", "rollback", "undo", "redo", "reset", "check")
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "label" str "快照标签（action=snapshot）"
+            "snapshotIndex" int "回滚的快照索引（-1 = 最近，action=rollback）"
+            "count" int "撤回/重做次数（action=undo|redo）"
         }, required = listOf("workspaceId")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val e = ctx.engine
@@ -760,12 +796,12 @@ object ToolCatalog {
             "Edit session audit trail: view audit, persist to file, list saved audits, or load a saved audit.",
             "session", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("audit (default) | persist | list | load", "audit", "persist", "list", "load")
-            "workspaceId" str "Workspace ID (audit/persist)"
-            "editSessionId" str "Edit session ID (audit/persist)"
-            "prefix" str "File prefix filter (list)"
-            "limit" int "Maximum items (list)"
-            "file" str "Audit file path (load)"
+            "action".oneOf("audit（默认）| persist | list | load", "audit", "persist", "list", "load")
+            "workspaceId" str "工作区 ID（audit/persist）"
+            "editSessionId" str "编辑会话 ID（audit/persist）"
+            "prefix" str "文件前缀过滤（list）"
+            "limit" int "返回条数上限（list）"
+            "file" str "审计文件路径（load）"
         }, required = listOf("workspaceId")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val e = ctx.engine
@@ -787,16 +823,16 @@ object ToolCatalog {
             "Build patched SO to file, or list built outputs. Supports single and multi-variant build.",
             "build", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("build (default) | list", "build", "list")
-            "workspaceId" str "Workspace ID (build)"
-            "editSessionId" str "Edit session ID (build)"
-            "outputName" str "Output file name (build)"
-            "outputs" arr ("Array of output variants (multi-build)" to SchemaBuilder.outputsSchema())
-            "conflictStrategy".oneOf("skip | overwrite | rename (default)", "skip", "overwrite", "rename")
-            "writeReport" bool "Write patch-report JSON sidecar"
-            "writeToWorkDir" bool "Mirror output into work directory"
-            "prefix" str "File prefix filter (list)"
-            "limit" int "Maximum items (list)"
+            "action".oneOf("build（默认）| list", "build", "list")
+            "workspaceId" str "工作区 ID（build）"
+            "editSessionId" str "编辑会话 ID（build）"
+            "outputName" str "输出文件名（build）"
+            "outputs" arr ("输出变体数组（multi-build）" to SchemaBuilder.outputsSchema())
+            "conflictStrategy".oneOf("skip | overwrite | rename（默认）", "skip", "overwrite", "rename")
+            "writeReport" bool "写入补丁报告 JSON 伴随文件"
+            "writeToWorkDir" bool "把输出镜像到工作目录"
+            "prefix" str "文件前缀过滤（list）"
+            "limit" int "返回条数上限（list）"
         }, required = listOf("workspaceId")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val e = ctx.engine
@@ -824,10 +860,10 @@ object ToolCatalog {
             "system", ToolClass.META,
         ) { objectSchema(props {
             "action".oneOf("status | tunnel_start | tunnel_stop | tunnel_status | tunnel_stats | apk_status | apk_probe | apk_ping", "status", "tunnel_start", "tunnel_stop", "tunnel_status", "tunnel_stats", "apk_status", "apk_probe", "apk_ping")
-            "mode".oneOf("Tunnel mode: quick | named (tunnel_start)", "quick", "named")
-            "targetPort" int "Tunnel target port (tunnel_start)"
-            "publicUrl" str "Named tunnel public HTTPS hostname/URL to display and persist (tunnel_start)"
-            "probe" bool "Force re-probe (apk_status/status)"
+            "mode".oneOf("隧道模式：quick | named（tunnel_start）", "quick", "named")
+            "targetPort" int "隧道目标端口（tunnel_start）"
+            "publicUrl" str "要显示并持久化的具名隧道公网 HTTPS 主机名/URL（tunnel_start）"
+            "probe" bool "强制重新探测（apk_status/status）"
         }, required = listOf("action")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val hooked = ctx as? HookedContext ?: return JSONObject().put("error", "System hooks not available")
@@ -852,24 +888,24 @@ object ToolCatalog {
             "system", ToolClass.META,
         ) {
             objectSchema(props {
-                "action".oneOf("get (default) | set | schema", "get", "set", "schema")
-                "maskSecrets" bool "Mask tokens in get output (default true)"
-                "config" str "JSON object string or nested object for set (appearance/service/engine/tunnel/apkBridge or flat keys)"
-                "themeMode".oneOf("Flat set helper", "system", "light", "dark")
-                "accentColor".oneOf("Flat set helper", "blue", "teal", "indigo", "purple", "green", "orange", "red", "mono")
-                "uiDensity".oneOf("Flat set helper", "compact", "comfortable", "spacious")
-                "cornerStyle".oneOf("Flat set helper", "small", "medium", "large", "xlarge")
-                "motionMode".oneOf("Flat set helper", "system", "reduced", "full")
-                "textScale".oneOf("Flat set helper", "normal", "large", "xlarge")
-                "language".oneOf("Flat set helper", "system", "zh", "en")
-                "pureBlackDark" bool "Flat set helper"
-                "showAdvancedHome" bool "Flat set helper"
-                "highContrast" bool "Flat set helper"
-                "port" int "Flat set helper"
-                "leanTools" bool "Flat set helper"
-                "emulationEnabled" bool "Flat set helper"
-                "tunnelMode".oneOf("Flat set helper", "off", "quick", "named")
-                "apkMcpUrl" str "Flat set helper"
+                "action".oneOf("get（默认）| set | schema", "get", "set", "schema")
+                "maskSecrets" bool "get 输出中屏蔽令牌（默认 true）"
+                "config" str "set 用的 JSON 对象字符串或嵌套对象（appearance/service/engine/tunnel/apkBridge 或扁平键）"
+                "themeMode".oneOf("扁平设置辅助项", "system", "light", "dark")
+                "accentColor".oneOf("扁平设置辅助项", "blue", "teal", "indigo", "purple", "green", "orange", "red", "mono")
+                "uiDensity".oneOf("扁平设置辅助项", "compact", "comfortable", "spacious")
+                "cornerStyle".oneOf("扁平设置辅助项", "small", "medium", "large", "xlarge")
+                "motionMode".oneOf("扁平设置辅助项", "system", "reduced", "full")
+                "textScale".oneOf("扁平设置辅助项", "normal", "large", "xlarge")
+                "language".oneOf("扁平设置辅助项", "system", "zh", "en")
+                "pureBlackDark" bool "扁平设置辅助项"
+                "showAdvancedHome" bool "扁平设置辅助项"
+                "highContrast" bool "扁平设置辅助项"
+                "port" int "扁平设置辅助项"
+                "leanTools" bool "扁平设置辅助项"
+                "emulationEnabled" bool "扁平设置辅助项"
+                "tunnelMode".oneOf("扁平设置辅助项", "off", "quick", "named")
+                "apkMcpUrl" str "扁平设置辅助项"
             })
         }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
@@ -904,18 +940,18 @@ object ToolCatalog {
             "Meta information: help text, tool list/describe, stats, batch pipeline, continue pagination, health check.",
             "meta", ToolClass.META,
         ) { objectSchema(props {
-            "action".oneOf("help (default) | tools | describe | stats | batch | continue | health | count | workflows | suggest | errors | report | capabilities", "help", "tools", "describe", "stats", "batch", "continue", "health", "count", "workflows", "suggest", "errors", "report", "capabilities")
-            "category" str "Category filter (tools)"
-            "query" str "Search query (tools)"
-            "tools" arr "Array of tool names (describe)"
-            "steps" arr ("Batch pipeline steps (batch)" to SchemaBuilder.batchStepsSchema())
-            "cursor" str "Pagination cursor (continue)"
-            "transactional" bool "If true, snapshot edit sessions before batch steps and rollback them when a later step fails"
-            "workspaceId" str "Workspace ID (suggest/report)"
-            "editSessionId" str "Edit session ID (suggest/report)"
-            "format".oneOf("Report format", "json")
-            "writeToFile" bool "Write report JSON to app files (report)"
-            "reset" bool "Reset stats (stats)"
+            "action".oneOf("help（默认）| tools | describe | stats | batch | continue | health | count | workflows | suggest | errors | report | capabilities", "help", "tools", "describe", "stats", "batch", "continue", "health", "count", "workflows", "suggest", "errors", "report", "capabilities")
+            "category" str "类别过滤（tools）"
+            "query" str "搜索查询词（tools）"
+            "tools" arr "工具名数组（describe）"
+            "steps" arr ("批处理流水线步骤（batch）" to SchemaBuilder.batchStepsSchema())
+            "cursor" str "分页游标（continue）"
+            "transactional" bool "为 true 时在批处理步骤前做编辑会话快照，后续步骤失败时回滚"
+            "workspaceId" str "工作区 ID（suggest/report）"
+            "editSessionId" str "编辑会话 ID（suggest/report）"
+            "format".oneOf("报告格式", "json")
+            "writeToFile" bool "将报告 JSON 写入应用文件（report）"
+            "reset" bool "重置统计（stats）"
         }, required = listOf("action")) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val hooked = ctx as? HookedContext ?: return JSONObject().put("error", "Meta hooks not available")

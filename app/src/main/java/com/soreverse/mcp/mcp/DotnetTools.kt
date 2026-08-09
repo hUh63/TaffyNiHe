@@ -31,9 +31,9 @@ object DotnetTools {
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("open (default) | list", "open", "list")
-            "path" str "Absolute path to the PE/DLL/EXE file (action=open)"
-            "filePath" str "Alias of path"
-            "temporary" bool "If true, workspace won't persist across restarts"
+            "path" str "PE/DLL/EXE 文件的绝对路径（action=open）"
+            "filePath" str "path 的别名"
+            "temporary" bool "为 true 时工作区重启后不保留"
         }) }
     ) { e, a, _ ->
         when (a.str("action", "open")) {
@@ -49,7 +49,7 @@ object DotnetTools {
             "dotnet", ToolClass.CORE,
         ) { objectSchema(props {
             "action".oneOf("close (default) | list", "close", "list")
-            "workspaceId" str "Workspace id (action=close)"
+            "workspaceId" str "工作区 ID（action=close）"
         }) }
     ) { e, a, _ ->
         when (a.str("action", "close")) {
@@ -66,8 +66,8 @@ object DotnetTools {
             "Full PE structure analysis: sections, imports, exports, resources via native parser.",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional, uses original if blank)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选，为空则用原始文件）"
         }) }
     ) { e, a, _ -> e.analyze(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }) }
 
@@ -79,8 +79,8 @@ object DotnetTools {
             "Detect .NET/Mono assembly and return diagnostics: MZ/PE/CLR headers, BSJB signature, stream info.",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
         }) }
     ) { e, a, _ -> e.dotnetDetect(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }) }
 
@@ -90,8 +90,8 @@ object DotnetTools {
             "List all .NET types in the assembly (class name, namespace, type token).",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
         }) }
     ) { e, a, _ -> e.dotnetListTypes(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }) }
 
@@ -101,9 +101,9 @@ object DotnetTools {
             "List .NET methods (name, token, IL offset, RVA). Use typeFilter to narrow to a specific type token.",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "typeFilter" int "Type token to filter methods (0 = all types)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "typeFilter" int "过滤方法的类型令牌（0 = 所有类型）"
         }) }
     ) { e, a, _ -> e.dotnetListMethods(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.intValue("typeFilter", 0)) }
 
@@ -113,9 +113,9 @@ object DotnetTools {
             "List .NET user strings from the #US heap.",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "maxCount" int "Maximum strings to return (default 5000, max 10000)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "maxCount" int "返回字符串数量上限（默认 5000，最大 10000）"
         }) }
     ) { e, a, _ -> e.dotnetListStrings(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.intValue("maxCount", 5000)) }
 
@@ -125,9 +125,9 @@ object DotnetTools {
             "Dump IL bytecode for a .NET method (hex bytes + opcode disassembly).",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "methodToken" str "Method token (hex, e.g. 0x06000001)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "methodToken" str "方法令牌（hex，例如 0x06000001）"
         }) }
     ) { e, a, _ ->
         val tokenStr = a.str("methodToken")
@@ -145,10 +145,10 @@ object DotnetTools {
             "Disassemble .NET method IL (instruction-level disassembly + optional pseudocode).",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "methodToken" str "Method token (hex, e.g. 0x06000001)"
-            "pseudoCode" bool "Include pseudocode if available (default false)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "methodToken" str "方法令牌（hex，例如 0x06000001）"
+            "pseudoCode" bool "可用时包含伪代码（默认 false）"
         }) }
     ) { e, a, _ ->
         val tokenStr = a.str("methodToken")
@@ -166,9 +166,9 @@ object DotnetTools {
             "Resolve a .NET metadata token to its referenced entity (type/method/field/string).",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "token" str "Metadata token (hex, e.g. 0x06000001)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "token" str "元数据令牌（hex，例如 0x06000001）"
         }) }
     ) { e, a, _ ->
         val tokenStr = a.str("token")
@@ -188,12 +188,12 @@ object DotnetTools {
             "Patch IL bytecode of a .NET method at a given IL offset. Requires an edit session.",
             "dotnet", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (required)"
-            "methodToken" str "Method token (hex, e.g. 0x06000001)"
-            "ilOffset" int "Byte offset within the method's IL body"
-            "hexData" str "Hex bytes to write (e.g. 2A for ret)"
-            "dryRun" bool "Preview without applying (default false)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（必填）"
+            "methodToken" str "方法令牌（hex，例如 0x06000001）"
+            "ilOffset" int "方法 IL 体内的字节偏移"
+            "hexData" str "要写入的十六进制字节（例如 2A 表示 ret）"
+            "dryRun" bool "预览而不应用（默认 false）"
         }) }
     ) { e, a, _ ->
         val tokenStr = a.str("methodToken")
@@ -215,11 +215,11 @@ object DotnetTools {
             "Patch a .NET user string at the given US heap offset. Requires an edit session.",
             "dotnet", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (required)"
-            "usOffset" int "Byte offset in the #US heap"
-            "newStr" str "New string content (must fit within original slot)"
-            "dryRun" bool "Preview without applying (default false)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（必填）"
+            "usOffset" int "#US 堆中的字节偏移"
+            "newStr" str "新字符串内容（必须能放入原槽位）"
+            "dryRun" bool "预览而不应用（默认 false）"
         }) }
     ) { e, a, _ ->
         e.dotnetEditString(
@@ -236,11 +236,11 @@ object DotnetTools {
             "Patch raw hex bytes at a file offset in a PE/DLL file. Requires an edit session. Use this for PE files where taffy_edit_hex (ELF-only) does not apply.",
             "dotnet", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (required)"
-            "offset" str "File offset (hex, e.g. 0x400, or decimal)"
-            "hexData" str "Hex bytes to write (e.g. 9090 for two NOPs)"
-            "dryRun" bool "Preview without applying (default false)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（必填）"
+            "offset" str "文件偏移（hex，例如 0x400，或十进制）"
+            "hexData" str "要写入的十六进制字节（例如 9090 表示两个 NOP）"
+            "dryRun" bool "预览而不应用（默认 false）"
         }) }
     ) { e, a, _ ->
         val offset = parseOffset(a.str("offset"))
@@ -257,11 +257,11 @@ object DotnetTools {
             "Patch raw hex bytes at a virtual address in a PE/DLL file. Auto-resolves VA to file offset. Requires an edit session.",
             "dotnet", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (required)"
-            "va" str "Virtual address (hex, e.g. 0x10004000, or decimal)"
-            "hexData" str "Hex bytes to write"
-            "dryRun" bool "Preview without applying (default false)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（必填）"
+            "va" str "虚拟地址（hex，例如 0x10004000，或十进制）"
+            "hexData" str "要写入的十六进制字节"
+            "dryRun" bool "预览而不应用（默认 false）"
         }) }
     ) { e, a, _ ->
         val va = parseOffset(a.str("va"))
@@ -278,11 +278,11 @@ object DotnetTools {
             "Patch hex bytes into a named section of a PE/DLL file. Requires an edit session.",
             "dotnet", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (required)"
-            "sectionName" str "Section name (e.g. .text, .rdata)"
-            "hexData" str "Hex bytes to write as new section content"
-            "dryRun" bool "Preview without applying (default false)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（必填）"
+            "sectionName" str "节区名（例如 .text、.rdata）"
+            "hexData" str "作为新节区内容写入的十六进制字节"
+            "dryRun" bool "预览而不应用（默认 false）"
         }) }
     ) { e, a, _ ->
         e.editSection(a.str("workspaceId"), a.str("editSessionId"), a.str("sectionName"), a.str("hexData"), a.bool("dryRun", false))
@@ -296,9 +296,9 @@ object DotnetTools {
             "Search for a hex byte pattern in a PE/DLL file. Returns match offsets.",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "pattern" str "Hex byte pattern (e.g. 5F2403D5 or 5F 24 ?? D5)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "pattern" str "十六进制字节模式（例如 5F2403D5 或 5F 24 ?? D5）"
         }) }
     ) { e, a, _ -> e.searchBytes(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.str("pattern")) }
 
@@ -308,9 +308,9 @@ object DotnetTools {
             "Read a named section from a PE/DLL file. Returns hex preview and size info.",
             "dotnet", ToolClass.CORE,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "sectionName" str "Section name (e.g. .text, .rdata, .rsrc)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "sectionName" str "节区名（例如 .text、.rdata、.rsrc）"
         }) }
     ) { e, a, _ -> e.readSection(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.str("sectionName")) }
 
@@ -323,11 +323,11 @@ object DotnetTools {
             "dotnet", ToolClass.CORE,
         ) { objectSchema(props {
             "action".oneOf("open (default) | snapshot | undo | redo | rollback | reset | history", "open", "snapshot", "undo", "redo", "rollback", "reset", "history")
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (required for all actions except open)"
-            "label" str "Snapshot label (action=snapshot)"
-            "count" int "Undo/redo count (default 1)"
-            "snapshotIndex" int "Rollback to snapshot index (action=rollback, -1 = latest)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（除 open 外的所有 action 必填）"
+            "label" str "快照标签（action=snapshot）"
+            "count" int "撤回/重做次数（默认 1）"
+            "snapshotIndex" int "回滚到的快照索引（action=rollback，-1 = 最近）"
         }) }
     ) { e, a, _ ->
         val wsId = a.str("workspaceId")
@@ -352,9 +352,9 @@ object DotnetTools {
             "Build and export the patched PE/DLL file from an edit session.",
             "dotnet", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID"
-            "outputName" str "Output file name (default: original_patched.dll)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID"
+            "outputName" str "输出文件名（默认：original_patched.dll）"
         }) }
     ) { e, a, _ -> e.build(a.str("workspaceId"), a.str("editSessionId"), a.str("outputName")) }
 
@@ -374,10 +374,10 @@ object DotnetTools {
             "Read a hex dump from a PE file at the given offset.",
             "dotnet", ToolClass.CORE,
         ) { objectSchema(props {
-            "workspaceId" str "Workspace ID"
-            "editSessionId" str "Edit session ID (optional)"
-            "offset" int "Byte offset (default 0)"
-            "length" int "Bytes to read (default 256, max 65536)"
+            "workspaceId" str "工作区 ID"
+            "editSessionId" str "编辑会话 ID（可选）"
+            "offset" int "字节偏移（默认 0）"
+            "length" int "读取字节数（默认 256，最大 65536）"
         }) }
     ) { e, a, _ -> e.readHex(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.intValue("offset", 0), a.intValue("length", 256)) }
 

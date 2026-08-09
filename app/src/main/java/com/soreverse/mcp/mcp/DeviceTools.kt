@@ -590,7 +590,7 @@ object DeviceTools {
         override val meta = ToolMeta("taffy_shorten_url",
             "使用 tinyurl 服务生成短链接",
             "Shorten a URL using the tinyurl service",
-            "device", ToolClass.EXTRA,
+            "device", ToolClass.EXTRA, generic = true,
         ) {
             objectSchema(props {
                 "url" str "要缩短的链接"
@@ -665,7 +665,7 @@ object DeviceTools {
         override val meta = ToolMeta("taffy_time_now",
             "获取当前时间戳（秒/毫秒）与格式化时间",
             "Get current timestamp (seconds/millis) and formatted time",
-            "device", ToolClass.EXTRA,
+            "device", ToolClass.EXTRA, generic = true,
         ) { SchemaBuilder.emptyObject() }
 
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
@@ -684,7 +684,7 @@ object DeviceTools {
         override val meta = ToolMeta("taffy_json_format",
             "格式化、压缩或验证 JSON 字符串。operation=pretty（默认）/ minify / validate",
             "Format, minify, or validate a JSON string. operation: pretty (default) / minify / validate",
-            "device", ToolClass.EXTRA,
+            "device", ToolClass.EXTRA, generic = true,
         ) {
             objectSchema(props {
                 "json" str "待处理的 JSON 字符串"
@@ -713,7 +713,7 @@ object DeviceTools {
         override val meta = ToolMeta("taffy_text_convert",
             "文本格式转换。operation: upper/lower/trim/trim_lines/remove_empty_lines/normalize_newlines/reverse/count",
             "Text conversion. operation: upper/lower/trim/trim_lines/remove_empty_lines/normalize_newlines/reverse/count",
-            "device", ToolClass.EXTRA,
+            "device", ToolClass.EXTRA, generic = true,
         ) {
             objectSchema(props {
                 "text" str "待处理的文本"
@@ -746,7 +746,7 @@ object DeviceTools {
         override val meta = ToolMeta("taffy_decrypt_xor",
             "XOR 异或解密/加密。data 为待处理字符串; key 为密钥; encoding 可选 hex/base64/utf8",
             "XOR encrypt/decrypt. data is the input; key is the key; encoding: hex/base64/utf8",
-            "device", ToolClass.EXTRA,
+            "device", ToolClass.EXTRA, generic = true,
         ) {
             objectSchema(props {
                 "data" str "待处理的字符串"
@@ -787,7 +787,7 @@ object DeviceTools {
         override val meta = ToolMeta("taffy_base64_encode",
             "Base64 编码/解码。decode=true 时解码",
             "Base64 encode/decode. Set decode=true to decode",
-            "device", ToolClass.EXTRA,
+            "device", ToolClass.EXTRA, generic = true,
         ) {
             objectSchema(props {
                 "data" str "待编码/解码的文本"

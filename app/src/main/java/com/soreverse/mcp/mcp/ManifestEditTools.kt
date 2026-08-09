@@ -37,10 +37,10 @@ object ManifestEditTools {
                 "value" str "set_package: 新包名; add_perm/remove_perm: 权限名(如 android.permission.INTERNET); add_component/remove_component: 组件类名"
                 "componentType".oneOf("add_component/remove_component: 组件类型", "activity", "service", "receiver", "provider")
                 "exported" str "set_exported: 组件类名"
-                "exportedValue" str "set_exported: true/false"
+                "exportedValue" str "set_exported: true/false（要设置的 exported 值）"
                 "metaName" str "add_meta/remove_meta: meta-data 的 android:name"
                 "metaValue" str "add_meta: meta-data 的值"
-                "debuggable" str "set_debuggable: true/false"
+                "debuggable" str "set_debuggable: true/false（要设置的 debuggable 值）"
             })
         }
 

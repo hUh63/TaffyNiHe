@@ -49,6 +49,7 @@ object ToolCatalogPresentation {
             .put("name", handler.meta.name)
             .put("description", handler.meta.en)
             .put("inputSchema", schema)
+        if (handler.meta.outputSchema != null) obj.put("outputSchema", handler.meta.outputSchema)
         if (includeCategory) obj.put("category", handler.meta.category)
         return obj
     }

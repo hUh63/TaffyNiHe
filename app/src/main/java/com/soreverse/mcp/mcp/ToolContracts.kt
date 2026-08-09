@@ -91,6 +91,12 @@ object SchemaBuilder {
             .put("arguments", JSONObject().put("type", "object").put("description", "Arguments object for this tool. May contain \${resultKey.jsonPath} placeholders substituted from prior steps' results."))
             .put("resultKey", strProp("Optional short key (e.g. a0, b1) used to reference this step's result JSON in later steps.")))
         .put("required", JSONArray().put("tool"))
+
+    /** Describe a tool's output shape for outputSchema. */
+    fun outputSchema(description: String, required: List<String> = emptyList(), block: PropList.() -> Unit): JSONObject =
+        JSONObject().put("type", "object").put("description", description).put("properties", props(block)).apply {
+            if (required.isNotEmpty()) put("required", JSONArray(required))
+        }
 }
 
 class HookedContext(

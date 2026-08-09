@@ -758,8 +758,14 @@ $historyRows
     private fun tools(): JSONArray {
         val settings = SettingsStore(context)
         val includeCategory = settings.includeCategoryInSchema
+        val lean = settings.leanTools
         val out = JSONArray()
-        ToolCatalog.ALL.forEach { handler -> out.put(ToolCatalog.toolDescriptor(handler, includeCategory)) }
+        ToolCatalog.ALL.forEach { handler ->
+            // leanTools=true hides generic (non-RE) utilities from tools/list to cut
+            // token noise; they stay callable by name and return when leanTools=false.
+            if (lean && handler.meta.generic) return@forEach
+            out.put(ToolCatalog.toolDescriptor(handler, includeCategory))
+        }
         if (settings.apkMcpMergeTools) {
             val merged = apkBridge.mergedTools()
             // If no cached tools, try probing

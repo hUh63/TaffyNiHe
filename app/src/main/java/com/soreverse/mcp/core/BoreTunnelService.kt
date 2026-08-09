@@ -1,11 +1,13 @@
 package com.soreverse.mcp.core
 
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.soreverse.mcp.MainActivity
@@ -48,7 +50,15 @@ class BoreTunnelService : Service() {
 
     private var boreClient: BoreClient? = null
 
-    override fun onCreate() { super.onCreate() }
+    override fun onCreate() {
+        super.onCreate()
+        if (Build.VERSION.SDK_INT >= 26) {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(
+                NotificationChannel("bore_tunnel", "Bore 隧道", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
@@ -147,7 +157,7 @@ class BoreTunnelService : Service() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        return NotificationCompat.Builder(this, "tunnel_channel")
+        return NotificationCompat.Builder(this, "bore_tunnel")
             .setContentTitle("Bore 隧道")
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_menu_share)

@@ -214,42 +214,57 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
 
         // Bore 配置
         if (tunnelType == "bore") {
-            GlassGroup(title = "Bore", footer = if (t.zh) "Bore 隧道通过公共 bore 服务器暴露本地端口，无需账号。默认服务器 bore.pub:7835。" else "Bore exposes a local port via a public bore server. No account needed. Default: bore.pub:7835.") {
-                OutlinedTextField(
-                    value = boreHost,
-                    onValueChange = { boreHost = it; settings.boreHost = it },
-                    label = { Text(if (t.zh) "Bore 服务器地址" else "Bore server") },
-                    supportingText = { Text(if (t.zh) "例如 bore.pub 或 你的自建服务器" else "e.g. bore.pub or your own server") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                )
-                GroupDivider()
-                NumberSettingRow(if (t.zh) "Bore 服务器端口" else "Server port", borePort, { borePort = it }, { settings.borePort = it }, if (t.zh) "端口" else "port")
-                GroupDivider()
-                NumberSettingRow(if (t.zh) "本地端口" else "Local port", tunnelPort, { tunnelPort = it }, { settings.tunnelTargetPort = it }, if (t.zh) "端口" else "port")
-                GroupDivider()
-                OutlinedTextField(
-                    value = boreSecret,
-                    onValueChange = { boreSecret = it; settings.boreSecret = it },
-                    label = { Text(if (t.zh) "密码（可选）" else "Secret (optional)") },
-                    supportingText = { Text(if (t.zh) "如果服务器配置了密码认证，在此填写" else "If the server requires authentication") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                )
+            GlassGroup(title = if (t.zh) "Bore 模式" else "Bore Mode", footer = if (t.zh) "临时隧道无需密码，URL 重启变化；永久隧道需自建 Bore 服务器并配置密码。" else "Quick bore needs no password, URL changes on restart; permanent bore needs a self-hosted server with a password.") {
+                ChipRow(
+                    listOf("off" to if (t.zh) "关闭" else "Off", "quick" to if (t.zh) "临时隧道" else "Quick", "named" to if (t.zh) "永久隧道" else "Permanent"),
+                    tunnelMode,
+                ) { tunnelMode = it; settings.tunnelMode = it }
+                if (tunnelMode != "off") {
+                    GroupDivider()
+                    OutlinedTextField(
+                        value = boreHost,
+                        onValueChange = { boreHost = it; settings.boreHost = it },
+                        label = { Text(if (t.zh) "Bore 服务器地址" else "Bore server") },
+                        supportingText = { Text(if (t.zh) "临时隧道默认为 bore.pub；永久隧道填写你的自建服务器地址" else "Quick: bore.pub; Permanent: your own server") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        ),
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    )
+                    GroupDivider()
+                    NumberSettingRow(if (t.zh) "Bore 服务器端口" else "Server port", borePort, { borePort = it }, { settings.borePort = it }, if (t.zh) "端口" else "port")
+                    GroupDivider()
+                    NumberSettingRow(if (t.zh) "本地端口" else "Local port", tunnelPort, { tunnelPort = it }, { settings.tunnelTargetPort = it }, if (t.zh) "端口" else "port")
+                    if (tunnelMode == "named") {
+                        GroupDivider()
+                        OutlinedTextField(
+                            value = boreSecret,
+                            onValueChange = { boreSecret = it; settings.boreSecret = it },
+                            label = { Text(if (t.zh) "密码" else "Secret") },
+                            supportingText = { Text(if (t.zh) "自建 Bore 服务器配置的认证密码" else "Password set on your self-hosted bore server") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            ),
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        )
+                    }
+                }
+            }
+            // Bore 通用设置
+            if (tunnelMode != "off") {
+                GlassGroup {
+                    ToggleRow(if (t.zh) "断线自动重连" else "Auto reconnect", tunnelReconnect) { tunnelReconnect = it; settings.tunnelReconnect = it }
+                }
             }
         }
 
@@ -279,7 +294,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                     if (tunnelType == "cloudflare") {
                         startCfTunnel(context, settings, tunnelMode, namedToken, namedPublicUrl) { cfStatus = tunnelStatusOf(context) }
                     } else {
-                        startBoreTunnel(context, settings, boreHost, borePort, tunnelPort)
+                        startBoreTunnel(context, settings, tunnelMode, boreHost, borePort, tunnelPort)
                     }
                 })
                 SecondaryActionButton(if (t.zh) "停止" else "Stop") {
@@ -457,7 +472,11 @@ private fun stopCfTunnel(context: Context, onDone: () -> Unit) {
     }
 }
 
-private fun startBoreTunnel(context: Context, settings: SettingsStore, host: String, port: String, localPort: String) {
+private fun startBoreTunnel(context: Context, settings: SettingsStore, tunnelMode: String, host: String, port: String, localPort: String) {
+    if (tunnelMode == "off") {
+        Toast.makeText(context, if (settings.language == "zh") "请先选择 Bore 隧道模式" else "Select a bore tunnel mode first", Toast.LENGTH_SHORT).show()
+        return
+    }
     val hp = host.ifBlank { "bore.pub" }
     val bp = port.toIntOrNull() ?: 7835
     val lp = localPort.toIntOrNull() ?: 8080

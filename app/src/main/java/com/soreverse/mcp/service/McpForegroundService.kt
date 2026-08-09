@@ -303,14 +303,19 @@ class McpForegroundService : Service() {
         }
         if (floating != null) {
             // 悬浮窗已存在，更新状态文字和透明度/自动吸边
+            val settingsNow = SettingsStore(this)
             updateFloatingStatus()
-            val op = settings.floatingOpacity / 100f
+            val op = settingsNow.floatingOpacity / 100f
             floating?.alpha = op
-            if (settings.floatingAutoEdge) {
+            if (settingsNow.floatingAutoEdge) {
                 val params = floatingParams ?: return
                 val width = resources.displayMetrics.widthPixels
                 params.x = if (params.x > width / 2) width - (floating?.width ?: 0) else 0
                 runCatching { windowManager?.updateViewLayout(floating, params) }
+            }
+            // 重新调度自动吸边
+            if (isCollapsed) {
+                scheduleAutoSnap()
             }
             return
         }
@@ -496,6 +501,7 @@ class McpForegroundService : Service() {
         val settings = SettingsStore(this)
         val isRunning = running
         val dotColor = if (isRunning) Color.argb(255, 52, 199, 89) else Color.argb(255, 255, 149, 0)
+        val targetAlpha = settings.floatingOpacity / 100f * 0.45f
 
         // 停止脉冲动画
         pulseAnimator?.cancel()
@@ -511,7 +517,7 @@ class McpForegroundService : Service() {
                 val p = anim.animatedValue as Float
                 val curW = (fromWidth + (targetSize - fromWidth) * p).toInt().coerceAtLeast(targetSize)
                 val curH = (fromHeight + (targetSize - fromHeight) * p).toInt().coerceAtLeast(targetSize)
-                val curAlpha = fromAlpha + (0.45f - fromAlpha) * p
+                val curAlpha = fromAlpha + (targetAlpha - fromAlpha) * p
 
                 params.width = curW
                 params.height = curH
@@ -542,7 +548,7 @@ class McpForegroundService : Service() {
                     params.width = targetSize
                     params.height = targetSize
                     tv.text = ""
-                    tv.alpha = 0.45f
+                    tv.alpha = targetAlpha
                     tv.setPadding(0, 0, 0, 0)
                     (tv.background as? GradientDrawable)?.apply {
                         setColor(dotColor)
@@ -568,12 +574,14 @@ class McpForegroundService : Service() {
         val zh = settings.language == "zh" || (settings.language == "system" && Locale.getDefault().language == "zh")
         val isRunning = running
         val statusText = if (isRunning) (if (zh) "● 塔菲逆核运行中" else "● Taffy running") else (if (zh) "● 服务未启动" else "● Service off")
+        val targetAlpha = settings.floatingOpacity / 100f * 0.85f
+        val fromAlpha = tv.alpha
 
         ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 250
             addUpdateListener { anim ->
                 val p = anim.animatedValue as Float
-                tv.alpha = 0.45f + (0.85f - 0.45f) * p
+                tv.alpha = fromAlpha + (targetAlpha - fromAlpha) * p
 
                 if (p > 0.5f) {
                     val rp = (p - 0.5f) / 0.5f
@@ -594,7 +602,7 @@ class McpForegroundService : Service() {
                     params.width = WindowManager.LayoutParams.WRAP_CONTENT
                     params.height = WindowManager.LayoutParams.WRAP_CONTENT
                     tv.text = statusText
-                    tv.alpha = 0.85f
+                    tv.alpha = targetAlpha
                     val padH = (14 * density).toInt()
                     val padV = (9 * density).toInt()
                     tv.setPadding(padH, padV, padH, padV)

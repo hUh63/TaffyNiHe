@@ -346,8 +346,16 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
         // 隧道运行日志
         GlassGroup(title = if (t.zh) "运行日志" else "Event log") {
             var showLog by remember { mutableStateOf(false) }
+            var logRefreshKey by remember { mutableStateOf(0) }
             ToggleRow(if (t.zh) "显示日志" else "Show log", showLog) { showLog = it }
             if (showLog) {
+                // 日志自动刷新
+                LaunchedEffect(logRefreshKey) {
+                    while (true) {
+                        delay(1000)
+                        logRefreshKey++
+                    }
+                }
                 GroupDivider()
                 val logLines = if (tunnelType == "cloudflare") {
                     cfTunnelLog(context) ?: listOf(if (t.zh) "无日志" else "No log")
@@ -363,6 +371,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 TextButton(onClick = {
                     if (tunnelType == "cloudflare") clearCfTunnelLog(context)
                     else BoreTunnelService.clearEventLog()
+                    logRefreshKey++
                 }, modifier = Modifier.padding(horizontal = 14.dp)) {
                     Text(if (t.zh) "清除日志" else "Clear log", color = MaterialTheme.colorScheme.error)
                 }

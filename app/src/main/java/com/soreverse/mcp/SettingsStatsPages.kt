@@ -227,13 +227,38 @@ internal fun TunnelStatsSection(t: UiText) {
         Spacer(Modifier.height(6.dp))
         Text(if (t.zh) "探查失败率 ≈ ${lossRate}%  ($probeFailures / $totalProbes)" else "Probe failure rate ≈ ${lossRate}%  ($probeFailures / $totalProbes)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
     } else {
+        val boreStats = BoreTunnelService.tunnelStats()
+        val totalRunningMs = boreStats.optLong("totalRunningMs", 0)
+        val totalReconnects = boreStats.optInt("totalReconnects", 0)
+        val totalConnections = boreStats.optInt("totalConnections", 0)
+        val totalBytes = boreStats.optLong("totalBytesTransferred", 0)
+        val totalErrors = boreStats.optInt("totalErrors", 0)
+        val state = boreStats.optString("state", "STOPPED")
         val boreUrl = BoreTunnelService.getTunnelUrl(context)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            MetricPill(if (t.zh) "状态" else "State", if (boreRunning) "RUNNING" else "STOPPED", if (boreRunning) AppleColors.systemGreen else AppleColors.systemOrange)
-            MetricPill(if (t.zh) "类型" else "Type", "Bore", MaterialTheme.colorScheme.primary)
+        fun fmtDuration(ms: Long): String {
+            val s = ms / 1000
+            val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+            return if (h > 0) "${h}h ${m}m ${sec}s" else if (m > 0) "${m}m ${sec}s" else "${sec}s"
         }
+        fun fmtBytes(v: Long): String {
+            val units = arrayOf("B", "KB", "MB", "GB"); var u = 0; var value = v.toDouble()
+            while (value >= 1024 && u < units.size - 1) { value /= 1024; u++ }
+            return "%.1f %s".format(value, units[u])
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricPill(if (t.zh) "状态" else "State", state, if (state == "RUNNING") AppleColors.systemGreen else AppleColors.systemOrange)
+            MetricPill(if (t.zh) "运行" else "Uptime", fmtDuration(totalRunningMs), MaterialTheme.colorScheme.primary)
+            MetricPill(if (t.zh) "错误" else "Errors", totalErrors.toString(), if (totalErrors > 0) AppleColors.systemRed else AppleColors.systemGreen)
+        }
+        Spacer(Modifier.height(10.dp))
+        val maxCount = maxOf(totalReconnects, totalConnections, totalErrors, 1)
+        MetricProgressRow(if (t.zh) "重连次数" else "Reconnects", totalReconnects.toString(), totalReconnects.toFloat() / maxCount, AppleColors.systemOrange)
+        MetricProgressRow(if (t.zh) "数据连接" else "Connections", totalConnections.toString(), totalConnections.toFloat() / maxCount, MaterialTheme.colorScheme.primary)
+        MetricProgressRow(if (t.zh) "错误次数" else "Errors", totalErrors.toString(), totalErrors.toFloat() / maxCount, AppleColors.systemRed)
+        Spacer(Modifier.height(6.dp))
+        Text(if (t.zh) "总传输: ${fmtBytes(totalBytes)}" else "Total transferred: ${fmtBytes(totalBytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         if (boreUrl != null) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Text(if (t.zh) "公网地址: $boreUrl" else "Public URL: $boreUrl", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
         }
     }
@@ -243,6 +268,12 @@ internal fun TunnelStatsSection(t: UiText) {
         if (statsType == "cloudflare") {
             SecondaryActionButton(if (t.zh) "重置" else "Reset", {
                 activeServer(context)?.tunnel?.resetTunnelStats()
+                refreshKey++
+                Toast.makeText(context, if (t.zh) "隧道统计已重置" else "Tunnel stats reset", Toast.LENGTH_SHORT).show()
+            }, Modifier.weight(1f))
+        } else {
+            SecondaryActionButton(if (t.zh) "重置" else "Reset", {
+                BoreTunnelService.resetStats()
                 refreshKey++
                 Toast.makeText(context, if (t.zh) "隧道统计已重置" else "Tunnel stats reset", Toast.LENGTH_SHORT).show()
             }, Modifier.weight(1f))

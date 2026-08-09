@@ -37,6 +37,14 @@ class BoreTunnelService : Service() {
         private val eventLog = mutableListOf<String>()
         private const val MAX_EVENTS = 100
 
+        // 统计数据
+        private var runningSinceMs = 0L
+        private var accumulatedRunningMs = 0L
+        private val totalReconnects = java.util.concurrent.atomic.AtomicInteger(0)
+        private val totalConnections = java.util.concurrent.atomic.AtomicInteger(0)
+        private val totalBytesTransferred = java.util.concurrent.atomic.AtomicLong(0)
+        private val totalErrors = java.util.concurrent.atomic.AtomicInteger(0)
+
         fun getEventLog(): List<String> = synchronized(eventLog) { ArrayList(eventLog) }
         fun clearEventLog() { synchronized(eventLog) { eventLog.clear() } }
 
@@ -51,6 +59,32 @@ class BoreTunnelService : Service() {
         fun getTunnelUrl(context: Context): String? =
             context.getSharedPreferences("bore_tunnel", MODE_PRIVATE)
                 .getString(PREF_TUNNEL_URL, null)
+
+        fun tunnelStats(): org.json.JSONObject {
+            val running = lastTunnelUrl != null
+            val currentRunningMs = if (running && runningSinceMs > 0) System.currentTimeMillis() - runningSinceMs else 0L
+            val totalRunningMs = accumulatedRunningMs + currentRunningMs
+            return org.json.JSONObject().apply {
+                put("type", "bore")
+                put("state", if (running) "RUNNING" else "STOPPED")
+                put("publicUrl", lastTunnelUrl ?: org.json.JSONObject.NULL)
+                put("totalRunningMs", totalRunningMs)
+                put("currentRunningMs", currentRunningMs)
+                put("totalReconnects", totalReconnects.get())
+                put("totalConnections", totalConnections.get())
+                put("totalBytesTransferred", totalBytesTransferred.get())
+                put("totalErrors", totalErrors.get())
+            }
+        }
+
+        fun resetStats() {
+            accumulatedRunningMs = 0L
+            runningSinceMs = 0L
+            totalReconnects.set(0)
+            totalConnections.set(0)
+            totalBytesTransferred.set(0L)
+            totalErrors.set(0)
+        }
     }
 
     private var boreClient: BoreClient? = null
@@ -118,6 +152,7 @@ class BoreTunnelService : Service() {
         boreClient!!.setListener(object : BoreClient.BoreListener {
             override fun onConnected(publicUrl: String) {
                 lastTunnelUrl = publicUrl
+                runningSinceMs = System.currentTimeMillis()
                 getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
                     .putString(PREF_TUNNEL_URL, publicUrl)
                     .putBoolean(PREF_TUNNEL_RUNNING, true)
@@ -128,6 +163,10 @@ class BoreTunnelService : Service() {
             }
 
             override fun onDisconnected() {
+                if (runningSinceMs > 0) {
+                    accumulatedRunningMs += System.currentTimeMillis() - runningSinceMs
+                    runningSinceMs = 0L
+                }
                 lastTunnelUrl = null
                 getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
                     .putBoolean(PREF_TUNNEL_RUNNING, false)
@@ -138,14 +177,23 @@ class BoreTunnelService : Service() {
             }
 
             override fun onError(message: String) {
+                totalErrors.incrementAndGet()
                 addEvent("[错误] $message")
                 updateNotification("Bore 错误: $message")
                 broadcastStatus(false, null)
             }
 
-            override fun onBytesTransferred(bytes: Long) {}
+            override fun onBytesTransferred(bytes: Long) {
+                totalBytesTransferred.set(bytes)
+            }
 
             override fun onConnectionEvent(event: String) {
+                if (event.contains("重连") || event.contains("reconnect")) {
+                    totalReconnects.incrementAndGet()
+                }
+                if (event.contains("数据连接") || event.contains("Connection")) {
+                    totalConnections.incrementAndGet()
+                }
                 addEvent(event)
             }
         })

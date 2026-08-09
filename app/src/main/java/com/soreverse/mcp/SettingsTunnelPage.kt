@@ -73,6 +73,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
     var history by remember { mutableStateOf(settings.tunnelHistoryUrls.split('\n').map { it.trim() }.filter { it.isNotBlank() }) }
     var cfStatus by remember { mutableStateOf<CloudflareTunnelManager.TunnelStatus?>(null) }
     var boreRunning by remember { mutableStateOf(BoreTunnelService.isRunning(context)) }
+    var boreConnecting by remember { mutableStateOf(BoreTunnelService.isConnecting(context)) }
     var boreUrl by remember { mutableStateOf(BoreTunnelService.getTunnelUrl(context)) }
     var showExport by remember { mutableStateOf(false) }
     var showImport by remember { mutableStateOf(false) }
@@ -85,6 +86,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 cfStatus = tunnelStatusOf(context)
             } else if (tunnelType == "bore") {
                 boreRunning = BoreTunnelService.isRunning(context)
+                boreConnecting = BoreTunnelService.isConnecting(context)
                 boreUrl = BoreTunnelService.getTunnelUrl(context)
             }
             delay(3_000)
@@ -93,6 +95,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
 
     val isCfRunning = cfStatus?.state == CloudflareTunnelManager.State.RUNNING
     val isBoreRunning = boreRunning
+    val isBoreConnecting = boreConnecting
     val isAnyRunning = if (tunnelType == "cloudflare") isCfRunning else isBoreRunning
 
     val stateColor = when {
@@ -102,7 +105,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
             CloudflareTunnelManager.State.FAILED -> AppleColors.systemRed
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
-        tunnelType == "bore" -> if (isBoreRunning) AppleColors.systemGreen else MaterialTheme.colorScheme.onSurfaceVariant
+        tunnelType == "bore" -> if (isBoreRunning) AppleColors.systemGreen else if (isBoreConnecting) AppleColors.systemOrange else MaterialTheme.colorScheme.onSurfaceVariant
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -119,7 +122,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 "${if (t.zh) "状态" else "State"}: ${
                     when {
                         tunnelType == "cloudflare" -> cfStatus?.state?.name ?: "STOPPED"
-                        tunnelType == "bore" -> if (isBoreRunning) "RUNNING" else "STOPPED"
+                        tunnelType == "bore" -> if (isBoreRunning) "RUNNING" else if (isBoreConnecting) "CONNECTING" else "STOPPED"
                         else -> "STOPPED"
                     }
                 }",

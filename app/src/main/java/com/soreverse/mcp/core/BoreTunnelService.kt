@@ -31,6 +31,7 @@ class BoreTunnelService : Service() {
 
         private const val PREF_TUNNEL_URL = "bore_tunnel_url"
         private const val PREF_TUNNEL_RUNNING = "bore_tunnel_running"
+        private const val PREF_TUNNEL_CONNECTING = "bore_tunnel_connecting"
 
         private var lastTunnelUrl: String? = null
         private val eventLog = mutableListOf<String>()
@@ -42,6 +43,10 @@ class BoreTunnelService : Service() {
         fun isRunning(context: Context): Boolean =
             context.getSharedPreferences("bore_tunnel", MODE_PRIVATE)
                 .getBoolean(PREF_TUNNEL_RUNNING, false)
+
+        fun isConnecting(context: Context): Boolean =
+            context.getSharedPreferences("bore_tunnel", MODE_PRIVATE)
+                .getBoolean(PREF_TUNNEL_CONNECTING, false)
 
         fun getTunnelUrl(context: Context): String? =
             context.getSharedPreferences("bore_tunnel", MODE_PRIVATE)
@@ -78,6 +83,9 @@ class BoreTunnelService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification("Bore 隧道启动中..."))
 
         synchronized(eventLog) { eventLog.clear() }
+        getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
+            .putBoolean(PREF_TUNNEL_CONNECTING, true)
+            .apply()
 
         startTunnel(boreHost, borePort, localPort, boreSecret)
         return START_NOT_STICKY
@@ -113,6 +121,7 @@ class BoreTunnelService : Service() {
                 getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
                     .putString(PREF_TUNNEL_URL, publicUrl)
                     .putBoolean(PREF_TUNNEL_RUNNING, true)
+                    .putBoolean(PREF_TUNNEL_CONNECTING, false)
                     .apply()
                 updateNotification("Bore 已连接: $publicUrl")
                 broadcastStatus(true, publicUrl)
@@ -122,6 +131,7 @@ class BoreTunnelService : Service() {
                 lastTunnelUrl = null
                 getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
                     .putBoolean(PREF_TUNNEL_RUNNING, false)
+                    .putBoolean(PREF_TUNNEL_CONNECTING, false)
                     .apply()
                 updateNotification("Bore 已断开")
                 broadcastStatus(false, null)
@@ -147,6 +157,7 @@ class BoreTunnelService : Service() {
         boreClient = null
         getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
             .putBoolean(PREF_TUNNEL_RUNNING, false)
+            .putBoolean(PREF_TUNNEL_CONNECTING, false)
             .apply()
         lastTunnelUrl = null
         broadcastStatus(false, null)

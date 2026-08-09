@@ -364,19 +364,27 @@ private fun ServiceStatusRow(
 
     // 公网隧道状态
     var tunnelStatus by remember { mutableStateOf(activeServer(context)?.tunnel?.status()) }
+    var boreRunning by remember { mutableStateOf(com.soreverse.mcp.core.BoreTunnelService.isRunning(context)) }
+    var boreConnecting by remember { mutableStateOf(com.soreverse.mcp.core.BoreTunnelService.isConnecting(context)) }
     LaunchedEffect(Unit) {
         while (true) {
             tunnelStatus = activeServer(context)?.tunnel?.status()
+            boreRunning = com.soreverse.mcp.core.BoreTunnelService.isRunning(context)
+            boreConnecting = com.soreverse.mcp.core.BoreTunnelService.isConnecting(context)
             delay(2000)
         }
     }
-    val tunnelRunning = tunnelStatus?.state == com.soreverse.mcp.core.CloudflareTunnelManager.State.RUNNING
-    val tunnelStarting = tunnelStatus?.state == com.soreverse.mcp.core.CloudflareTunnelManager.State.STARTING
-    val tunnelColor = if (tunnelRunning) MaterialTheme.colorScheme.primary else if (tunnelStarting) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+    val cfRunning = tunnelStatus?.state == com.soreverse.mcp.core.CloudflareTunnelManager.State.RUNNING
+    val cfStarting = tunnelStatus?.state == com.soreverse.mcp.core.CloudflareTunnelManager.State.STARTING
+    val anyTunnelRunning = cfRunning || boreRunning
+    val anyTunnelStarting = (cfStarting || boreConnecting) && !anyTunnelRunning
+    val tunnelColor = if (anyTunnelRunning) MaterialTheme.colorScheme.primary else if (anyTunnelStarting) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
     val tunnelText = when {
-        tunnelRunning -> (if (zh) "公网隧道 · 运行中" else "Tunnel · Running") + (tunnelStatus?.publicUrl?.let { " $it" } ?: "")
-        tunnelStarting -> if (zh) "公网隧道 · 连接中…" else "Tunnel · Connecting…"
-        else -> if (zh) "公网隧道 · 未开启" else "Tunnel · Off"
+        cfRunning -> (if (zh) "隧道 · Cloudflare 运行中" else "Tunnel · CF Running") + (tunnelStatus?.publicUrl?.let { " $it" } ?: "")
+        boreRunning -> (if (zh) "隧道 · Bore 运行中" else "Tunnel · Bore Running") + (com.soreverse.mcp.core.BoreTunnelService.getTunnelUrl(context)?.let { " $it" } ?: "")
+        cfStarting -> if (zh) "隧道 · Cloudflare 连接中…" else "Tunnel · CF Connecting…"
+        boreConnecting -> if (zh) "隧道 · Bore 连接中…" else "Tunnel · Bore Connecting…"
+        else -> if (zh) "隧道 · 未开启" else "Tunnel · Off"
     }
 
     val accent = MaterialTheme.colorScheme.primary

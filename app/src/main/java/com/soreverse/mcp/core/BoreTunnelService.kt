@@ -60,6 +60,17 @@ class BoreTunnelService : Service() {
             context.getSharedPreferences("bore_tunnel", MODE_PRIVATE)
                 .getString(PREF_TUNNEL_URL, null)
 
+        fun stop(context: Context) {
+            context.getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
+                .remove(PREF_TUNNEL_URL)
+                .putBoolean(PREF_TUNNEL_RUNNING, false)
+                .putBoolean(PREF_TUNNEL_CONNECTING, false)
+                .apply()
+            lastTunnelUrl = null
+            val intent = Intent(context, BoreTunnelService::class.java).setAction(ACTION_STOP)
+            context.startService(intent)
+        }
+
         fun tunnelStats(): org.json.JSONObject {
             val running = lastTunnelUrl != null
             val currentRunningMs = if (running && runningSinceMs > 0) System.currentTimeMillis() - runningSinceMs else 0L
@@ -118,6 +129,8 @@ class BoreTunnelService : Service() {
 
         synchronized(eventLog) { eventLog.clear() }
         getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
+            .remove(PREF_TUNNEL_URL)
+            .putBoolean(PREF_TUNNEL_RUNNING, false)
             .putBoolean(PREF_TUNNEL_CONNECTING, true)
             .apply()
 
@@ -169,6 +182,7 @@ class BoreTunnelService : Service() {
                 }
                 lastTunnelUrl = null
                 getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
+                    .remove(PREF_TUNNEL_URL)
                     .putBoolean(PREF_TUNNEL_RUNNING, false)
                     .putBoolean(PREF_TUNNEL_CONNECTING, false)
                     .apply()
@@ -179,6 +193,12 @@ class BoreTunnelService : Service() {
             override fun onError(message: String) {
                 totalErrors.incrementAndGet()
                 addEvent("[错误] $message")
+                lastTunnelUrl = null
+                getSharedPreferences("bore_tunnel", MODE_PRIVATE).edit()
+                    .remove(PREF_TUNNEL_URL)
+                    .putBoolean(PREF_TUNNEL_RUNNING, false)
+                    .putBoolean(PREF_TUNNEL_CONNECTING, false)
+                    .apply()
                 updateNotification("Bore 错误: $message")
                 broadcastStatus(false, null)
             }

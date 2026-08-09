@@ -24,6 +24,7 @@ import android.os.Looper
 import android.widget.TextView
 import com.soreverse.mcp.MainActivity
 import com.soreverse.mcp.core.AppLog
+import com.soreverse.mcp.core.BoreTunnelService
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.IntegrityGuard
 import com.soreverse.mcp.core.NetworkInspector
@@ -116,6 +117,11 @@ class McpForegroundService : Service() {
                 sv?.stop()
             } catch (e: Throwable) {
                 AppLog.e("server.stop() failed during destroy", e)
+            }
+            try {
+                BoreTunnelService.stop(this)
+            } catch (e: Throwable) {
+                AppLog.e("bore.stop() failed during destroy", e)
             }
         }, "mcp-teardown").apply { isDaemon = true }.start()
         wakeLock?.takeIf { it.isHeld }?.release()

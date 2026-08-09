@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.BoreTunnelService
 import com.soreverse.mcp.core.CloudflareTunnelManager
 import com.soreverse.mcp.core.SettingsStore
@@ -345,7 +347,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
             if (showLog) {
                 GroupDivider()
                 val logLines = if (tunnelType == "cloudflare") {
-                    cfTunnelLog() ?: listOf(if (t.zh) "无日志" else "No log")
+                    cfTunnelLog(context) ?: listOf(if (t.zh) "无日志" else "No log")
                 } else {
                     BoreTunnelService.getEventLog().ifEmpty { listOf(if (t.zh) "无日志" else "No log") }
                 }
@@ -356,7 +358,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 }
                 GroupDivider()
                 TextButton(onClick = {
-                    if (tunnelType == "cloudflare") clearCfTunnelLog()
+                    if (tunnelType == "cloudflare") clearCfTunnelLog(context)
                     else BoreTunnelService.clearEventLog()
                 }, modifier = Modifier.padding(horizontal = 14.dp)) {
                     Text(if (t.zh) "清除日志" else "Clear log", color = MaterialTheme.colorScheme.error)
@@ -543,8 +545,8 @@ private fun activeTunnel(context: Context): CloudflareTunnelManager? =
 private fun tunnelStatusOf(context: Context): CloudflareTunnelManager.TunnelStatus =
     activeServer(context)?.tunnel?.status() ?: CloudflareTunnelManager.TunnelStatus()
 
-private fun cfTunnelLog(): List<String>? = activeServer(context)?.tunnel?.eventLog()
-private fun clearCfTunnelLog() { activeServer(context)?.tunnel?.clearEventLog() }
+private fun cfTunnelLog(ctx: Context): List<String>? = activeServer(ctx)?.tunnel?.eventLog()
+private fun clearCfTunnelLog(ctx: Context) { activeServer(ctx)?.tunnel?.clearEventLog() }
 
 private fun maskToken(token: String): String {
     if (token.length <= 8) return if (token.isBlank()) "(empty)" else "****"

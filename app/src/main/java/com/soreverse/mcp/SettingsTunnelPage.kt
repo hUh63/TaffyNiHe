@@ -51,6 +51,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
     val scope = rememberCoroutineScope()
     var tunnelType by remember { mutableStateOf(settings.tunnelType) }
     var tunnelMode by remember { mutableStateOf(settings.tunnelMode) }
+    var boreMode by remember { mutableStateOf(settings.boreMode) }
     var tunnelAutoStart by remember { mutableStateOf(settings.tunnelAutoStart) }
     var tunnelPort by remember { mutableStateOf(settings.tunnelTargetPort.toString()) }
     var namedToken by remember { mutableStateOf(settings.tunnelNamedToken) }
@@ -217,9 +218,9 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
             GlassGroup(title = if (t.zh) "Bore 模式" else "Bore Mode", footer = if (t.zh) "临时隧道无需密码，URL 重启变化；永久隧道需自建 Bore 服务器并配置密码。" else "Quick bore needs no password, URL changes on restart; permanent bore needs a self-hosted server with a password.") {
                 ChipRow(
                     listOf("off" to if (t.zh) "关闭" else "Off", "quick" to if (t.zh) "临时隧道" else "Quick", "named" to if (t.zh) "永久隧道" else "Permanent"),
-                    tunnelMode,
-                ) { tunnelMode = it; settings.tunnelMode = it }
-                if (tunnelMode != "off") {
+                    boreMode,
+                ) { boreMode = it; settings.boreMode = it }
+                if (boreMode != "off") {
                     GroupDivider()
                     OutlinedTextField(
                         value = boreHost,
@@ -240,7 +241,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                     NumberSettingRow(if (t.zh) "Bore 服务器端口" else "Server port", borePort, { borePort = it }, { settings.borePort = it }, if (t.zh) "端口" else "port")
                     GroupDivider()
                     NumberSettingRow(if (t.zh) "本地端口" else "Local port", tunnelPort, { tunnelPort = it }, { settings.tunnelTargetPort = it }, if (t.zh) "端口" else "port")
-                    if (tunnelMode == "named") {
+                    if (boreMode == "named") {
                         GroupDivider()
                         OutlinedTextField(
                             value = boreSecret,
@@ -261,7 +262,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 }
             }
             // Bore 通用设置
-            if (tunnelMode != "off") {
+            if (boreMode != "off") {
                 GlassGroup {
                     ToggleRow(if (t.zh) "断线自动重连" else "Auto reconnect", tunnelReconnect) { tunnelReconnect = it; settings.tunnelReconnect = it }
                 }
@@ -294,7 +295,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                     if (tunnelType == "cloudflare") {
                         startCfTunnel(context, settings, tunnelMode, namedToken, namedPublicUrl) { cfStatus = tunnelStatusOf(context) }
                     } else {
-                        startBoreTunnel(context, settings, tunnelMode, boreHost, borePort, tunnelPort)
+                        startBoreTunnel(context, settings, boreMode, boreHost, borePort, tunnelPort)
                     }
                 })
                 SecondaryActionButton(if (t.zh) "停止" else "Stop") {
@@ -473,7 +474,7 @@ private fun stopCfTunnel(context: Context, onDone: () -> Unit) {
 }
 
 private fun startBoreTunnel(context: Context, settings: SettingsStore, tunnelMode: String, host: String, port: String, localPort: String) {
-    if (tunnelMode == "off") {
+    if (tunnelMode == "off" || settings.boreMode == "off") {
         Toast.makeText(context, if (settings.language == "zh") "请先选择 Bore 隧道模式" else "Select a bore tunnel mode first", Toast.LENGTH_SHORT).show()
         return
     }

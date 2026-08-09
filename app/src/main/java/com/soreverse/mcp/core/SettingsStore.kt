@@ -433,6 +433,10 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("boreSecret", "") ?: ""
         set(value) = prefs.edit().putString("boreSecret", value.trim()).apply()
 
+    var boreMode: String
+        get() = prefs.getString("boreMode", "off") ?: "off"
+        set(value) = prefs.edit().putString("boreMode", if (value in setOf("off", "quick", "named")) value else "off").apply()
+
     var tunnelProtocol: String
         get() = prefs.getString("tunnelProtocol", "http2") ?: "http2"
         set(value) = prefs.edit().putString("tunnelProtocol", if (value in setOf("http2", "quic", "auto")) value else "http2").apply()

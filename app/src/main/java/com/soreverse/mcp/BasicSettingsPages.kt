@@ -209,6 +209,7 @@ internal fun SettingsKeepAlivePage(t: UiText, settings: SettingsStore) {
                 Slider(
                     value = floatingOpacity.toFloat(),
                     onValueChange = { floatingOpacity = it.toInt(); settings.floatingOpacity = it.toInt() },
+                    onValueChangeFinished = { com.soreverse.mcp.service.McpForegroundService.refreshFloating(context) },
                     valueRange = 10f..100f,
                     steps = 17,
                     modifier = Modifier.padding(horizontal = 40.dp, vertical = 4.dp),
@@ -217,6 +218,7 @@ internal fun SettingsKeepAlivePage(t: UiText, settings: SettingsStore) {
                 ToggleRow(if (t.zh) "自动吸边" else "Auto snap to edge", floatingAutoEdge) {
                     floatingAutoEdge = it
                     settings.floatingAutoEdge = it
+                    com.soreverse.mcp.service.McpForegroundService.refreshFloating(context)
                 }
                 GroupDivider()
                 Text(

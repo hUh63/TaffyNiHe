@@ -302,19 +302,14 @@ class McpForegroundService : Service() {
             return
         }
         if (floating != null) {
-            // 悬浮窗已存在，更新状态文字和透明度/自动吸边
+            // 悬浮窗已存在，更新状态文字和透明度
             val settingsNow = SettingsStore(this)
             updateFloatingStatus()
-            val op = settingsNow.floatingOpacity / 100f
-            floating?.alpha = op
-            if (settingsNow.floatingAutoEdge) {
-                val params = floatingParams ?: return
-                val width = resources.displayMetrics.widthPixels
-                params.x = if (params.x > width / 2) width - (floating?.width ?: 0) else 0
-                runCatching { windowManager?.updateViewLayout(floating, params) }
-            }
-            // 重新调度自动吸边
-            if (isCollapsed) {
+            floating?.alpha = settingsNow.floatingOpacity / 100f
+            // 自动吸边开关变化时，开启或关闭自动吸边调度
+            if (!settingsNow.floatingAutoEdge) {
+                cancelScheduled()
+            } else if (isCollapsed) {
                 scheduleAutoSnap()
             }
             return
@@ -416,7 +411,9 @@ class McpForegroundService : Service() {
                         val width = resources.displayMetrics.widthPixels
                         params.x = if (params.x > width / 2) width - tv.width else 0
                         windowManager?.updateViewLayout(tv, params)
-                        scheduleAutoSnap()
+                        if (settings.floatingAutoEdge) {
+                            scheduleAutoSnap()
+                        }
                     } else if (elapsed < longPressTimeout) {
                         // 点击 (<500ms)：打开 MainActivity
                         launchMainActivity()
@@ -435,7 +432,9 @@ class McpForegroundService : Service() {
         floating = tv
         windowManager?.addView(tv, params)
         startPulse(tv)
-        scheduleAutoSnap()
+        if (settings.floatingAutoEdge) {
+            scheduleAutoSnap()
+        }
         AppLog.i("Floating window shown")
     }
 
@@ -447,6 +446,8 @@ class McpForegroundService : Service() {
     }
 
     private fun scheduleAutoSnap() {
+        val settings = SettingsStore(this)
+        if (!settings.floatingAutoEdge) return
         autoSnapRunnable?.let { mainHandler.removeCallbacks(it) }
         val tv = bubbleText ?: return
         val params = floatingParams ?: return
@@ -613,7 +614,9 @@ class McpForegroundService : Service() {
                     }
                     runCatching { windowManager?.updateViewLayout(tv, params) }
                     startPulse(tv)
-                    scheduleAutoSnap()
+                    if (settings.floatingAutoEdge) {
+                        scheduleAutoSnap()
+                    }
                     AppLog.i("Floating expanded from bubble")
                 }
             })

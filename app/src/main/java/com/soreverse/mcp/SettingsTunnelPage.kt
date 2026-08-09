@@ -3,6 +3,7 @@ package com.soreverse.mcp
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -278,7 +279,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                     if (tunnelType == "cloudflare") {
                         startCfTunnel(context, settings, tunnelMode, namedToken, namedPublicUrl) { cfStatus = tunnelStatusOf(context) }
                     } else {
-                        startBoreTunnel(context, settings, boreHost, borePort, tunnelPort) { boreRunning = BoreTunnelService.isRunning(context) }
+                        startBoreTunnel(context, settings, boreHost, borePort, tunnelPort)
                     }
                 })
                 SecondaryActionButton(if (t.zh) "停止" else "Stop") {

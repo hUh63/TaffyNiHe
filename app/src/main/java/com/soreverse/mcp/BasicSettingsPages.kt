@@ -29,6 +29,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -180,12 +181,20 @@ internal fun SurfacePanel(modifier: Modifier = Modifier, content: @Composable Co
 internal fun SettingsKeepAlivePage(t: UiText, settings: SettingsStore) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var floating by remember { mutableStateOf(settings.floatingEnabled) }
+    var floatingOpacity by remember { mutableStateOf(settings.floatingOpacity) }
+    var floatingAutoEdge by remember { mutableStateOf(settings.floatingAutoEdge) }
     var wakeLock by remember { mutableStateOf(settings.wakeLockEnabled) }
     var bootAutoStart by remember { mutableStateOf(settings.bootAutoStart) }
     PageScroll {
         GlassGroup {
             ToggleRow(t.wakeLock, wakeLock) { wakeLock = it; settings.wakeLockEnabled = it }
             GroupDivider()
+            ToggleRow(if (t.zh) "开机自启 MCP 服务" else "Autostart MCP service on boot", bootAutoStart) {
+                bootAutoStart = it
+                settings.bootAutoStart = it
+            }
+        }
+        GlassGroup(title = if (t.zh) "悬浮窗" else "Floating window") {
             ToggleRow(t.floating, floating) {
                 if (it && !AndroidSettings.canDrawOverlays(context)) {
                     context.startActivity(Intent(AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
@@ -194,10 +203,28 @@ internal fun SettingsKeepAlivePage(t: UiText, settings: SettingsStore) {
                 settings.floatingEnabled = it
                 com.soreverse.mcp.service.McpForegroundService.refreshFloating(context)
             }
-            GroupDivider()
-            ToggleRow(if (t.zh) "开机自启 MCP 服务" else "Autostart MCP service on boot", bootAutoStart) {
-                bootAutoStart = it
-                settings.bootAutoStart = it
+            if (floating) {
+                GroupDivider()
+                Text(if (t.zh) "透明度：${floatingOpacity}%" else "Opacity: ${floatingOpacity}%", modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Slider(
+                    value = floatingOpacity.toFloat(),
+                    onValueChange = { floatingOpacity = it.toInt(); settings.floatingOpacity = it.toInt() },
+                    valueRange = 10f..100f,
+                    steps = 17,
+                    modifier = Modifier.padding(horizontal = 40.dp, vertical = 4.dp),
+                )
+                GroupDivider()
+                ToggleRow(if (t.zh) "自动吸边" else "Auto snap to edge", floatingAutoEdge) {
+                    floatingAutoEdge = it
+                    settings.floatingAutoEdge = it
+                }
+                GroupDivider()
+                Text(
+                    if (t.zh) "悬浮窗显示当前保活状态和隧道连接状态，5 秒无操作自动吸边。" else "Floating window shows keepalive and tunnel status. Snaps to edge after 5 seconds of inactivity.",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         GlassGroup(footer = keepAliveAdvice(t.zh)) {
@@ -398,3 +425,4 @@ private fun openBatterySettings(context: Context) {
         context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
     }
 }
+

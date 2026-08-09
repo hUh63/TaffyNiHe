@@ -77,6 +77,14 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("floatingEnabled", false)
         set(value) = prefs.edit().putBoolean("floatingEnabled", value).apply()
 
+    var floatingOpacity: Int
+        get() = prefs.getInt("floatingOpacity", 80)
+        set(value) = prefs.edit().putInt("floatingOpacity", value.coerceIn(10, 100)).apply()
+
+    var floatingAutoEdge: Boolean
+        get() = prefs.getBoolean("floatingAutoEdge", true)
+        set(value) = prefs.edit().putBoolean("floatingAutoEdge", value).apply()
+
     var wakeLockEnabled: Boolean
         get() = prefs.getBoolean("wakeLockEnabled", true)
         set(value) = prefs.edit().putBoolean("wakeLockEnabled", value).apply()
@@ -936,3 +944,4 @@ Rules:
 - If a tool fails, explain the failure and continue with alternative tools when possible."""
     }
 }
+

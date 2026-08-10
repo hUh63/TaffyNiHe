@@ -69,10 +69,10 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
     PageScroll {
         GlassGroup(title = if (t.zh) "签名密钥" else "Signing key") {
             Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                KeySourceOption(if (t.zh) "默认" else "Default", keySource != "custom", AppPalette.indigo) {
+                KeySourceOption(if (t.zh) "默认" else "Default", keySource != "custom", AppPalette.indigo, Modifier.weight(1f)) {
                     settings.apkSignKeySource = "default"; refresh++
                 }
-                KeySourceOption(if (t.zh) "其他密钥" else "Custom", keySource == "custom", AppPalette.orange) {
+                KeySourceOption(if (t.zh) "其他密钥" else "Custom", keySource == "custom", AppPalette.orange, Modifier.weight(1f)) {
                     settings.apkSignKeySource = "custom"; refresh++
                 }
             }
@@ -132,11 +132,10 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
 }
 
 @Composable
-private fun KeySourceOption(label: String, selected: Boolean, tint: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+private fun KeySourceOption(label: String, selected: Boolean, tint: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
     Row(
-        Modifier
-            .weight(1f)
+        modifier
             .clip(shape)
             .background(if (selected) tint.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             .border(1.dp, if (selected) tint.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), shape)

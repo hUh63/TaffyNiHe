@@ -74,6 +74,8 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
     val loopback = endpoints.firstOrNull { it.url.contains("127.0.0.1") }?.url ?: "http://127.0.0.1:${settings.port}/mcp"
     val preferred = endpoints.firstOrNull { !it.url.contains("127.0.0.1") && !it.url.contains("[::1]") }?.url ?: loopback
     val publicUrl = activeServer(context)?.tunnel?.status()?.publicUrl?.takeIf { it.isNotBlank() }
+    var showStorageDialog by remember { mutableStateOf(false) }
+    val storageGranted = StoragePermissionHelper.hasAllFilesAccess(context)
     PageScroll {
         GlassGroup(title = if (t.zh) "工作目录" else "Work directory") {
             NavRow(
@@ -84,33 +86,12 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 onClick = { pickTree.launch(null) },
             )
             GroupDivider()
-            var showStorageDialog by remember { mutableStateOf(false) }
-            val storageGranted = StoragePermissionHelper.hasAllFilesAccess(context)
             ToggleRow(
                 if (t.zh) "全部文件访问" else "All files access",
                 storageGranted,
             ) {
                 StoragePermissionHelper.ensureAllFilesAccess(context) { showStorageDialog = true }
             }
-        }
-        if (showStorageDialog) {
-            AlertDialog(
-                onDismissRequest = { showStorageDialog = false },
-                title = { Text(if (t.zh) "需要所有文件访问权限" else "All files access required") },
-                text = {
-                    Text(if (t.zh)
-                        "开启后 MCP 工具在隧道开启时可访问 /sdcard 与 /storage/emulated/0。点击「去授权」前往系统设置页授予「所有文件访问」权限。"
-                        else
-                        "MCP tools can access /sdcard and /storage/emulated/0 when a tunnel is active. Grant \"All files access\" to continue.")
-                },
-                confirmButton = {
-                    TextButton({
-                        showStorageDialog = false
-                        runCatching { context.startActivity(StoragePermissionHelper.allFilesAccessIntent(context)) }
-                    }) { Text(if (t.zh) "去授权" else "Grant") }
-                },
-                dismissButton = { TextButton({ showStorageDialog = false }) { Text(if (t.zh) "取消" else "Cancel") } },
-            )
         }
         GlassGroup(title = if (t.zh) "服务端口" else "Service port", footer = portStatusText(portText.toIntOrNull() ?: settings.port, McpForegroundService.isRunning(), t.zh)) {
             Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -226,6 +207,25 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 SecondaryActionButton(if (t.zh) "复制 Token" else "Copy token") { copy(context, accessToken, t.copied) }
             }
         }
+    }
+    if (showStorageDialog) {
+        AlertDialog(
+            onDismissRequest = { showStorageDialog = false },
+            title = { Text(if (t.zh) "需要所有文件访问权限" else "All files access required") },
+            text = {
+                Text(if (t.zh)
+                    "开启后 MCP 工具在隧道开启时可访问 /sdcard 与 /storage/emulated/0。点击「去授权」前往系统设置页授予「所有文件访问」权限。"
+                    else
+                    "MCP tools can access /sdcard and /storage/emulated/0 when a tunnel is active. Grant \"All files access\" to continue.")
+            },
+            confirmButton = {
+                TextButton({
+                    showStorageDialog = false
+                    runCatching { context.startActivity(StoragePermissionHelper.allFilesAccessIntent(context)) }
+                }) { Text(if (t.zh) "去授权" else "Grant") }
+            },
+            dismissButton = { TextButton({ showStorageDialog = false }) { Text(if (t.zh) "取消" else "Cancel") } },
+        )
     }
 }
 

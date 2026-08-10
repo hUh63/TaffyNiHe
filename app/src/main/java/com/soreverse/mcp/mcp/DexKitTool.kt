@@ -28,8 +28,8 @@ object DexKitTool {
 
     val search: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_dex_search",
-            "【DexKit 反混淆查找】混淆 App 里靠特征反查被混淆的真实类/方法(C++ 高性能)。action=method_by_string 查\"用了某字符串的方法\"(逆向定位关键逻辑最常用,如搜 sign/pay/vip 找到签名/支付/会员相关方法); class_by_string 查用了某字符串的类; method_by_name 按方法名查; class_by_name 按类名查。输入 APK 路径,返回匹配的类名/方法签名。",
-            "DexKit anti-obfuscation search (high-performance C++). Find obfuscated classes/methods by feature. action=method_by_string (find methods using a given string — most useful for locating key logic like sign/pay/vip); class_by_string; method_by_name; class_by_name. Input an APK path, returns matched class names / method descriptors.",
+            "【DexKit 反混淆查找】混淆 App 里靠特征反查被混淆的真实类/方法(反混淆: C++ 高性能)。action=method_by_string 查\"用了某字符串的方法\"(逆向定位关键逻辑最常用,如搜 sign/pay/vip 找到签名/支付/会员相关方法); class_by_string 查用了某字符串的类(如校验类); method_by_name 按方法名查; class_by_name 按类名查; method_strings 列出某方法体内引用的字符串/常量/调用(反向: 反编译定位后看它调用了什么, 配合 taffy_smali_edit 改代码)。输入 APK 路径,返回匹配的类名/方法签名。",
+            "DexKit anti-obfuscation search (high-performance C++). Find obfuscated classes/methods by feature. action=method_by_string (find methods using a given string — most useful for locating key logic like sign/pay/vip); class_by_string; method_by_name; class_by_name; method_strings (list strings/constants/calls referenced inside a method — reverse direction, pairs with taffy_smali_edit patching). Input an APK path, returns matched class names / method descriptors.",
             "decompile", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
@@ -59,7 +59,7 @@ object DexKitTool {
             if (keyword.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 keyword(要查的字符串/名字)", "keyword", "")
 
             val action = args.str("action", "method_by_string").ifBlank { "method_by_string" }
-            // method_strings 用 dexlib2 遍历方法指令, 不走 DexKitBridge(C++ 全量加载) 以提速
+            // method_strings 用 baksmali 反汇编 + 正则提取, 不走 DexKitBridge(C++ 全量加载) 以提速
             if (action == "method_strings") {
                 return methodStrings(input, args)
             }
@@ -266,7 +266,7 @@ object DexKitTool {
                         val im = Regex("\\.invoke(?:-virtual|-super|-direct|-static|-interface)?(?:/range)?\\s+.*?,\\s*(L[^;]+(?:;[^;]*)?)->([^(]*)\\(([^)]*)\\)\\w*").find(line)
                         if (im != null) { cals.add(im.groupValues[1] + "->" + im.groupValues[2] + "(" + im.groupValues[3] + ")"); continue }
                         // const/4,const/16,const,const-wide : const vN, 0x...
-                        val cm = Regex("const(?:/4|/16|/high16)?|const-wide(?:/16|/32)?\\s+v\\d+,\\s*(0x[0-9a-fA-F]+|-?\\d+)").find(line)
+                        val cm = Regex("(?:const|const-wide)(?:/4|/16|/high16|/32)?\\s+v\\d+,\\s*(0x[0-9a-fA-F]+|-?\\d+)").find(line)
                         if (cm != null) cons.add(cm.groupValues[1])
                     }
                 }

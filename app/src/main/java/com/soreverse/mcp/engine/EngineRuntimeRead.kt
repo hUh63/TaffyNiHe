@@ -37,10 +37,9 @@ internal fun EngineRuntime.list(workspaceId: String, editSessionId: String, view
                     .put("bind", it.bind)
                     .put("type", it.type)
                     .put("visibility", it.visibility)
-                    .put("section", if (shndx == 0) "UNDEF (导入/未定义)" else "section_$shndx")
+                    .put("section", if (shndx == 0) "UNDEF (导入)" else "section_$shndx")
                     .put("isWeak", it.bind == "WEAK")
-                    .put("neededLibraries", JSONArray(neededLibraries(elf, dataFor(workspaceId, editSessionId))))
-                    .put("editHint", "用 taffy_edit_symbol action=rename 重命名该导入符号, 可将调用重定向到同长/更短的另一个符号, 实现 import 级补丁")
+                    .put("editHint", "用 taffy_edit_symbol action=rename 可将该导入重定向到同长/更短符号")
             }
             "plt_stubs" -> emptySequence()
             else -> return@guarded err("INVALID_LOCATOR", "Unsupported list view", "view", view)

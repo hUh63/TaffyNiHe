@@ -33,8 +33,8 @@ object SmaliEditTools {
     /** Smali 增量编辑 */
     val smaliEdit: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_smali_edit",
-            "【Smali 增量编辑】不改包整个 APK, 只提取/替换单个类的 smali。action=list_classes 列出 APK 中的类(按包名过滤); action=extract 提取指定类的 smali 代码; action=replace 用新 smali 替换指定类(自动定位 DEX→重编→写回 APK); action=list_methods 列出类的方法签名。参考 MT管理器的 edit_open/edit_text 增量流程, 但用 Google smali 库实现。多 DEX 自动定位。",
-            "Incremental smali editing without full APK unpacking. action=list_classes lists classes (filter by package); extract gets smali for one class; replace writes new smali (auto-locates DEX→recompiles→writes back to APK); list_methods lists method signatures. Inspired by MT's edit_open/edit_text, uses Google smali library. Auto multi-DEX.",
+            "【Smali 增量编辑】不改包整个 APK, 只提取/替换单个类或单条指令的 smali。action=list_classes 列出 APK 中的类(按包名过滤); action=extract 提取指定类的 smali 代码; action=replace 用新 smali 替换指定类(自动定位 DEX→重编→写回 APK); action=list_methods 列出类的方法签名; action=patch_instruction 仅替换方法内一条指令(如改 const 常量/return 返回值, 对标 MT 改一行代码)。参考 MT管理器的 edit_open/edit_text 增量流程, 用 Google smali 库实现, 多 DEX 自动定位。注意: replace/patch_instruction 会重编整个 DEX 再写回, 大 DEX 较慢。",
+            "Incremental smali editing without full APK unpacking. action=list_classes lists classes (filter by package); extract gets smali for one class; replace writes new smali (auto-locates DEX→recompiles→writes back to APK); list_methods lists method signatures; patch_instruction replaces a single instruction inside a method (e.g. change a const literal / return value — MT-style 'change one line'). Uses Google smali library, auto multi-DEX. Note: replace/patch_instruction recompile the whole DEX then write back, slow on large DEX.",
             "build", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {

@@ -38,11 +38,15 @@ object SmaliEditTools {
             "build", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
-                "action".oneOf("list_classes | extract | replace | list_methods", "list_classes", "extract", "replace", "list_methods")
+                "action".oneOf("list_classes | extract | replace | list_methods | patch_instruction", "list_classes", "extract", "replace", "list_methods", "patch_instruction")
                 "path" str "APK 文件路径"
                 "className" str "类全名(如 com.example.Foo), list_classes/extract/replace/list_methods 用"
                 "packagePrefix" str "list_classes: 包名前缀过滤(如 com.example), 加快速度"
                 "smali" str "replace: 新的 smali 代码(完整 .smali 文件内容)"
+                "method" str "patch_instruction: 目标方法名(如 onCreate)。可用 \";\" 追加参数签名定位重载"
+                "from" str "patch_instruction: 要替换的原始指令(需在方法体内唯一或取首次匹配)"
+                "to" str "patch_instruction: 替换后的新指令"
+                "occurrence" int "patch_instruction: 替换第几处匹配(1 起, 默认 1)"
                 "limit" int "list_classes: 最多返回条数(默认 100)"
             })
         }
@@ -60,6 +64,7 @@ object SmaliEditTools {
                     "extract" -> extractSmali(file, args.str("className"))
                     "replace" -> replaceSmali(file, args.str("className"), args.str("smali"), ctx)
                     "list_methods" -> listMethods(file, args.str("className"))
+                    "patch_instruction" -> patchInstruction(file, args, ctx)
                     else -> err("UNKNOWN_ACTION", "未知 action: $action", "action", action)
                 }
             }.getOrElse { e ->
@@ -259,6 +264,142 @@ object SmaliEditTools {
                     .put("hint", "用 taffy_smali_edit action=extract 提取完整 smali 代码"))
             } finally {
                 tempDex.delete()
+            }
+        }
+
+        /** 定位方法体内某条指令并替换为另一条(指令级补丁, 对标 MT 改代码)。 */
+        private fun patchInstruction(apk: File, args: JSONObject, ctx: ToolContext): JSONObject {
+            val className = args.str("className")
+            val method = args.str("method")
+            val from = args.str("from")
+            val to = args.str("to")
+            val occurrence = args.intValue("occurrence", 1).coerceAtLeast(1)
+            if (className.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 className", "className", "")
+            if (method.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 method(目标方法名)", "method", "")
+            if (from.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 from(原始指令)", "from", "")
+            if (to.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 to(新指令)", "to", "")
+            val classDescriptor = "L${className.replace('.', '/')};"
+
+            val (dexEntryName, tempDex) = findClassInApk(apk, classDescriptor)
+                ?: return err("CLASS_NOT_FOUND", "类 $className 不在 APK 的任何 DEX 中", "className", className)
+
+            try {
+                // 1. baksmali 解包整个 DEX 到临时目录
+                val outDir = File.createTempFile("smali_patch_", "").apply { delete(); mkdirs() }
+                val options = com.android.tools.smali.baksmali.BaksmaliOptions()
+                val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
+                com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(dexFile, outDir, 4, options)
+
+                // 2. 读取目标类 smali 并做方法内指令替换
+                val smaliFile = File(outDir, className.replace('.', '/') + ".smali")
+                if (!smaliFile.isFile) {
+                    outDir.deleteRecursively()
+                    return err("SMALI_NOT_FOUND", "类 $className 的 smali 未找到(可能内部类)", "className", className)
+                }
+                val smaliText = smaliFile.readText()
+                val patched = patchMethodInstruction(smaliText, method, from, to, occurrence)
+                if (patched == null) {
+                    outDir.deleteRecursively()
+                    return err("INSTRUCTION_NOT_FOUND", "方法 $method 中未找到指令: $from (第 $occurrence 处)", "from", from)
+                }
+                smaliFile.writeText(patched)
+
+                // 3. smali → dex 重编
+                val newDex = File.createTempFile("recompiled_", ".dex")
+                val opts = SmaliOptions().apply {
+                    outputDexFile = newDex.absolutePath
+                    apiLevel = 34
+                    jobs = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+                }
+                val success = Smali.assemble(opts, listOf(outDir.absolutePath))
+                outDir.deleteRecursively()
+                if (!success) return err("SMALI_ASSEMBLE_FAILED", "指令补丁后 smali 重编失败(检查 to 指令语法), 类: $className", "to", to)
+
+                // 4. 写回 APK
+                val newDexBytes = newDex.readBytes()
+                newDex.delete()
+                tempDex.delete()
+                val out = writeCompiledDexBack(apk, classDescriptor, dexEntryName, newDexBytes, className)
+                if (out != null) return out
+
+                return ok(JSONObject()
+                    .put("action", "patch_instruction")
+                    .put("className", className)
+                    .put("method", method)
+                    .put("from", from)
+                    .put("to", to)
+                    .put("success", true)
+                    .put("newDexSize", newDexBytes.size)
+                    .put("hint", "指令已替换并写回 APK. 签名已失效, 用 taffy_apk_sign 或 taffy_apk_rebuild 重新签名"))
+            } finally {
+                tempDex.delete()
+            }
+        }
+
+        /** 在 smali 文本中定位方法体, 替换方法内的 from→to 指令(occurrence 起 1)。返回新文本, 未找到返回 null。 */
+        private fun patchMethodInstruction(smaliText: String, method: String, from: String, to: String, occurrence: Int): String? {
+            val methodBase = method.substringBefore(';').trim() // 方法名(去掉可能的参数签名后缀)
+            val methodStartRegex = if (method.indexOf(';') >= 0) {
+                Regex("\\.method.*?${Regex.escape(methodBase)}\\s*\\(.*" + Regex.escape(method.substringAfter(';', "")))
+            } else {
+                Regex("\\.method.*?\\b${Regex.escape(methodBase)}\\s*\\(")
+            }
+            val fromTrim = from.trim()
+            val lines = smaliText.lines()
+            val sb = StringBuilder()
+            var inTarget = false
+            var replaced = 0
+            for (line in lines) {
+                val trimmed = line.trim()
+                when {
+                    trimmed.startsWith(".method") -> {
+                        inTarget = methodStartRegex.containsMatchIn(trimmed)
+                        sb.append(line).append("\n")
+                    }
+                    trimmed == ".end method" -> {
+                        inTarget = false
+                        sb.append(line).append("\n")
+                    }
+                    inTarget && trimmed == fromTrim -> {
+                        replaced++
+                        if (replaced == occurrence) {
+                            val indent = line.takeWhile { it == ' ' || it == '\t' }
+                            sb.append(indent).append(to.trim()).append("\n")
+                        } else {
+                            sb.append(line).append("\n")
+                        }
+                    }
+                    else -> sb.append(line).append("\n")
+                }
+            }
+            return if (replaced >= occurrence) sb.toString() else null
+        }
+
+        /** 将重编后的 DEX 字节写回 APK(重建 ZIP 替换目标 DEX), 带备份。成功返回 null, 失败返回错误 JSON。 */
+        private fun writeCompiledDexBack(apk: File, classDescriptor: String, dexEntryName: String, newDexBytes: ByteArray, className: String): JSONObject? {
+            val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
+            try {
+                ZipFile(apk).use { zf ->
+                    val zos = java.util.zip.ZipOutputStream(tempApk.outputStream())
+                    zf.entries().toList().forEach { e ->
+                        zos.putNextEntry(java.util.zip.ZipEntry(e.name))
+                        if (e.name == dexEntryName) {
+                            zos.write(newDexBytes)
+                        } else {
+                            zf.getInputStream(e).use { it.copyTo(zos) }
+                        }
+                        zos.closeEntry()
+                    }
+                    zos.close()
+                }
+                val backup = File(apk.parentFile, "${apk.nameWithoutExtension}.bak.apk")
+                apk.copyTo(backup, overwrite = true)
+                tempApk.copyTo(apk, overwrite = true)
+                tempApk.delete()
+                return null
+            } catch (e: Throwable) {
+                tempApk.delete()
+                return err("APK_WRITE_FAILED", "写回 APK 失败: ${e.message}", "className", className)
             }
         }
 

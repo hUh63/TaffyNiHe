@@ -4,6 +4,12 @@ import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
+import com.android.tools.smali.dexlib2.DexFileFactory
+import com.android.tools.smali.dexlib2.Opcodes
+import com.android.tools.smali.dexlib2.iface.instruction.MethodReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.NarrowLiteralInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.StringReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.WideLiteralInstruction
 import org.json.JSONArray
 import org.json.JSONObject
 import org.luckypray.dexkit.DexKitBridge
@@ -32,12 +38,14 @@ object DexKitTool {
         ) {
             objectSchema(props {
                 "action".oneOf(
-                    "method_by_string(查用了某字符串的方法) | class_by_string | method_by_name | class_by_name",
-                    "method_by_string", "class_by_string", "method_by_name", "class_by_name",
+                    "method_by_string(查用了某字符串的方法) | class_by_string | method_by_name | class_by_name | method_strings(列某方法引用的字符串/常量)",
+                    "method_by_string", "class_by_string", "method_by_name", "class_by_name", "method_strings",
                 )
                 "path" str "APK 文件绝对路径"
                 "filePath" str "path 的别名"
                 "keyword" str "要查的字符串/名字(按 action 决定含义)"
+                "className" str "method_strings: 目标类全名(如 com.example.Foo)"
+                "method" str "method_strings: 目标方法名(可用 \";\" 追加参数签名定位重载)"
                 "matchType".oneOf("字符串匹配方式", "Contains", "Equals", "StartsWith", "EndsWith")
                 "ignoreCase" bool "是否忽略大小写(默认 false)"
                 "packagePrefix" str "限定搜索包名前缀(可选,加快速度,如 com.xxx)"
@@ -55,6 +63,10 @@ object DexKitTool {
             if (keyword.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 keyword(要查的字符串/名字)", "keyword", "")
 
             val action = args.str("action", "method_by_string").ifBlank { "method_by_string" }
+            // method_strings 用 dexlib2 遍历方法指令, 不走 DexKitBridge(C++ 全量加载) 以提速
+            if (action == "method_strings") {
+                return methodStrings(input, args)
+            }
             val matchType = when (args.str("matchType", "Contains")) {
                 "Equals" -> StringMatchType.Equals
                 "StartsWith" -> StringMatchType.StartsWith
@@ -164,5 +176,80 @@ object DexKitTool {
                 .put("returned", arr.length())
                 .put("results", arr)
                 .put("hint", "拿到真实类名/方法后,可用 taffy_jadx_decompile 反编译该类看代码,或 frida hook 该方法"))
+
+        /** 列出指定方法体内引用的所有字符串/常量/调用的方法(dexlib2 指令遍历)。配合 patch_instruction 使用。 */
+        private fun methodStrings(apk: File, args: JSONObject): JSONObject {
+            val className = args.str("className")
+            val method = args.str("method")
+            if (method.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 method", "method", "")
+            val methodBase = method.substringBefore(';').trim()
+            val classDescriptor = "L${className.replace('.', '/')};"
+            val limit = args.intValue("limit", 200).coerceIn(1, 2000)
+
+            val strings = LinkedHashSet<String>()
+            val calls = LinkedHashSet<String>()
+            val constants = LinkedHashSet<String>()
+
+            var foundMethod = false
+            runCatching {
+                java.util.zip.ZipFile(apk).use { zf ->
+                    val dexEntries = zf.entries().toList().filter { it.name.matches(Regex("classes\\d*\\.dex")) }
+                    for (dexEntry in dexEntries) {
+                        val tempDex = File.createTempFile("classes_", ".dex")
+                        zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
+                        try {
+                            val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
+                            val classDef = dexFile.classes.firstOrNull { it.type == classDescriptor } ?: continue
+                            for (m in classDef.methods) {
+                                if (m.name != methodBase) continue
+                                // 若 method 含签名, 校验参数类型
+                                if (method.indexOf(';') >= 0) {
+                                    val sigMatch = method.substringAfter(';').trim()
+                                    if (sigMatch.isNotBlank()) {
+                                        val paramTypes = m.parameters.map { it.type }.joinToString("")
+                                        if (!paramTypes.contains(sigMatch.trim())) continue
+                                    }
+                                }
+                                foundMethod = true
+                                val impl = m.implementation ?: continue
+                                for (insn in impl.instructions) {
+                                    when (insn) {
+                                        is StringReferenceInstruction -> strings.add(insn.string)
+                                        is MethodReferenceInstruction -> calls.add(insn.reference.definingClass + "->" + insn.reference.name + insn.reference.parameterTypes.joinToString("") { it })
+                                        is NarrowLiteralInstruction -> {
+                                            val v = insn.narrowLiteral
+                                            if (v != 0) constants.add("0x" + java.lang.Integer.toHexString(v) + " ($v)")
+                                        }
+                                        is WideLiteralInstruction -> {
+                                            val v = insn.wideLiteral
+                                            if (v != 0L) constants.add("0x" + java.lang.Long.toHexString(v) + " ($v)")
+                                        }
+                                        else -> {}
+                                    }
+                                }
+                            }
+                        } finally {
+                            tempDex.delete()
+                        }
+                        if (foundMethod) break
+                    }
+                }
+            }
+
+            if (!foundMethod) return err("METHOD_NOT_FOUND", "类 $className 中未找到方法 $method", "method", method)
+
+            return ok(JSONObject()
+                .put("tool", "taffy_dex_search")
+                .put("action", "method_strings")
+                .put("className", className)
+                .put("method", method)
+                .put("stringCount", strings.size)
+                .put("strings", JSONArray(strings.take(limit * 2)))
+                .put("constantCount", constants.size)
+                .put("constants", JSONArray(constants.take(limit * 2)))
+                .put("callCount", calls.size)
+                .put("calls", JSONArray(calls.take(limit * 2)))
+                .put("hint", "method_strings 列出方法引用的字符串/常量/调用, 配合 taffy_smali_edit action=patch_instruction 精准改指令"))
+        }
     }
 }

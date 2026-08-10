@@ -24,6 +24,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +44,7 @@ import com.soreverse.mcp.core.EndpointInfo
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.NetworkInspector
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.StoragePermissionHelper
 import com.soreverse.mcp.engine.WorkDirectory
 import com.soreverse.mcp.service.McpForegroundService
 import org.json.JSONArray
@@ -79,6 +82,34 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 icon = Icons.Default.FolderOpen,
                 trailing = if (t.zh) "选择" else "Choose",
                 onClick = { pickTree.launch(null) },
+            )
+            GroupDivider()
+            var showStorageDialog by remember { mutableStateOf(false) }
+            val storageGranted = StoragePermissionHelper.hasAllFilesAccess(context)
+            ToggleRow(
+                if (t.zh) "全部文件访问" else "All files access",
+                storageGranted,
+            ) {
+                StoragePermissionHelper.ensureAllFilesAccess(context) { showStorageDialog = true }
+            }
+        }
+        if (showStorageDialog) {
+            AlertDialog(
+                onDismissRequest = { showStorageDialog = false },
+                title = { Text(if (t.zh) "需要所有文件访问权限" else "All files access required") },
+                text = {
+                    Text(if (t.zh)
+                        "开启后 MCP 工具在隧道开启时可访问 /sdcard 与 /storage/emulated/0。点击「去授权」前往系统设置页授予「所有文件访问」权限。"
+                        else
+                        "MCP tools can access /sdcard and /storage/emulated/0 when a tunnel is active. Grant \"All files access\" to continue.")
+                },
+                confirmButton = {
+                    TextButton({
+                        showStorageDialog = false
+                        runCatching { context.startActivity(StoragePermissionHelper.allFilesAccessIntent(context)) }
+                    }) { Text(if (t.zh) "去授权" else "Grant") }
+                },
+                dismissButton = { TextButton({ showStorageDialog = false }) { Text(if (t.zh) "取消" else "Cancel") } },
             )
         }
         GlassGroup(title = if (t.zh) "服务端口" else "Service port", footer = portStatusText(portText.toIntOrNull() ?: settings.port, McpForegroundService.isRunning(), t.zh)) {

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Memory
@@ -72,6 +73,8 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Disclaimer -> t.disclaimer
     SettingsDest.About -> t.about
     SettingsDest.BackupRestore -> t.backupRestore
+    SettingsDest.ApkSign -> if (t.zh) "APK 签名设置" else "APK Signing"
+    SettingsDest.TempWorkspace -> if (t.zh) "临时工作区" else "Temp Workspaces"
 }
 
 @Composable
@@ -173,6 +176,11 @@ internal fun SettingsHub(
                     SettingsTile(if (t.zh) "外观" else "Look", if (t.zh) "主题 / 强调色 / 密度" else "Theme / accent / density", Icons.Default.Tune, AppPalette.indigo, { onDest(SettingsDest.Appearance) }, Modifier.weight(1f).fillMaxHeight())
                     SettingsTile(if (t.zh) "保活" else "Keep-alive", if (t.zh) "唤醒锁 / 自启" else "Wake lock / boot", Icons.Default.PowerSettingsNew, AppPalette.green, { onDest(SettingsDest.KeepAlive) }, Modifier.weight(1f).fillMaxHeight())
                 }
+                Text(if (t.zh) "MCP 工具" else "MCP Tools", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile(if (t.zh) "工具设置" else "Tool Settings", if (t.zh) "APK 签名 / 密钥" else "APK signing / keys", Icons.Default.Build, AppPalette.orange, { onDest(SettingsDest.ApkSign) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "临时工作区" else "Temp Workspaces", if (t.zh) "数量 / 清理" else "Limit / clean", Icons.Default.DeleteSweep, AppPalette.green, { onDest(SettingsDest.TempWorkspace) }, Modifier.weight(1f).fillMaxHeight())
+                }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
                     NavRow(if (t.zh) "返回数量" else "Result limits", "limit / disasm / hexdump", Icons.Default.Analytics, onClick = { onDest(SettingsDest.Limits) })
@@ -242,6 +250,8 @@ internal fun SettingsHub(
             SettingsDest.AiDeep -> SettingsAiDeepPage(t, settings)
             SettingsDest.Updates -> SettingsUpdatesPage(t, settings, updateManager, availableRelease, onRelease)
             SettingsDest.Probe -> SettingsProbePage(t, settings)
+            SettingsDest.ApkSign -> SettingsApkSignPage(t, settings)
+            SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

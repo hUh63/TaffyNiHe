@@ -85,12 +85,31 @@ object PatchTemplateTool {
                     .put("permission", "\${p.permission}"),
             ),
         ),
+        Tpl(
+            "recon_apk",
+            "逆向诊断: 壳识别 + 签名方案 + 原生库自检(逆向第一步综合体检)",
+            listOf("path"),
+            listOf(
+                "taffy_apk_shell_check" to JSONObject().put("path", "\${p.path}").put("detail", true),
+                "taffy_apk_sign_info" to JSONObject().put("path", "\${p.path}"),
+                "taffy_native_self_test" to JSONObject().put("probe", true),
+            ),
+        ),
+        Tpl(
+            "resign_with_check",
+            "重签名前诊断: 先壳识别判断是否能直接改签, 再重签名",
+            listOf("apk"),
+            listOf(
+                "taffy_apk_shell_check" to JSONObject().put("path", "\${p.apk}").put("detail", false),
+                "taffy_apk_sign" to JSONObject().put("inputApk", "\${p.apk}"),
+            ),
+        ),
     )
 
     val tool: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_patch_template",
-            "【常用 Patch 模板】把 MT 高频逆向操作封装成一步调用(复用现有工具)。action=list 列出内置模板及所需参数; action=apply 选模板并填参数执行。内置: resign_apk(重签名) / dex_string_global_replace(全局字符串替换) / dex_string_patch_single(单方法字符串替换) / apk_patch_bytes_write(CAS字节写) / apk_add_permission(加权限)。对标 MT 的一键改包常用操作。",
-            "Common reverse-engineering patch templates that call existing tools in one step. action=list shows built-in templates + required params; action=apply runs one. Templates: resign_apk / dex_string_global_replace / dex_string_patch_single / apk_patch_bytes_write / apk_add_permission. Mirrors MT-style one-click common patches.",
+            "【常用 Patch 模板】把 MT 高频逆向操作封装成一步调用(复用现有工具)。action=list 列出内置模板及所需参数; action=apply 选模板并填参数执行。内置: resign_apk(重签名) / resign_with_check(重签前诊断) / dex_string_global_replace(全局字符串替换) / dex_string_patch_single(单方法字符串替换) / apk_patch_bytes_write(CAS字节写) / apk_add_permission(加权限) / recon_apk(逆向诊断: 壳+签名+原生库体检)。对标 MT 的一键改包常用操作。",
+            "Common reverse-engineering patch templates that call existing tools in one step. action=list shows built-in templates + required params; action=apply runs one. Templates: resign_apk / resign_with_check / dex_string_global_replace / dex_string_patch_single / apk_patch_bytes_write / apk_add_permission / recon_apk (shell+signature+native probe one-shot). Mirrors MT-style one-click common patches.",
             "apk", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {

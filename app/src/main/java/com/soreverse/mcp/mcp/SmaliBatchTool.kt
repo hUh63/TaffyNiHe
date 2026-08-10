@@ -40,8 +40,8 @@ object SmaliBatchTool {
         ) {
             objectSchema(props {
                 "action".oneOf("批处理action",
-                    "init(全量解包到smali目录) | rebuild(重编回DEX并写回APK) | rename_class(重命名类,去混淆) | diff(对比差异) | rollback(回滚) | list_snapshots(列快照)",
-                    "init", "rebuild", "rename_class", "diff", "rollback", "list_snapshots")
+                    "init(全量解包到smali目录) | rebuild(重编回DEX并写回APK) | rename_class(重命名类,去混淆) | diff_tree(对比目录改动) | diff(对比差异) | rollback(回滚) | list_snapshots(列快照)",
+                    "init", "rebuild", "rename_class", "diff_tree", "diff", "rollback", "list_snapshots")
                 "path" str "APK 文件路径(init) 或 DEX 文件路径(init 单 dex, 用 isDex 标记)"
                 "isDex" bool "init: true 表示 path 是单个 .dex 而非 APK(可选)"
                 "workDir" str "rebuild/rename_class: 工作目录(init 返回的)"
@@ -60,6 +60,7 @@ object SmaliBatchTool {
                 "init" -> initWork(ctx, args)
                 "rebuild" -> rebuildWork(ctx, args)
                 "rename_class" -> renameClass(ctx, args)
+                "diff_tree" -> diffTree(ctx, args)
                 "diff" -> snapshotDiff(ctx, args)
                 "rollback" -> snapshotRollback(ctx, args)
                 "list_snapshots" -> snapshotList(ctx, args)
@@ -102,6 +103,7 @@ object SmaliBatchTool {
                         .put("dex", dexName)
                         .put("smaliDir", smaliDir.absolutePath)
                         .put("smaliFiles", count)
+                        .put("manifestPath", writeTreeManifest(workRoot))
                         .put("workDir", workRoot.absolutePath)
                         .put("snapshotId", snap?.first ?: JSONObject.NULL)
                         .put("hint", "改完 smali 后调用 rebuild(action=rebuild, workDir=workDir, path=原$path)"))
@@ -150,6 +152,7 @@ object SmaliBatchTool {
                         .put("dexCount", dexMap.size)
                         .put("snapshotId", snap?.first ?: JSONObject.NULL)
                         .put("dexes", plans)
+                        .put("manifestPath", writeTreeManifest(workRoot))
                         .put("hint", "已把全部 DEX 反汇编到 workDir 下各 *_smali 目录, 可任意改; 改完调用 rebuild"))
                 }
             }.getOrElse { e ->
@@ -337,6 +340,76 @@ object SmaliBatchTool {
             }
         }
 
+/** 生成工作目录 tree 快照(所有 *_smali 下 .smali 文件的相对路径+SHA), 存 workDir/manifest.json。 */
+        private fun writeTreeManifest(workRoot: File): String {
+            return runCatching {
+                val manifest = JSONObject()
+                    .put("tool", "taffy_smali_batch")
+                    .put("createdAt", System.currentTimeMillis())
+                val files = JSONArray()
+                val smaliDirs = workRoot.listFiles { f -> f.isDirectory && f.name.endsWith("_smali") }?.toList() ?: emptyList()
+                for (dir in smaliDirs) {
+                    dir.walkTopDown().filter { it.isFile && it.extension == "smali" }.forEach { f ->
+                        files.put(JSONObject()
+                            .put("path", f.relativeTo(workRoot).path)
+                            .put("sha256", EditSnapshotService.sha256(f))
+                            .put("size", f.length()))
+                    }
+                }
+                manifest.put("files", files)
+                val mf = File(workRoot, "manifest.json")
+                mf.writeText(manifest.toString(), Charsets.UTF_8)
+                mf.absolutePath
+            }.getOrElse { "" }
+        }
+
+        /** 对比工作目录当前 .smali 文件树与 init 时的清单, 报告新增/删除/修改。 */
+        private fun diffTree(ctx: ToolContext, args: JSONObject): JSONObject {
+            val workDirPath = args.str("workDir")
+            if (workDirPath.isBlank()) return err("INVALID_ARGUMENT", "缺少 workDir", "workDir", "")
+            val workDir = File(workDirPath)
+            if (!workDir.isDirectory) return err("DIR_NOT_FOUND", "工作目录不存在: $workDirPath", "workDir", workDirPath)
+            val mf = File(workDir, "manifest.json")
+            if (!mf.isFile) return err("NO_MANIFEST", "无 init 清单(manifest.json)。先 action=init 建立基线再 diff", "workDir", workDirPath)
+            return runCatching {
+                val manifest = JSONObject(mf.readText())
+                val baseline = HashMap<String, JSONObject>()
+                val arr = manifest.optJSONArray("files") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    baseline[o.optString("path")] = o
+                }
+                // 当前文件树
+                val current = HashMap<String, Long>()
+                workDir.walkTopDown().filter { it.isFile && it.extension == "smali" }.forEach { f ->
+                    current[f.relativeTo(workDir).path] = f.length()
+                }
+                val added = JSONArray()   // 新增(不在基线)
+                val removed = JSONArray() // 删除(基线有但当前无)
+                val modified = JSONArray() // 修改(大小不同)
+                val unchanged = JSONArray()
+                for ((path, size) in current.entries.sortedBy { it.key }) {
+                    val b = baseline[path]
+                    if (b == null) added.put(path)
+                    else if (b.optLong("size") != size) modified.put(path)
+                    else unchanged.put(path)
+                }
+                for (path in baseline.keys.filter { !current.containsKey(it) }.sorted()) removed.put(path)
+                ok(JSONObject()
+                    .put("action", "diff_tree")
+                    .put("workDir", workDirPath)
+                    .put("baselineFiles", baseline.size)
+                    .put("currentFiles", current.size)
+                    .put("added", added)
+                    .put("removed", removed)
+                    .put("modified", modified)
+                    .put("unchangedCount", unchanged.length())
+                    .put("hint", "added/removed/modified 为相对 init 基线的新增/删除/修改文件。改完用 action=rebuild 回编。")
+                    .put("previousHint", "与 taffy_smali_batch 解出的初始状态对比, 方便确认改动的文件范围"))
+            }.getOrElse { e ->
+                err("DIFF_TREE_FAILED", "目录 diff 失败: ${e.message ?: e.javaClass.simpleName}", "workDir", workDirPath)
+            }
+        }
         private fun countOccurrences(haystack: String, needle: String): Int {
             if (needle.isEmpty()) return 0
             var count = 0; var idx = 0

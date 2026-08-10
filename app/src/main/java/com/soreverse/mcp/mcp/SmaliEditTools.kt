@@ -30,6 +30,10 @@ import java.util.zip.ZipFile
  */
 object SmaliEditTools {
 
+    /** APK/输入大小上限(512MB), 防大 APK 全局替换 OOM */
+    private const val MAX_INPUT_BYTES = 512L * 1024L * 1024L
+
+
     /** Smali 增量编辑 */
     val smaliEdit: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_smali_edit",
@@ -365,6 +369,9 @@ object SmaliEditTools {
 
             // 按 scope 扫描, 返回改动后的 DEX (map: dex条目名 -> 重写后的新 DEX 字节)。
             // null 表示该 DEX 无改动。
+            if (scope == "global" && apk.length() > MAX_INPUT_BYTES) {
+                return err("INPUT_TOO_LARGE", "APK 过大(${(apk.length() / 1024 / 1024)}MB, 上限 512MB), 全局替换可能 OOM。改用 scope=class/method", "path", apk.absolutePath)
+            }
             val results = HashMap<String, ByteArray>()
             val opcodes = Opcodes.getDefault()
 

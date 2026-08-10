@@ -26,6 +26,9 @@ import java.util.zip.ZipFile
  */
 object SmaliBatchTool {
 
+    /** APK/输入大小上限(512MB) */
+    private const val MAX_INPUT_BYTES = 512L * 1024L * 1024L
+
     /** APK 里识别 DEX 的条目名 */
     private fun isDexEntry(name: String) = name.matches(Regex("classes\\d*\\.dex"))
 
@@ -67,6 +70,9 @@ object SmaliBatchTool {
             if (path.isBlank()) return err("INVALID_ARGUMENT", "缺少 path(APK/DEX)", "path", "")
             val input = File(path)
             if (!input.isFile) return err("FILE_NOT_FOUND", "文件不存在: $path", "path", path)
+            if (input.length() > MAX_INPUT_BYTES) {
+                return err("INPUT_TOO_LARGE", "输入过大(${(input.length() / 1024 / 1024)}MB, 上限 512MB), 可能 OOM。请拆小或直接编辑单类", "path", path)
+            }
             val isDex = args.optBoolean("isDex", false)
             val api = args.intValue("apiLevel", 34)
             val opcodes = if (api > 0) Opcodes.forApi(api) else Opcodes.getDefault()
@@ -111,6 +117,10 @@ object SmaliBatchTool {
                         val dexEntries = zf.entries().toList().filter { isDexEntry(it.name) }
                         if (dexEntries.isEmpty()) return@runCatching err("NO_DEX", "APK 内无 classes*.dex", "path", path)
                         for (de in dexEntries) {
+                            // 单个 DEX 解压后过大也防 OOM
+                            if (de.size > MAX_INPUT_BYTES / 2) {
+                                return@runCatching err("DEX_TOO_LARGE", "DEX ${de.name} 解压后过大(${(de.size / 1024 / 1024)}MB), 可能 OOM", "path", path)
+                            }
                             val tempDex = File.createTempFile("smb_", ".dex")
                             zf.getInputStream(de).use { it.copyTo(tempDex.outputStream()) }
                             try {

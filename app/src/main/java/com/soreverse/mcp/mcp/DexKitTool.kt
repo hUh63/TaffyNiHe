@@ -6,10 +6,6 @@ import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
-import com.android.tools.smali.dexlib2.iface.instruction.MethodReferenceInstruction
-import com.android.tools.smali.dexlib2.iface.instruction.NarrowLiteralInstruction
-import com.android.tools.smali.dexlib2.iface.instruction.StringReferenceInstruction
-import com.android.tools.smali.dexlib2.iface.instruction.WideLiteralInstruction
 import org.json.JSONArray
 import org.json.JSONObject
 import org.luckypray.dexkit.DexKitBridge
@@ -181,6 +177,7 @@ object DexKitTool {
         private fun methodStrings(apk: File, args: JSONObject): JSONObject {
             val className = args.str("className")
             val method = args.str("method")
+            if (className.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 className", "className", "")
             if (method.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 method", "method", "")
             val methodBase = method.substringBefore(';').trim()
             val classDescriptor = "L${className.replace('.', '/')};"
@@ -191,6 +188,7 @@ object DexKitTool {
             val constants = LinkedHashSet<String>()
 
             var foundMethod = false
+            // baksmali 反汇编 + 文本正则提取, 复用已验证 API, 不依赖底层指令接口
             runCatching {
                 java.util.zip.ZipFile(apk).use { zf ->
                     val dexEntries = zf.entries().toList().filter { it.name.matches(Regex("classes\\d*\\.dex")) }
@@ -199,34 +197,26 @@ object DexKitTool {
                         zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
                         try {
                             val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
+                            // 仅当该类存在于该 DEX 时才反汇编整个 DEX(避免对所有 DEX 无谓 baksmali)
                             val classDef = dexFile.classes.firstOrNull { it.type == classDescriptor } ?: continue
-                            for (m in classDef.methods) {
-                                if (m.name != methodBase) continue
-                                // 若 method 含签名, 校验参数类型
-                                if (method.indexOf(';') >= 0) {
-                                    val sigMatch = method.substringAfter(';').trim()
-                                    if (sigMatch.isNotBlank()) {
-                                        val paramTypes = m.parameters.map { it.type }.joinToString("")
-                                        if (!paramTypes.contains(sigMatch.trim())) continue
-                                    }
+                            // 类存在但无该名字的方法(可能拼错) → 跳过, 最终返回 METHOD_NOT_FOUND
+                            if (classDef.methods.none { it.name == methodBase }) continue
+                            val outDir = File.createTempFile("smali_ms_", "").apply { delete(); mkdirs() }
+                            try {
+                                val bopts = com.android.tools.smali.baksmali.BaksmaliOptions()
+                                com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(dexFile, outDir, 4, bopts)
+                                val smaliFile = File(outDir, className.replace('.', '/') + ".smali")
+                                if (smaliFile.isFile) {
+                                    val smaliText = smaliFile.readText()
+                                    val extracted = extractMethodRefs(smaliText, method, methodBase)
+                                    strings.addAll(extracted.first)
+                                    constants.addAll(extracted.second)
+                                    calls.addAll(extracted.third)
+                                    // 只要该类在本 DEX 中被找到且成功反汇编,即视为已处理
+                                    if (smaliFile.isFile) { foundMethod = true }
                                 }
-                                foundMethod = true
-                                val impl = m.implementation ?: continue
-                                for (insn in impl.instructions) {
-                                    when (insn) {
-                                        is StringReferenceInstruction -> strings.add(insn.string)
-                                        is MethodReferenceInstruction -> calls.add(insn.reference.definingClass + "->" + insn.reference.name + insn.reference.parameterTypes.joinToString("") { it })
-                                        is NarrowLiteralInstruction -> {
-                                            val v = insn.narrowLiteral
-                                            if (v != 0) constants.add("0x" + java.lang.Integer.toHexString(v) + " ($v)")
-                                        }
-                                        is WideLiteralInstruction -> {
-                                            val v = insn.wideLiteral
-                                            if (v != 0L) constants.add("0x" + java.lang.Long.toHexString(v) + " ($v)")
-                                        }
-                                        else -> {}
-                                    }
-                                }
+                            } finally {
+                                outDir.deleteRecursively()
                             }
                         } finally {
                             tempDex.delete()
@@ -250,6 +240,38 @@ object DexKitTool {
                 .put("callCount", calls.size)
                 .put("calls", JSONArray(calls.take(limit * 2)))
                 .put("hint", "method_strings 列出方法引用的字符串/常量/调用, 配合 taffy_smali_edit action=patch_instruction 精准改指令"))
+        }
+
+        /** 从类 smali 文本中提取目标方法体内引用的字符串/常量/方法调用。返回 (字符串, 常量, 调用)。 */
+        private fun extractMethodRefs(smaliText: String, method: String, methodBase: String): Triple<Set<String>, Set<String>, Set<String>> {
+            val strs = LinkedHashSet<String>()
+            val cons = LinkedHashSet<String>()
+            val cals = LinkedHashSet<String>()
+            val methodStartRegex = if (method.indexOf(';') >= 0) {
+                Regex("\\.method.*?${Regex.escape(methodBase)}\\s*\\(.*${Regex.escape(method.substringAfter(';', ""))}")
+            } else {
+                Regex("\\.method.*?\\b${Regex.escape(methodBase)}\\s*\\(")
+            }
+            var inTarget = false
+            for (line in smaliText.lines()) {
+                val t = line.trim()
+                when {
+                    t.startsWith(".method") -> inTarget = methodStartRegex.containsMatchIn(line)
+                    t == ".end method" -> inTarget = false
+                    inTarget -> {
+                        // const-string / const-string/jumbo  vN, "literal"
+                        val sm = Regex("const-string(?:/jumbo)?\\s+v\\d+,\\s*\"(.*?)\"\\s*$").find(line)
+                        if (sm != null) { strs.add(sm.groupValues[1]); continue }
+                        // .invoke-* {..}, Lcls;->name(params)ret  (覆盖 virtual/super/direct/static/interface & -range)
+                        val im = Regex("\\.invoke(?:-virtual|-super|-direct|-static|-interface)?(?:/range)?\\s+.*?,\\s*(L[^;]+(?:;[^;]*)?)->([^(]*)\\(([^)]*)\\)\\w*").find(line)
+                        if (im != null) { cals.add(im.groupValues[1] + "->" + im.groupValues[2] + "(" + im.groupValues[3] + ")"); continue }
+                        // const/4,const/16,const,const-wide : const vN, 0x...
+                        val cm = Regex("const(?:/4|/16|/high16)?|const-wide(?:/16|/32)?\\s+v\\d+,\\s*(0x[0-9a-fA-F]+|-?\\d+)").find(line)
+                        if (cm != null) cons.add(cm.groupValues[1])
+                    }
+                }
+            }
+            return Triple(strs, cons, cals)
         }
     }
 }

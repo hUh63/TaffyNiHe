@@ -354,6 +354,7 @@ object AdvancedTools {
                                 System.arraycopy(writeBytes, 0, newBytes, offset, writeBytes.size)
 
                                 val tempFile = File.createTempFile("patch_", ".apk", file.parentFile)
+                                EditSnapshotService.snapshot(ctx.context, "taffy_apk_patch_bytes", file.absolutePath)
                                 file.copyTo(File(file.parentFile, "${file.nameWithoutExtension}.bak.apk"), overwrite = true)
                                 java.util.zip.ZipOutputStream(tempFile.outputStream()).use { zos ->
                                     zf.entries().toList().forEach { e ->

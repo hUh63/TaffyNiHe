@@ -1058,6 +1058,8 @@ object ToolCatalog {
         EditSnapshotService.handler(),
         // 塔菲逆核: 常用逆向 Patch 模板(一键高频操作, 复用现有工具)
         *PatchTemplateTool.ALL.toTypedArray(),
+        // 塔菲逆核: APK 加固检测(只读, 逆向第一步判断壳)
+        *ShellDetectorTool.ALL.toTypedArray(),
         // 塔菲逆核: 高级DEX分析(指令级交叉引用/类大纲/字节码/deodex/增量重编)
         *DexAnalysisTools.ALL.toTypedArray(),
         // 塔菲逆核: 高精度Manifest编辑+资源交叉引用(用ARSCLib, 不用正则)

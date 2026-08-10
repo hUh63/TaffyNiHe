@@ -560,6 +560,7 @@ object ArscTool {
                 val kw = keyword.lowercase()
                 val hits = JSONArray()
                 var matched = 0
+                var truncated = false
                 // typeId → 类型名 映射(resourceId 高16位含 typeId)
                 val typeIdToName = HashMap<Int, String>()
                 for (pkg in result.packages) {
@@ -578,7 +579,7 @@ object ArscTool {
                             hay.lowercase().contains(kw)
                         }
                         if (!okHit) continue
-                        if (matched >= limit) { matched++; break@outer }
+                        if (matched >= limit) { truncated = true; break@outer }
                         hits.put(JSONObject()
                             .put("resourceId", "0x%08X".format(entry.entryId))
                             .put("name", entry.name)
@@ -593,6 +594,7 @@ object ArscTool {
                     .put("action", "search_strings")
                     .put("keyword", if (regex.isNotBlank()) "/$regex/" else keyword)
                     .put("matched", matched)
+                    .put("truncated", truncated)
                     .put("hits", hits))
             }
 

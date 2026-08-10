@@ -209,11 +209,11 @@ object DexKitTool {
                                 if (smaliFile.isFile) {
                                     val smaliText = smaliFile.readText()
                                     val extracted = extractMethodRefs(smaliText, method, methodBase)
-                                    strings.addAll(extracted.first)
-                                    constants.addAll(extracted.second)
-                                    calls.addAll(extracted.third)
-                                    // 只要该类在本 DEX 中被找到且成功反汇编,即视为已处理
-                                    if (smaliFile.isFile) { foundMethod = true }
+                                    strings.addAll(extracted.strings)
+                                    constants.addAll(extracted.constants)
+                                    calls.addAll(extracted.calls)
+                                    // 以"是否真正进入过目标方法体"为判定标准, 避免 smali 文件存在但方法签名没匹配到的误报
+                                    if (extracted.found) { foundMethod = true }
                                 }
                             } finally {
                                 outDir.deleteRecursively()
@@ -242,15 +242,19 @@ object DexKitTool {
                 .put("hint", "method_strings 列出方法引用的字符串/常量/调用, 配合 taffy_smali_edit action=patch_instruction 精准改指令"))
         }
 
-        /** 从类 smali 文本中提取目标方法体内引用的字符串/常量/方法调用。返回 (字符串, 常量, 调用)。 */
-        private fun extractMethodRefs(smaliText: String, method: String, methodBase: String): Triple<Set<String>, Set<String>, Set<String>> {
+        /** 从类 smali 文本中提取目标方法体内引用的字符串/常量/方法调用。返回 (字符串, 常量, 调用, 是否找到方法体)。 */
+        private fun extractMethodRefs(smaliText: String, method: String, methodBase: String): MethodRefs {
             val strs = LinkedHashSet<String>()
             val cons = LinkedHashSet<String>()
             val cals = LinkedHashSet<String>()
+            var bodySeen = false
+            // smali 方法头: .method [访问标志...] name(params)returnType
+            // 若调用方提供 method;paramsSuffix(如 onCreate;Landroid/os/Bundle;)则要求参数签名也匹配, 避免同名重载误伤。
             val methodStartRegex = if (method.indexOf(';') >= 0) {
-                Regex("\\.method.*?${Regex.escape(methodBase)}\\s*\\(.*${Regex.escape(method.substringAfter(';', ""))}")
+                val sigSuffix = Regex.escape(method.substringAfter(';', "").trim())
+                Regex("""^\.method\b.*\b${Regex.escape(methodBase)}\s*\([^)]*${sigSuffix}[^)]*\)\s*\S+""")
             } else {
-                Regex("\\.method.*?\\b${Regex.escape(methodBase)}\\s*\\(")
+                Regex("""^\.method\b.*\b${Regex.escape(methodBase)}\s*\([^)]*\)\s*\S+""")
             }
             var inTarget = false
             for (line in smaliText.lines()) {
@@ -259,6 +263,7 @@ object DexKitTool {
                     t.startsWith(".method") -> inTarget = methodStartRegex.containsMatchIn(line)
                     t == ".end method" -> inTarget = false
                     inTarget -> {
+                        bodySeen = true
                         // const-string / const-string/jumbo  vN, "literal"
                         val sm = Regex("const-string(?:/jumbo)?\\s+v\\d+,\\s*\"(.*?)\"\\s*$").find(line)
                         if (sm != null) { strs.add(sm.groupValues[1]); continue }
@@ -271,7 +276,15 @@ object DexKitTool {
                     }
                 }
             }
-            return Triple(strs, cons, cals)
+            return MethodRefs(strs, cons, cals, bodySeen)
         }
     }
+
+    /** 方法内字符串/常量/调用提取结果 */
+    private data class MethodRefs(
+        val strings: Set<String>,
+        val constants: Set<String>,
+        val calls: Set<String>,
+        val found: Boolean,
+    )
 }

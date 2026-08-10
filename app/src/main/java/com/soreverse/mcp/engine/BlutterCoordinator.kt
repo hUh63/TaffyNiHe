@@ -139,64 +139,71 @@ internal class BlutterCoordinator(private val context: Context, private val stor
             return err("STRING_SCAN_FAILED", "读取 libapp.so 失败: ${error.message ?: error.javaClass.simpleName}", "path", path)
         }
 
+        // 边扫边过滤、边计数、到达 limit 提前终止, 避免对大快照全量构建字符串集合(内存/时间开销)。
         val hits = JSONArray()
-        var scanned = 0
-        // 扫描 ASCII 字符串与 UTF-16LE 字符串
-        val ascii = extractAscii(libapp, minLen)
-        val utf16 = extractUtf16(libapp, minLen)
-        val all = LinkedHashSet<String>()
-        all.addAll(ascii); all.addAll(utf16)
-        for (s in all) {
-            if (keyword.isNotBlank() && !s.lowercase().contains(keyword)) continue
-            if (scanned >= limit) break
-            hits.put(JSONObject().put("value", s))
-            scanned++
-        }
+        val scanned = scanStrings(libapp, keyword, minLen, limit) { hits.put(JSONObject().put("value", it)) }
+        val truncated = scanned >= limit
 
         return ok(JSONObject()
             .put("action", "strings")
             .put("library", path)
             .put("matched", scanned)
-            .put("totalUnique", all.size)
+            .put("truncated", truncated)
             .put("hits", hits)
             .put("hint", "扫描到 libapp.so 中的可读字符串(类名/函数名/URL/文案)。配合 taffy_flutter_blutter action=analyze 反编译定位逻辑"))
     }
 
-    private fun extractAscii(data: ByteArray, minLen: Int): List<String> {
-        val out = mutableListOf<String>()
-        val cur = StringBuilder()
-        for (b in data) {
-            val c = b.toInt() and 0xFF
-            val printable = c in 0x20..0x7E
-            if (printable) {
-                cur.append(c.toChar())
-            } else {
-                if (cur.length >= minLen) out.add(cur.toString())
-                cur.setLength(0)
-            }
+    /**
+     * 流式扫描 libapp 可读字符串(ASCII + UTF-16LE), 命中 keyword(可选)且去重后写入 [emit],
+     * 达到 [limit] 提前终止。返回实际收集到的字符串数。
+     */
+    private fun scanStrings(data: ByteArray, keyword: String, minLen: Int, limit: Int, emit: (String) -> Unit): Int {
+        val seen = LinkedHashSet<String>()
+        val n = data.size
+        var i = 0
+        var count = 0
+        while (i < n && count < limit) {
+            // 先尝试 ASCII 片段
+            if (data[i].toInt() and 0xFF in 0x20..0x7E) {
+                val start = i
+                while (i < n && data[i].toInt() and 0xFF in 0x20..0x7E) i++
+                if (i - start >= minLen) {
+                    val s = String(data, start, i - start, Charsets.US_ASCII)
+                    if ((keyword.isBlank() || s.lowercase().contains(keyword)) && seen.add(s)) { emit(s); count++ }
+                }
+            } else if (i + 1 < n) {
+                // 尝试 UTF-16LE 片段(一次取两个字节)
+                val hi = data[i + 1].toInt() and 0xFF
+                val lo = data[i].toInt() and 0xFF
+                val start = i
+                if (lo in 0x20..0x7E && hi == 0) { i += 2; continue } // 单字节可打印, ascii 分支已处理
+                while (i + 1 < n) {
+                    val h = data[i + 1].toInt() and 0xFF
+                    val l = data[i].toInt() and 0xFF
+                    val cp = (h shl 8) or l
+                    if (isUtf16Char(cp)) i += 2 else break
+                }
+                if (i - start >= minLen * 2 && i - start >= 2) {
+                    val s = String(data, start, i - start, Charsets.UTF_16LE)
+                    if ((keyword.isBlank() || s.lowercase().contains(keyword)) && seen.add(s)) { emit(s); count++ }
+                }
+                if (i == start) i += 2 // 防死循环: 未消费任何字节则前进 2
+            } else i++
         }
-        if (cur.length >= minLen) out.add(cur.toString())
-        return out
+        return count
     }
 
-    private fun extractUtf16(data: ByteArray, minLen: Int): List<String> {
-        val out = mutableListOf<String>()
-        var i = 0
-        val n = data.size - 1
-        val cur = StringBuilder()
-        while (i < n) {
-            val low = data[i].toInt() and 0xFF
-            val high = data[i + 1].toInt() and 0xFF // LE: 低位在前; high 通常 0(ASCII), 否则需 utf8
-            val code = (high shl 8) or low
-            if (high == 0 && low in 0x20..0x7E) {
-                cur.append(low.toChar())
-            } else {
-                if (cur.length >= minLen) out.add(cur.toString())
-                cur.setLength(0)
-            }
-            i += 2
-        }
-        if (cur.length >= minLen) out.add(cur.toString())
-        return out
+    /** 判断是否为可作为 UTF-16LE 字符串内容的合法码元(白名单区间)。 */
+    private fun isUtf16Char(cp: Int): Boolean = when {
+        cp in 0x20..0x7E -> true // ASCII 可打印
+        cp in 0x00A0..0x00FF -> true // 拉丁-1 补充(à/é/ñ/ö 等)
+        cp in 0x2010..0x206F -> true // 常用标点/符号(– — ‘ ’ “ ” … ™)
+        cp in 0x2E80..0x303F -> true // CJK 部首/注音/标点
+        cp in 0x3040..0x30FF -> true // 日文假名
+        cp in 0x3400..0x9FFF -> true // CJK 统一表意(含扩展 A)
+        cp in 0xAC00..0xD7AF -> true // 韩文音节
+        cp in 0xFF00..0xFFEF -> true // 全角形式
+        cp in 0xD800..0xDFFF -> false // 孤立代理(需配对, 不单独当作字符串内容)
+        else -> false
     }
 }

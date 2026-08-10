@@ -154,7 +154,7 @@ object SmaliEditTools {
             val classDescriptor = "L${className.replace('.', '/')};"
 
             // 1. 找到类在哪个 DEX
-            val (_, tempDex) = findClassInApk(apk, classDescriptor)
+            val (dexEntryName, tempDex) = findClassInApk(apk, classDescriptor)
                 ?: return err("CLASS_NOT_FOUND", "类 $className 不在 APK 的任何 DEX 中", "className", className)
 
             try {
@@ -186,9 +186,6 @@ object SmaliEditTools {
                 val newDexBytes = newDex.readBytes()
                 newDex.delete()
                 tempDex.delete()
-
-                val dexEntryName = findDexEntryName(apk, classDescriptor)
-                    ?: return err("CLASS_NOT_FOUND", "替换后找不到类所在的 DEX 条目", "className", className)
 
                 val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
                 ZipFile(apk).use { zf ->
@@ -339,10 +336,13 @@ object SmaliEditTools {
         /** 在 smali 文本中定位方法体, 替换方法内的 from→to 指令(occurrence 起 1)。返回新文本, 未找到返回 null。 */
         private fun patchMethodInstruction(smaliText: String, method: String, from: String, to: String, occurrence: Int): String? {
             val methodBase = method.substringBefore(';').trim() // 方法名(去掉可能的参数签名后缀)
+            // smali 方法头: .method [访问标志...] name(params)returnType
+            // 若调用方提供 method;paramsSuffix(如 onCreate;Landroid/os/Bundle;)则要求参数签名也匹配, 避免同名重载误伤。
             val methodStartRegex = if (method.indexOf(';') >= 0) {
-                Regex("\\.method.*?${Regex.escape(methodBase)}\\s*\\(.*" + Regex.escape(method.substringAfter(';', "")))
+                val sigSuffix = Regex.escape(method.substringAfter(';', "").trim())
+                Regex("""^\.method\b.*\b${Regex.escape(methodBase)}\s*\([^)]*${sigSuffix}[^)]*\)\s*\S+""")
             } else {
-                Regex("\\.method.*?\\b${Regex.escape(methodBase)}\\s*\\(")
+                Regex("""^\.method\b.*\b${Regex.escape(methodBase)}\s*\([^)]*\)\s*\S+""")
             }
             val fromTrim = from.trim()
             val lines = smaliText.lines()
@@ -428,27 +428,6 @@ object SmaliEditTools {
             return null
         }
 
-        /** 只查找类在哪个 DEX 条目, 不返回文件 */
-        private fun findDexEntryName(apk: File, classDescriptor: String): String? {
-            ZipFile(apk).use { zf ->
-                val dexEntries = zf.entries().toList().filter {
-                    it.name.matches(Regex("classes\\d*\\.dex"))
-                }
-                for (dexEntry in dexEntries) {
-                    val tempDex = File.createTempFile("chk_", ".dex")
-                    zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
-                    try {
-                        val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
-                        if (dexFile.classes.any { it.type == classDescriptor }) {
-                            return dexEntry.name
-                        }
-                    } finally {
-                        tempDex.delete()
-                    }
-                }
-            }
-            return null
-        }
     }
 
     val ALL = listOf(smaliEdit)

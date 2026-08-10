@@ -446,11 +446,13 @@ object ArscTool {
             "analyze", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
-                "action".oneOf("分析action", "parse(解析) | list_types(列出类型) | list_entries(列出条目)", "parse", "list_types", "list_entries")
+                "action".oneOf("分析action", "parse(解析) | list_types(列出类型) | list_entries(列出条目) | search_strings(搜可读字符串)", "parse", "list_types", "list_entries", "search_strings")
                 "path" str "resources.arsc 文件或 APK 的绝对路径"
                 "apkPath" str "APK 文件路径（用于从 APK 提取 resources.arsc 并解析）"
                 "packageId" int "筛选目标包 ID（action=list_types/list_entries, 可选）"
-                "typeName" str "筛选类型名（如 string/drawable/layout, action=list_entries, 可选）"
+                "typeName" str "筛选类型名（如 string/drawable/layout, action=list_entries/search_strings, 可选）"
+                "keyword" str "search_strings: 要搜的字符串/URL/文案(大小写不敏感)"
+                "regex" str "search_strings: 可选正则(优先于 keyword), 如 https?://"
                 "limit" int "最多返回条目（默认 500）"
             })
         }
@@ -540,6 +542,58 @@ object ArscTool {
                     .put("total", (result.packages.sumOf { p -> p.typeEntries.size }))
                     .put("returned", entries.length())
                     .put("entries", entries))
+            }
+
+            "search_strings" -> {
+                // 对标 RzDroid 资源字符串搜索：扫所有条目, 返回含关键词的可读字符串值(含 URL/文案/接口名)。
+                val keyword = a.optString("keyword", "").trim()
+                val typeName = a.str("typeName")
+                val regex = a.optString("regex", "").trim()
+                if (keyword.isBlank() && regex.isBlank()) {
+                    return@EngineToolHandler err("INVALID_ARGUMENT", "search_strings 需要 keyword 或 regex", "keyword", "")
+                }
+                var regexPat: Regex? = null
+                if (regex.isNotBlank()) {
+                    regexPat = runCatching { Regex(regex, RegexOption.IGNORE_CASE) }.getOrNull()
+                        ?: return@EngineToolHandler err("INVALID_REGEX", "regex 不合法: $regex", "regex", regex)
+                }
+                val kw = keyword.lowercase()
+                val hits = JSONArray()
+                var matched = 0
+                // typeId → 类型名 映射(resourceId 高16位含 typeId)
+                val typeIdToName = HashMap<Int, String>()
+                for (pkg in result.packages) {
+                    for (spec in pkg.typeSpecs) typeIdToName[spec.id] = spec.name
+                }
+                outer@ for (pkg in result.packages) {
+                    for (entry in pkg.typeEntries) {
+                        val entryTypeId = ((entry.entryId shr 16) and 0xFF).toInt()
+                        val entryTypeName = typeIdToName[entryTypeId] ?: entry.valueType
+                        if (typeName.isNotBlank() && entryTypeName != typeName) continue
+                        // 该条目的所属类型名(用 typeName 或按 resourceId 高位逆推)
+                        val hay = entry.name + "\n" + entry.valueStr
+                        val okHit = if (regexPat != null) {
+                            regexPat.containsMatchIn(hay)
+                        } else {
+                            hay.lowercase().contains(kw)
+                        }
+                        if (!okHit) continue
+                        if (matched >= limit) { matched++; break@outer }
+                        hits.put(JSONObject()
+                            .put("resourceId", "0x%08X".format(entry.entryId))
+                            .put("name", entry.name)
+                            .put("value", entry.valueStr)
+                            .put("type", entryTypeName)
+                            .put("config", entry.config)
+                            .put("isComplex", entry.isComplex))
+                        matched++
+                    }
+                }
+                ok(JSONObject()
+                    .put("action", "search_strings")
+                    .put("keyword", if (regex.isNotBlank()) "/$regex/" else keyword)
+                    .put("matched", matched)
+                    .put("hits", hits))
             }
 
             else -> { // parse - full dump

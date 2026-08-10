@@ -19,6 +19,7 @@ internal class BlutterCoordinator(private val context: Context, private val stor
         "cancel" -> cancel(args.str("jobId"))
         "packages" -> ok(registry.capabilities())
         "prune" -> ok(store.prune(args.optLong("olderThanMillis", 7L * 24 * 60 * 60 * 1000)))
+        "strings" -> scanStrings(args)
         else -> err("UNKNOWN_ACTION", "Unsupported flutter_blutter action", "action", args.str("action"))
     }
 
@@ -101,5 +102,101 @@ internal class BlutterCoordinator(private val context: Context, private val stor
         if (app == null || flutter == null) return err("FLUTTER_LIBS_NOT_FOUND", "Directory must contain libapp.so and libflutter.so", "path", path)
         val abi = if (requestedAbi == "auto") "arm64-v8a" else requestedAbi
         return ok(FlutterArtifactInspector.inspectLibraries(FlutterLibraries(dir.name, abi, app.readBytes(), flutter.readBytes(), app.name, flutter.name)))
+    }
+
+    /**
+     * 扫描 Flutter 快照(libapp.so)里的可读字符串(ASCII + UTF-16LE)。
+     * Dart AOT 的类/函数名、URL、文案、接口路径等通常以可读字符串形式存在于 ROData 段, 这是 Flutter 逆向第一抓手。
+     */
+    private fun scanStrings(args: JSONObject): JSONObject {
+        val path = args.str("path")
+        if (path.isBlank()) return err("INPUT_REQUIRED", "path is required for strings", "path", path)
+        val file = File(path)
+        val keyword = args.optString("keyword", "").trim().lowercase()
+        val minLen = args.optInt("minLength", 4).coerceIn(2, 48)
+        val limit = args.optInt("limit", 500).coerceIn(1, 5000)
+
+        val libapp: ByteArray = try {
+            when {
+                file.isDirectory -> {
+                    (file.resolve("libapp.so").takeIf { it.isFile } ?: file.resolve("App").takeIf { it.isFile })
+                        ?.let { it.readBytes() }
+                        ?: return err("FLUTTER_LIBS_NOT_FOUND", "Directory must contain libapp.so", "path", path)
+                }
+                file.isFile -> {
+                    val bytes = file.readBytes()
+                    if (!file.extension.equals("apk", true)) {
+                        // 直接是 so 文件? 可能是 libapp.so 本身
+                        if (file.name.contains("libapp") || file.extension.equals("so", true)) bytes
+                        else return err("UNSUPPORTED_INPUT", "strings accepts an APK or a libapp/libflutter directory", "path", path)
+                    } else {
+                        FlutterArtifactInspector.extractLibraries(bytes, path, args.str("abi", "auto")).libapp
+                    }
+                }
+                else -> return err("INPUT_NOT_FOUND", "Input path does not exist", "path", path)
+            }
+        } catch (error: Exception) {
+            return err("STRING_SCAN_FAILED", "读取 libapp.so 失败: ${error.message ?: error.javaClass.simpleName}", "path", path)
+        }
+
+        val hits = JSONArray()
+        var scanned = 0
+        // 扫描 ASCII 字符串与 UTF-16LE 字符串
+        val ascii = extractAscii(libapp, minLen)
+        val utf16 = extractUtf16(libapp, minLen)
+        val all = LinkedHashSet<String>()
+        all.addAll(ascii); all.addAll(utf16)
+        for (s in all) {
+            if (keyword.isNotBlank() && !s.lowercase().contains(keyword)) continue
+            if (scanned >= limit) break
+            hits.put(JSONObject().put("value", s))
+            scanned++
+        }
+
+        return ok(JSONObject()
+            .put("action", "strings")
+            .put("library", path)
+            .put("matched", scanned)
+            .put("totalUnique", all.size)
+            .put("hits", hits)
+            .put("hint", "扫描到 libapp.so 中的可读字符串(类名/函数名/URL/文案)。配合 taffy_flutter_blutter action=analyze 反编译定位逻辑"))
+    }
+
+    private fun extractAscii(data: ByteArray, minLen: Int): List<String> {
+        val out = mutableListOf<String>()
+        val cur = StringBuilder()
+        for (b in data) {
+            val c = b.toInt() and 0xFF
+            val printable = c in 0x20..0x7E
+            if (printable) {
+                cur.append(c.toChar())
+            } else {
+                if (cur.length >= minLen) out.add(cur.toString())
+                cur.setLength(0)
+            }
+        }
+        if (cur.length >= minLen) out.add(cur.toString())
+        return out
+    }
+
+    private fun extractUtf16(data: ByteArray, minLen: Int): List<String> {
+        val out = mutableListOf<String>()
+        var i = 0
+        val n = data.size - 1
+        val cur = StringBuilder()
+        while (i < n) {
+            val low = data[i].toInt() and 0xFF
+            val high = data[i + 1].toInt() and 0xFF // LE: 低位在前; high 通常 0(ASCII), 否则需 utf8
+            val code = (high shl 8) or low
+            if (high == 0 && low in 0x20..0x7E) {
+                cur.append(low.toChar())
+            } else {
+                if (cur.length >= minLen) out.add(cur.toString())
+                cur.setLength(0)
+            }
+            i += 2
+        }
+        if (cur.length >= minLen) out.add(cur.toString())
+        return out
     }
 }

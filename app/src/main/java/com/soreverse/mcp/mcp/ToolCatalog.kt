@@ -80,7 +80,7 @@ object ToolCatalog {
             heavy = true,
         ) {
             objectSchema(props {
-                "action".oneOf("inspect | analyze | status | result | cancel | packages | prune", "inspect", "analyze", "status", "result", "cancel", "packages", "prune")
+                "action".oneOf("inspect | analyze | status | result | cancel | packages | prune | strings", "inspect", "analyze", "status", "result", "cancel", "packages", "prune", "strings")
                 "path" str "APK 路径，或包含 libapp.so 和 libflutter.so 的目录"
                 "jobId" str "查询状态/结果/取消用的持久化 Blutter 任务 ID"
                 "abi".oneOf("目标 ABI", "auto", "arm64-v8a", "x86_64", "armeabi-v7a", "x86")
@@ -89,6 +89,8 @@ object ToolCatalog {
                 "kind".oneOf("分页结果集", "libraries", "classes", "functions", "objects")
                 "cursor" str "上一页结果返回的不透明游标"
                 "olderThanMillis" int "清理比该时长更早的缓存结果"
+                "keyword" str "strings: 过滤用关键词(URL/文案/类名, 大小写不敏感)"
+                "minLength" int "strings: 最短字符串长度(默认4)"
             })
         },
     ) { engine, args, _ -> engine.flutterBlutter(args) }

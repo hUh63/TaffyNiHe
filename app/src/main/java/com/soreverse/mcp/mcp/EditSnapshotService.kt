@@ -101,8 +101,63 @@ object EditSnapshotService {
         if (origHash != curHash) {
             val changed = countChangedBytes(origCopy, current)
             out.put("changedBytes", changed).put("changedPercent", if (origLen > 0) (changed * 100.0 / origLen) else 0.0)
+            // 文本文件(如 smali/json/xml): 附加行级可读 diff
+            if (looksLikeText(origCopy) && looksLikeText(current)) {
+                try {
+                    val o = origCopy.readText().lines()
+                    val c = current.readText().lines()
+                    if (o.size + c.size <= 20000) {
+                        val (added, removed) = lineDiff(o, c)
+                        val additions = JSONArray(); removed.forEach { additions.put("+" + it) }
+                        val deletions = JSONArray(); added.forEach { deletions.put("-" + it) }
+                        if (added.isNotEmpty() || removed.isNotEmpty()) {
+                            out.put("lineDiff", JSONObject()
+                                .put("addedLines", added.size)
+                                .put("removedLines", removed.size)
+                                .put("removed", removed)
+                                .put("added", added))
+                        }
+                    }
+                } catch (e: Exception) { /* 行级 diff 失败则忽略, 仍保留字节级 */ }
+            }
         }
         return out
+    }
+
+    /** 粗略判断一个文件是否以 UTF-8 文本为主(用于决定是否做行级 diff)。 */
+    private fun looksLikeText(f: File): Boolean {
+        if (f.length() > 5 * 1024 * 1024) return false   // 超过 5MB 不做行级
+        val head = try { f.inputStream().use { it.readNBytes(4096) } } catch (e: Exception) { return false }
+        if (head.isEmpty()) return true
+        var control = 0
+        val n = minOf(head.size, 4096)
+        for (i in 0 until n) {
+            val b = head[i].toInt() and 0xFF
+            if (b == 0) return false                  // NUL 表示二进制
+            if (b < 0x09 || (b in 0x0E..0x1F) || b == 0x7F) control++
+        }
+        return control < n / 32
+    }
+
+    /** 简单逐行 diff(类 Myers 的朴素版): 返回 (删除行=[仅旧文件], 新增行=[仅新文件])。
+     *  对 smali/json 等行文本足够。复杂度 O(n*m) 但用行哈希预处理, 大文件已由调用方限制。 */
+    private fun lineDiff(oldLines: List<String>, newLines: List<String>): Pair<List<String>, List<String>> {
+        val n = oldLines.size; val m = newLines.size
+        // 基于行相等的最长公共子序列, 扁平化后追踪增删
+        val dp = Array(n + 1) { IntArray(m + 1) }
+        for (i in n - 1 downTo 0) for (j in m - 1 downTo 0)
+            dp[i][j] = if (oldLines[i] == newLines[j]) dp[i + 1][j + 1] + 1 else maxOf(dp[i + 1][j], dp[i][j + 1])
+        val removed = mutableListOf<String>()
+        val added = mutableListOf<String>()
+        var i = 0; var j = 0
+        while (i < n && j < m) {
+            if (oldLines[i] == newLines[j]) { i++; j++ }
+            else if (dp[i + 1][j] >= dp[i][j + 1]) { removed.add(oldLines[i]); i++ }
+            else { added.add(newLines[j]); j++ }
+        }
+        while (i < n) { removed.add(oldLines[i]); i++ }
+        while (j < m) { added.add(newLines[j]); j++ }
+        return removed to added
     }
 
     /** 回滚：用快照还原原始文件到指定目标路径。默认还原到元数据里的原始路径。 */

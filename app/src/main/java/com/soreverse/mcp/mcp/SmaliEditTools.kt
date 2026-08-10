@@ -50,6 +50,7 @@ object SmaliEditTools {
                 "oldString" str "replace_string: 要替换的原始字符串常量(方法体内 const-string 的值)"
                 "newString" str "replace_string: 替换后的新字符串"
                 "mode".oneOf("replace_string 模式", "preserve(默认: 新串长度≤旧串, 不改结构心智) | recompile(允许变长重编)", "preserve", "recompile")
+                "scope".oneOf("replace_string 范围", "method(默认: 仅目标方法内) | class(整个类文件) | global(整个 APK 所有 DEX)", "method", "class", "global")
                 "limit" int "list_classes: 最多返回条数(默认 100)"
             })
         }
@@ -337,77 +338,148 @@ object SmaliEditTools {
             }
         }
 
-        /** 在方法体内原位替换一个字符串常量(const-string 的值), 对标 taffy_native_patch_string。
-         *  mode=preserve(默认): 新串长度<=旧串, 不改结构心智; 放不下时报错提示 recompile。
-         *  mode=recompile:     允许变长, 重编该 DEX。 */
+/** 在 smali 文本范围内替换字符串常量(const-string/jumbo 的值), 对标 taffy_native_patch_string。
+         *  mode=preserve(默认): 新串长度≤旧串, 不改结构心智; 放不下时报错提示 recompile。
+         *  mode=recompile:     允许变长, 重编该 DEX。
+         *  scope=method(默认): 仅 className.method 内; class: 整个 className 类文件; global: 全部 DEX 所有类。 */
         private fun replaceString(apk: File, args: JSONObject, ctx: ToolContext): JSONObject {
-            val className = args.str("className")
-            val method = args.str("method")
             val oldString = args.str("oldString")
             val newString = args.str("newString")
             val mode = args.str("mode", "preserve").ifBlank { "preserve" }
+            val scope = args.str("scope", "method").ifBlank { "method" }
+            val className = args.str("className")
+            val method = args.str("method")
             val occurrence = args.intValue("occurrence", 1).coerceAtLeast(1)
-            if (className.isBlank()) return err("INVALID_ARGUMENT", "缺少 className", "className", "")
-            if (method.isBlank()) return err("INVALID_ARGUMENT", "缺少 method(目标方法名)", "method", "")
             if (oldString.isBlank()) return err("INVALID_ARGUMENT", "缺少 oldString(原始字符串)", "oldString", "")
             if (newString.isBlank()) return err("INVALID_ARGUMENT", "缺少 newString(新字符串)", "newString", "")
+            if (scope != "global" && className.isBlank()) return err("INVALID_ARGUMENT", "scope=$scope 需要 className", "className", "")
+            if (scope == "method" && method.isBlank()) return err("INVALID_ARGUMENT", "scope=method 需要 method", "method", "")
             if (mode == "preserve" && newString.length > oldString.length) {
                 return err("STRING_TOO_LONG", "preserve 模式要求新串长度≤旧串(旧 ${oldString.length} / 新 ${newString.length})。改用 mode=recompile 允许变长", "newString", newString)
             }
-            val classDescriptor = "L${className.replace('.', '/')};"
+            val classDescriptor = if (scope != "global") "L${className.replace('.', '/')};" else null
+            val escapedOld = Regex.escape(oldString)
+            val escapedNew = newString.replace("\\", "\\\\").replace("\"", "\\\"")
+            var totalReplaced = 0
+            var dexTouched = 0
 
-            val (dexEntryName, tempDex) = findClassInApk(apk, classDescriptor)
-                ?: return err("CLASS_NOT_FOUND", "类 $className 不在 APK 的任何 DEX 中", "className", className)
+            // 按 scope 扫描, 返回改动后的 DEX (map: dex条目名 -> 重写后的新 DEX 字节)。
+            // null 表示该 DEX 无改动。
+            val results = HashMap<String, ByteArray>()
+            val opcodes = Opcodes.getDefault()
 
-            try {
-                val outDir = File.createTempFile("smali_rstr_", "").apply { delete(); mkdirs() }
-                val options = com.android.tools.smali.baksmali.BaksmaliOptions()
-                val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
-                com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(dexFile, outDir, 4, options)
+            // 收集需处理的 (dexEntryName, 需要改动的 smali 相对路径集合 或 null=全改)
+            // 统一走: 反汇编 dex -> 逐个 smali 替换 -> 重编 -> 写回
+            java.util.zip.ZipFile(apk).use { zf ->
+                val dexEntries = zf.entries().toList().filter { it.name.matches(Regex("classes\\d*\\.dex")) }
+                for (dexEntry in dexEntries) {
+                    val tempDex = File.createTempFile("rstr_dex_", ".dex")
+                    zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
+                    try {
+                        val dexFile = DexFileFactory.loadDexFile(tempDex, opcodes)
+                        // 决定本 DEX 是否需要处理
+                        val targets: List<String>? = when (scope) {
+                            "global" -> null // 全部类
+                            else -> if (dexFile.classes.any { it.type == classDescriptor }) {
+                                listOf(className.replace('.', '/') + ".smali")
+                            } else null
+                        }
+                        if (targets == null) continue // 本 DEX 无目标
+                        // 反汇编本 DEX
+                        val outDir = File.createTempFile("rstr_smali_", "").apply { delete(); mkdirs() }
+                        val bopts = com.android.tools.smali.baksmali.BaksmaliOptions()
+                        com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(dexFile, outDir, Runtime.getRuntime().availableProcessors().coerceIn(1, 4), bopts)
 
-                val smaliFile = File(outDir, className.replace('.', '/') + ".smali")
-                if (!smaliFile.isFile) {
-                    outDir.deleteRecursively()
-                    return err("SMALI_NOT_FOUND", "类 $className 的 smali 未找到(可能内部类)", "className", className)
+                        var dexChanged = false
+                        val allSmali = if (scope == "global") outDir.walkTopDown().filter { it.isFile && it.extension == "smali" }.toList()
+                            else targets.map { File(outDir, it) }.filter { it.isFile }
+                        for (smaliFile in allSmali) {
+                            val text = smaliFile.readText()
+                            val patched = if (scope == "method") {
+                                replaceMethodStringLiteral(text, method, oldString, newString, occurrence)
+                            } else {
+                                replaceAllStringLiteral(text, escapedOld, escapedNew)
+                            }
+                            if (patched != null) { smaliFile.writeText(patched); dexChanged = true }
+                        }
+                        if (!dexChanged) { outDir.deleteRecursively(); continue }
+
+                        // 重编本 DEX
+                        val newDex = File.createTempFile("rstr_out_", ".dex")
+                        val opts = SmaliOptions().apply {
+                            outputDexFile = newDex.absolutePath
+                            apiLevel = 34
+                            jobs = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+                        }
+                        val success = Smali.assemble(opts, listOf(outDir.absolutePath))
+                        outDir.deleteRecursively()
+                        if (!success) {
+                            newDex.delete(); tempDex.delete()
+                            return err("SMALI_ASSEMBLE_FAILED", "字符串替换后 smali 重编失败, dex: ${dexEntry.name}", "newString", newString)
+                        }
+                        results[dexEntry.name] = newDex.readBytes()
+                        newDex.delete()
+                        dexTouched++
+                        totalReplaced++
+                    } finally { tempDex.delete() }
                 }
-                val smaliText = smaliFile.readText()
-                val patched = replaceMethodStringLiteral(smaliText, method, oldString, newString, occurrence)
-                if (patched == null) {
-                    outDir.deleteRecursively()
-                    return err("STRING_NOT_FOUND", "方法 $method 中未找到字符串常量: $oldString (第 $occurrence 处)", "oldString", oldString)
-                }
-                smaliFile.writeText(patched)
-
-                val newDex = File.createTempFile("recompiled_rstr_", ".dex")
-                val opts = SmaliOptions().apply {
-                    outputDexFile = newDex.absolutePath
-                    apiLevel = 34
-                    jobs = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
-                }
-                val success = Smali.assemble(opts, listOf(outDir.absolutePath))
-                outDir.deleteRecursively()
-                if (!success) return err("SMALI_ASSEMBLE_FAILED", "字符串替换后 smali 重编失败, 类: $className", "newString", newString)
-
-                val newDexBytes = newDex.readBytes()
-                newDex.delete()
-                tempDex.delete()
-                val out = writeCompiledDexBack(ctx, apk, classDescriptor, dexEntryName, newDexBytes, className)
-                if (out != null) return out
-
-                return ok(JSONObject()
-                    .put("action", "replace_string")
-                    .put("className", className)
-                    .put("method", method)
-                    .put("mode", mode)
-                    .put("occurrence", occurrence)
-                    .put("oldString", oldString)
-                    .put("newString", newString)
-                    .put("success", true)
-                    .put("newDexSize", newDexBytes.size)
-                    .put("hint", "字符串常量已替换并重编写回 APK. 签名已失效, 用 taffy_apk_sign 重新签名"))
-            } finally {
-                tempDex.delete()
             }
+
+            if (results.isEmpty()) {
+                return err(if (scope != "global") "STRING_NOT_FOUND" else "NO_MATCH",
+                    when (scope) {
+                        "method" -> "方法 $method 中未找到字符串常量: $oldString (第 $occurrence 处)"
+                        "class" -> "类 $className 中未找到字符串常量: $oldString"
+                        else -> "整个 APK 未找到字符串常量: $oldString"
+                    }, "oldString", oldString)
+            }
+
+            // 写回 APK(重建 ZIP, 替换有改动的 DEX); 改动前登记快照 + .bak
+            val backup = File(apk.parentFile, "${apk.nameWithoutExtension}.bak.apk")
+            if (!backup.isFile) EditSnapshotService.snapshot(ctx.context, "taffy_smali_edit", apk.absolutePath)
+            val tempApk = File.createTempFile("apk_rstr_", ".apk", apk.parentFile)
+            java.util.zip.ZipFile(apk).use { zf ->
+                val zos = java.util.zip.ZipOutputStream(tempApk.outputStream())
+                zf.entries().toList().forEach { e ->
+                    zos.putNextEntry(java.util.zip.ZipEntry(e.name))
+                    val nb = results[e.name]
+                    if (nb != null) zos.write(nb) else zf.getInputStream(e).use { it.copyTo(zos) }
+                    zos.closeEntry()
+                }
+                zos.close()
+            }
+            apk.copyTo(backup, overwrite = true)
+            apk.delete()
+            tempApk.copyTo(apk, overwrite = true)
+            tempApk.delete()
+
+            return ok(JSONObject()
+                .put("action", "replace_string")
+                .put("scope", scope)
+                .put("mode", mode)
+                .put("oldString", oldString)
+                .put("newString", newString)
+                .put("dexTouched", dexTouched)
+                .put("replacements", totalReplaced)
+                .put("success", true)
+                .put("newSizes", results.mapValues { it.value.size }.let { java.util.LinkedHashMap(it) })
+                .put("hint", "字符串常量已替换并写回 APK(${results.keys.joinToString(",")})。签名已失效, 用 taffy_apk_sign 重新签名"))
+        }
+
+        /** 在整个 smali 文本中替换所有 const-string 值为 oldStr 的(不分方法)。返回新文本, 无匹配返回 null。 */
+        private fun replaceAllStringLiteral(smaliText: String, escapedOld: String, escapedNew: String): String? {
+            val matchRe = Regex("""const-string(?:/jumbo)?\s+v\d+,\s*"${escapedOld}"\s*$""")
+            val out = StringBuilder()
+            var changed = false
+            for (line in smaliText.lines()) {
+                if (matchRe.containsMatchIn(line)) {
+                    val indent = line.takeWhile { it == ' ' || it == '\t' }
+                    val instr = line.trim().substringBefore("\"").trim()
+                    out.append(indent).append(instr).append(" \"").append(escapedNew).append("\"\n")
+                    changed = true
+                } else out.append(line).append("\n")
+            }
+            return if (changed) out.toString() else null
         }
 
         /** 在 smali 文本的目标方法体内, 把第 occurrence 个 const-string "old" 替换为 "new"。返回新文本, 未找到返回 null。 */

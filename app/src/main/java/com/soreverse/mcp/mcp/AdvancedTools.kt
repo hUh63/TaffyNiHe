@@ -4,6 +4,7 @@ import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
+import com.soreverse.mcp.core.HexCodec
 import com.soreverse.mcp.core.EngineProvider
 import org.json.JSONArray
 import org.json.JSONObject
@@ -122,8 +123,8 @@ object AdvancedTools {
             objectSchema(props {
                 "workspaceId" str "SO 工作区 ID"
                 "pattern" str "十六进制字节模式, 空格分隔, ?? 为通配(如 '90 31 ?? 6B')"
-                "fromVa" int "起始虚拟地址(可选, 0=从头)"
-                "toVa" int "结束虚拟地址(可选, 0=到尾)"
+                "fromVa" str "起始虚拟地址(可选, hex 如 0x1000, 0=从头)"
+                "toVa" str "结束虚拟地址(可选, hex 如 0x2000, 0=到尾)"
             })
         }
 
@@ -132,8 +133,8 @@ object AdvancedTools {
             val pattern = args.str("pattern")
             if (ws.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 workspaceId", "workspaceId", "")
             if (pattern.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 pattern(十六进制模式)", "pattern", "")
-            val fromVa = args.intValue("fromVa", 0).toLong()
-            val toVa = args.intValue("toVa", 0).toLong()
+            val fromVa = if (args.has("fromVa")) (HexCodec.long(args.str("fromVa")) ?: return err("INVALID_ARGUMENT", "fromVa must be a hex virtual address", "fromVa", args.str("fromVa"))) else 0L
+            val toVa = if (args.has("toVa")) (HexCodec.long(args.str("toVa")) ?: return err("INVALID_ARGUMENT", "toVa must be a hex virtual address", "toVa", args.str("toVa"))) else 0L
             val engine = EngineProvider.get(ctx.context)
             return engine.rzSearchBytes(ws, "", pattern, fromVa, toVa)
         }
@@ -448,6 +449,13 @@ object AdvancedTools {
                 }
             }.getOrElse { e ->
                 err("RESOURCE_LIST_FAILED", "资源列表失败: ${e.message}", "path", path)
+            }
+        }
+    }
+
+    val ALL = listOf(soXref, soCfg, soAddrMap, soSearchBytes, apkSearch, apkPatchBytes, apkResourceList)
+}
+         err("RESOURCE_LIST_FAILED", "资源列表失败: ${e.message}", "path", path)
             }
         }
     }

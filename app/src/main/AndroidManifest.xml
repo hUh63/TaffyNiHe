@@ -11,6 +11,17 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 所有文件访问权限（Android 11+ 特殊权限，需系统授权页授予；服务配置页"全部文件访问"开关使用） -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- Android 10 及以下的共享存储读写（Android 11+ 由 MANAGE_EXTERNAL_STORAGE 覆盖） -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
 
     <queries>
         <package android:name="com.tencent.mobileqq" />

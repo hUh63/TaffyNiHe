@@ -3,6 +3,9 @@ package com.soreverse.mcp.mcp
 import com.android.apksig.ApkSigner
 import com.android.tools.smali.smali.Smali
 import com.android.tools.smali.smali.SmaliOptions
+import com.soreverse.mcp.core.ApkBuildSignerBridge
+import com.soreverse.mcp.core.ApkSigningPolicy
+import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
@@ -29,6 +32,11 @@ import java.util.Date
  * "反编译 → 改 smali/资源 → 回编 dex → 打包 → 签名" 的完整链路。
  */
 object ApkBuildTool {
+
+    init {
+        // 向 core 包注册内置密钥提供者（ApkSigningPolicy.resolveSigner 使用）
+        ApkBuildSignerBridge.provider = { ctx -> runCatching { obtainInternalSigner(ctx) }.getOrNull() }
+    }
 
     private const val KEY_ALIAS = "niehe"
     private const val KEY_PASS = "niehe123"
@@ -116,23 +124,37 @@ object ApkBuildTool {
                 val output = args.str("outputApk").ifBlank {
                     File(input.parentFile, "${input.nameWithoutExtension}-signed.apk").absolutePath
                 }
-                val (key, cert) = obtainSigner(ctx.context.filesDir)
-                val signerConfig = ApkSigner.SignerConfig.Builder("NIEHE", key, listOf(cert)).build()
+                // 签名策略来自设置页「APK 签名设置」：密钥来源 / 签名方案 / V1 文件名
+                val (key, cert) = ApkSigningPolicy.resolveSigner(ctx.context)
+                    ?: return@runCatching err("NO_SIGNING_KEY", "无可用的签名密钥（自定义密钥缺失且内置密钥初始化失败）", "inputApk", inputPath)
+                val (v1, v2, v3) = ApkSigningPolicy.schemeFlags(ctx.context)
+                val v1Name = ApkSigningPolicy.v1SignerName(ctx.context)
+                val cfgBuilder = ApkSigner.SignerConfig.Builder("NIEHE", key, listOf(cert))
+                if (v1Name != "CERT") {
+                    // apksig 部分版本支持自定义 V1 签名文件名（META-INF/<name>.RSA/.SF）
+                    runCatching {
+                        cfgBuilder.javaClass.getMethod("setV1SignerName", String::class.java).invoke(cfgBuilder, v1Name)
+                    }
+                }
+                val signerConfig = cfgBuilder.build()
                 ApkSigner.Builder(listOf(signerConfig))
                     .setInputApk(input)
                     .setOutputApk(File(output))
                     .setMinSdkVersion(args.intValue("minSdk", 26))
-                    .setV1SigningEnabled(true)
-                    .setV2SigningEnabled(true)
-                    .setV3SigningEnabled(true)
+                    .setV1SigningEnabled(v1)
+                    .setV2SigningEnabled(v2)
+                    .setV3SigningEnabled(v3)
                     .build()
                     .sign()
+                val schemeLabel = SettingsStore(ctx.context).apkSignScheme
+                val keyLabel = if (SettingsStore(ctx.context).apkSignKeySource == "custom") "自定义密钥" else "内置自签名密钥"
                 ok(JSONObject()
                     .put("tool", "taffy_apk_sign")
                     .put("success", true)
                     .put("outputApk", output)
-                    .put("signer", "CN=Taffy (内置自签名密钥)")
-                    .put("hint", "已签名,可直接安装。用内置密钥,与官方签名不同,覆盖安装原 App 需先卸载。"))
+                    .put("signer", "$keyLabel (${ApkSigningPolicy.v1SignerName(ctx.context)})")
+                    .put("scheme", schemeLabel)
+                    .put("hint", "已签名,可直接安装。方案=$schemeLabel, 密钥=$keyLabel。与官方签名不同,覆盖安装原 App 需先卸载。"))
             }.getOrElse { e -> err("APK_SIGN_FAILED", "APK 签名失败: ${e.message ?: e.javaClass.simpleName}", "inputApk", inputPath) }
         }
     }

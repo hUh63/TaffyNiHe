@@ -18,6 +18,17 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 class CloudflareTunnelManager(private val context: Context, private val settings: SettingsStore) {
 
+    companion object {
+        /** 当前进程内活跃的 Cloudflare 隧道管理器实例（由构造函数登记），
+         *  供 [WorkspacePolicy] 判断隧道是否开启。 */
+        @Volatile
+        var activeInstance: CloudflareTunnelManager? = null
+    }
+
+    init {
+        activeInstance = this
+    }
+
     enum class Mode { OFF, QUICK, NAMED }
     enum class State { STOPPED, STARTING, RUNNING, FAILED }
 

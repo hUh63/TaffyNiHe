@@ -72,4 +72,8 @@ object EngineProvider {
             null
         }
     }
+
+    /** 公开解析 SAF treeUri 对应的文件系统路径（供 WorkspacePolicy 统一工作区使用）。 */
+    fun resolveWorkDirPath(context: Context, uri: Uri?): String? =
+        extractWorkDirPath(uri)
 }

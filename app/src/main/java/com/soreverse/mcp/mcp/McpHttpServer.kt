@@ -7,6 +7,8 @@ import com.soreverse.mcp.core.ApkMcpBridge
 import com.soreverse.mcp.core.CloudflareTunnelManager
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.StoragePermissionHelper
+import com.soreverse.mcp.core.WorkspacePolicy
 import com.soreverse.mcp.core.bool
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.obj
@@ -559,6 +561,9 @@ $historyRows
         }
         return try {
             callToolPayload(name, args)
+        } catch (t: Throwable) {
+            AppLog.e("Tool $name threw an unexpected error", t)
+            err("TOOL_ERROR", "Tool '$name' failed unexpectedly: ${t.message}", "tool", name)
         } finally {
             if (heavy) acquiredGate.release()
         }
@@ -651,6 +656,10 @@ $historyRows
     private fun callToolPayload(name: String, args: JSONObject): JSONObject {
         val native = EngineProvider.get(context)
         val settings = SettingsStore(context)
+        // 统一工作区路径预检：未开隧道时路径限制在设置页服务配置的工作目录，
+        // 开隧道后放行 /sdcard 与 /storage/emulated/0。越界直接返回 PATH_OUTSIDE_WORKSPACE。
+        val baseDir = WorkspacePolicy.workDirPath(context)
+        WorkspacePolicy.validateArgs(context, args, baseDir)?.let { return it }
         ToolStats.setEnabled(settings.collectToolStats)
         ToolStats.setPersistEnabled(settings.toolStatsPersist)
         val started = System.nanoTime()
@@ -719,7 +728,7 @@ $historyRows
                 .toString()
         } else payloadText
         return JSONObject()
-            .put("isError", payload.optBoolean("ok", true).not())
+            .put("isError", (!payload.optBoolean("ok", true)) || payload.has("error"))
             .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", rendered)))
     }
 
@@ -842,6 +851,11 @@ $historyRows
             .put("nativeBackends", nativeBackendStatus())
             .put("apkMcp", snapshot)
             .put("tunnel", tunnel.snapshotJson())
+            .put("workspace", JSONObject()
+                .put("tunnelActive", WorkspacePolicy.isTunnelActive(context))
+                .put("workDirPath", WorkspacePolicy.workDirPath(context))
+                .put("allowedRoots", JSONArray(WorkspacePolicy.allowedRoots(context)))
+                .put("fullStorageAccessGranted", StoragePermissionHelper.hasAllFilesAccess(context)))
             .put("integration", JSONObject()
                 .put("online", integrationOnline)
                 .put("onlineCount", onlineBridgeCount)

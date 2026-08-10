@@ -32,7 +32,7 @@ object ToolCatalog {
             "limit" int "返回条数上限（action=list）"
             "cursor" str "分页游标（action=list）"
             "temporary" bool "为 true 时工作区重启后不保留"
-        }, required = listOf("action")) }
+        }) }
     ) { e, a, s ->
         when (a.str("action", "open")) {
             "list" -> e.listAvailableSos(a.str("prefix"), a.intValue("limit", s.defaultLimit), a.str("cursor"))
@@ -49,7 +49,7 @@ object ToolCatalog {
         ) { objectSchema(props {
             "action".oneOf("close (默认) | list", "close", "list")
             "workspaceId" str "工作区 ID（action=close）"
-        }, required = listOf("action")) }
+        }) }
     ) { e, a, _ ->
         when (a.str("action", "close")) {
             "list" -> e.listWorkspaces()
@@ -66,6 +66,7 @@ object ToolCatalog {
         ) {
             objectSchema(props {
                 "path" str "本地 APK 路径，或相对于所选工作目录的路径"
+                "filePath" str "path 的别名（本地 APK 路径）"
                 "entryLimit" int "返回的 ZIP 条目数上限，1..5000（默认 500）"
             })
         },
@@ -329,7 +330,8 @@ object ToolCatalog {
                 ?: return@EngineToolHandler err("INVALID_HEX", "patchHex must contain valid byte pairs", "patchHex", a.str("patchHex"))
             e.editHexVa(a.str("workspaceId"), a.str("editSessionId"), va, patch, a.bool("dryRun"))
         } else {
-            e.editHex(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.getJSONArray("edits"), a.bool("dryRun"))
+            val edits = a.optJSONArray("edits") ?: return@EngineToolHandler err("BAD_REQUEST", "\"edits\" array is required when patching bytes by offset", "edits", JSONObject.NULL)
+            e.editHex(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), edits, a.bool("dryRun"))
         }
     }
 
@@ -345,7 +347,10 @@ object ToolCatalog {
             "dryRun" bool "为 true 时返回预览而不实际应用改动"
             "edits" arr ("汇编编辑数组" to SchemaBuilder.editsAsmSchema())
         }, required = listOf("workspaceId")) }
-    ) { e, a, _ -> e.editAsm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.getJSONArray("edits"), a.bool("dryRun")) }
+    ) { e, a, _ ->
+        val edits = a.optJSONArray("edits") ?: return@EngineToolHandler err("BAD_REQUEST", "\"edits\" array is required for assembly patches", "edits", JSONObject.NULL)
+        e.editAsm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), edits, a.bool("dryRun"))
+    }
 
     private val editSymbol = EngineToolHandler(
         ToolMeta("taffy_edit_symbol",
@@ -370,10 +375,14 @@ object ToolCatalog {
                     e.liefAddExportedFunction(a.str("workspaceId"), a.str("editSessionId"), it, a.str("name"))
                 } ?: err("INVALID_ARGUMENT", "addr must be a hexadecimal address", "addr", a.str("addr"))
                 "remove" -> e.liefRemoveSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("name"))
-                else -> e.editSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.getJSONArray("edits"), a.bool("dryRun"))
+                else -> {
+                    val edits = a.optJSONArray("edits") ?: return@EngineToolHandler err("BAD_REQUEST", "\"edits\" array is required for symbol edits", "edits", JSONObject.NULL)
+                    e.editSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), edits, a.bool("dryRun"))
+                }
             }
         } else {
-            e.editSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.getJSONArray("edits"), a.bool("dryRun"))
+            val edits = a.optJSONArray("edits") ?: return@EngineToolHandler err("BAD_REQUEST", "\"edits\" array is required for symbol edits", "edits", JSONObject.NULL)
+            e.editSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), edits, a.bool("dryRun"))
         }
     }
 
@@ -525,6 +534,7 @@ object ToolCatalog {
             "conflictStrategy".oneOf("构建冲突策略", "skip", "overwrite", "rename")
             "writeReport" bool "写入补丁报告"
             "writeToFile" bool "写入分析报告文件"
+            "writeToWorkDir" bool "构建产物写回工作目录（而非仅返回字节）"
             "format".oneOf("parse_any 的输入格式", "auto", "elf", "pe", "macho", "dex", "art", "oat", "vdex")
             "op".oneOf("分发器操作", "roots", "methods", "parse_any", "validate", "get", "list", "set", "call")
             "objectPath" str "对象路径，例如 sections[0].name 或 binary.entry"
@@ -585,7 +595,7 @@ object ToolCatalog {
             "Typed Unidbg session tool for shell-friendly live emulator workflows: open/list/close/call/call_address/dump/modules/exports/registers/memory_maps. [EMULATION RUNTIME session — does NOT patch files; independent from SO edit session (taffy_session_open) and PE edit session (taffy_pe_edit_session).]",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("Session action — open(需workspaceId+editSessionId) | list(无参数) | close(需emulatorSessionId) | call(需emulatorSessionId+symbolName) | call_address(需emulatorSessionId+addr) | dump(需emulatorSessionId+addr) | modules(需emulatorSessionId) | exports(需emulatorSessionId) | registers(需emulatorSessionId) | memory_maps(需emulatorSessionId) | Session action — open(needs workspaceId+editSessionId) | list(no args) | close(session) | call(session+symbolName) | call_address(session+addr) | dump(session+addr) | modules/exports/registers/memory_maps(session)", "open", "list", "close", "call", "call_address", "dump", "modules", "exports", "registers", "memory_maps")
+            "action".oneOf("Session action — open(默认,需workspaceId+editSessionId) | list(无参数) | close(需emulatorSessionId) | call(需emulatorSessionId+symbolName) | call_address(需emulatorSessionId+addr) | dump(需emulatorSessionId+addr) | modules(需emulatorSessionId) | exports(需emulatorSessionId) | registers(需emulatorSessionId) | memory_maps(需emulatorSessionId) | Session action — open(needs workspaceId+editSessionId) | list(no args) | close(session) | call(session+symbolName) | call_address(session+addr) | dump(session+addr) | modules/exports/registers/memory_maps(session)", "open", "list", "close", "call", "call_address", "dump", "modules", "exports", "registers", "memory_maps")
             "workspaceId" str "工作区 ID"
             "editSessionId" str "编辑会话 ID"
             "emulatorSessionId" str "实时 Unidbg 模拟器会话 ID"
@@ -595,7 +605,7 @@ object ToolCatalog {
             "trace" bool "为 call 启用追踪"
             "size" int "转储大小"
             "callJniOnLoad" bool "打开会话时调用 JNI_OnLoad"
-        }, required = listOf("action")) }
+        }) }
     ) { e, a, _ ->
         val sessionId = a.str("emulatorSessionId")
         val callArgs = a.optJSONArray("args") ?: JSONArray()
@@ -669,7 +679,7 @@ object ToolCatalog {
             "Typed Unidbg debugger lifecycle for trace, breakpoint add/list/remove, single-step configuration, stop, and status.",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "action".oneOf("Debug action — 均需emulatorSessionId trace_code/start_events(可加begin/end/traceType/cursor/limit) trace_stop(+traceId) trace_clear hook_start(+hookType/begin/end) hook_list hook_stop(+hookId) breakpoint_add/remove(+addr) single_step(+count) status stop | Debug action — all need emulatorSessionId; trace_stop adds traceId, hook_stop adds hookId, breakpoint_add/remove add addr, single_step adds count", "trace_code", "trace_start", "trace_events", "trace_stop", "trace_clear", "hook_start", "hook_list", "hook_stop", "breakpoint_add", "breakpoint_remove", "status", "single_step", "stop", "debugger_plan", "trace_plan", "breakpoints_plan")
+            "action".oneOf("Debug action — 默认debugger_plan；均需emulatorSessionId trace_code/start_events(可加begin/end/traceType/cursor/limit) trace_stop(+traceId) trace_clear hook_start(+hookType/begin/end) hook_list hook_stop(+hookId) breakpoint_add/remove(+addr) single_step(+count) status stop | Debug action — all need emulatorSessionId; trace_stop adds traceId, hook_stop adds hookId, breakpoint_add/remove add addr, single_step adds count", "trace_code", "trace_start", "trace_events", "trace_stop", "trace_clear", "hook_start", "hook_list", "hook_stop", "breakpoint_add", "breakpoint_remove", "status", "single_step", "stop", "debugger_plan", "trace_plan", "breakpoints_plan")
             "workspaceId" str "工作区 ID"
             "editSessionId" str "编辑会话 ID"
             "emulatorSessionId" str "实时 Unidbg 模拟器会话 ID"
@@ -683,7 +693,7 @@ object ToolCatalog {
             "limit" int "追踪事件页大小，最大 1000"
             "hookType".oneOf("后端钩子类型", "syscall", "interrupt", "code", "read", "write")
             "hookId" str "后端钩子 ID"
-        }, required = listOf("action")) }
+        }) }
     ) { e, a, _ ->
         val action = a.str("action", "debugger_plan")
         val op = when (action) {
@@ -865,14 +875,14 @@ object ToolCatalog {
             "System control: tunnel start/stop/status, APK MCP bridge status/probe/ping, overall system status.",
             "system", ToolClass.META,
         ) { objectSchema(props {
-            "action".oneOf("status | tunnel_start | tunnel_stop | tunnel_status | tunnel_stats | apk_status | apk_probe | apk_ping", "status", "tunnel_start", "tunnel_stop", "tunnel_status", "tunnel_stats", "apk_status", "apk_probe", "apk_ping")
+            "action".oneOf("status（默认）| tunnel_start | tunnel_stop | tunnel_status | tunnel_stats | apk_status | apk_probe | apk_ping", "status", "tunnel_start", "tunnel_stop", "tunnel_status", "tunnel_stats", "apk_status", "apk_probe", "apk_ping")
             "mode".oneOf("隧道模式：quick | named（tunnel_start）", "quick", "named")
             "targetPort" int "隧道目标端口（tunnel_start）"
             "publicUrl" str "要显示并持久化的具名隧道公网 HTTPS 主机名/URL（tunnel_start）"
             "probe" bool "强制重新探测（apk_status/status）"
-        }, required = listOf("action")) }
+        }) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val hooked = ctx as? HookedContext ?: return JSONObject().put("error", "System hooks not available")
+            val hooked = ctx as? HookedContext ?: return err("INTERNAL", "System hooks not available")
             return when (args.str("action", "status")) {
                 "status" -> hooked.sysStatusHook(args.bool("probe", false))
                 "tunnel_start" -> hooked.tunnelStartHook(args.str("mode", "quick"), args.intValue("targetPort", 0), "", args.optString("publicUrl").takeIf { it.isNotBlank() })
@@ -958,9 +968,9 @@ object ToolCatalog {
             "format".oneOf("报告格式", "json")
             "writeToFile" bool "将报告 JSON 写入应用文件（report）"
             "reset" bool "重置统计（stats）"
-        }, required = listOf("action")) }
+        }) }
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val hooked = ctx as? HookedContext ?: return JSONObject().put("error", "Meta hooks not available")
+            val hooked = ctx as? HookedContext ?: return err("INTERNAL", "Meta hooks not available")
             return when (args.str("action", "help")) {
                 "help" -> hooked.helpHook()
                 "tools" -> hooked.listToolsHook(args.str("category"), args.str("query"))
@@ -1068,6 +1078,8 @@ object ToolCatalog {
         *ManifestEditTools.ALL.toTypedArray(),
         // 塔菲逆核: Native指令/字符串补丁(CAS乐观锁)+APK统一搜索(分页游标)
         *NativePatchTools.ALL.toTypedArray(),
+        // 设置页「MCP 工具」分组：APK 签名密钥管理 + 临时工作区管理
+        *McpToolsConfig.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)
@@ -1089,4 +1101,8 @@ object ToolCatalog {
         ToolCatalogPresentation.toolDescriptor(handler, includeCategory)
 
     fun categoryOf(name: String): String? = registry.categoryOf(name)
+}
+ryOf(name)
+}
+ing? = registry.categoryOf(name)
 }

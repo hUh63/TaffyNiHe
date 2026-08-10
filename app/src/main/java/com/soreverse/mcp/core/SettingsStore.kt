@@ -5,6 +5,7 @@ import android.net.Uri
 import java.security.SecureRandom
 
 class SettingsStore(context: Context) {
+    private val appContext = context.applicationContext
     private val prefs = context.getSharedPreferences("so_reverse_mcp", Context.MODE_PRIVATE)
 
     init {
@@ -52,6 +53,57 @@ class SettingsStore(context: Context) {
     var defaultWorkDirPath: String
         get() = prefs.getString("defaultWorkDirPath", "/storage/emulated/0/MT2/mcp") ?: "/storage/emulated/0/MT2/mcp"
         set(value) = prefs.edit().putString("defaultWorkDirPath", value).apply()
+
+    /** 服务配置「全部文件访问」开关：请求 MANAGE_EXTERNAL_STORAGE（所有文件访问权限）。
+     *  勾选后需用户在系统授权页授予权限；实际授权状态以 [StoragePermissionHelper.hasAllFilesAccess] 为准。 */
+    var fullStorageAccess: Boolean
+        get() = prefs.getBoolean("fullStorageAccess", false)
+        set(value) = prefs.edit().putBoolean("fullStorageAccess", value).apply()
+
+    // ── MCP 工具设置 · APK 签名 ──
+
+    /** 签名密钥来源：default（内置自签名密钥） | custom（导入的密钥）。 */
+    var apkSignKeySource: String
+        get() = prefs.getString("apkSignKeySource", "default") ?: "default"
+        set(value) = prefs.edit().putString("apkSignKeySource", if (value == "custom") "custom" else "default").apply()
+
+    /** 自定义密钥文件名（位于 filesDir/keystores/ 下，由 [SigningKeyStore] 管理）。 */
+    var apkSignKeystoreName: String
+        get() = prefs.getString("apkSignKeystoreName", "") ?: ""
+        set(value) = prefs.edit().putString("apkSignKeystoreName", value).apply()
+
+    var apkSignKeystoreAlias: String
+        get() = prefs.getString("apkSignKeystoreAlias", "") ?: ""
+        set(value) = prefs.edit().putString("apkSignKeystoreAlias", value).apply()
+
+    var apkSignKeystorePass: String
+        get() = prefs.getString("apkSignKeystorePass", "") ?: ""
+        set(value) = prefs.edit().putString("apkSignKeystorePass", value).apply()
+
+    /** 签名方案：v1v2v3 | v1v2 | v1v3 | v1 | v2v3 | v2 | v3。 */
+    var apkSignScheme: String
+        get() = prefs.getString("apkSignScheme", "v1v2v3") ?: "v1v2v3"
+        set(value) = prefs.edit().putString(
+            "apkSignScheme",
+            if (value in setOf("v1v2v3", "v1v2", "v1v3", "v1", "v2v3", "v2", "v3")) value else "v1v2v3",
+        ).apply()
+
+    /** 自定义 V1 签名数据文件名（META-INF 下，不含扩展名，默认 CERT → CERT.RSA/CERT.SF）。 */
+    var apkV1SignerName: String
+        get() = prefs.getString("apkV1SignerName", "CERT") ?: "CERT"
+        set(value) = prefs.edit().putString("apkV1SignerName", value.ifBlank { "CERT" }).apply()
+
+    /** 不签名时保留原 APK 的 V2/V3 签名数据（供重建流程读取）。 */
+    var apkKeepV2V3WhenNoSign: Boolean
+        get() = prefs.getBoolean("apkKeepV2V3WhenNoSign", false)
+        set(value) = prefs.edit().putBoolean("apkKeepV2V3WhenNoSign", value).apply()
+
+    // ── MCP 工具设置 · 临时工作区 ──
+
+    /** MCP 工具临时工作区数量上限（超过时自动裁剪最旧的临时工作区）。 */
+    var tempWorkspaceLimit: Int
+        get() = prefs.getInt("tempWorkspaceLimit", 8).coerceIn(1, 100)
+        set(value) = prefs.edit().putInt("tempWorkspaceLimit", value.coerceIn(1, 100)).apply()
 
     var port: Int
         get() = prefs.getInt("port", 8000)
@@ -647,9 +699,20 @@ class SettingsStore(context: Context) {
                 .put("defaultWorkDirPath", defaultWorkDirPath)
                 .put("useDefaultWorkDir", useDefaultWorkDir)
                 .put("hasTreeUri", treeUri != null)
+                .put("fullStorageAccess", fullStorageAccess)
                 .put("floatingEnabled", floatingEnabled)
                 .put("wakeLockEnabled", wakeLockEnabled)
                 .put("bootAutoStart", bootAutoStart))
+            .put("mcpTools", org.json.JSONObject()
+                .put("apkSignKeySource", apkSignKeySource)
+                .put("apkSignKeystoreName", apkSignKeystoreName)
+                .put("apkSignKeystoreAlias", apkSignKeystoreAlias)
+                .put("apkSignKeystorePass", mask(apkSignKeystorePass))
+                .put("apkSignScheme", apkSignScheme)
+                .put("apkV1SignerName", apkV1SignerName)
+                .put("apkKeepV2V3WhenNoSign", apkKeepV2V3WhenNoSign)
+                .put("tempWorkspaceLimit", tempWorkspaceLimit)
+                .put("tempWorkspaceCount", TempWorkspaceManager.count(appContext)))
             .put("engine", org.json.JSONObject()
                 .put("indexCacheEnabled", indexCacheEnabled)
                 .put("parseMetadataInList", parseMetadataInList)
@@ -773,9 +836,20 @@ class SettingsStore(context: Context) {
         if (allowSecrets && allowSecurityFields) applyStr(service, "accessToken") { accessToken = it }
         applyStr(service, "defaultWorkDirPath") { defaultWorkDirPath = it }
         applyBool(service, "useDefaultWorkDir") { useDefaultWorkDir = it }
+        applyBool(service, "fullStorageAccess") { fullStorageAccess = it }
         applyBool(service, "floatingEnabled") { floatingEnabled = it }
         applyBool(service, "wakeLockEnabled") { wakeLockEnabled = it }
         applyBool(service, "bootAutoStart") { bootAutoStart = it }
+
+        val mcpTools = obj("mcpTools") ?: patch
+        applyStr(mcpTools, "apkSignKeySource") { apkSignKeySource = it }
+        applyStr(mcpTools, "apkSignKeystoreName") { apkSignKeystoreName = it }
+        applyStr(mcpTools, "apkSignKeystoreAlias") { apkSignKeystoreAlias = it }
+        if (allowSecrets) applyStr(mcpTools, "apkSignKeystorePass") { apkSignKeystorePass = it }
+        applyStr(mcpTools, "apkSignScheme") { apkSignScheme = it }
+        applyStr(mcpTools, "apkV1SignerName") { apkV1SignerName = it }
+        applyBool(mcpTools, "apkKeepV2V3WhenNoSign") { apkKeepV2V3WhenNoSign = it }
+        applyInt(mcpTools, "tempWorkspaceLimit") { tempWorkspaceLimit = it }
 
         val engine = obj("engine") ?: patch
         applyBool(engine, "indexCacheEnabled") { indexCacheEnabled = it }

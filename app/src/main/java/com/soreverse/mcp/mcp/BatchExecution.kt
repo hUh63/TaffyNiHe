@@ -145,7 +145,7 @@ internal class BatchExecutor(
             } catch (error: Exception) {
                 JSONObject().put("ok", false).put("error", JSONObject().put("code", "STEP_EXCEPTION").put("message", error.message ?: error.javaClass.simpleName))
             }
-            val succeeded = payload.optBoolean("ok", true)
+            val succeeded = if (payload.has("ok")) payload.optBoolean("ok") else !payload.has("error")
             results.put(JSONObject().put("step", index).put("tool", toolName).put("resultKey", resultKey).put("arguments", resolvedArgs).put("ok", succeeded).put("result", payload))
             if (resultKey.matches(Regex("^[a-zA-Z0-9_]+$"))) keyed[resultKey] = payload
             if (!succeeded && stopOnError) {

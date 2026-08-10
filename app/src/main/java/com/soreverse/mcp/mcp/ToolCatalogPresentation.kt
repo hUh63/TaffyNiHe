@@ -21,6 +21,7 @@ object ToolCatalogPresentation {
         "lowlevel" to (if (zh) "底层 API 网关：Rizin / LIEF / Unidbg / xAnSo 聚合入口" else "Low-level API gateways: aggregated Rizin / LIEF / Unidbg / xAnSo access"),
         "session" to (if (zh) "编辑会话：打开、历史管理、审计" else "Edit session: open, history, audit"),
         "build" to (if (zh) "构建：输出补丁后的 SO 文件、APK 回编签名" else "Build: export patched SO file, APK rebuild & sign"),
+        "device" to (if (zh) "设备：硬件/系统/应用/网络/日志" else "Device: hardware, system, apps, network, logs"),
         "system" to (if (zh) "系统控制：隧道、APK MCP 桥" else "System: tunnel, APK MCP bridge"),
         "meta" to (if (zh) "元信息：帮助、工具列表、统计、批量、分页" else "Meta: help, tool list, stats, batch, pagination"),
         "decompile" to (if (zh) "反编译：jadx DEX→Java、baksmali DEX→Smali" else "Decompile: jadx DEX→Java, baksmali DEX→Smali"),

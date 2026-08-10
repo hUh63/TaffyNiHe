@@ -5,6 +5,8 @@ import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.smali.Smali
 import com.android.tools.smali.smali.SmaliOptions
+import com.soreverse.mcp.core.ApkSigningPolicy
+import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -255,6 +257,10 @@ object SmaliBatchTool {
                         val signed = signApk(ctx, apkFile, args.str("signOutput").takeIf { it.isNotBlank() })
                         if (signed != null) result.put("signed", true).put("signedApk", signed)
                         else result.put("signed", false).put("signError", "签名失败(可手动用 taffy_apk_sign)")
+                    } else if (SettingsStore(ctx.context).apkKeepV2V3WhenNoSign) {
+                        // 设置「不签名时保留 V2/V3 签名数据」：从原 APK 备份复制签名块到重编产物
+                        val copied = ApkSigningPolicy.copyV2V3Blocks(backup, apkFile)
+                        result.put("keepV2V3", copied > 0)
                     }
                     ok(result)
                 }
@@ -436,16 +442,26 @@ object SmaliBatchTool {
             return ok(JSONObject().put("tool", "taffy_smali_batch").put("snapshots", EditSnapshotService.list(ctx.context, "taffy_smali_batch")))
         }
 
-        /** 复用内置签名密钥, 输出签名 APK。成功返回签名后路径, 失败 null。 */
+        /** 按签名策略（密钥来源/方案/V1 文件名）签名, 输出签名 APK。成功返回签名后路径, 失败 null。 */
         private fun signApk(ctx: ToolContext, apk: File, outPath: String?): String? {
             return try {
-                val signer = ApkBuildTool.obtainInternalSigner(ctx.context)
+                val signer = ApkSigningPolicy.resolveSigner(ctx.context) ?: return null
                 val dest = if (outPath != null) File(outPath)
                     else File(apk.parentFile, "${apk.nameWithoutExtension}-signed.apk")
-                val config = com.android.apksig.ApkSigner.SignerConfig.Builder("NIEHE", signer.first, listOf(signer.second)).build()
-                com.android.apksig.ApkSigner.Builder(listOf(config))
+                val (v1, v2, v3) = ApkSigningPolicy.schemeFlags(ctx.context)
+                val v1Name = ApkSigningPolicy.v1SignerName(ctx.context)
+                val cfgBuilder = com.android.apksig.ApkSigner.SignerConfig.Builder("NIEHE", signer.first, listOf(signer.second))
+                if (v1Name != "CERT") {
+                    runCatching {
+                        cfgBuilder.javaClass.getMethod("setV1SignerName", String::class.java).invoke(cfgBuilder, v1Name)
+                    }
+                }
+                com.android.apksig.ApkSigner.Builder(listOf(cfgBuilder.build()))
                     .setInputApk(apk)
                     .setOutputApk(dest)
+                    .setV1SigningEnabled(v1)
+                    .setV2SigningEnabled(v2)
+                    .setV3SigningEnabled(v3)
                     .build()
                     .sign()
                 dest.absolutePath

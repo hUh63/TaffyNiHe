@@ -455,10 +455,3 @@ object AdvancedTools {
 
     val ALL = listOf(soXref, soCfg, soAddrMap, soSearchBytes, apkSearch, apkPatchBytes, apkResourceList)
 }
-         err("RESOURCE_LIST_FAILED", "资源列表失败: ${e.message}", "path", path)
-            }
-        }
-    }
-
-    val ALL = listOf(soXref, soCfg, soAddrMap, soSearchBytes, apkSearch, apkPatchBytes, apkResourceList)
-}

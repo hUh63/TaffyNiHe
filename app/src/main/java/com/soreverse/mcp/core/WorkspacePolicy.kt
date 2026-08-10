@@ -39,6 +39,12 @@ object WorkspacePolicy {
         return runCatching { BoreTunnelService.isRunning(context.applicationContext) }.getOrDefault(false)
     }
 
+    /** 反射获取应用级 Context（供无 Context 参数的旧式调用方使用），失败返回 null。 */
+    fun appContext(): Context? = runCatching {
+        Class.forName("android.app.ActivityThread")
+            .getMethod("currentApplication").invoke(null) as? Context
+    }.getOrNull()
+
     /** 设置页服务配置下的工作目录路径（treeUri 解析失败或未选择时回退 defaultWorkDirPath）。 */
     fun workDirPath(context: Context): String? {
         val settings = SettingsStore(context.applicationContext)

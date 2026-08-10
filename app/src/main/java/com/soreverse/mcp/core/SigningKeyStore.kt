@@ -84,7 +84,7 @@ object SigningKeyStore {
         return JSONObject().put("ok", true)
             .put("name", name)
             .put("alias", alias)
-            .put("subject", verify.subject)
+            .put("subject", verify.third)
             .put("hint", "密钥已导入并登记，可在 APK 签名设置中选择使用")
     }
 
@@ -100,7 +100,7 @@ object SigningKeyStore {
                 .put("alias", o.optString("alias"))
                 .put("exists", File(dir(context), name).exists())
                 .put("subject", runCatching {
-                    loadKey(context, name, o.optString("alias"), o.optString("storePass"))?.subject ?: ""
+                    loadKey(context, name, o.optString("alias"), o.optString("storePass"))?.third ?: ""
                 }.getOrDefault("")))
         }
         return out

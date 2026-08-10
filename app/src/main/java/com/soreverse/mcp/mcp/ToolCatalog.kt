@@ -1102,7 +1102,3 @@ object ToolCatalog {
 
     fun categoryOf(name: String): String? = registry.categoryOf(name)
 }
-ryOf(name)
-}
-ing? = registry.categoryOf(name)
-}

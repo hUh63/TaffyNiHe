@@ -34,8 +34,7 @@ object ApkBuildTool {
     private const val KEY_PASS = "niehe123"
 
     /** 内置签名密钥(首次用时生成一个自签名 keystore 存 filesDir,之后复用)。 */
-    private fun obtainSigner(dir: File): Pair<PrivateKey, X509Certificate> {
-        val ksFile = File(dir, "niehe-sign.jks")
+    private fun obtainSigner(dir: File): Pair<PrivateKey, X509Certificate> {        val ksFile = File(dir, "niehe-sign.jks")
         val ks = KeyStore.getInstance("PKCS12")
         if (ksFile.exists()) {
             ksFile.inputStream().use { ks.load(it, KEY_PASS.toCharArray()) }
@@ -137,4 +136,8 @@ object ApkBuildTool {
             }.getOrElse { e -> err("APK_SIGN_FAILED", "APK 签名失败: ${e.message ?: e.javaClass.simpleName}", "inputApk", inputPath) }
         }
     }
+
+    /** 供同包其它工具复用内置签名密钥(返回 key+cert)。 */
+    internal fun obtainInternalSigner(context: android.content.Context): Pair<PrivateKey, X509Certificate> =
+        obtainSigner(context.filesDir)
 }

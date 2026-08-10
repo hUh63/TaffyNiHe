@@ -1052,6 +1052,10 @@ object ToolCatalog {
         *UnicornTools.ALL.toTypedArray(),
         // 塔菲逆核: Smali增量编辑(参考MT管理器edit_open/edit_text增量流程)
         *SmaliEditTools.ALL.toTypedArray(),
+        // 塔菲逆核: Smali全量批处理(参考MT管理器全量改包: 解包→批量改→回编签名)
+        *SmaliBatchTool.ALL.toTypedArray(),
+        // 塔菲逆核: 通用编辑快照(diff/回滚, 对任意文件格式生效)
+        EditSnapshotService.handler(),
         // 塔菲逆核: 高级DEX分析(指令级交叉引用/类大纲/字节码/deodex/增量重编)
         *DexAnalysisTools.ALL.toTypedArray(),
         // 塔菲逆核: 高精度Manifest编辑+资源交叉引用(用ARSCLib, 不用正则)

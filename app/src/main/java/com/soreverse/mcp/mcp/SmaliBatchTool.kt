@@ -40,13 +40,11 @@ object SmaliBatchTool {
         ) {
             objectSchema(props {
                 "action".oneOf("批处理action",
-                    "init(全量解包到smali目录) | rebuild(重编回DEX并写回APK) | rename_class(重命名类,去混淆) | diff(对比差异) | rollback(回滚) | list_snapshots(列快照)",
-                    "init", "rebuild", "rename_class", "diff", "rollback", "list_snapshots")
+                    "init(全量解包到smali目录) | rebuild(重编回DEX并写回APK) | diff(对比差异) | rollback(回滚) | list_snapshots(列快照)",
+                    "init", "rebuild", "diff", "rollback", "list_snapshots")
                 "path" str "APK 文件路径(init) 或 DEX 文件路径(init 单 dex, 用 isDex 标记)"
                 "isDex" bool "init: true 表示 path 是单个 .dex 而非 APK(可选)"
-                "workDir" str "rebuild/rename_class: 工作目录(init 返回的)"
-                "oldClass" str "rename_class: 要重命名的原始类全名(如 com.example.A)"
-                "newClass" str "rename_class: 重命名后的类全名(如 com.example.MainActivity)"
+                "workDir" str "rebuild: 工作目录(init 返回的)"
                 "apiLevel" int "smali/dex api level(默认 34)"
                 "sign" bool "rebuild: 是否自动重签名(默认 false, 签名用内置密钥)"
                 "signOutput" str "sign=true 时输出签名 APK 路径(默认 <原>-signed.apk)"
@@ -59,7 +57,6 @@ object SmaliBatchTool {
             return when (args.str("action", "init")) {
                 "init" -> initWork(ctx, args)
                 "rebuild" -> rebuildWork(ctx, args)
-                "rename_class" -> renameClass(ctx, args)
                 "diff" -> snapshotDiff(ctx, args)
                 "rollback" -> snapshotRollback(ctx, args)
                 "list_snapshots" -> snapshotList(ctx, args)
@@ -260,93 +257,6 @@ object SmaliBatchTool {
             }
         }
 
-/** 重命名单个类(去混淆): 精确替换全目录 smali 里的类引用 + 移动类文件。只改解包目录, 不重编; 之后用 rebuild 回编校验。 */
-        private fun renameClass(ctx: ToolContext, args: JSONObject): JSONObject {
-            val workDirPath = args.str("workDir")
-            val oldClass = args.str("oldClass")
-            val newClass = args.str("newClass")
-            if (workDirPath.isBlank()) return err("INVALID_ARGUMENT", "缺少 workDir", "workDir", "")
-            if (oldClass.isBlank() || newClass.isBlank()) return err("INVALID_ARGUMENT", "缺少 oldClass 或 newClass", "oldClass", oldClass)
-            val workDir = File(workDirPath)
-            if (!workDir.isDirectory) return err("DIR_NOT_FOUND", "工作目录不存在: $workDirPath", "workDir", workDirPath)
-            if (oldClass == newClass) return err("NOOP", "oldClass 与 newClass 相同", "newClass", newClass)
-
-            val slOld = oldClass.replace('.', '/')
-            val slNew = newClass.replace('.', '/')
-            // 精确引用替换(先长后短, 避免内嵌类被纯; 前缀提前吞)
-            val refOldInner = "L$slOld\$"
-            val refNewInner = "L$slNew\$"
-            val refOldSelf = "L$slOld;"
-            val refNewSelf = "L$slNew;"
-            val oldRelDir = slOld.substringBeforeLast('/', slOld)
-            val newRelDir = slNew.substringBeforeLast('/', slNew)
-            val oldSimple = slOld.substringAfterLast('/')
-            val newSimple = slNew.substringAfterLast('/')
-
-            return runCatching {
-                var totalFiles = 0
-                var totalRefs = 0
-                var moved = 0
-                var smaliDirs = workDir.listFiles { f -> f.isDirectory && f.name.endsWith("_smali") }?.toList() ?: emptyList()
-                if (smaliDirs.isEmpty()) smaliDirs = workDir.listFiles { f -> f.isDirectory }?.toList() ?: emptyList()
-
-                for (smaliDir in smaliDirs) {
-                    // 1. 全目录 smali 文本替换引用
-                    val allSmali = smaliDir.walkTopDown().filter { it.isFile && it.extension == "smali" }.toList()
-                    for (f in allSmali) {
-                        val text = f.readText()
-                        val replaced = text.replace(refOldInner, refNewInner).replace(refOldSelf, refNewSelf)
-                        if (replaced != text) {
-                            val refs = countOccurrences(text, refOldInner) + countOccurrences(text, refOldSelf)
-                            f.writeText(replaced)
-                            totalFiles++; totalRefs += refs
-                        }
-                    }
-                    // 2. 移动类文件(自身 + 内嵌类)
-                    val oldSelf = File(smaliDir, "$slOld.smali")
-                    val targetMap = ArrayList<Pair<File, File>>()
-                    if (oldSelf.isFile) {
-                        targetMap.add(oldSelf to File(smaliDir, "$slNew.smali"))
-                    }
-                    // 内嵌类: oldRelDir 下 oldSimple$*.smali
-                    val oldParentDir = File(smaliDir, oldRelDir)
-                    if (oldParentDir.isDirectory) {
-                        oldParentDir.listFiles { f -> f.isFile && f.name.startsWith("$oldSimple\$") && f.name.endsWith(".smali") }
-                            ?.forEach { f ->
-                                val inner = f.name.removePrefix("$oldSimple\$").removeSuffix(".smali") // 保留多级内嵌, 如 B$C
-                                targetMap.add(f to File(File(smaliDir, newRelDir), "$newSimple\$$inner.smali"))
-                            }
-                    }
-                    for ((src, dst) in targetMap) {
-                        dst.parentFile?.mkdirs()
-                        src.copyTo(dst, overwrite = true)
-                        src.delete()
-                        moved++
-                    }
-                }
-                ok(JSONObject()
-                    .put("action", "rename_class")
-                    .put("oldClass", oldClass)
-                    .put("newClass", newClass)
-                    .put("filesChanged", totalFiles)
-                    .put("refsChanged", totalRefs)
-                    .put("filesMoved", moved)
-                    .put("hint", "类引用已重命名并移动文件。用 action=rebuild 重编回 DEX 校验语法/引用一致性后再签名。若重编报错(引用断裂), 用 action=rollback 还原。"))
-            }.getOrElse { e ->
-                err("RENAME_CLASS_FAILED", "重命名失败: ${e.message ?: e.javaClass.simpleName}", "oldClass", oldClass)
-            }
-        }
-
-        private fun countOccurrences(haystack: String, needle: String): Int {
-            if (needle.isEmpty()) return 0
-            var count = 0; var idx = 0
-            while (idx <= haystack.length - needle.length) {
-                val at = haystack.indexOf(needle, idx)
-                if (at < 0) break
-                count++; idx = at + needle.length
-            }
-            return count
-        }
         private fun snapshotDiff(ctx: ToolContext, args: JSONObject): JSONObject {
             val id = args.str("snapshotId")
             if (id.isBlank()) return err("INVALID_ARGUMENT", "缺少 snapshotId", "snapshotId", "")

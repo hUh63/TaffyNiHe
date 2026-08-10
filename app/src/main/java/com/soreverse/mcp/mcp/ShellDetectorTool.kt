@@ -57,6 +57,7 @@ object ShellDetectorTool {
             return runCatching {
                 val libs = mutableListOf<String>()
                 val assets = mutableListOf<String>()
+                val metaInf = mutableListOf<String>()
                 var dexCount = 0
                 var minDexSize = Long.MAX_VALUE
                 var maxDexSize = 0L
@@ -67,6 +68,7 @@ object ShellDetectorTool {
                         allEntries.add(n)
                         if (n.startsWith("lib/") && n.endsWith(".so")) libs.add(n.substringAfter("/").substringAfter("/"))
                         else if (n.startsWith("assets/")) assets.add(n.removePrefix("assets/"))
+                        else if (n.startsWith("META-INF/")) metaInf.add(n.removePrefix("META-INF/"))
                         if (n.matches(Regex("classes\\d*\\.dex"))) {
                             dexCount++
                             val s = e.size
@@ -74,6 +76,24 @@ object ShellDetectorTool {
                         }
                     }
                 }
+                // 签名方案检测: v1 = META-INF/*.RSA|DSA|EC + .SF; v2/v3 = APK Signing Block(MAGIC "APK Sig Block 42 " in trailing zone)
+                val v1Cert = metaInf.firstOrNull { it.endsWith(".RSA") || it.endsWith(".DSA") || it.endsWith(".EC") || it.endsWith(".SF") }
+                var v2v3 = false
+                runCatching {
+                    apk.inputStream().use { ins ->
+                        val total = apk.length()
+                        val tailLen = minOf(total, 1L * 1024 * 1024).toInt()
+                        if (tailLen > 0) {
+                            ins.skip(total - tailLen)
+                            val tail = ByteArray(tailLen)
+                            var off = 0
+                            while (off < tailLen) { val n = ins.read(tail, off, tailLen - off); if (n <= 0) break; off += n }
+                            val magic = "APK Sig Block 42 ".toByteArray(Charsets.US_ASCII)
+                            v2v3 = containsBytes(tail, magic)
+                        }
+                    }
+                }
+                val v2 = v2v3
                 // 找出命中的壳
                 val hits = JSONArray()
                 val matched = LinkedHashSet<String>()
@@ -96,6 +116,7 @@ object ShellDetectorTool {
                     JSONObject()
                         .put("libs", JSONArray(libs.take(30)))
                         .put("assets", JSONArray(assets.take(30)))
+                        .put("metaInf", JSONArray(metaInf.take(20)))
                         .put("classesDex", JSONObject().put("count", dexCount).put("minSize", if (dexCount > 0) minDexSize else 0).put("maxSize", maxDexSize))
                 } else JSONObject()
                 ok(JSONObject()
@@ -103,12 +124,28 @@ object ShellDetectorTool {
                     .put("path", path)
                     .put("packed", packed)
                     .put("shells", hits)
+                    .put("signature", JSONObject()
+                        .put("v1", v1Cert != null)
+                        .put("v1Cert", v1Cert ?: JSONObject.NULL)
+                        .put("v2", v2)
+                        .put("v3", v2) // 有 Sig Block 通常 v2/v3 同有; 精确区分需解析 block(略)
+                        .put("signed", v1Cert != null || v2))
                     .put("detail", shellDetail)
                     .put("hint", if (packed) "检测到疑似加固, 改之前通常要先脱壳: 用 taffy_dex_unpack(需root,内存dump) 或 taffy_apk_rebuild(decode) 观察。" else "未检出常见加固壳, 可直接 jadx/baksmali 分析修改。"))
             }.getOrElse { e ->
                 err("SHELL_CHECK_FAILED", "加固检测失败: ${e.message ?: e.javaClass.simpleName}", "path", path)
             }
         }
+    }
+
+    /** 字节数组中是否包含某模式(简单 contains)。 */
+    private fun containsBytes(hay: ByteArray, needle: ByteArray): Boolean {
+        if (needle.isEmpty() || needle.size > hay.size) return false
+        outer@ for (i in 0..hay.size - needle.size) {
+            for (j in needle.indices) if (hay[i + j] != needle[j]) continue@outer
+            return true
+        }
+        return false
     }
 
     val ALL = listOf(tool)

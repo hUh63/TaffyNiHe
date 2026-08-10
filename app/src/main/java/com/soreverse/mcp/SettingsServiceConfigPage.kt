@@ -31,6 +31,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -75,7 +77,19 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
     val preferred = endpoints.firstOrNull { !it.url.contains("127.0.0.1") && !it.url.contains("[::1]") }?.url ?: loopback
     val publicUrl = activeServer(context)?.tunnel?.status()?.publicUrl?.takeIf { it.isNotBlank() }
     var showStorageDialog by remember { mutableStateOf(false) }
-    val storageGranted = StoragePermissionHelper.hasAllFilesAccess(context)
+    var showRevokeDialog by remember { mutableStateOf(false) }
+    var storageGranted by remember { mutableStateOf(StoragePermissionHelper.hasAllFilesAccess(context)) }
+    // 当从系统授权页返回时，重新检查权限状态
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                storageGranted = StoragePermissionHelper.hasAllFilesAccess(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     PageScroll {
         GlassGroup(title = if (t.zh) "工作目录" else "Work directory") {
             NavRow(
@@ -90,7 +104,11 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 if (t.zh) "全部文件访问" else "All files access",
                 storageGranted,
             ) {
-                StoragePermissionHelper.ensureAllFilesAccess(context) { showStorageDialog = true }
+                if (!storageGranted) {
+                    StoragePermissionHelper.ensureAllFilesAccess(context) { showStorageDialog = true }
+                } else {
+                    showRevokeDialog = true
+                }
             }
         }
         GlassGroup(title = if (t.zh) "服务端口" else "Service port", footer = portStatusText(portText.toIntOrNull() ?: settings.port, McpForegroundService.isRunning(), t.zh)) {
@@ -225,6 +243,25 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 }) { Text(if (t.zh) "去授权" else "Grant") }
             },
             dismissButton = { TextButton({ showStorageDialog = false }) { Text(if (t.zh) "取消" else "Cancel") } },
+        )
+    }
+    if (showRevokeDialog) {
+        AlertDialog(
+            onDismissRequest = { showRevokeDialog = false },
+            title = { Text(if (t.zh) "关闭所有文件访问权限" else "Revoke all files access") },
+            text = {
+                Text(if (t.zh)
+                    "需要前往系统设置页关闭「所有文件访问」权限。点击「去关闭」跳转到系统设置页。"
+                    else
+                    "You need to go to system settings to revoke \"All files access\" permission.")
+            },
+            confirmButton = {
+                TextButton({
+                    showRevokeDialog = false
+                    runCatching { context.startActivity(StoragePermissionHelper.allFilesAccessIntent(context)) }
+                }) { Text(if (t.zh) "去关闭" else "Revoke") }
+            },
+            dismissButton = { TextButton({ showRevokeDialog = false }) { Text(if (t.zh) "取消" else "Cancel") } },
         )
     }
 }

@@ -349,8 +349,8 @@ object ToolCatalog {
 
     private val editSymbol = EngineToolHandler(
         ToolMeta("taffy_edit_symbol",
-            "符号管理（rename 重命名 / add 添加导出函数 / remove 移除符号）",
-            "Symbol management: rename (same-or-shorter), add exported function via LIEF, or remove symbol via LIEF.",
+            "符号管理（rename 重命名 / add 添加导出函数 / remove 移除符号）。rename 也用于重命名导入(import)符号：将调用重定向到同长/更短的另一个符号，实现 import 级补丁（对标 soedit 编辑导入表）。",
+            "Symbol management: rename (same-or-shorter, also redirects imports by renaming the UNDEF symbol), add exported function via LIEF, or remove symbol via LIEF.",
             "edit", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"

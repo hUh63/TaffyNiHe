@@ -30,8 +30,17 @@ internal fun EngineRuntime.list(workspaceId: String, editSessionId: String, view
             "strings" -> elf.strings.asSequence().filter { prefix.isBlank() || it.value.contains(prefix, ignoreCase = true) }.map {
                 EngineJson.stringJson(name, it)
             }
-            "imports" -> elf.dynSymbols.asSequence().filter { it.imported && it.name.startsWith(prefix) }.map {
-                JSONObject().put("locator", "so_import:$name!UNRESOLVED!${it.name}").put("soname", JSONObject.NULL).put("resolution", "unresolved_without_symbol_version_mapping").put("neededLibraries", JSONArray(neededLibraries(elf, dataFor(workspaceId, editSessionId)))).put("symbol", it.name).put("symbolLocator", "so_symbol:$name!${it.name}").put("isWeak", it.bind == "WEAK")
+            "imports" -> elf.dynSymbols.asSequence().filter { it.imported && it.name.startsWith(prefix) }.sortedBy { it.name }.map {
+                val shndx = it.sectionIndex
+                JSONObject().put("locator", "so_symbol:$name!${it.name}")
+                    .put("symbol", it.name)
+                    .put("bind", it.bind)
+                    .put("type", it.type)
+                    .put("visibility", it.visibility)
+                    .put("section", if (shndx == 0) "UNDEF (导入/未定义)" else "section_$shndx")
+                    .put("isWeak", it.bind == "WEAK")
+                    .put("neededLibraries", JSONArray(neededLibraries(elf, dataFor(workspaceId, editSessionId))))
+                    .put("editHint", "用 taffy_edit_symbol action=rename 重命名该导入符号, 可将调用重定向到同长/更短的另一个符号, 实现 import 级补丁")
             }
             "plt_stubs" -> emptySequence()
             else -> return@guarded err("INVALID_LOCATOR", "Unsupported list view", "view", view)

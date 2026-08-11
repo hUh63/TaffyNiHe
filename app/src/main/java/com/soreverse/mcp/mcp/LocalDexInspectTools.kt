@@ -1,11 +1,10 @@
 package com.soreverse.mcp.mcp
 
 import com.android.tools.smali.dexlib2.DexFileFactory
+import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.dexlib2.iface.ClassDef
 import com.android.tools.smali.dexlib2.iface.DexFile
-import com.android.tools.smali.dexlib2.iface.Field
 import com.android.tools.smali.dexlib2.iface.Method
-import com.android.tools.smali.dexlib2.iface.StringId
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -68,9 +67,7 @@ object LocalDexInspectTools {
         val out = mutableListOf<DexFile>()
         for (f in sources) {
             try {
-                FileInputStream(f).use { fis ->
-                    out.add(DexFileFactory.loadDexFile(fis, f.name))
-                }
+                out.add(DexFileFactory.loadDexFile(f, Opcodes.getDefault()))
             } catch (e: Exception) {
                 // 跳过坏 dex 继续
             }
@@ -79,10 +76,10 @@ object LocalDexInspectTools {
     }
 
     private fun summaryFor(dexes: List<DexFile>, label: String, limit: Int): JSONObject {
-        val totalClasses = dexes.sumOf { it.classes.size }
-        val totalMethods = dexes.sumOf { it.classes.sumOf { c -> c.virtualMethods.size + c.directMethods.size } }
-        val totalFields = dexes.sumOf { it.classes.sumOf { c -> c.fields.size } }
-        val totalStrings = dexes.sumOf { it.strings.size }
+        val totalClasses = dexes.sumOf { it.classes.count() }
+        val totalMethods = dexes.sumOf { d -> d.classes.sumOf { c -> c.virtualMethods.count() + c.directMethods.count() } }
+        val totalFields = dexes.sumOf { d -> d.classes.sumOf { c -> c.fields.count() } }
+        val totalStrings = dexes.sumOf { it.strings.count() }
         val topClasses = mutableListOf<String>()
         var n = 0
         for (dex in dexes) {
@@ -112,13 +109,13 @@ object LocalDexInspectTools {
             for (c in dex.classes) {
                 val type = c.type
                 if (re != null && !re.containsMatchIn(type)) continue
-                val methods = c.virtualMethods.size + c.directMethods.size
+                val methods = c.virtualMethods.count() + c.directMethods.count()
                 arr.put(JSONObject()
                     .put("type", type)
                     .put("super", c.superclass ?: "")
                     .put("access", c.accessFlags)
                     .put("methodCount", methods)
-                    .put("fieldCount", c.fields.size))
+                    .put("fieldCount", c.fields.count()))
                 count++
                 if (count >= limit) break
             }
@@ -150,7 +147,8 @@ object LocalDexInspectTools {
         var count = 0
         for (dex in dexes) {
             val klass = dex.classes.firstOrNull { it.type == targetType || it.type.endsWith(className) } ?: continue
-            for (m in (klass.virtualMethods + klass.directMethods)) {
+            val all = klass.virtualMethods + klass.directMethods
+            for (m in all) {
                 val params = m.parameters.joinToString(", ") { it.type ?: "" }
                 arr.put(JSONObject()
                     .put("name", m.name)

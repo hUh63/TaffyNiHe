@@ -35,11 +35,13 @@ class ApkMcpBridge(private val settings: SettingsStore) {
     )
 
     data class State(
+        val name: String = "",
         val url: String = "",
         val online: Boolean = false,
         val lastError: String = "",
         val tools: List<ToolDef> = emptyList(),
         val toolPrefix: String = MT_PREFIX,
+        val configPrefix: String = "",
         val lastCheckedAt: Long = 0,
         val lastLatencyMs: Long = 0,
         val probes: Long = 0,
@@ -53,8 +55,9 @@ class ApkMcpBridge(private val settings: SettingsStore) {
 
     /**
      * Internal representation of a single bridge connection.
+     * name 唯一，url 允许重复（多实例指向同一桥接）。
      */
-    private class BridgeConnection(val url: String, val token: String) {
+    private class BridgeConnection(val name: String, val url: String, val token: String, val configPrefix: String) {
         @Volatile var state: State = State(url = url)
         private val client: OkHttpClient by lazy {
             OkHttpClient.Builder()
@@ -74,14 +77,17 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 val resp = post(req)
                 val latencyMs = (System.nanoTime() - start) / 1_000_000
                 val parsed = parseTools(resp)
-                val prefix = detectPrefix(parsed)
+                // 配置的前缀优先；否则自动检测
+                val prefix = configPrefix.ifBlank { detectPrefix(parsed) }
                 val prev = state
                 val s = State(
+                    name = name,
                     url = url,
                     online = true,
                     lastError = "",
                     tools = parsed,
-                    toolPrefix = prefix ?: prev.toolPrefix,
+                    toolPrefix = prefix,
+                    configPrefix = configPrefix,
                     lastCheckedAt = System.currentTimeMillis(),
                     lastLatencyMs = latencyMs,
                     probes = prev.probes + 1,
@@ -95,7 +101,8 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 return s
             } catch (e: Exception) {
                 val prev = state
-                val s = State(url = url, online = false, lastError = e.message ?: e.javaClass.simpleName,
+                val s = State(name = name, url = url, online = false, lastError = e.message ?: e.javaClass.simpleName,
+                    configPrefix = configPrefix,
                     probes = prev.probes + 1, probeFailures = prev.probeFailures + 1,
                     totalLatencyMs = prev.totalLatencyMs, maxLatencyMs = prev.maxLatencyMs)
                 state = s
@@ -168,9 +175,10 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                         val resp = post(req)
                         val parsed = parseTools(resp)
                         val prefix = detectPrefix(parsed)
-                        if (prefix != null) {
+                        if (prefix != null || configPrefix.isNotBlank()) {
                             val cur = state
-                            state = State(url = url, online = true, lastError = "", tools = parsed, toolPrefix = prefix, lastCheckedAt = System.currentTimeMillis())
+                            val effectivePrefix = configPrefix.ifBlank { prefix }
+                            state = State(name = name, url = url, online = true, lastError = "", tools = parsed, toolPrefix = effectivePrefix, configPrefix = configPrefix, lastCheckedAt = System.currentTimeMillis())
                             if (!cur.online) AppLog.i("apk-mcp health: $url back online (${parsed.size} tools, prefix=$prefix)")
                         }
                     } catch (e: Exception) {
@@ -298,23 +306,32 @@ class ApkMcpBridge(private val settings: SettingsStore) {
     /** Sync the internal connection list from settings. */
     private fun syncConnectionsFromSettings() {
         val configs = settings.apkMcpConfigs
-        // Remove connections whose URLs are no longer in config
-        val activeUrls = configs.map { it.url }.toSet()
-        connections.removeAll { it.url !in activeUrls }
-        // Add new connections
-        val existingUrls = connections.map { it.url }.toSet()
+        // Remove connections whose name is no longer in config
+        val activeNames = configs.map { it.name }.toSet()
+        connections.removeAll { it.name !in activeNames }
+        // Add new connections by name（同名桥接不会被合并；同 URL 不同 name 允许）
+        val existingNames = connections.map { it.name }.toSet()
         for (config in configs) {
-            if (config.url !in existingUrls) {
-                connections.add(BridgeConnection(config.url, config.token))
+            if (config.name !in existingNames) {
+                connections.add(BridgeConnection(config.name, config.url, config.token, config.prefix))
+            } else {
+                // 更新已存在桥接的 url/token/prefix（用户在弹窗中改了）
+                val idx = connections.indexOfFirst { it.name == config.name }
+                if (idx >= 0) {
+                    val old = connections[idx]
+                    if (old.url != config.url || old.token != config.token || old.configPrefix != config.prefix) {
+                        connections[idx] = BridgeConnection(config.name, config.url, config.token, config.prefix)
+                    }
+                }
             }
         }
     }
 
-    /** Ensure a connection exists for the given URL, adding it if new. */
-    private fun ensureConnection(url: String, token: String = ""): BridgeConnection {
+    /** Ensure a connection exists for the given name, adding it if new. */
+    private fun ensureConnection(name: String, url: String, token: String = "", prefix: String = ""): BridgeConnection {
         syncConnectionsFromSettings()
-        return connections.firstOrNull { it.url == url } ?: run {
-            val conn = BridgeConnection(url, token)
+        return connections.firstOrNull { it.name == name } ?: run {
+            val conn = BridgeConnection(name, url, token, prefix)
             connections.add(conn)
             conn
         }
@@ -340,21 +357,21 @@ class ApkMcpBridge(private val settings: SettingsStore) {
             )
             for (url in candidates) {
                 try {
-                    val conn = BridgeConnection(url, "")
+                    val autoName = "桥接 ${connections.size + 1}"
+                    val conn = BridgeConnection(autoName, url, "", "")
                     val st = conn.probe()
                     if (st.online) {
                         connections.add(conn)
-                        // Save to settings
                         val configs = settings.apkMcpConfigs.toMutableList()
                         if (configs.none { it.url == url }) {
-                            configs.add(SettingsStore.BridgeConfig(url, ""))
+                            configs.add(SettingsStore.BridgeConfig(name = autoName, url = url, token = "", prefix = ""))
                             settings.apkMcpConfigs = configs
                         }
                         if (firstState == null) firstState = st
                         AppLog.i("apk-mcp auto-discovered ${prefixLabel(st.toolPrefix)} at $url (${st.tools.size} tools)")
                         break
                     }
-                } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch: ${e.message}") }
+                } catch (_: Exception) { /* try next */ }
             }
         }
         if (firstState == null) {
@@ -389,28 +406,39 @@ class ApkMcpBridge(private val settings: SettingsStore) {
      * Adds the connection if successful.
      */
     @Synchronized
-    fun probeUrl(url: String, token: String = ""): State {
-        val conn = ensureConnection(url, token)
+    fun probeUrl(name: String, url: String, token: String = "", prefix: String = ""): State {
+        val conn = ensureConnection(name, url, token, prefix)
         val st = conn.probe()
         // Always save to settings so the bridge appears in the UI list
-        // even when it is currently offline (user can retry later).
         val configs = settings.apkMcpConfigs.toMutableList()
-        if (configs.none { it.url == url }) {
-            configs.add(SettingsStore.BridgeConfig(url, token))
+        if (configs.none { it.name == name }) {
+            configs.add(SettingsStore.BridgeConfig(name = name, url = url, token = token, prefix = prefix))
             settings.apkMcpConfigs = configs
         }
         return st
+    }
+
+    /** 兼容旧调用：按 url 自动生成 name 并探测。 */
+    fun probeUrl(url: String, token: String = ""): State {
+        val name = "桥接 ${connections.size + 1}"
+        return probeUrl(name, url, token, "")
     }
 
     /**
      * Remove a bridge connection by URL.
      */
     @Synchronized
-    fun removeBridge(url: String) {
-        connections.removeAll { it.url == url }
+    fun removeBridge(name: String) {
+        connections.removeAll { it.name == name }
         val configs = settings.apkMcpConfigs.toMutableList()
-        configs.removeAll { it.url == url }
+        configs.removeAll { it.name == name }
         settings.apkMcpConfigs = configs
+    }
+
+    /** 兼容旧调用：按 URL 匹配移除（删除同名 URL 中第一个匹配项）。 */
+    fun removeBridgeByUrl(url: String) {
+        val conn = connections.firstOrNull { it.url == url } ?: return
+        removeBridge(conn.name)
     }
 
     /** Lightweight liveness ping for all connections. */
@@ -510,12 +538,14 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         val configs = settings.apkMcpConfigs
         val bridges = JSONArray()
         for (config in configs) {
-            val conn = connections.firstOrNull { it.url == config.url }
-            val st = conn?.state ?: State(url = config.url)
+            val conn = connections.firstOrNull { it.name == config.name }
+            val st = conn?.state ?: State(name = config.name, url = config.url, configPrefix = config.prefix)
             bridges.put(JSONObject()
+                .put("name", config.name)
                 .put("url", config.url)
                 .put("online", st.online)
                 .put("toolPrefix", st.toolPrefix)
+                .put("configPrefix", config.prefix)
                 .put("toolCount", st.tools.size)
                 .put("lastError", st.lastError)
                 .put("lastCheckedAt", st.lastCheckedAt)
@@ -525,7 +555,11 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 .put("probes", st.probes)
                 .put("probeFailures", st.probeFailures)
                 .put("lossRate", st.lossRate())
-                .put("tools", JSONArray().apply { st.tools.forEach { put(it.name) } })
+                .put("tools", JSONArray().apply { st.tools.forEach { tool -> put(JSONObject()
+                    .put("name", tool.name)
+                    .put("title", tool.title ?: "")
+                    .put("description", tool.description ?: "")
+                ) } })
             )
         }
         val firstOnline = connections.firstOrNull { it.state.online }

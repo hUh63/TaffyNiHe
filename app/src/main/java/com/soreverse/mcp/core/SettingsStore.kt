@@ -553,7 +553,7 @@ class SettingsStore(context: Context) {
         set(value) {
             val configs = apkMcpConfigs.toMutableList()
             if (configs.isEmpty()) {
-                configs.add(BridgeConfig(value.trim(), apkMcpToken))
+                configs.add(BridgeConfig(name = "桥接 1", url = value.trim(), token = apkMcpToken))
             } else {
                 configs[0] = configs[0].copy(url = value.trim())
             }
@@ -569,47 +569,73 @@ class SettingsStore(context: Context) {
         set(value) {
             val configs = apkMcpConfigs.toMutableList()
             if (configs.isEmpty()) {
-                configs.add(BridgeConfig(apkMcpUrl, sanitizeCredential(value)))
+                configs.add(BridgeConfig(name = "桥接 1", url = apkMcpUrl, token = sanitizeCredential(value)))
             } else {
                 configs[0] = configs[0].copy(token = sanitizeCredential(value))
             }
             apkMcpConfigs = configs
         }
 
-    data class BridgeConfig(val url: String, val token: String = "")
+    /**
+     * 桥接配置：name 为人类可读名字（UI 显示），url 为 MCP 端点，token 为可选 Bearer，
+     * prefix 为工具名前缀（留空自动检测；非空则以此前缀暴露工具，如 "MCP1_read_file"）。
+     * 唯一约束：name 在列表内不重复（自动去重后缀）。
+     */
+    data class BridgeConfig(
+        val name: String,
+        val url: String,
+        val token: String = "",
+        val prefix: String = "",
+    )
 
-    /** Multiple bridge configurations as a JSON array of {"url","token"} objects. */
+    /** Multiple bridge configurations as a JSON array of {name,url,token,prefix} objects. */
     var apkMcpConfigs: List<BridgeConfig>
         get() {
             val raw = prefs.getString("apkMcpConfigs", "") ?: ""
             if (raw.isBlank()) {
-                // Migration: read legacy single URL+token
                 val legacyUrl = prefs.getString("apkMcpUrl", "") ?: ""
                 return if (legacyUrl.isNotBlank()) {
                     val legacyToken = sanitizeCredential(prefs.getString("apkMcpToken", "").orEmpty())
-                    listOf(BridgeConfig(legacyUrl, legacyToken))
+                    listOf(BridgeConfig(name = "桥接 1", url = legacyUrl, token = legacyToken))
                 } else emptyList()
             }
             return try {
                 val arr = org.json.JSONArray(raw)
-                (0 until arr.length()).map { i ->
+                val out = mutableListOf<BridgeConfig>()
+                val used = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
-                    BridgeConfig(
-                        url = obj.optString("url", ""),
+                    val url = obj.optString("url", "")
+                    if (url.isBlank()) continue
+                    val rawName = obj.optString("name", "")
+                    val name = if (rawName.isBlank()) "桥接 ${out.size + 1}"
+                    else if (rawName in used) "${rawName}_${out.size + 1}"
+                    else rawName
+                    used.add(name)
+                    out.add(BridgeConfig(
+                        name = name,
+                        url = url,
                         token = sanitizeCredential(obj.optString("token", "")),
-                    )
-                }.filter { it.url.isNotBlank() }
+                        prefix = obj.optString("prefix", ""),
+                    ))
+                }
+                out
             } catch (_: Exception) { emptyList() }
         }
         set(value) {
             val arr = org.json.JSONArray()
+            val used = mutableSetOf<String>()
             value.forEach { config ->
+                val baseName = config.name.ifBlank { "桥接 ${used.size + 1}" }
+                val name = if (baseName in used) "${baseName}_${used.size + 1}" else baseName
+                used.add(name)
                 arr.put(org.json.JSONObject()
+                    .put("name", name)
                     .put("url", config.url.trim())
-                    .put("token", config.token))
+                    .put("token", config.token)
+                    .put("prefix", config.prefix.trim()))
             }
             prefs.edit().putString("apkMcpConfigs", arr.toString()).apply()
-            // Keep legacy fields in sync for backward compatibility
             val first = value.firstOrNull()
             prefs.edit()
                 .putString("apkMcpUrl", first?.url?.trim() ?: "")
@@ -624,6 +650,11 @@ class SettingsStore(context: Context) {
     var apkMcpMergeTools: Boolean
         get() = prefs.getBoolean("apkMcpMergeTools", true)
         set(value) = prefs.edit().putBoolean("apkMcpMergeTools", value).apply()
+
+    /** MCP 桥接工具禁用映射（key = "bridgeName::toolName"），JSON 字符串。 */
+    var toolDisableMapRaw: String
+        get() = prefs.getString("toolDisableMap", "{}") ?: "{}"
+        set(value) = prefs.edit().putString("toolDisableMap", value).apply()
 
     var apkMcpProbeTimeoutMs: Int
         get() = prefs.getInt("apkMcpProbeTimeoutMs", 8000)

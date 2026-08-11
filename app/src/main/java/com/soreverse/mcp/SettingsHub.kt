@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Memory
@@ -75,6 +76,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.BackupRestore -> t.backupRestore
     SettingsDest.ApkSign -> if (t.zh) "APK 签名设置" else "APK Signing"
     SettingsDest.TempWorkspace -> if (t.zh) "临时工作区" else "Temp Workspaces"
+    SettingsDest.Workspace -> if (t.zh) "工作区" else "Workspace"
 }
 
 @Composable
@@ -178,8 +180,11 @@ internal fun SettingsHub(
                 }
                 Text(if (t.zh) "MCP 工具" else "MCP Tools", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "工具设置" else "Tool Settings", if (t.zh) "APK 签名 / 密钥" else "APK signing / keys", Icons.Default.Build, AppPalette.orange, { onDest(SettingsDest.ApkSign) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "APK 签名设置" else "APK Signing", if (t.zh) "APK签名/密钥" else "APK signing / keys", Icons.Default.Build, AppPalette.orange, { onDest(SettingsDest.ApkSign) }, Modifier.weight(1f).fillMaxHeight())
                     SettingsTile(if (t.zh) "临时工作区" else "Temp Workspaces", if (t.zh) "数量 / 清理" else "Limit / clean", Icons.Default.DeleteSweep, AppPalette.green, { onDest(SettingsDest.TempWorkspace) }, Modifier.weight(1f).fillMaxHeight())
+                }
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 隧道放行 / 管理" else "Directory / tunnel / manage", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
@@ -252,6 +257,7 @@ internal fun SettingsHub(
             SettingsDest.Probe -> SettingsProbePage(t, settings)
             SettingsDest.ApkSign -> SettingsApkSignPage(t, settings)
             SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings)
+            SettingsDest.Workspace -> SettingsWorkspacePage(t, settings)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

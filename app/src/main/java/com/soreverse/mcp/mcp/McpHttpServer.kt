@@ -522,9 +522,8 @@ $historyRows
                 .put("resultType", "complete")
             // MCP 2026-07-28 新方法：服务器通告支持的协议版本、capabilities、身份。
             "server/discover" -> JSONObject()
-                .put("supportedProtocolVersions", JSONArray().apply {
-                    add("2026-07-28"); add("2025-11-25"); add("2025-06-18"); add("2025-03-26"); add("2024-11-05")
-                })
+                .put("supportedProtocolVersions", JSONArray()
+                    .put("2026-07-28").put("2025-11-25").put("2025-06-18").put("2025-03-26").put("2024-11-05"))
                 .put("capabilities", JSONObject()
                     .put("tools", JSONObject().put("listChanged", false))
                     .put("resources", JSONObject().put("subscribe", false).put("listChanged", false))

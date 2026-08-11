@@ -148,7 +148,7 @@ object DbgTools {
                 "regs" -> {
                     val reply = rsp.send("g") // 读全部寄存器
                     val regsHex = decodeHex(reply)
-                    ok(JSONObject().put("action", "regs").put("registerBytes", regsHex).put("length", regsHex.length))
+                    ok(JSONObject().put("action", "regs").put("registerBytes", regsHex).put("length", regsHex.size))
                 }
                 "mem" -> {
                     val addr = args.str("addr").removePrefix("0x").removePrefix("0X")
@@ -157,7 +157,7 @@ object DbgTools {
                     val reply = rsp.send("m$addr,${len.toString(16)}")
                     val bytes = decodeHex(reply)
                     val hex = bytes.joinToString(" ") { "%02x".format(it) }
-                    val ascii = bytes.map { if (it in 32..126) it.toChar() else '.' }.joinToString("")
+                    val ascii = bytes.map { if (it in 32..126) it.toInt().toChar() else '.' }.joinToString("")
                     ok(JSONObject().put("action", "mem").put("addr", "0x$addr").put("size", bytes.size).put("hex", hex).put("ascii", ascii))
                 }
                 "break" -> {
@@ -201,7 +201,7 @@ object DbgTools {
             output.flush()
             // 读 ack（+/-）
             val ack = input.read()
-            if (ack == '-') return "E_NAK"
+            if (ack == '-'.code) return "E_NAK"
             // 读响应包 $...#
             val sb = StringBuilder()
             var c = input.read()

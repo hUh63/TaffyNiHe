@@ -78,6 +78,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.TempWorkspace -> if (t.zh) "临时工作区" else "Temp Workspaces"
     SettingsDest.Workspace -> if (t.zh) "工作区" else "Workspace"
     SettingsDest.Permissions -> if (t.zh) "权限管理" else "Permissions"
+    SettingsDest.LogcatViewer -> if (t.zh) "Logcat 查看器" else "Logcat Viewer"
 }
 
 @Composable
@@ -186,6 +187,7 @@ internal fun SettingsHub(
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 隧道放行 / 管理" else "Directory / tunnel / manage", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "Logcat 查看器" else "Logcat Viewer", if (t.zh) "实时日志 / 过滤 / 着色" else "Live logs / filter / color", Icons.Default.Description, AppPalette.teal, { onDest(SettingsDest.LogcatViewer) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
@@ -262,6 +264,7 @@ internal fun SettingsHub(
             SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings)
             SettingsDest.Workspace -> SettingsWorkspacePage(t, settings) { onDest(SettingsDest.ServiceConfig) }
             SettingsDest.Permissions -> SettingsPermissionsPage(t)
+            SettingsDest.LogcatViewer -> LogcatViewerPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

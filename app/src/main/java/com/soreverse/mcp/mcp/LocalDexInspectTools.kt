@@ -2,6 +2,7 @@ package com.soreverse.mcp.mcp
 
 import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
+import com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile
 import com.android.tools.smali.dexlib2.iface.ClassDef
 import com.android.tools.smali.dexlib2.iface.DexFile
 import com.android.tools.smali.dexlib2.iface.Method
@@ -63,8 +64,8 @@ object LocalDexInspectTools {
         return InspectSources(listOf(file), label, fromUri)
     }
 
-    private fun loadDexFiles(sources: List<File>): List<DexFile> {
-        val out = mutableListOf<DexFile>()
+    private fun loadDexFiles(sources: List<File>): List<DexBackedDexFile> {
+        val out = mutableListOf<DexBackedDexFile>()
         for (f in sources) {
             try {
                 out.add(DexFileFactory.loadDexFile(f, Opcodes.getDefault()))
@@ -75,11 +76,10 @@ object LocalDexInspectTools {
         return out
     }
 
-    private fun summaryFor(dexes: List<DexFile>, label: String, limit: Int): JSONObject {
+    private fun summaryFor(dexes: List<DexBackedDexFile>, label: String, limit: Int): JSONObject {
         val totalClasses = dexes.sumOf { it.classes.count() }
         val totalMethods = dexes.sumOf { d -> d.classes.sumOf { c -> c.virtualMethods.count() + c.directMethods.count() } }
         val totalFields = dexes.sumOf { d -> d.classes.sumOf { c -> c.fields.count() } }
-        val totalStrings = dexes.sumOf { it.strings?.toList()?.size ?: 0 }
         val topClasses = mutableListOf<String>()
         var n = 0
         for (dex in dexes) {
@@ -96,12 +96,11 @@ object LocalDexInspectTools {
             .put("classCount", totalClasses)
             .put("methodCount", totalMethods)
             .put("fieldCount", totalFields)
-            .put("stringCount", totalStrings)
             .put("topClasses", JSONArray().apply { topClasses.forEach { put(it) } })
-            .put("hint", "无需 root / eBPF / Shizuku；普通 APK/dex 静态解析（替代 eBPFDexDumper 的非 root fallback）。")
+            .put("hint", "无需 root / eBPF / Shizuku；普通 APK/dex 静态解析（替代 eBPFDexDumper 的非 root fallback）。字符串统计需单独调用 action=strings 或 search。")
     }
 
-    private fun classesFor(dexes: List<DexFile>, limit: Int, filter: String): JSONObject {
+    private fun classesFor(dexes: List<DexBackedDexFile>, limit: Int, filter: String): JSONObject {
         val re = if (filter.isBlank()) null else runCatching { Regex(filter) }.getOrNull()
         val arr = JSONArray()
         var count = 0
@@ -124,12 +123,13 @@ object LocalDexInspectTools {
         return JSONObject().put("count", count).put("truncated", count >= limit).put("classes", arr)
     }
 
-    private fun stringsFor(dexes: List<DexFile>, limit: Int, filter: String): JSONObject {
+    private fun stringsFor(dexes: List<DexBackedDexFile>, limit: Int, filter: String): JSONObject {
         val re = if (filter.isBlank()) null else runCatching { Regex(filter, RegexOption.IGNORE_CASE) }.getOrNull()
         val arr = JSONArray()
         var count = 0
         for (dex in dexes) {
-            for (s in dex.strings.toList()) {
+            // DexFile 接口无 strings 属性；string pool 通过 DexBackedDexFile.stringReferences 访问
+            for (s in dex.stringReferences.map { it.string }) {
                 if (re != null && !re.containsMatchIn(s)) continue
                 arr.put(s)
                 count++
@@ -140,7 +140,7 @@ object LocalDexInspectTools {
         return JSONObject().put("count", count).put("truncated", count >= limit).put("strings", arr)
     }
 
-    private fun methodsFor(dexes: List<DexFile>, className: String, limit: Int): JSONObject {
+    private fun methodsFor(dexes: List<DexBackedDexFile>, className: String, limit: Int): JSONObject {
         val target = className.removePrefix("L").removeSuffix(";")
         val targetType = "L$target;"
         val arr = JSONArray()
@@ -163,13 +163,14 @@ object LocalDexInspectTools {
         return JSONObject().put("class", className).put("count", count).put("truncated", count >= limit).put("methods", arr)
     }
 
-    private fun searchStrings(dexes: List<DexFile>, pattern: String, limit: Int): JSONObject {
+    private fun searchStrings(dexes: List<DexBackedDexFile>, pattern: String, limit: Int): JSONObject {
         val re = runCatching { Regex(pattern, RegexOption.IGNORE_CASE) }.getOrNull()
             ?: return JSONObject().put("error", "正则无效: $pattern").put("hits", JSONArray())
         val arr = JSONArray()
         var count = 0
         for (dex in dexes) {
-            for (s in dex.strings.toList()) {
+            // DexFile 接口无 strings 属性；string pool 通过 DexBackedDexFile.stringReferences 访问
+            for (s in dex.stringReferences.map { it.string }) {
                 if (!re.containsMatchIn(s)) continue
                 arr.put(s)
                 count++

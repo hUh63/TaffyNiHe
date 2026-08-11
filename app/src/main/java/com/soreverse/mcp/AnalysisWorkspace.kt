@@ -1,7 +1,11 @@
 package com.soreverse.mcp
 
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,12 +53,35 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.soreverse.mcp.core.EngineProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+
+/**
+ * 选择文件的 ActivityResultContract：与 OpenDocument 相同，但额外请求
+ * 读写权限（FLAG_GRANT_READ|WRITE|PERSISTABLE），以便引擎对所选文件进行读写。
+ */
+private class OpenDocumentReadWriteContract : ActivityResultContract<Array<String>, Uri?>() {
+    override fun createIntent(context: Context, input: Array<String>): Intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, input)
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+        }
+
+    override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
+        if (resultCode == Activity.RESULT_OK) intent?.data else null
+}
 
 internal data class ToolDef(val key: String, val labelZh: String, val labelEn: String)
 
@@ -94,11 +122,10 @@ internal fun AnalysisWorkspace(
                 Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.weight(1f))
-            val curTool = toolDefs.firstOrNull { it.key == state.activeTool }
             Button(onClick = { toolsExpanded = !toolsExpanded },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
                 shape = RoundedCornerShape(6.dp)) {
-                Text(if (zh) (curTool?.labelZh ?: "工具") else (curTool?.labelEn ?: "Tools"), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
                 Spacer(Modifier.size(3.dp))
                 Text(if (toolsExpanded) "▲" else "▼", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
             }
@@ -205,26 +232,131 @@ private fun AddrBar(state: WorkspaceState, zh: Boolean) {
 @Composable
 private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
     val tools = state.tools; val ctx = LocalContext.current; val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    var showDialog by remember { mutableStateOf(false) }
+    var manualPath by remember { mutableStateOf("") }
+    var manualError by remember { mutableStateOf("") }
+
+    fun openWorkspaceFile(path: String, fallbackName: String) {
         scope.launch {
             tools.opening = true; tools.openError = ""
-            val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).open(uri.toString(), false) }.getOrNull() }
+            val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).open(path, false) }.getOrNull() }
             if (r != null && r.optBoolean("ok", false)) {
                 tools.sharedWorkspaceId = r.optString("workspaceId"); tools.sharedSoName = r.optString("soFileName").ifBlank { r.optString("fileName") }
-                val fname = tools.sharedSoName.ifBlank { uri.lastPathSegment ?: "file" }
-                state.createTask(fname, if (fname.endsWith(".apk", true)) "apk" else "so", uri.toString(), fname)
+                val fname = tools.sharedSoName.ifBlank { fallbackName }
+                state.createTask(fname, if (fname.endsWith(".apk", true)) "apk" else "so", path, fname)
                 tools.opening = false; tools.clearTabs()
             } else { tools.opening = false; tools.openError = r?.optString("error").orEmpty().ifBlank { if (zh) "打开失败" else "Open failed" } }
         }
     }
-    Button(onClick = { picker.launch(arrayOf("application/octet-stream","application/zip","application/vnd.android.package-archive","*/*")) },
+
+    val picker = rememberLauncherForActivityResult(OpenDocumentReadWriteContract()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        showDialog = false
+        openWorkspaceFile(uri.toString(), uri.lastPathSegment ?: "file")
+    }
+
+    fun submitManual() {
+        val path = manualPath.trim()
+        if (path.isBlank()) {
+            manualError = if (zh) "请输入文件路径" else "Please enter a file path"
+            return
+        }
+        showDialog = false
+        openWorkspaceFile(path, path.substringAfterLast('/').ifBlank { "file" })
+    }
+
+    Button(onClick = { showDialog = true; manualPath = ""; manualError = "" },
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), enabled = !tools.opening, shape = RoundedCornerShape(6.dp)) {
         if (tools.opening) { CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary); Spacer(Modifier.size(4.dp)); Text(if (zh) "加载中…" else "Loading…", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
         else { Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp)) }
         Spacer(Modifier.size(4.dp)); Text((tools.sharedSoName.ifBlank { if (zh) "选文件" else "Open" }).take(12), style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
     }
     if (tools.openError.isNotBlank()) Text(tools.openError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
+
+    if (showDialog) {
+        Dialog(
+            onDismissRequest = { showDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (zh) "选文件" else "Pick file",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        IconButton(onClick = { showDialog = false }) {
+                            Icon(Icons.Default.Close, contentDescription = if (zh) "关闭" else "Close")
+                        }
+                    }
+                    Text(
+                        if (zh) "选择要分析的文件（APK、SO 等），文件可读写访问。"
+                        else "Select a file to analyze (APK, SO, etc.). Read-write access.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = { picker.launch(arrayOf("application/octet-stream", "application/zip", "application/vnd.android.package-archive", "*/*")) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (zh) "选择文件" else "Pick file")
+                    }
+                    androidx.compose.material3.HorizontalDivider()
+                    Text(
+                        if (zh) "手动输入路径" else "Manual path",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OutlinedTextField(
+                        value = manualPath,
+                        onValueChange = { manualPath = it; manualError = "" },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(if (zh) "输入文件路径" else "Enter file path", maxLines = 1) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        isError = manualError.isNotBlank(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onDone = { submitManual() },
+                        ),
+                        supportingText = if (manualError.isNotBlank()) {
+                            { Text(manualError, color = MaterialTheme.colorScheme.error) }
+                        } else null,
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { showDialog = false }) {
+                            Text(if (zh) "取消" else "Cancel")
+                        }
+                        TextButton(
+                            enabled = manualPath.isNotBlank(),
+                            onClick = { submitManual() },
+                        ) { Text(if (zh) "打开" else "Open") }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -49,6 +49,15 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 
 class McpHttpServer(private val context: Context, private val port: Int, private val host: String) : CoroutineScope {
+
+    companion object {
+        /**
+         * 此服务器声明支持的 MCP 协议版本。
+         * 兼容旧客户端：收到 initialize 时按客户端请求的版本响应（如果在支持列表内）；
+         * 新客户端可直接调用 server/discover 协商。
+         */
+        const val PROTOCOL_VERSION = "2026-07-28"
+    }
     override val coroutineContext = SupervisorJob() + Dispatchers.Default
     private val startedAt = System.currentTimeMillis()
     private var engine: EmbeddedServer<*, *>? = null
@@ -319,7 +328,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         .put("endpoint", "/mcp")
         .put("sseEndpoint", "/sse")
         .put("messagesEndpoint", "/messages")
-        .put("methods", JSONArray(listOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call", "resources/list", "prompts/list")))
+        .put("methods", JSONArray(listOf("initialize", "server/discover", "notifications/initialized", "ping", "tools/list", "tools/call", "resources/list", "prompts/list")))
         .put("hint", "POST JSON-RPC to /mcp. GET /mcp with Accept: text/event-stream returns an SSE compatibility hello.")
 
     private fun browserStatusHtml(): String {
@@ -486,24 +495,57 @@ $historyRows
         val isNotification = !req.has("id") || method.startsWith("notifications/")
         if (isNotification) return NoResponse
         val params = req.optJSONObject("params") ?: JSONObject()
+        // 客户端通过 initialize 消息携带 client 协议版本（params.protocolVersion 优先）；
+        // 没传则根据请求 URI/Accept-Language 等上下文判断，兼容旧客户端
+        val clientProtocol = params.optString("protocolVersion", "")
+        val negotiatedVersion = negotiateProtocolVersion(clientProtocol)
         val result = when (method) {
+            // 兼容旧协议 initialize（2025-06-18 客户端仍会发送此方法）。声明支持的协议版本为 2026-07-28。
             "initialize" -> JSONObject()
-                .put("protocolVersion", "2025-06-18")
+                .put("protocolVersion", negotiatedVersion)
                 .put("capabilities", JSONObject()
-                    .put("tools", JSONObject().put("listChanged", false)))
-                .put("serverInfo", JSONObject().put("name", "Taffy").put("version", BuildConfig.VERSION_NAME))
+                    .put("tools", JSONObject().put("listChanged", false))
+                    .put("resources", JSONObject().put("subscribe", false).put("listChanged", false))
+                    .put("prompts", JSONObject().put("listChanged", false))
+                    .put("extensions", JSONObject()))
+                .put("serverInfo", JSONObject()
+                    .put("name", "TaffyNiHe")
+                    .put("version", BuildConfig.VERSION_NAME)
+                    .put("description", "塔菲逆核 MCP bridge — SO reverse engineering + APK MCP bridging"))
+                .put("instructions", "taffy_so_open + analyze_* + edit_* + taffy_build_so are built-in SO reverse engineering tools. Bridged APK tools (mt_*/np_*/<prefix>_* per config) are for APK-layer tasks only.")
                 .put("_meta", JSONObject()
                     .put("builtInToolsAlwaysAdvertised", true)
                     .put("fullToolCount", ToolCatalog.ALL.size)
                     .put("toolUsageGuide", toolUsageGuide())
-                    .put("hint", "tools/list advertises the complete built-in catalog. IMPORTANT: Always route SO tasks to built-in tools (taffy_so_open + analyze_* + edit_*), NOT bridged APK tools."))
-            "ping" -> JSONObject().put("ok", true)
-            "resources/list" -> JSONObject().put("resources", JSONArray())
-            "prompts/list" -> JSONObject().put("prompts", JSONArray())
+                    .put("hint", "tools/list advertises the complete built-in catalog. IMPORTANT: Always route SO tasks to built-in tools (taffy_so_open + analyze_* + edit_*), NOT bridged APK tools.")
+                    .put("io.modelcontextprotocol/serverInfo", JSONObject().put("name", "TaffyNiHe").put("version", BuildConfig.VERSION_NAME)))
+                .put("resultType", "complete")
+            // MCP 2026-07-28 新方法：服务器通告支持的协议版本、capabilities、身份。
+            "server/discover" -> JSONObject()
+                .put("supportedProtocolVersions", JSONArray().apply {
+                    add("2026-07-28"); add("2025-11-25"); add("2025-06-18"); add("2025-03-26"); add("2024-11-05")
+                })
+                .put("capabilities", JSONObject()
+                    .put("tools", JSONObject().put("listChanged", false))
+                    .put("resources", JSONObject().put("subscribe", false).put("listChanged", false))
+                    .put("prompts", JSONObject().put("listChanged", false))
+                    .put("extensions", JSONObject()))
+                .put("serverInfo", JSONObject()
+                    .put("name", "TaffyNiHe")
+                    .put("version", BuildConfig.VERSION_NAME)
+                    .put("description", "塔菲逆核 MCP bridge — SO reverse engineering + APK MCP bridging"))
+                .put("resultType", "complete")
+            // 保留 ping 兼容（2026-07-28 移除，但旧客户端仍可能发）
+            "ping" -> JSONObject().put("ok", true).put("resultType", "complete")
+            "resources/list" -> JSONObject().put("resources", JSONArray()).put("resultType", "complete").put("ttlMs", 60000).put("cacheScope", "public")
+            "prompts/list" -> JSONObject().put("prompts", JSONArray()).put("resultType", "complete").put("ttlMs", 60000).put("cacheScope", "public")
             "tools/list" -> {
                 val advertised = advertisedTools()
                 JSONObject()
                 .put("tools", advertised)
+                .put("resultType", "complete")
+                .put("ttlMs", 30000)
+                .put("cacheScope", "public")
                 .put("_meta", JSONObject()
                     .put("builtInToolsAlwaysAdvertised", true)
                     .put("returnedCount", advertised.length())
@@ -515,6 +557,17 @@ $historyRows
             else -> return jsonRpcError(id ?: JSONObject.NULL, -32601, "Method not found")
         }
         return JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result)
+    }
+
+    /**
+     * 协议版本协商：返回此服务器支持的最高版本。
+     * 服务器声明支持 2026-07-28，向下兼容所有已声明的旧协议客户端。
+     */
+    private fun negotiateProtocolVersion(clientRequested: String): String {
+        if (clientRequested.isBlank()) return PROTOCOL_VERSION
+        val supported = setOf(PROTOCOL_VERSION, "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+        // 客户端请求的是我们支持的版本 → 接受；否则回退到最新支持版本（让客户端决定是否降级）
+        return if (clientRequested in supported) clientRequested else PROTOCOL_VERSION
     }
 
     private fun jsonRpcError(id: Any?, code: Int, message: String): JSONObject = JSONObject()
@@ -755,7 +808,7 @@ $historyRows
         JSONObject().put("jsonrpc", "2.0").put("id", JSONObject.NULL).put("error", JSONObject().put("code", -32001).put("message", "Unauthorized: missing or invalid Taffy token"))
 
     private fun requestTooLarge(maxBytes: Int): JSONObject =
-        JSONObject().put("jsonrpc", "2.0").put("id", JSONObject.NULL).put("error", JSONObject().put("code", -32002).put("message", "Request body is larger than configured Taffy limit").put("data", JSONObject().put("maxBytes", maxBytes)))
+        JSONObject().put("jsonrpc", "2.0").put("id", JSONObject.NULL).put("error", JSONObject().put("code", -32602).put("message", "Request body is larger than configured Taffy limit").put("data", JSONObject().put("maxBytes", maxBytes)))
 
     /**
      * Full tools/list payload built from `ToolCatalog.ALL`. Each entry's

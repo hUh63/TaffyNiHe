@@ -77,6 +77,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.ApkSign -> if (t.zh) "APK 签名设置" else "APK Signing"
     SettingsDest.TempWorkspace -> if (t.zh) "临时工作区" else "Temp Workspaces"
     SettingsDest.Workspace -> if (t.zh) "工作区" else "Workspace"
+    SettingsDest.Permissions -> if (t.zh) "权限管理" else "Permissions"
 }
 
 @Composable
@@ -199,6 +200,8 @@ internal fun SettingsHub(
 
                 Text(if (t.zh) "诊断与关于" else "Diagnostics & about", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
+                    NavRow(if (t.zh) "权限管理" else "Permissions", if (t.zh) "Root / Shizuku / Dhizuku" else "Root / Shizuku / Dhizuku", Icons.Default.Security, onClick = { onDest(SettingsDest.Permissions) })
+                    GroupDivider()
                     NavRow(if (t.zh) "版本更新" else "Software update", if (t.zh) "GitHub Releases / 自动检查" else "GitHub Releases / automatic checks", Icons.Default.Info, trailing = availableRelease?.tag.orEmpty(), onClick = { onDest(SettingsDest.Updates) })
                     GroupDivider()
                     NavRow(t.backupRestore, t.backupRestoreSubtitle, Icons.Default.Cloud, onClick = { onDest(SettingsDest.BackupRestore) })
@@ -258,6 +261,7 @@ internal fun SettingsHub(
             SettingsDest.ApkSign -> SettingsApkSignPage(t, settings)
             SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings)
             SettingsDest.Workspace -> SettingsWorkspacePage(t, settings) { onDest(SettingsDest.ServiceConfig) }
+            SettingsDest.Permissions -> SettingsPermissionsPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

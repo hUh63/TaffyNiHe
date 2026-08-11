@@ -4,6 +4,7 @@ import android.app.Application
 import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.core.CrashReporter
 import com.soreverse.mcp.core.IntegrityGuard
+import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.ToolStats
 import com.soreverse.mcp.nativecore.RizinNativeEngine
@@ -18,6 +19,7 @@ class SoReverseApplication : Application() {
         ToolStats.setPersistEnabled(settings.toolStatsPersist)
         ToolStats.attachContext(this)
         RizinNativeEngine.configureGhidra(this)
+        PermissionManager.init(this)
         val integrity = IntegrityGuard.verify(this)
         if (!integrity.trusted) AppLog.e("Integrity check failed: ${integrity.reason}; expected=${integrity.expected}; actual=${integrity.actual.joinToString()}")
         AppLog.i("SOMCP initialized (toolStatsPersist=${settings.toolStatsPersist})")

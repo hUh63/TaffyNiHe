@@ -105,8 +105,8 @@ internal fun SettingsPermissionsPage(t: UiText) {
             }
             GroupDivider()
             Text(
-                if (zh) "eDBG 附加调试、eBPF dex 追踪、进程级操作需要 Root 或 Shizuku；Dhizuku 提供设备所有者级能力。下方可逐项检测与授权。"
-                else "eDBG attach, eBPF dex tracing and process-level ops need Root or Shizuku; Dhizuku provides device-owner capabilities. Check and grant below.",
+                if (zh) "eDBG（eBPF 调试，无视反调试）与 eBPF DEX dump 需要 Root；增强 logcat 无需特权。下方可逐项检测与授权。"
+                else "eDBG (eBPF debugging, anti-anti-debug) and eBPF DEX dump need Root; enhanced logcat needs none. Check and grant below.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -243,13 +243,13 @@ internal fun SettingsPermissionsPage(t: UiText) {
             Text(
                 if (zh) {
                     "• 增强 logcat（LogFox 级）：无需特权\n" +
-                        "• eDBG 附加调试：Root 或 Shizuku\n" +
-                        "• eBPF dex 追踪：Root（需内核支持 BPF）\n" +
+                        "• eDBG（eBPF 调试）：Root（内核 5.10+）\n" +
+                        "• eBPF DEX dump（eBPFDexDumper）：Root\n" +
                         "• 文件级操作：Shizuku 或 Root（配合 MANAGE_EXTERNAL_STORAGE）"
                 } else {
                     "• Enhanced logcat (LogFox-grade): no privilege needed\n" +
-                        "• eDBG attach debugging: Root or Shizuku\n" +
-                        "• eBPF dex tracing: Root (kernel BPF required)\n" +
+                        "• eDBG (eBPF debugging): Root (kernel 5.10+)\n" +
+                        "• eBPF DEX dump (eBPFDexDumper): Root\n" +
                         "• File-level ops: Shizuku or Root (with MANAGE_EXTERNAL_STORAGE)"
                 },
                 style = MaterialTheme.typography.bodySmall,

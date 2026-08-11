@@ -1,9 +1,12 @@
 package com.soreverse.mcp
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,6 +79,27 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * 选择文件的 ActivityResultContract：与 OpenDocument 相同，但额外请求
+ * 读写权限（FLAG_GRANT_READ|WRITE|PERSISTABLE），以便引擎对所选文件进行读写。
+ */
+private class OpenDocumentReadWriteContract : ActivityResultContract<Array<String>, Uri?>() {
+    override fun createIntent(context: Context, input: Array<String>): Intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, input)
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+        }
+
+    override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
+        if (resultCode == Activity.RESULT_OK) intent?.data else null
+}
+
 @Composable
 internal fun AnalyzeTab(
     t: UiText,
@@ -146,15 +170,19 @@ internal fun AnalyzeTab(
                         ?: (if (t.zh) "打开失败" else "Open failed")
                 }
                 state.message = msg
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val pickFile = rememberLauncherForActivityResult(OpenDocumentReadWriteContract()) { uri: Uri? ->
         if (uri != null) {
-            // 只取只读权限，不设置工作目录、不触发扫描
+            // 取读写权限，不设置工作目录、不触发扫描
             runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
             }
             val path = uri.toString()
             showFileDialog = false
@@ -940,8 +968,8 @@ internal fun AnalyzeTab(
                         }
                     }
                     Text(
-                        if (t.zh) "选择要分析的文件（APK、SO 等），文件仅只读访问，不触发扫描。"
-                        else "Select a file to analyze (APK, SO, etc.). Read-only access, no scan triggered.",
+                        if (t.zh) "选择要分析的文件（APK、SO 等），文件可读写访问，不触发扫描。"
+                        else "Select a file to analyze (APK, SO, etc.). Read-write access, no scan triggered.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -98,9 +98,9 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("apkV1SignerName", "") ?: ""
         set(value) = prefs.edit().putString("apkV1SignerName", value.trim()).apply()
 
-    /** 修改 APK 后自动签名（MCP 工具 rebuild/build 完成后按签名策略自动签名）。 */
+    /** 修改 APK 后自动签名（MCP 工具 rebuild/build 完成后按签名策略自动签名）。默认开启。 */
     var apkAutoSign: Boolean
-        get() = prefs.getBoolean("apkAutoSign", false)
+        get() = prefs.getBoolean("apkAutoSign", true)
         set(value) = prefs.edit().putBoolean("apkAutoSign", value).apply()
 
     /** 不签名时保留原 APK 的 V2/V3 签名数据（供重建流程读取）。 */

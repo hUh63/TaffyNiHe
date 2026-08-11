@@ -74,7 +74,7 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
             ToggleRow(
                 if (t.zh) "修改APK后自动签名" else "Auto-sign after APK edit",
                 settings.apkAutoSign,
-            ) { settings.apkAutoSign = it }
+            ) { settings.apkAutoSign = it; refresh++ }
         }
 
         GlassGroup(title = if (t.zh) "签名密钥" else "Signing key") {
@@ -120,7 +120,7 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
             ToggleRow(
                 if (t.zh) "自定义 V1 签名数据文件名" else "Custom V1 signer name",
                 settings.apkV1SignerEnabled,
-            ) { settings.apkV1SignerEnabled = it }
+            ) { settings.apkV1SignerEnabled = it; refresh++ }
             if (settings.apkV1SignerEnabled) {
                 GroupDivider()
                 var v1Name by remember { mutableStateOf(settings.apkV1SignerName) }
@@ -140,7 +140,7 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
             ToggleRow(
                 if (t.zh) "不签名时保留 V2/V3 签名数据" else "Keep V2/V3 signature when unsigned",
                 settings.apkKeepV2V3WhenNoSign,
-            ) { settings.apkKeepV2V3WhenNoSign = it }
+            ) { settings.apkKeepV2V3WhenNoSign = it; refresh++ }
         }
     }
 

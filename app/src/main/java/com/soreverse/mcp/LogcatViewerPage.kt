@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -36,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -43,10 +46,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /** 单条解析后的日志行。 */
 private data class LogLine(
@@ -95,6 +105,7 @@ private fun parseLogLine(line: String): LogLine? {
 @Composable
 internal fun LogcatViewerPage(t: UiText) {
     val zh = t.zh
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val logs = remember { mutableStateListOf<LogLine>() }
     val listState = rememberLazyListState()
@@ -106,6 +117,75 @@ internal fun LogcatViewerPage(t: UiText) {
     var levelSet by remember { mutableStateOf(setOf("V", "D", "I", "W", "E", "F")) }
     var process by remember { mutableStateOf<Process?>(null) }
     var dropped by remember { mutableStateOf(0) }
+    // 崩溃/ANR 通知去重签名
+    var lastCrashSig by remember { mutableStateOf("") }
+
+    fun notifyCrash(line: LogLine) {
+        val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
+        if (crashKeys.none { line.raw.contains(it, ignoreCase = true) }) return
+        val sig = (line.tag + line.message).take(120)
+        if (sig == lastCrashSig) return
+        lastCrashSig = sig
+        runCatching {
+            val channelId = "logcat_crash"
+            if (Build.VERSION.SDK_INT >= 26) {
+                val channel = android.app.NotificationChannel(
+                    channelId, if (zh) "Logcat 崩溃" else "Logcat crash",
+                    android.app.NotificationManager.IMPORTANCE_HIGH,
+                )
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                nm.createNotificationChannel(channel)
+            }
+            val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(if (zh) "检测到崩溃/ANR" else "Crash/ANR detected")
+                .setContentText("${line.level} ${line.tag}: ${line.message.take(80)}")
+                .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(line.raw.take(500)))
+                .setAutoCancel(true)
+            androidx.core.app.NotificationManagerCompat.from(context).notify(
+                (System.currentTimeMillis() % 100000).toInt(),
+                builder.build(),
+            )
+        }
+    }
+
+    fun exportZip(visibleLines: List<LogLine>) {
+        runCatching {
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+            val zip = File(context.filesDir, "logcat_export_$stamp.zip")
+            ZipOutputStream(zip.outputStream()).use { zos ->
+                // 设备信息
+                val deviceInfo = buildString {
+                    appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                    appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+                    appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
+                    appendLine("Kernel: ${System.getProperty("os.version", "")}")
+                    appendLine("Time: $stamp")
+                    appendLine("Filter: tags=[$tagFilter] keyword=[$keyword] levels=$levelSet")
+                }
+                zos.putNextEntry(ZipEntry("device_info.txt"))
+                zos.write(deviceInfo.toByteArray())
+                zos.closeEntry()
+                // 日志
+                val logText = visibleLines.joinToString("\n") { it.raw }
+                zos.putNextEntry(ZipEntry("logcat.txt"))
+                zos.write(logText.toByteArray())
+                zos.closeEntry()
+            }
+            // 分享
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.fileprovider", zip,
+            )
+            val share = Intent(Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(share, if (zh) "导出 Logcat 日志" else "Export logcat").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { e ->
+            Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
 
     fun start() {
         if (running) return
@@ -126,6 +206,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                         logs.removeAt(0); dropped++
                                     }
                                 }
+                                notifyCrash(parsed)
                             }
                         }
                         line = reader.readLine()
@@ -209,6 +290,9 @@ internal fun LogcatViewerPage(t: UiText) {
                 logs.clear(); dropped = 0
             }) {
                 Icon(Icons.Default.Refresh, contentDescription = if (zh) "清空" else "Clear")
+            }
+            IconButton(onClick = { exportZip(visible) }) {
+                Icon(Icons.Default.FileDownload, contentDescription = if (zh) "导出 ZIP" else "Export ZIP")
             }
         }
 

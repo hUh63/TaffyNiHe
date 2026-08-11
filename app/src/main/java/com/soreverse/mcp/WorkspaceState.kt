@@ -53,8 +53,8 @@ internal class WorkspaceState(private val context: Context) {
     // 所有任务（含历史）
     var tasks by mutableStateOf<List<TaskRecord>>(emptyList())
 
-    // 当前活跃工具（分析页左侧选中）
-    var activeTool by mutableStateOf("decompile")
+    // 当前活跃工具（分析页左侧选中）；默认不选，展开工具列表后由用户选择
+    var activeTool by mutableStateOf("")
 
     private val storeFile: File = File(context.filesDir, "analysis-tasks.json")
 

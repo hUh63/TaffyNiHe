@@ -65,8 +65,9 @@ import org.json.JSONObject
 /**
  * 选择文件的 ActivityResultContract：与 OpenDocument 相同，但额外请求
  * 读写权限（FLAG_GRANT_READ|WRITE|PERSISTABLE），以便引擎对所选文件进行读写。
+ * 同包共享（AnalyzeTab 也使用），故为 internal。
  */
-private class OpenDocumentReadWriteContract : ActivityResultContract<Array<String>, Uri?>() {
+internal class OpenDocumentReadWriteContract : ActivityResultContract<Array<String>, Uri?>() {
     override fun createIntent(context: Context, input: Array<String>): Intent =
         Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)

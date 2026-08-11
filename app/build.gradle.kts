@@ -146,6 +146,10 @@ dependencies {
     implementation("com.github.rikkahub:markdown:d79a97cc8e")
     implementation("org.jsoup:jsoup:1.22.2")
 
+    // 权限管理: Shizuku (adb 级 shell 权限) + Dhizuku (设备所有者权限)
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.dhizuku:api:1.8.0")
+
     implementation(files("libs/unidbg-api-0.9.9-android-patched.jar"))
     implementation(files("libs/unidbg-android-0.9.9-android-patched.jar"))
     implementation(files("libs/capstone-3.1.8-android-patched.jar"))

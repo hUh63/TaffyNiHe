@@ -28,6 +28,8 @@ object BinaryManager {
         val sizeMb: Double,
         val minKernel: String? = null,
         val zh: String,
+        /** 内置在 APK assets 中的路径（非空则优先使用内置，无需下载）。 */
+        val bundledAsset: String? = null,
     )
 
     val EDBG = ToolBinary(
@@ -35,6 +37,7 @@ object BinaryManager {
         repo = "ShinoLeah/eDBG", releaseTag = "v2.3.0", sizeMb = 11.38,
         minKernel = "5.10",
         zh = "eDBG（eBPF 调试器，无视反调试，支持 MCP）",
+        bundledAsset = "binaries/eDBG",
     )
     val DEXDUMP = ToolBinary(
         key = "dexdumper", fileName = "eBPFDexDumper", remoteName = "eBPFDexDumper_android_arm64",
@@ -57,7 +60,26 @@ object BinaryManager {
     /** 设备端部署路径。 */
     fun devicePath(tool: ToolBinary): String = "/data/local/tmp/${tool.fileName}"
 
-    /** 是否已下载到应用目录。 */
+    /** 是否内置在 APK assets 中。 */
+    fun isBundled(tool: ToolBinary): Boolean = !tool.bundledAsset.isNullOrBlank()
+
+    /** 从 APK assets 提取内置二进制到应用目录（无内置返回 false）。 */
+    fun extractBundled(context: Context, tool: ToolBinary): Boolean {
+        val asset = tool.bundledAsset ?: return false
+        val dir = File(context.filesDir, "tools")
+        dir.mkdirs()
+        val target = localFile(context, tool)
+        return runCatching {
+            context.assets.open(asset).use { input ->
+                val tmp = File(dir, "${tool.fileName}.part")
+                tmp.outputStream().use { output -> input.copyTo(output) }
+                tmp.renameTo(target)
+            }
+            target.length() > 1024 * 1024
+        }.getOrDefault(false)
+    }
+
+    /** 是否已下载到应用目录（内置已提取或下载完成）。 */
     fun isDownloaded(context: Context, tool: ToolBinary): Boolean {
         val f = localFile(context, tool)
         return f.exists() && f.length() > 1024 * 1024
@@ -81,8 +103,21 @@ object BinaryManager {
         return ver >= min
     }
 
-    /** 下载官方二进制到应用目录（含 GitHub 镜像候选）。 */
+    /** 获取二进制到应用目录：优先从 APK 内置 assets 提取，否则从 GitHub Release 下载。 */
     fun download(context: Context, tool: ToolBinary): JSONObject {
+        // 内置优先
+        if (isBundled(tool)) {
+            if (extractBundled(context, tool)) {
+                AppLog.i("BinaryManager: ${tool.fileName} extracted from bundled assets")
+                val f = localFile(context, tool)
+                return JSONObject()
+                    .put("ok", true)
+                    .put("tool", tool.key)
+                    .put("bundled", true)
+                    .put("sizeMb", f.length() / 1024.0 / 1024.0)
+                    .put("path", f.absolutePath)
+            }
+        }
         val dir = File(context.filesDir, "tools")
         dir.mkdirs()
         val target = localFile(context, tool)
@@ -114,7 +149,7 @@ object BinaryManager {
         }
         return JSONObject()
             .put("ok", false)
-            .put("error", "下载失败（所有源均不可用）")
+            .put("error", "获取失败（内置缺失且下载失败）")
             .put("tool", tool.key)
     }
 

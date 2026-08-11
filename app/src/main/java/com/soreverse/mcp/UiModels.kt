@@ -12,7 +12,7 @@ internal enum class MainTab { Home, Tools, Tasks, Settings }
 internal enum class SetupTarget { Directory, ApkMcp, KeepAlive }
 internal enum class SettingsDest {
     Root, ServiceConfig, Appearance, KeepAlive, Access, Limits, Export, Audit, Blutter, Tunnel, ApkBridge, AiDeep, Updates, Probe, ToolStats, TunnelStats, Instructions, Credits, Disclaimer, About, BackupRestore,
-    ApkSign, TempWorkspace, Workspace, Permissions,
+    ApkSign, TempWorkspace, Workspace, Permissions, LogcatViewer,
 }
 
 internal data class WorkspaceUi(

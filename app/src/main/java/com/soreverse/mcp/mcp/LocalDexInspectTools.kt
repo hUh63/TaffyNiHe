@@ -79,7 +79,7 @@ object LocalDexInspectTools {
         val totalClasses = dexes.sumOf { it.classes.count() }
         val totalMethods = dexes.sumOf { d -> d.classes.sumOf { c -> c.virtualMethods.count() + c.directMethods.count() } }
         val totalFields = dexes.sumOf { d -> d.classes.sumOf { c -> c.fields.count() } }
-        val totalStrings = dexes.sumOf { it.strings.toList().size }
+        val totalStrings = dexes.sumOf { it.strings?.toList()?.size ?: 0 }
         val topClasses = mutableListOf<String>()
         var n = 0
         for (dex in dexes) {

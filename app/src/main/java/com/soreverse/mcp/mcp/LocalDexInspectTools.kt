@@ -79,7 +79,7 @@ object LocalDexInspectTools {
         val totalClasses = dexes.sumOf { it.classes.count() }
         val totalMethods = dexes.sumOf { d -> d.classes.sumOf { c -> c.virtualMethods.count() + c.directMethods.count() } }
         val totalFields = dexes.sumOf { d -> d.classes.sumOf { c -> c.fields.count() } }
-        val totalStrings = dexes.sumOf { it.strings.count() }
+        val totalStrings = dexes.sumOf { it.strings.toList().size }
         val topClasses = mutableListOf<String>()
         var n = 0
         for (dex in dexes) {
@@ -129,7 +129,7 @@ object LocalDexInspectTools {
         val arr = JSONArray()
         var count = 0
         for (dex in dexes) {
-            for (s in dex.strings) {
+            for (s in dex.strings.toList()) {
                 if (re != null && !re.containsMatchIn(s)) continue
                 arr.put(s)
                 count++
@@ -169,7 +169,7 @@ object LocalDexInspectTools {
         val arr = JSONArray()
         var count = 0
         for (dex in dexes) {
-            for (s in dex.strings) {
+            for (s in dex.strings.toList()) {
                 if (!re.containsMatchIn(s)) continue
                 arr.put(s)
                 count++

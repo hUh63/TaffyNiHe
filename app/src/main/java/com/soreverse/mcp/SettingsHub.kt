@@ -63,7 +63,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Audit -> if (t.zh) "编辑校验与审计" else "Edit & Audit"
     SettingsDest.Blutter -> "Blutter"
     SettingsDest.Tunnel -> if (t.zh) "隧道" else "Tunnel"
-    SettingsDest.ApkBridge -> "APK MCP"
+    SettingsDest.ApkBridge -> if (t.zh) "MCP 桥接" else "MCP Bridge"
     SettingsDest.AiDeep -> if (t.zh) "AI 深度分析" else "AI Deep Analysis"
     SettingsDest.Updates -> if (t.zh) "版本更新" else "Software Update"
     SettingsDest.Probe -> t.externalProbe
@@ -170,7 +170,7 @@ internal fun SettingsHub(
                 Text(if (t.zh) "常用" else "Essentials", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "服务配置" else "Service", if (t.zh) "目录 / 端口 / 地址 / 工具" else "Directory / port / URLs / tools", Icons.Default.Settings, MaterialTheme.colorScheme.primary, { onDest(SettingsDest.ServiceConfig) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile("APK MCP", if (t.zh) "MT 管理器协同" else "MT Manager bridge", Icons.Default.Link, AppPalette.orange, { onDest(SettingsDest.ApkBridge) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "MCP 桥接" else "MCP Bridge", if (t.zh) "MT 管理器等外部 MCP 桥接" else "External MCP bridges (MT Manager etc.)", Icons.Default.Link, AppPalette.orange, { onDest(SettingsDest.ApkBridge) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "隧道" else "Tunnel", if (t.zh) "公网暴露 / 保活" else "Public expose", Icons.Default.Cloud, AppPalette.purple, { onDest(SettingsDest.Tunnel) }, Modifier.weight(1f).fillMaxHeight())

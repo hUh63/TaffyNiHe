@@ -1058,6 +1058,10 @@ object ToolCatalog {
         *LogcatTools.ALL.toTypedArray(),
         // 塔菲逆核: eDBG 进程调试(GDB RSP, 需 gdbserver + Root/Shizuku)
         *DbgTools.ALL.toTypedArray(),
+        // 塔菲逆核: eDBG 官方 eBPF 调试器封装(ShinoLeah/eDBG, 需 Root + 内核 5.10+)
+        *EdbgTools.ALL.toTypedArray(),
+        // 塔菲逆核: eBPFDexDumper 官方 eBPF DEX dump 封装(chinleez/eBPFDexDumper-rs)
+        *DexDumpTools.ALL.toTypedArray(),
         // 塔菲逆核: eBPF dex 内核级 DEX 访问追踪(tracefs, 需 Root)
         *BpfTools.ALL.toTypedArray(),
         // 塔菲逆核: 进阶逆向辅助(参考MT管理器 native_xref/cfg/patch_bytes/taffy_apk_search)

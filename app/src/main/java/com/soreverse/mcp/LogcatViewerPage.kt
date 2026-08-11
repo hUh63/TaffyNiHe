@@ -114,26 +114,38 @@ internal fun LogcatViewerPage(t: UiText) {
         val proc = ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
         process = proc
         scope.launch(Dispatchers.IO) {
-            BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
-                var line = reader.readLine()
-                while (line != null && running) {
-                    if (!paused) {
-                        parseLogLine(line)?.let { parsed ->
-                            logs.add(parsed)
-                            while (logs.size > 2000) {
-                                logs.removeAt(0); dropped++
+            try {
+                BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                    var line = reader.readLine()
+                    while (line != null && running) {
+                        if (!paused) {
+                            parseLogLine(line)?.let { parsed ->
+                                synchronized(logs) {
+                                    logs.add(parsed)
+                                    while (logs.size > 2000) {
+                                        logs.removeAt(0); dropped++
+                                    }
+                                }
                             }
                         }
+                        line = reader.readLine()
                     }
-                    line = reader.readLine()
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: java.io.IOException) {
+                // destroy()/stop() 会关闭流导致 readLine 抛 InterruptedIOException，
+                // 这是正常停止路径，静默忽略；仅非正常退出才记录
+                if (running) com.soreverse.mcp.core.AppLog.e("Logcat reader ended: ${e.message}")
+            } catch (e: Exception) {
+                if (running) com.soreverse.mcp.core.AppLog.e("Logcat reader failed: ${e.message}")
             }
         }
     }
 
     fun stop() {
         running = false
-        process?.destroy()
+        runCatching { process?.destroy() }
         process = null
     }
 

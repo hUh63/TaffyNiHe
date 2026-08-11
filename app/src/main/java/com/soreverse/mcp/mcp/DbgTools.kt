@@ -206,7 +206,7 @@ object DbgTools {
             val sb = StringBuilder()
             var c = input.read()
             while (c != -1 && c != '#'.code) {
-                if (c != '$'.code) sb.append(c.toChar())
+                if (c != '$'.code) sb.append(Char(c))
                 c = input.read()
             }
             // 读校验和两位

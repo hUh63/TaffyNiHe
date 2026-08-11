@@ -44,7 +44,19 @@ object DexDumpTools {
                 when (action) {
                     "probe" -> ok(BinaryManager.status(ctx.context, BinaryManager.DEXDUMP)
                         .put("root", PermissionManager.isRootAvailable())
-                        .put("bpfFs", PermissionManager.exec("ls /sys/fs/bpf 2>/dev/null | head -2").stdout))
+                        .put("shizuku", PermissionManager.isShizukuGranted())
+                        .put("bpfFs", PermissionManager.exec("ls /sys/fs/bpf 2>/dev/null | head -2").stdout)
+                        .put("canUse", PermissionManager.isRootAvailable() && BinaryManager.isDeployed(BinaryManager.DEXDUMP))
+                        .put("reason", if (!PermissionManager.isRootAvailable()) "eBPFDexDumper 基于 eBPF uprobe，需要 Root（Shizuku 无 eBPF 加载能力）。当前可用替代：taffy_dex_inspect（本地 dex 解析）/ DexAnalysisTools（Jadx 反编译）。" else "")
+                        .put("fallbackTools", JSONArray().put(JSONObject()
+                            .put("category", "DEX 静态分析（无需 root）")
+                            .put("tools", "taffy_dex_inspect / DexAnalysisTools 系列")
+                            .put("description", "本地 dex 文件结构化检查与反编译，不需要 root 或 eBPF。")
+                        ).put(JSONObject()
+                            .put("category", "SO 静态分析（无需 root）")
+                            .put("tools", "taffy_so_open + analyze_*")
+                            .put("description", "基于内置 Rizin 后端的本地 ELF 静态分析。")
+                        )))
 
                     "install" -> {
                         if (!PermissionManager.isRootAvailable()) {

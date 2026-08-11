@@ -23,6 +23,7 @@ object LogcatTools {
     @Volatile private var capturePid: Int = 0
     @Volatile private var captureTag: String = ""
     @Volatile private var captureLevel: String = "V"
+    @Volatile private var captureStartedAt: Long = 0L
 
     /** 采集 logcat 日志 */
     val collect: ToolHandler = object : ToolHandler {
@@ -36,6 +37,8 @@ object LogcatTools {
                 "lines" int "recent: 获取行数(默认200, 最大2000)"
                 "keyword" str "search: 搜索关键字"
                 "tag" str "按 tag 过滤(如 ActivityManager)"
+                "tags" str "多 tag 过滤(逗号分隔, 如 ActivityManager,AndroidRuntime; 正则按 \\bTAG\\b 匹配)"
+                "regex" str "按正则过滤日志内容(如 SIGSEGV|FATAL)"
                 "level".oneOf("日志级别过滤", "V", "D", "I", "W", "E", "F")
                 "pid" int "按 PID 过滤"
             })
@@ -45,16 +48,24 @@ object LogcatTools {
             val action = args.str("action", "recent")
             val maxLines = args.intValue("lines", 200).coerceAtMost(2000)
             val tag = args.str("tag")
+            val tags = args.str("tags")
+            val regex = args.str("regex")
             val level = args.str("level", "V")
             val pid = args.intValue("pid", 0)
 
             val cmd = mutableListOf("logcat", "-d")
             if (pid > 0) cmd.add("--pid=$pid")
-            val filter = if (tag.isNotBlank()) {
-                "$tag:${if (level.isNotBlank()) level else "V"}"
-            } else {
-                "*:${if (level.isNotBlank()) level else "V"}"
+            // 多 tag：每个 tag 一条 -e 正则（OR 关系）
+            val tagList = (tags.split(',').map { it.trim() }.filter { it.isNotBlank() } +
+                listOfNotNull(tag.ifBlank { null })).distinct()
+            if (tagList.isNotEmpty()) {
+                tagList.forEach { t ->
+                    val escaped = Regex.escape(t)
+                    cmd.add("-e")
+                    cmd.add("\\b$escaped\\b")
+                }
             }
+            val filter = "*:${if (level.isNotBlank()) level else "V"}"
             cmd.add(filter)
 
             return runCatching {
@@ -69,11 +80,14 @@ object LogcatTools {
                     }
                     proc.waitFor()
                     val keyword = args.str("keyword")
-                    val filtered = if (keyword.isNotBlank()) {
-                        allLines.filter { it.contains(keyword, ignoreCase = true) }
-                    } else {
-                        allLines
+                    val lineFilter: (String) -> Boolean = { l ->
+                        val kwOk = keyword.isBlank() || l.contains(keyword, ignoreCase = true)
+                        val reOk = regex.isBlank() || runCatching {
+                            Regex(regex, RegexOption.IGNORE_CASE).containsMatchIn(l)
+                        }.getOrDefault(false)
+                        kwOk && reOk
                     }
+                    val filtered = allLines.filter(lineFilter)
                     val result = when (action) {
                         "recent" -> filtered.takeLast(maxLines)
                         "search" -> filtered.take(maxLines)
@@ -102,33 +116,80 @@ object LogcatTools {
             objectSchema(props {
                 "lines" int "获取行数(默认100, 最大500)"
                 "keyword" str "额外过滤关键字(可选)"
+                "parse" bool "是否解析崩溃堆栈为结构化 JSON(默认 true): 提取异常类型/消息/首个应用帧"
             })
         }
 
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val maxLines = args.intValue("lines", 100).coerceAtMost(500)
             val extraKeyword = args.str("keyword")
+            val parse = args.optBoolean("parse", true)
             return runCatching {
                 val cmd = mutableListOf("logcat", "-d", "*:E")
                 val proc = ProcessBuilder(cmd).redirectErrorStream(true).start()
-                val output = StringBuilder()
+                val allLines = mutableListOf<String>()
                 BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
-                    val crashKeywords = mutableListOf("CRASH", "FATAL", "ANR", "died", "AndroidRuntime", "SIGSEGV", "SIGABRT", "tombstone", "backtrace")
-                    if (extraKeyword.isNotBlank()) crashKeywords.add(extraKeyword)
                     var line = reader.readLine()
-                    val matches = mutableListOf<String>()
                     while (line != null) {
-                        if (crashKeywords.any { line.contains(it, ignoreCase = true) }) matches.add(line)
+                        allLines.add(line)
                         line = reader.readLine()
                     }
-                    proc.waitFor()
-                    val result = matches.takeLast(maxLines)
-                    result.forEach { output.appendLine(it) }
-                    ok(JSONObject()
+                }
+                proc.waitFor()
+                val crashKeywords = mutableListOf("CRASH", "FATAL", "ANR", "died", "AndroidRuntime", "SIGSEGV", "SIGABRT", "tombstone", "backtrace")
+                if (extraKeyword.isNotBlank()) crashKeywords.add(extraKeyword)
+                val matches = allLines.filter { l -> crashKeywords.any { l.contains(it, ignoreCase = true) } }
+                val result = matches.takeLast(maxLines)
+                if (!parse) {
+                    return ok(JSONObject()
                         .put("totalCrashLines", matches.size)
                         .put("returnedLines", result.size)
-                        .put("crashes", output.toString()))
+                        .put("crashes", result.joinToString("\n")))
                 }
+                // 结构化解析：按崩溃块切分（FATAL EXCEPTION / Process: ... died 起始）
+                val blocks = mutableListOf<List<String>>()
+                var i = 0
+                while (i < matches.size) {
+                    val line = matches[i]
+                    val isStart = line.contains("FATAL EXCEPTION") ||
+                        (line.contains("Process: ") && line.contains(" died")) ||
+                        line.contains("*** *** ***")
+                    if (isStart) {
+                        val block = mutableListOf<String>()
+                        var j = i
+                        while (j < matches.size && j < i + 80) {
+                            val l = matches[j]
+                            block.add(l)
+                            if (j > i && (l.isBlank() || l.contains("FATAL EXCEPTION") ||
+                                    (l.contains("Process: ") && l.contains(" died")))
+                            ) break
+                            j++
+                        }
+                        if (block.isNotEmpty()) blocks.add(block)
+                        i = j
+                    } else i++
+                }
+                val parsed = blocks.map { block ->
+                    val text = block.joinToString("\n")
+                    val exceptionType = Regex("([A-Za-z0-9_$.]+(?:Exception|Error|Throwable))")
+                        .find(text)?.groupValues?.get(1)
+                    val msgLine = block.firstOrNull { it.contains("Exception") && it.contains(":") }
+                    val message = msgLine?.substringAfter(": ")?.trim()
+                    // 首个应用帧（非 android./java./system 框架）
+                    val appFrame = block.firstOrNull {
+                        it.trim().startsWith("at ") &&
+                            !it.contains("android.") && !it.contains("java.") && !it.contains("dalvik.")
+                    }
+                    JSONObject()
+                        .put("exception", exceptionType ?: "unknown")
+                        .put("message", message ?: "")
+                        .put("appFrame", appFrame?.trim() ?: "")
+                        .put("stack", text)
+                }
+                ok(JSONObject()
+                    .put("totalCrashLines", matches.size)
+                    .put("crashCount", parsed.size)
+                    .put("crashes", parsed))
             }.getOrElse { e -> err("LOGCAT_FAILED", "崩溃日志采集失败: ${e.message}", null, null) }
         }
     }
@@ -143,9 +204,11 @@ object LogcatTools {
             objectSchema(props {
                 "action".oneOf("start | stop | status | read | clear", "start", "stop", "status", "read", "clear")
                 "tag" str "start: 按 tag 过滤(如 ActivityManager)"
+                "tags" str "start: 多 tag 过滤(逗号分隔)"
                 "level".oneOf("start: 日志级别", "V", "D", "I", "W", "E", "F")
                 "pid" int "start: 按 PID 过滤"
                 "keyword" str "read: 搜索关键字(可选)"
+                "regex" str "read: 按正则搜索(可选)"
                 "lines" int "read: 返回行数(默认 500)"
             })
         }
@@ -160,19 +223,27 @@ object LogcatTools {
                             return err("ALREADY_RUNNING", "后台采集已在运行, 先 stop 再 start", "action", "start")
                         }
                         captureTag = args.str("tag")
+                        val tagsArg = args.str("tags")
                         captureLevel = args.str("level", "V")
                         capturePid = args.intValue("pid", 0)
-                        captureFile = java.io.File(ctx.context.filesDir, "taffy_logcat_capture.log")
+                        val tagList = (tagsArg.split(',').map { it.trim() }.filter { it.isNotBlank() } +
+                            listOfNotNull(captureTag.ifBlank { null })).distinct()
+                        // 会话文件带时间戳命名（LogFox 式多会话管理）
+                        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                        captureFile = java.io.File(ctx.context.filesDir, "taffy_capture_$stamp.log")
                         captureFile?.delete()
+                        captureStartedAt = System.currentTimeMillis()
 
                         val cmd = mutableListOf("logcat", "-v", "time")
                         if (capturePid > 0) cmd.add("--pid=$capturePid")
-                        val filter = if (captureTag.isNotBlank()) {
-                            "$captureTag:$captureLevel"
-                        } else {
-                            "*:$captureLevel"
+                        if (tagList.isNotEmpty()) {
+                            tagList.forEach { t ->
+                                val escaped = Regex.escape(t)
+                                cmd.add("-e")
+                                cmd.add("\\b$escaped\\b")
+                            }
                         }
-                        cmd.add(filter)
+                        cmd.add("*:$captureLevel")
 
                         captureProcess = ProcessBuilder(cmd)
                             .redirectErrorStream(true)
@@ -185,7 +256,7 @@ object LogcatTools {
                             .put("running", true)
                             .put("pid", capturePid)
                             .put("file", captureFile?.absolutePath ?: "")
-                            .put("tag", captureTag)
+                            .put("tags", tagList.joinToString(","))
                             .put("level", captureLevel)
                             .put("hint", "后台采集已启动, 用 action=read 读取, action=stop 停止"))
                     }
@@ -194,16 +265,20 @@ object LogcatTools {
                         captureProcess?.destroy()
                         captureProcess = null
                         val lineCount = captureFile?.readLines()?.size ?: 0
+                        val durationSec = if (captureStartedAt > 0) (System.currentTimeMillis() - captureStartedAt) / 1000 else 0
+                        captureStartedAt = 0
                         ok(JSONObject()
                             .put("action", "stop")
                             .put("stopped", true)
                             .put("totalLines", lineCount)
+                            .put("durationSec", durationSec)
                             .put("file", captureFile?.absolutePath ?: ""))
                     }
 
                     "status" -> {
                         val running = captureProcess != null && captureProcess!!.isAlive
                         val lineCount = captureFile?.takeIf { it.exists() }?.readLines()?.size ?: 0
+                        val durationSec = if (captureStartedAt > 0) (System.currentTimeMillis() - captureStartedAt) / 1000 else 0
                         ok(JSONObject()
                             .put("action", "status")
                             .put("running", running)
@@ -211,6 +286,7 @@ object LogcatTools {
                             .put("tag", captureTag)
                             .put("level", captureLevel)
                             .put("totalLines", lineCount)
+                            .put("durationSec", durationSec)
                             .put("file", captureFile?.absolutePath ?: "")
                             .put("fileSize", captureFile?.length() ?: 0))
                     }
@@ -220,11 +296,14 @@ object LogcatTools {
                         if (!file.exists()) return err("NO_FILE", "采集文件不存在", "action", "read")
                         val maxLines = args.intValue("lines", 500).coerceAtMost(5000)
                         val keyword = args.str("keyword")
+                        val regex = args.str("regex")
                         val allLines = file.readLines()
-                        val filtered = if (keyword.isNotBlank()) {
-                            allLines.filter { it.contains(keyword, ignoreCase = true) }
-                        } else {
-                            allLines
+                        val filtered = allLines.filter { l ->
+                            val kwOk = keyword.isBlank() || l.contains(keyword, ignoreCase = true)
+                            val reOk = regex.isBlank() || runCatching {
+                                Regex(regex, RegexOption.IGNORE_CASE).containsMatchIn(l)
+                            }.getOrDefault(false)
+                            kwOk && reOk
                         }
                         val result = filtered.takeLast(maxLines)
                         ok(JSONObject()
@@ -238,6 +317,7 @@ object LogcatTools {
 
                     "clear" -> {
                         captureFile?.takeIf { it.exists() }?.delete()
+                        captureStartedAt = 0
                         ok(JSONObject().put("action", "clear").put("cleared", true))
                     }
 

@@ -98,122 +98,32 @@ internal fun AnalyzeTab(
         }
     }
     var showWorkspaces by remember { mutableStateOf(false) }
-    var manualSoPath by remember { mutableStateOf("") }
-    var manualError by remember { mutableStateOf("") }
-    var manualInfo by remember { mutableStateOf("") }
+    var showFileDialog by remember { mutableStateOf(false) }
+    var fileDialogPath by remember { mutableStateOf("") }
+    var fileDialogError by remember { mutableStateOf("") }
     // settings.treeUri 由 SharedPreferences 支撑，不是 Compose 可观察状态，直接作为 LaunchedEffect
     // 的 key 不会在选择目录后可靠触发重组。这里镜像成快照状态，确保一选目录就立刻重新扫描。
     var treeUriKey by remember { mutableStateOf(settings.treeUri?.toString()) }
-    val pickTree = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            }
-            settings.treeUri = uri
-            settings.useDefaultWorkDir = false
-            EngineProvider.setWorkDirectory(context, uri)
-            state.scannedTreeUri = null
-            treeUriKey = uri.toString()
-            // 立即触发扫描，不依赖 LaunchedEffect 重新组合
-            launchSoScan(context, settings, state, scope, t.zh)
-        }
-    }
-    val pickSoFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
+            // 只取只读权限，不设置工作目录、不触发扫描
             runCatching {
                 context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             val path = uri.toString()
-            val isApk = path.substringBefore('?').endsWith(".apk", ignoreCase = true)
-            manualSoPath = path
-            manualError = ""
-            manualInfo = ""
-            scope.launch {
-                val result = withContext(Dispatchers.IO) {
-                    runCatching {
-                        if (isApk) {
-                            analyzeApkForUi(context.applicationContext, path, t.zh)
-                        } else {
-                            // 直接将 content:// URI 传给引擎，引擎内部会复制到缓存目录再以本地路径打开
-                            val engine = EngineProvider.get(context)
-                            engine.open(path, temporary = false)
-                        }
-                    }
-                }
-                val opened = result.getOrNull()
-                if (opened != null && opened.optBoolean("ok", true)) {
-                    if (isApk) {
-                        // APK 分析结果存入 state，同时显示在工作区和分析页
-                        val entryCount = opened.optInt("entryCount", 0)
-                        val nativeLibs = opened.optJSONArray("nativeLibraries")?.length() ?: 0
-                        val dexFiles = opened.optJSONArray("dexFiles")?.length() ?: 0
-                        val apkName = path.substringAfterLast("%2F").substringAfterLast('/').substringBefore('?').ifBlank { "apk" }
-                        val summary = if (t.zh)
-                            "$entryCount 条目, $nativeLibs 原生库, $dexFiles DEX"
-                        else
-                            "$entryCount entries, $nativeLibs libs, $dexFiles DEX"
-                        state.apkResults = state.apkResults + (path to opened)
-                        manualInfo = if (t.zh)
-                            "APK 分析完成：$summary"
-                        else
-                            "APK analyzed: $summary"
-                        manualSoPath = ""
-                        manualError = ""
-                    } else {
-                        // SO 文件成功打开工作区：关闭对话框、刷新列表、自动进行基础分析
-                        val workspaceId = opened.optString("workspaceId")
-                        val soName = opened.optString("soFileName", "lib.so")
-                        manualSoPath = ""
-                        manualError = ""
-                        manualInfo = ""
-                        showWorkspaces = false
-                        state.workspaces = withContext(Dispatchers.IO) { loadWorkspaces(context.applicationContext) }
-                        launchWorkspaceAnalysis(context, workspaceId, soName, state, scope, t.zh)
-                    }
-                } else {
-                    val msg = opened?.optJSONObject("error")?.optString("message")
-                        ?: result.exceptionOrNull()?.message
-                        ?: (if (t.zh) "打开失败" else "Open failed")
-                    manualError = msg
-                    state.message = msg
-                }
-            }
-        }
-    }
-    val pickSoFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            }
-            settings.treeUri = uri
-            settings.useDefaultWorkDir = false
-            EngineProvider.setWorkDirectory(context, uri)
-            state.scannedTreeUri = null
-            manualSoPath = uri.toString()
-            manualError = ""
-            manualInfo = ""
-            showWorkspaces = false
-            treeUriKey = uri.toString()
-            // 立即触发扫描，不依赖 LaunchedEffect 重新组合
-            launchSoScan(context, settings, state, scope, t.zh)
+            showFileDialog = false
+            handleSelectedFile(path)
         }
     }
 
-    fun openManualPath() {
-        val path = manualSoPath.trim()
-        if (path.isBlank()) {
-            manualError = if (t.zh) "请输入或选择 SO/APK 文件路径" else "Please enter or pick a SO/APK file path"
-            return
-        }
+    fun handleSelectedFile(path: String) {
         val isApk = path.substringBefore('?').endsWith(".apk", ignoreCase = true)
-        manualInfo = ""
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     if (isApk) {
                         analyzeApkForUi(context.applicationContext, path, t.zh)
                     } else {
-                        // 直接将路径传给引擎，引擎会处理 content:// URI 和本地路径
                         val engine = EngineProvider.get(context)
                         engine.open(path, temporary = false)
                     }
@@ -230,25 +140,23 @@ internal fun AnalyzeTab(
                     else
                         "$entryCount entries, $nativeLibs libs, $dexFiles DEX"
                     state.apkResults = state.apkResults + (path to opened)
-                    manualInfo = if (t.zh) "APK 分析完成：$summary" else "APK analyzed: $summary"
-                    manualSoPath = ""
-                    manualError = ""
+                    state.message = if (t.zh) "APK 分析完成：$summary" else "APK analyzed: $summary"
                 } else {
-                    // SO 文件成功打开工作区：关闭对话框、刷新列表、自动进行基础分析
+                    // SO 文件成功打开工作区：刷新列表、自动进行基础分析
                     val workspaceId = opened.optString("workspaceId")
                     val soName = opened.optString("soFileName", "lib.so")
-                    manualSoPath = ""
-                    manualError = ""
-                    manualInfo = ""
-                    showWorkspaces = false
                     state.workspaces = withContext(Dispatchers.IO) { loadWorkspaces(context.applicationContext) }
                     launchWorkspaceAnalysis(context, workspaceId, soName, state, scope, t.zh)
                 }
             } else {
-                val msg = opened?.optJSONObject("error")?.optString("message")
-                    ?: result.exceptionOrNull()?.message
-                    ?: (if (t.zh) "打开失败" else "Open failed")
-                manualError = msg
+                val errCode = opened?.optJSONObject("error")?.optString("code", "")
+                val msg = if (errCode == "UNSUPPORTED_FORMAT") {
+                    if (t.zh) "不支持的文件类型，仅支持 ELF (.so) 和 PE (.dll) 格式" else "Unsupported file type. Only ELF (.so) and PE (.dll) are supported."
+                } else {
+                    opened?.optJSONObject("error")?.optString("message")
+                        ?: result.exceptionOrNull()?.message
+                        ?: (if (t.zh) "打开失败" else "Open failed")
+                }
                 state.message = msg
             }
         }
@@ -441,9 +349,7 @@ internal fun AnalyzeTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    if (settings.treeUri == null) {
-                        TextButton(onClick = { pickTree.launch(null) }) { Text(if (t.zh) "选择目录" else "Choose") }
-                    }
+                    TextButton(onClick = { showFileDialog = true; fileDialogPath = ""; fileDialogError = "" }) { Text(if (t.zh) "选文件" else "Pick file") }
                 }
             }
             if (state.scanning) {
@@ -860,44 +766,6 @@ internal fun AnalyzeTab(
                         modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        // 手动建立工作区
-                        Text(
-                            if (t.zh) "手动建立工作区" else "Create workspace manually",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        OutlinedTextField(
-                            value = manualSoPath,
-                            onValueChange = { manualSoPath = it; manualError = ""; manualInfo = "" },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(if (t.zh) "输入 SO/APK 文件路径或文件夹路径" else "Enter SO/APK file or folder path", maxLines = 1) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            isError = manualError.isNotBlank(),
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
-                            ),
-                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                                onDone = { openManualPath() },
-                            ),
-                            supportingText = if (manualError.isNotBlank()) {
-                                { Text(manualError, color = MaterialTheme.colorScheme.error) }
-                            } else if (manualInfo.isNotBlank()) {
-                                { Text(manualInfo, color = MaterialTheme.colorScheme.primary) }
-                            } else null,
-                        )
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            TextButton(onClick = { pickSoFile.launch(arrayOf("*/*")) }) {
-                                Text(if (t.zh) "选择文件" else "Pick file")
-                            }
-                            TextButton(onClick = { pickSoFolder.launch(null) }) {
-                                Text(if (t.zh) "选择文件夹" else "Pick folder")
-                            }
-                        }
-                        androidx.compose.material3.HorizontalDivider()
                         // 当前工作目录信息
                         val dirDisplay = settings.treeUri?.let { uri ->
                             uri.toString().substringAfterLast("%2F")
@@ -1036,6 +904,107 @@ internal fun AnalyzeTab(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+    // 选文件对话框：选择文件按钮 + 手动输入路径输入框
+    if (showFileDialog) {
+        Dialog(
+            onDismissRequest = { showFileDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (t.zh) "选文件" else "Pick file",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        IconButton(onClick = { showFileDialog = false }) {
+                            Icon(Icons.Default.Close, contentDescription = if (t.zh) "关闭" else "Close")
+                        }
+                    }
+                    Text(
+                        if (t.zh) "选择要分析的文件（APK、SO 等），文件仅只读访问，不触发扫描。"
+                        else "Select a file to analyze (APK, SO, etc.). Read-only access, no scan triggered.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = { pickFile.launch(arrayOf("*/*")) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Default.Storage, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (t.zh) "选择文件" else "Pick file")
+                    }
+                    androidx.compose.material3.HorizontalDivider()
+                    Text(
+                        if (t.zh) "手动输入路径" else "Manual path",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OutlinedTextField(
+                        value = fileDialogPath,
+                        onValueChange = { fileDialogPath = it; fileDialogError = "" },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(if (t.zh) "输入文件路径" else "Enter file path", maxLines = 1) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        isError = fileDialogError.isNotBlank(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onDone = {
+                                val path = fileDialogPath.trim()
+                                if (path.isBlank()) {
+                                    fileDialogError = if (t.zh) "请输入文件路径" else "Please enter a file path"
+                                } else {
+                                    showFileDialog = false
+                                    handleSelectedFile(path)
+                                }
+                            },
+                        ),
+                        supportingText = if (fileDialogError.isNotBlank()) {
+                            { Text(fileDialogError, color = MaterialTheme.colorScheme.error) }
+                        } else null,
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { showFileDialog = false }) {
+                            Text(if (t.zh) "取消" else "Cancel")
+                        }
+                        TextButton(
+                            enabled = fileDialogPath.isNotBlank(),
+                            onClick = {
+                                val path = fileDialogPath.trim()
+                                if (path.isBlank()) {
+                                    fileDialogError = if (t.zh) "请输入文件路径" else "Please enter a file path"
+                                } else {
+                                    showFileDialog = false
+                                    handleSelectedFile(path)
+                                }
+                            },
+                        ) { Text(if (t.zh) "打开" else "Open") }
                     }
                 }
             }

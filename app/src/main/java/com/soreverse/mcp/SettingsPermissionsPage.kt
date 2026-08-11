@@ -193,7 +193,7 @@ internal fun SettingsPermissionsPage(t: UiText) {
         }
 
         // ── Dhizuku ──
-        GlassGroup(title = "Dhizuku", footer = if (zh) "Dhizuku 将本应用设为设备所有者，可获得系统级能力。激活需要 Root。" else "Dhizuku sets this app as device owner for system-level capabilities. Activation requires Root.") {
+        GlassGroup(title = "Dhizuku", footer = if (zh) "Dhizuku 将本应用设为设备所有者，可获得系统级能力。激活需要 shizuku(ADB)或者Root。" else "Dhizuku sets this app as device owner for system-level capabilities. Activation requires shizuku (ADB) or Root.") {
             NavRow(
                 title = if (zh) "Dhizuku 应用" else "Dhizuku app",
                 subtitle = if (dhizukuApp) (if (zh) "已安装" else "Installed") else (if (zh) "未安装" else "Not installed"),
@@ -208,8 +208,8 @@ internal fun SettingsPermissionsPage(t: UiText) {
                 iconTint = if (dhizukuOk) AppPalette.green else MaterialTheme.colorScheme.error,
             )
             Text(
-                if (zh) "激活步骤：安装 Dhizuku 应用 → 在 Dhizuku 内授予 Root → 点击激活为设备所有者。注意：设置设备所有者前需移除已有账户/工作资料，激活后部分系统功能受限。"
-                else "Steps: install Dhizuku → grant Root inside it → activate as device owner. Note: remove existing accounts/work profile first; some system features become restricted.",
+                if (zh) "激活步骤：安装 Dhizuku 应用 → 通过 Shizuku（ADB 调试）或 Root 触发设备所有者授权（dpm set-device-owner）→ 在 Dhizuku 中激活。注意：设置设备所有者前需移除已有账户/工作资料，激活后部分系统功能受限。"
+                else "Steps: install Dhizuku → trigger device-owner grant (dpm set-device-owner) via Shizuku (ADB) or Root → activate inside Dhizuku. Note: remove existing accounts/work profile first; some system features become restricted.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -245,12 +245,12 @@ internal fun SettingsPermissionsPage(t: UiText) {
                     "• 增强 logcat（LogFox 级）：无需特权\n" +
                         "• eDBG（eBPF 调试）：Root（内核 5.10+）\n" +
                         "• eBPF DEX dump（eBPFDexDumper）：Root\n" +
-                        "• 文件级操作：Shizuku 或 Root（配合 MANAGE_EXTERNAL_STORAGE）"
+                        "• 文件级操作：Shizuku / Root / 设备所有者（设置·Dhizuku·MANAGE_EXTERNAL_STORAGE）"
                 } else {
                     "• Enhanced logcat (LogFox-grade): no privilege needed\n" +
                         "• eDBG (eBPF debugging): Root (kernel 5.10+)\n" +
                         "• eBPF DEX dump (eBPFDexDumper): Root\n" +
-                        "• File-level ops: Shizuku or Root (with MANAGE_EXTERNAL_STORAGE)"
+                        "• File-level ops: Shizuku / Root / Device Owner (settings·Dhizuku·MANAGE_EXTERNAL_STORAGE)"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

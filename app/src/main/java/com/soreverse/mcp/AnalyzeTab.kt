@@ -104,18 +104,6 @@ internal fun AnalyzeTab(
     // settings.treeUri 由 SharedPreferences 支撑，不是 Compose 可观察状态，直接作为 LaunchedEffect
     // 的 key 不会在选择目录后可靠触发重组。这里镜像成快照状态，确保一选目录就立刻重新扫描。
     var treeUriKey by remember { mutableStateOf(settings.treeUri?.toString()) }
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            // 只取只读权限，不设置工作目录、不触发扫描
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            val path = uri.toString()
-            showFileDialog = false
-            handleSelectedFile(path)
-        }
-    }
-
     fun handleSelectedFile(path: String) {
         val isApk = path.substringBefore('?').endsWith(".apk", ignoreCase = true)
         scope.launch {
@@ -159,6 +147,18 @@ internal fun AnalyzeTab(
                 }
                 state.message = msg
             }
+        }
+    }
+
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            // 只取只读权限，不设置工作目录、不触发扫描
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val path = uri.toString()
+            showFileDialog = false
+            handleSelectedFile(path)
         }
     }
 

@@ -1,0 +1,286 @@
+package com.soreverse.mcp
+
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.soreverse.mcp.core.BoreTunnelService
+import com.soreverse.mcp.core.SettingsStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MetricPill(label: String, value: String, color: Color) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(color.copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = color)
+        Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun MetricProgressRow(label: String, value: String, progress: Float, color: Color, monospace: Boolean = false) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default)
+            Text(value, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f), fontFamily = FontFamily.Monospace)
+        }
+        Spacer(Modifier.height(4.dp))
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)),
+            color = color,
+            trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+        )
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun ToolStatsSection(t: UiText, settings: SettingsStore) {
+    var refreshKey by remember { mutableStateOf(0) }
+    var snapshot by remember(refreshKey) { mutableStateOf(com.soreverse.mcp.core.ToolStats.snapshot()) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val toolStatsExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                val text = snapshot.toString(2)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                }
+            }.onSuccess {
+                Toast.makeText(context, if (t.zh) "统计已导出" else "Exported", Toast.LENGTH_SHORT).show()
+            }.onFailure { e ->
+                Toast.makeText(context, if (t.zh) "导出失败: ${e.message}" else "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    LaunchedEffect(refreshKey, settings.collectToolStats) {
+        if (settings.collectToolStats) {
+            delay(50)
+            snapshot = com.soreverse.mcp.core.ToolStats.snapshot()
+        }
+    }
+    if (!settings.collectToolStats) {
+        Text(if (t.zh) "工具调用统计已关闭，可在「编辑校验与审计」中开启。" else "Tool-call statistics are off. Enable in 'Edit validation and audit'.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        return
+    }
+    val totalCalls = snapshot.optLong("totalCalls", 0)
+    val totalOk = snapshot.optLong("totalOk", 0)
+    val totalFailed = snapshot.optLong("totalFailed", 0)
+    val distinct = snapshot.optInt("distinctTools", 0)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MetricPill(if (t.zh) "总调用" else "Calls", totalCalls.toString(), MaterialTheme.colorScheme.primary)
+        MetricPill(if (t.zh) "成功" else "OK", totalOk.toString(), AppleColors.systemGreen)
+        MetricPill(if (t.zh) "失败" else "Failed", totalFailed.toString(), AppleColors.systemRed)
+        MetricPill(if (t.zh) "工具" else "Tools", distinct.toString(), AppleColors.systemIndigo)
+    }
+    Spacer(Modifier.height(8.dp))
+    val toolsArr = snapshot.optJSONArray("tools")
+    val entries = (0 until (toolsArr?.length() ?: 0)).mapNotNull { i ->
+        val obj = toolsArr?.optJSONObject(i) ?: return@mapNotNull null
+        Triple(obj.optString("tool"), obj.optLong("calls"), obj.optLong("failed"))
+    }.sortedByDescending { it.second }
+    if (entries.isEmpty()) {
+        Text(if (t.zh) "暂无工具调用记录。" else "No tool calls recorded yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+    } else {
+        val maxCalls = entries.maxOf { it.second }.coerceAtLeast(1)
+        entries.take(14).forEach { (name, calls, failed) ->
+            MetricProgressRow(
+                label = name,
+                value = if (failed > 0) "$calls / $failed" else calls.toString(),
+                progress = calls.toFloat() / maxCalls,
+                color = if (failed > 0 && failed >= calls) AppleColors.systemRed else MaterialTheme.colorScheme.primary,
+                monospace = true,
+            )
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SecondaryActionButton(if (t.zh) "刷新" else "Refresh", { refreshKey++; snapshot = com.soreverse.mcp.core.ToolStats.snapshot() }, Modifier.weight(1f))
+        SecondaryActionButton(if (t.zh) "重置" else "Reset", {
+            com.soreverse.mcp.core.ToolStats.reset()
+            refreshKey++
+            snapshot = com.soreverse.mcp.core.ToolStats.snapshot()
+            Toast.makeText(context, if (t.zh) "统计已重置" else "Reset", Toast.LENGTH_SHORT).show()
+        }, Modifier.weight(1f))
+        SecondaryActionButton(if (t.zh) "导出" else "Export", {
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            toolStatsExportLauncher.launch("tool_stats_$ts.json")
+        }, Modifier.weight(1f))
+    }
+}
+
+@Composable
+internal fun TunnelStatsSection(t: UiText) {
+    var refreshKey by remember { mutableStateOf(0) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settings = remember { SettingsStore(context) }
+    var statsType by remember { mutableStateOf("cloudflare") }
+    var cfStats by remember(refreshKey) { mutableStateOf(activeServer(context)?.tunnel?.tunnelStats() ?: JSONObject()) }
+    var boreRunning by remember { mutableStateOf(BoreTunnelService.isRunning(context)) }
+    val tunnelStatsExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                val text = if (statsType == "cloudflare") cfStats.toString(2) else JSONObject().apply {
+                    put("type", "bore")
+                    put("running", boreRunning)
+                    put("url", BoreTunnelService.getTunnelUrl(context) ?: JSONObject.NULL)
+                }.toString(2)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                }
+            }.onSuccess {
+                Toast.makeText(context, if (t.zh) "隧道统计已导出" else "Exported", Toast.LENGTH_SHORT).show()
+            }.onFailure { e ->
+                Toast.makeText(context, if (t.zh) "导出失败: ${e.message}" else "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    LaunchedEffect(refreshKey, statsType) {
+        while (true) {
+            if (statsType == "cloudflare") {
+                cfStats = activeServer(context)?.tunnel?.tunnelStats() ?: JSONObject()
+            } else {
+                boreRunning = BoreTunnelService.isRunning(context)
+            }
+            delay(2000)
+        }
+    }
+
+    ChipRow(listOf("cloudflare" to "Cloudflare", "bore" to "Bore"), statsType) { statsType = it }
+
+    if (statsType == "cloudflare") {
+        val totalRunningMs = cfStats.optLong("totalRunningMs", 0)
+        val totalRestarts = cfStats.optInt("totalRestarts", 0)
+        val keepaliveRestarts = cfStats.optInt("keepaliveRestarts", 0)
+        val probeOks = cfStats.optInt("probeOks", 0)
+        val probeFailures = cfStats.optInt("probeFailures", 0)
+        val state = cfStats.optString("state", "STOPPED")
+        val totalProbes = probeOks + probeFailures
+        val lossRate = if (totalProbes > 0) (probeFailures.toFloat() / totalProbes * 1000).toInt() / 10f else 0f
+        val keepaliveEnabled = cfStats.optBoolean("keepaliveEnabled")
+        fun fmtDuration(ms: Long): String {
+            val s = ms / 1000
+            val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+            return if (h > 0) "${h}h ${m}m ${sec}s" else if (m > 0) "${m}m ${sec}s" else "${sec}s"
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricPill(if (t.zh) "状态" else "State", state, if (state == "RUNNING") AppleColors.systemGreen else AppleColors.systemOrange)
+            MetricPill(if (t.zh) "运行" else "Uptime", fmtDuration(totalRunningMs), MaterialTheme.colorScheme.primary)
+            MetricPill(if (t.zh) "保活" else "Keepalive", if (keepaliveEnabled) "ON" else "OFF", if (keepaliveEnabled) AppleColors.systemGreen else Color(0xFF8E8E93))
+        }
+        Spacer(Modifier.height(10.dp))
+        val maxCount = maxOf(totalRestarts, keepaliveRestarts, probeOks, probeFailures, 1)
+        MetricProgressRow(if (t.zh) "总重启" else "Total restarts", totalRestarts.toString(), totalRestarts.toFloat() / maxCount, AppleColors.systemOrange)
+        MetricProgressRow(if (t.zh) "保活重启" else "Keepalive restarts", keepaliveRestarts.toString(), keepaliveRestarts.toFloat() / maxCount, AppleColors.systemRed)
+        MetricProgressRow(if (t.zh) "探查成功" else "Probe OK", probeOks.toString(), probeOks.toFloat() / maxCount, AppleColors.systemGreen)
+        MetricProgressRow(if (t.zh) "探查失败" else "Probe failed", probeFailures.toString(), probeFailures.toFloat() / maxCount, AppleColors.systemRed)
+        Spacer(Modifier.height(6.dp))
+        Text(if (t.zh) "探查失败率 ≈ ${lossRate}%  ($probeFailures / $totalProbes)" else "Probe failure rate ≈ ${lossRate}%  ($probeFailures / $totalProbes)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+    } else {
+        val boreStats = BoreTunnelService.tunnelStats()
+        val totalRunningMs = boreStats.optLong("totalRunningMs", 0)
+        val totalReconnects = boreStats.optInt("totalReconnects", 0)
+        val totalConnections = boreStats.optInt("totalConnections", 0)
+        val totalBytes = boreStats.optLong("totalBytesTransferred", 0)
+        val totalErrors = boreStats.optInt("totalErrors", 0)
+        val state = boreStats.optString("state", "STOPPED")
+        val boreUrl = BoreTunnelService.getTunnelUrl(context)
+        fun fmtDuration(ms: Long): String {
+            val s = ms / 1000
+            val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+            return if (h > 0) "${h}h ${m}m ${sec}s" else if (m > 0) "${m}m ${sec}s" else "${sec}s"
+        }
+        fun fmtBytes(v: Long): String {
+            val units = arrayOf("B", "KB", "MB", "GB"); var u = 0; var value = v.toDouble()
+            while (value >= 1024 && u < units.size - 1) { value /= 1024; u++ }
+            return "%.1f %s".format(value, units[u])
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricPill(if (t.zh) "状态" else "State", state, if (state == "RUNNING") AppleColors.systemGreen else AppleColors.systemOrange)
+            MetricPill(if (t.zh) "运行" else "Uptime", fmtDuration(totalRunningMs), MaterialTheme.colorScheme.primary)
+            MetricPill(if (t.zh) "错误" else "Errors", totalErrors.toString(), if (totalErrors > 0) AppleColors.systemRed else AppleColors.systemGreen)
+        }
+        Spacer(Modifier.height(10.dp))
+        val maxCount = maxOf(totalReconnects, totalConnections, totalErrors, 1)
+        MetricProgressRow(if (t.zh) "重连次数" else "Reconnects", totalReconnects.toString(), totalReconnects.toFloat() / maxCount, AppleColors.systemOrange)
+        MetricProgressRow(if (t.zh) "数据连接" else "Connections", totalConnections.toString(), totalConnections.toFloat() / maxCount, MaterialTheme.colorScheme.primary)
+        MetricProgressRow(if (t.zh) "错误次数" else "Errors", totalErrors.toString(), totalErrors.toFloat() / maxCount, AppleColors.systemRed)
+        Spacer(Modifier.height(6.dp))
+        Text(if (t.zh) "总传输: ${fmtBytes(totalBytes)}" else "Total transferred: ${fmtBytes(totalBytes)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        if (boreUrl != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(if (t.zh) "公网地址: $boreUrl" else "Public URL: $boreUrl", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SecondaryActionButton(if (t.zh) "刷新" else "Refresh", { refreshKey++ }, Modifier.weight(1f))
+        if (statsType == "cloudflare") {
+            SecondaryActionButton(if (t.zh) "重置" else "Reset", {
+                activeServer(context)?.tunnel?.resetTunnelStats()
+                refreshKey++
+                Toast.makeText(context, if (t.zh) "隧道统计已重置" else "Tunnel stats reset", Toast.LENGTH_SHORT).show()
+            }, Modifier.weight(1f))
+        } else {
+            SecondaryActionButton(if (t.zh) "重置" else "Reset", {
+                BoreTunnelService.resetStats()
+                refreshKey++
+                Toast.makeText(context, if (t.zh) "隧道统计已重置" else "Tunnel stats reset", Toast.LENGTH_SHORT).show()
+            }, Modifier.weight(1f))
+        }
+        SecondaryActionButton(if (t.zh) "导出" else "Export", {
+            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+            tunnelStatsExportLauncher.launch("tunnel_stats_$ts.json")
+        }, Modifier.weight(1f))
+    }
+}

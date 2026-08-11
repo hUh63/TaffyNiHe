@@ -45,11 +45,17 @@ object WorkspacePolicy {
             .getMethod("currentApplication").invoke(null) as? Context
     }.getOrNull()
 
-    /** 设置页服务配置下的工作目录路径（treeUri 解析失败或未选择时回退 defaultWorkDirPath）。 */
+    /**
+     * 设置页服务配置下的工作目录路径。
+     *  - 已通过 SAF 选择目录（treeUri）：解析其真实路径；
+     *  - 未选择目录：仅当用户显式启用默认提示目录（[SettingsStore.useDefaultWorkDir]）时才返回
+     *    [SettingsStore.defaultWorkDirPath]（仅提示性路径），否则返回 null —— 未选择工作目录即无工作区。
+     */
     fun workDirPath(context: Context): String? {
         val settings = SettingsStore(context.applicationContext)
         val fromTree = runCatching { EngineProvider.resolveWorkDirPath(context, settings.treeUri) }.getOrNull()
-        return fromTree ?: settings.defaultWorkDirPath.takeIf { it.isNotBlank() }
+        if (!fromTree.isNullOrBlank()) return fromTree
+        return if (settings.useDefaultWorkDir) settings.defaultWorkDirPath.takeIf { it.isNotBlank() } else null
     }
 
     /**

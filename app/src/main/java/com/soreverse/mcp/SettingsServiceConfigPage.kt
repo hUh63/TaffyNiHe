@@ -251,9 +251,9 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
             title = { Text(if (t.zh) "关闭所有文件访问权限" else "Revoke all files access") },
             text = {
                 Text(if (t.zh)
-                    "需要前往系统设置页关闭「所有文件访问」权限。点击「去关闭」跳转到系统设置页。"
+                    "需要前往系统设置页关闭「所有文件访问」权限。注意：关闭后系统会终止本应用进程（Android 系统行为），返回时应用会重新启动。"
                     else
-                    "You need to go to system settings to revoke \"All files access\" permission.")
+                    "You need to go to system settings to revoke \"All files access\" permission. Note: revoking it force-stops this app (Android system behavior); the app will restart afterwards.")
             },
             confirmButton = {
                 TextButton({

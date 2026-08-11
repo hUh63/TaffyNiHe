@@ -357,7 +357,7 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
 // ─────────────────────────── 工作区管理 ───────────────────────────
 
 @Composable
-internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore) {
+internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenServiceConfig: () -> Unit) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     @Suppress("UNUSED_EXPRESSION") refresh
@@ -370,10 +370,23 @@ internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore) {
         GlassGroup(title = if (t.zh) "工作目录" else "Work directory") {
             NavRow(
                 title = workDir?.takeIf { it.isNotBlank() } ?: if (t.zh) "未设置" else "Not set",
-                subtitle = if (t.zh) "MCP 工具默认文件访问范围，在「服务配置」中修改" else "Default file scope of MCP tools; change it in Service config",
+                subtitle = if (workDir.isNullOrBlank())
+                    if (t.zh) "尚未选择工作目录，MCP 工具暂无文件工作区" else "No work directory selected; MCP tools have no file workspace"
+                else
+                    if (t.zh) "MCP 工具默认文件访问范围，在「服务配置」中修改" else "Default file scope of MCP tools; change it in Service config",
                 icon = Icons.Default.FolderOpen,
                 onClick = {},
             )
+            if (workDir.isNullOrBlank()) {
+                GroupDivider()
+                Row(Modifier.padding(14.dp)) {
+                    PrimaryActionButton(
+                        if (t.zh) "选择工作目录" else "Choose work directory",
+                        onOpenServiceConfig,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
         }
 
         GlassGroup(title = if (t.zh) "访问策略" else "Access policy") {

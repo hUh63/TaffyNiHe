@@ -257,7 +257,7 @@ internal fun SettingsHub(
             SettingsDest.Probe -> SettingsProbePage(t, settings)
             SettingsDest.ApkSign -> SettingsApkSignPage(t, settings)
             SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings)
-            SettingsDest.Workspace -> SettingsWorkspacePage(t, settings)
+            SettingsDest.Workspace -> SettingsWorkspacePage(t, settings) { onDest(SettingsDest.ServiceConfig) }
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

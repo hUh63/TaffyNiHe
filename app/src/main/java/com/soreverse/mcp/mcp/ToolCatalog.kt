@@ -1056,6 +1056,10 @@ object ToolCatalog {
         *ApkEditTools.ALL.toTypedArray(),
         // 塔菲逆核: Logcat 日志采集(参考NexusBridge LogFox)
         *LogcatTools.ALL.toTypedArray(),
+        // 塔菲逆核: eDBG 进程调试(GDB RSP, 需 gdbserver + Root/Shizuku)
+        *DbgTools.ALL.toTypedArray(),
+        // 塔菲逆核: eBPF dex 内核级 DEX 访问追踪(tracefs, 需 Root)
+        *BpfTools.ALL.toTypedArray(),
         // 塔菲逆核: 进阶逆向辅助(参考MT管理器 native_xref/cfg/patch_bytes/taffy_apk_search)
         *AdvancedTools.ALL.toTypedArray(),
         // 塔菲逆核: Unicorn 直接CPU模拟(参考Flutter解析工具的libunicorn_java独立模拟)

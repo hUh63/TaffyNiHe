@@ -2,8 +2,8 @@ package com.soreverse.mcp.core
 
 import android.content.Context
 import android.content.pm.PackageManager
+import com.rosan.dhizuku.api.Dhizuku
 import org.json.JSONObject
-import rikka.dhizuku.Dhizuku
 import rikka.shizuku.Shizuku
 
 /**
@@ -33,10 +33,9 @@ object PermissionManager {
             Shizuku.addBinderReceivedListenerSticky { shizukuBinderAlive = true }
             Shizuku.addBinderDeadListener { shizukuBinderAlive = false }
         }
-        // Dhizuku
+        // Dhizuku（包名 com.rosan.dhizuku，iamr0s 维护的活跃分支）
         runCatching {
-            Dhizuku.init(context)
-            dhizukuReady = Dhizuku.isOwner()
+            dhizukuReady = Dhizuku.init(context) && Dhizuku.isPermissionGranted()
         }
     }
 
@@ -57,9 +56,7 @@ object PermissionManager {
     fun isRootAvailable(): Boolean = RootShell.isRootAvailable()
 
     /** Dhizuku 是否已激活（本应用为设备所有者代理）。 */
-    fun isDhizukuAvailable(): Boolean = dhizukuReady
-
-    /** 是否安装了 Shizuku 应用（未安装时引导下载）。 */
+    fun isDhizukuAvailable(): Boolean = dhizukuReady    /** 是否安装了 Shizuku 应用（未安装时引导下载）。 */
     fun isShizukuAppInstalled(context: Context): Boolean =
         runCatching { context.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0); true }
             .getOrDefault(false)
@@ -95,18 +92,32 @@ object PermissionManager {
         Channel.NONE -> RootShell.Result(-1, "", "Channel not selected")
     }
 
-    private fun execShizuku(command: String, timeoutSec: Long): RootShell.Result = runCatching {
-        val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-        val out = process.inputStream.bufferedReader().readText()
-        val err = process.errorStream.bufferedReader().readText()
-        val code = process.waitFor()
-        RootShell.Result(code, out.trim(), err.trim())
-    }.getOrElse { RootShell.Result(-1, "", it.message ?: "Shizuku exec failed") }
+    private fun execShizuku(command: String, timeoutSec: Long): RootShell.Result {
+        // Shizuku 13.1.5 中 Shizuku.newProcess 为 private（官方推荐 UserService 模式），
+        // 这里用反射调用，保持轻量；后续如需稳定可迁移到 UserService。
+        return runCatching {
+            val method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java,
+            )
+            method.isAccessible = true
+            val proc = method.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
+            val out = proc.inputStream.bufferedReader().readText()
+            val err = proc.errorStream.bufferedReader().readText()
+            val code = proc.waitFor()
+            RootShell.Result(code, out.trim(), err.trim())
+        }.getOrElse { RootShell.Result(-1, "", it.message ?: "Shizuku exec failed") }
+    }
 
-    private fun execDhizuku(command: String, timeoutSec: Long): RootShell.Result =
-        // Dhizuku 官方 API 仅提供 init/isOwner/getBinder，不提供进程执行；
-        // 激活 Dhizuku 本身需要 root，因此 Dhizuku 通道复用 root 执行能力。
-        RootShell.exec(command, timeoutSec)
+    private fun execDhizuku(command: String, timeoutSec: Long): RootShell.Result = runCatching {
+        val proc = Dhizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+        val out = proc.inputStream.bufferedReader().readText()
+        val err = proc.errorStream.bufferedReader().readText()
+        val code = proc.waitFor()
+        RootShell.Result(code, out.trim(), err.trim())
+    }.getOrElse { RootShell.Result(-1, "", it.message ?: "Dhizuku exec failed") }
 
     // ── 自检 ──
 

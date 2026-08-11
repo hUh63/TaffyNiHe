@@ -1060,6 +1060,8 @@ object ToolCatalog {
         *EdbgTools.ALL.toTypedArray(),
         // 塔菲逆核: eBPFDexDumper 官方 eBPF DEX dump 封装(chinleez/eBPFDexDumper-rs)
         *DexDumpTools.ALL.toTypedArray(),
+        // 塔菲逆核: 本地 DEX/APK 静态分析(无需 root / eBPF, 普通手机用户可用)
+        *LocalDexInspectTools.ALL.toTypedArray(),
         // 塔菲逆核: 进阶逆向辅助(参考MT管理器 native_xref/cfg/patch_bytes/taffy_apk_search)
         *AdvancedTools.ALL.toTypedArray(),
         // 塔菲逆核: Unicorn 直接CPU模拟(参考Flutter解析工具的libunicorn_java独立模拟)

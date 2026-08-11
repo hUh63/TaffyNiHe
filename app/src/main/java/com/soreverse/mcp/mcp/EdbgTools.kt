@@ -127,10 +127,38 @@ object EdbgTools {
 
     private fun isDeployed(): Boolean = BinaryManager.isDeployed(BinaryManager.EDBG)
 
-    private fun probeEnv(ctx: ToolContext): JSONObject = BinaryManager.status(ctx.context, BinaryManager.EDBG)
-        .put("root", PermissionManager.isRootAvailable())
-        .put("sessionRunning", sessionRunning)
-        .put("sessionPackage", sessionPkg)
+    private fun probeEnv(ctx: ToolContext): JSONObject {
+        val root = PermissionManager.isRootAvailable()
+        val shizuku = PermissionManager.isShizukuGranted()
+        val canUse = root && isDeployed() && BinaryManager.kernelMeets("5.10")
+        val reason = when {
+            !root -> "eDBG 基于 eBPF，需要 Root 权限（Shizuku 无 eBPF 加载能力）。"
+            !isDeployed() -> "eDBG 二进制未部署，先执行 install。"
+            !BinaryManager.kernelMeets("5.10") -> "内核版本 < 5.10，eDBG 不兼容。"
+            else -> ""
+        }
+        val fallback = JSONArray().put(JSONObject()
+            .put("category", "SO 静态分析（无需 root）")
+            .put("tools", "taffy_so_open + analyze_* (functions/cfg/xrefs/strings) + taffy_read_disasm")
+            .put("description", "基于内置 Rizin 后端的本地 ELF 静态分析，不需要任何特权。")
+        ).put(JSONObject()
+            .put("category", "DEX 静态分析（无需 root）")
+            .put("tools", "taffy_dex_inspect / DexAnalysisTools 系列")
+            .put("description", "本地 dex 文件结构化检查与反编译，不需要 root 或 eBPF。")
+        ).put(JSONObject()
+            .put("category", "动态插桩替代（Frida，需 app debuggable 或 Shizuku 配合）")
+            .put("tools", "Frida 工具页 + taffy_analyze_guide")
+            .put("description", "Frida-gadget 模式可调试 debuggable 应用；非 debuggable 仍需 root。")
+        )
+        return BinaryManager.status(ctx.context, BinaryManager.EDBG)
+            .put("root", root)
+            .put("shizuku", shizuku)
+            .put("canUse", canUse)
+            .put("reason", reason)
+            .put("fallbackTools", fallback)
+            .put("sessionRunning", sessionRunning)
+            .put("sessionPackage", sessionPkg)
+    }
 
     val ALL = listOf(edbg)
 }

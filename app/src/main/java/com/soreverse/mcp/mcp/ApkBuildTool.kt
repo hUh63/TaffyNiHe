@@ -129,12 +129,10 @@ object ApkBuildTool {
                     ?: return@runCatching err("NO_SIGNING_KEY", "无可用的签名密钥（自定义密钥缺失且内置密钥初始化失败）", "inputApk", inputPath)
                 val (v1, v2, v3) = ApkSigningPolicy.schemeFlags(ctx.context)
                 val v1Name = ApkSigningPolicy.v1SignerName(ctx.context)
-                val cfgBuilder = ApkSigner.SignerConfig.Builder("NIEHE", key, listOf(cert))
-                if (v1Name != "CERT") {
-                    // apksig 部分版本支持自定义 V1 签名文件名（META-INF/<name>.RSA/.SF）
-                    runCatching {
-                        cfgBuilder.javaClass.getMethod("setV1SignerName", String::class.java).invoke(cfgBuilder, v1Name)
-                    }
+                // 构造器第一个参数即 V1 签名者名（META-INF/<name>.RSA/.SF）；再尝试独立 setter（apksig 新版本）
+                val cfgBuilder = ApkSigner.SignerConfig.Builder(v1Name, key, listOf(cert))
+                runCatching {
+                    cfgBuilder.javaClass.getMethod("setV1SignerName", String::class.java).invoke(cfgBuilder, v1Name)
                 }
                 val signerConfig = cfgBuilder.build()
                 ApkSigner.Builder(listOf(signerConfig))

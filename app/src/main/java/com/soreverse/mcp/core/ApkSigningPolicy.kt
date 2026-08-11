@@ -41,9 +41,21 @@ object ApkSigningPolicy {
         return runCatching { ApkBuildSignerBridge.obtainInternal(context) }.getOrNull()
     }
 
-    /** 自定义 V1 签名数据文件名（不含扩展名，默认 CERT）。 */
-    fun v1SignerName(context: Context): String =
-        SettingsStore(context).apkV1SignerName.ifBlank { "CERT" }
+    /**
+     * V1 签名数据文件名（不含扩展名）。
+     *  - 设置页开启「自定义 V1 签名数据文件名」且已填写名称 → 使用自定义名称；
+     *  - 否则（开关关闭或留空）→ 自动从签名密钥派生：
+     *    自定义密钥用其 alias，内置密钥用内置 alias（niehe）。
+     */
+    fun v1SignerName(context: Context): String {
+        val s = SettingsStore(context)
+        if (s.apkV1SignerEnabled) {
+            val custom = s.apkV1SignerName.trim()
+            if (custom.isNotBlank()) return custom
+        }
+        return if (s.apkSignKeySource == "custom") s.apkSignKeystoreAlias.trim().ifBlank { "CERT" }
+        else "niehe"
+    }
 
     /**
      * 把输入 APK 的 V2/V3 签名块（APK Signing Block）复制到输出 APK。

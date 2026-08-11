@@ -172,7 +172,8 @@ object SmaliBatchTool {
             if (!workDir.isDirectory) return err("DIR_NOT_FOUND", "工作目录不存在: $workDirPath", "workDir", workDirPath)
             val api = args.intValue("apiLevel", 34)
             val opcodes = if (api > 0) Opcodes.forApi(api) else Opcodes.getDefault()
-            val wantSign = args.optBoolean("sign", false)
+            val wantSign = if (args.has("sign")) args.optBoolean("sign", false)
+                else SettingsStore(ctx.context).apkAutoSign // 未显式指定时遵循设置页「修改APK后自动签名」
 
             return runCatching {
                 // 判断是 single.dex 还是 apk 形态: 根据 smali 目录命名
@@ -450,11 +451,10 @@ object SmaliBatchTool {
                     else File(apk.parentFile, "${apk.nameWithoutExtension}-signed.apk")
                 val (v1, v2, v3) = ApkSigningPolicy.schemeFlags(ctx.context)
                 val v1Name = ApkSigningPolicy.v1SignerName(ctx.context)
-                val cfgBuilder = com.android.apksig.ApkSigner.SignerConfig.Builder("NIEHE", signer.first, listOf(signer.second))
-                if (v1Name != "CERT") {
-                    runCatching {
-                        cfgBuilder.javaClass.getMethod("setV1SignerName", String::class.java).invoke(cfgBuilder, v1Name)
-                    }
+                // 构造器第一个参数即 V1 签名者名（META-INF/<name>.RSA/.SF）；再尝试独立 setter（apksig 新版本）
+                val cfgBuilder = com.android.apksig.ApkSigner.SignerConfig.Builder(v1Name, signer.first, listOf(signer.second))
+                runCatching {
+                    cfgBuilder.javaClass.getMethod("setV1SignerName", String::class.java).invoke(cfgBuilder, v1Name)
                 }
                 com.android.apksig.ApkSigner.Builder(listOf(cfgBuilder.build()))
                     .setInputApk(apk)

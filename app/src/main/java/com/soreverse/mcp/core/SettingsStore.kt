@@ -88,10 +88,20 @@ class SettingsStore(context: Context) {
             if (value in setOf("v1v2v3", "v1v2", "v1v3", "v1", "v2v3", "v2", "v3")) value else "v1v2v3",
         ).apply()
 
-    /** 自定义 V1 签名数据文件名（META-INF 下，不含扩展名，默认 CERT → CERT.RSA/CERT.SF）。 */
+    /** 自定义 V1 签名数据文件名开关：开启后使用 [apkV1SignerName] 作为 V1 签名文件名；关闭或留空时自动从签名密钥派生。 */
+    var apkV1SignerEnabled: Boolean
+        get() = prefs.getBoolean("apkV1SignerEnabled", false)
+        set(value) = prefs.edit().putBoolean("apkV1SignerEnabled", value).apply()
+
+    /** 自定义 V1 签名数据文件名（META-INF 下，不含扩展名；留空则自动从签名密钥派生）。 */
     var apkV1SignerName: String
-        get() = prefs.getString("apkV1SignerName", "CERT") ?: "CERT"
-        set(value) = prefs.edit().putString("apkV1SignerName", value.ifBlank { "CERT" }).apply()
+        get() = prefs.getString("apkV1SignerName", "") ?: ""
+        set(value) = prefs.edit().putString("apkV1SignerName", value.trim()).apply()
+
+    /** 修改 APK 后自动签名（MCP 工具 rebuild/build 完成后按签名策略自动签名）。 */
+    var apkAutoSign: Boolean
+        get() = prefs.getBoolean("apkAutoSign", false)
+        set(value) = prefs.edit().putBoolean("apkAutoSign", value).apply()
 
     /** 不签名时保留原 APK 的 V2/V3 签名数据（供重建流程读取）。 */
     var apkKeepV2V3WhenNoSign: Boolean
@@ -102,7 +112,7 @@ class SettingsStore(context: Context) {
 
     /** MCP 工具临时工作区数量上限（超过时自动裁剪最旧的临时工作区）。 */
     var tempWorkspaceLimit: Int
-        get() = prefs.getInt("tempWorkspaceLimit", 8).coerceIn(1, 100)
+        get() = prefs.getInt("tempWorkspaceLimit", 10).coerceIn(1, 100)
         set(value) = prefs.edit().putInt("tempWorkspaceLimit", value.coerceIn(1, 100)).apply()
 
     var port: Int
@@ -709,7 +719,9 @@ class SettingsStore(context: Context) {
                 .put("apkSignKeystoreAlias", apkSignKeystoreAlias)
                 .put("apkSignKeystorePass", mask(apkSignKeystorePass))
                 .put("apkSignScheme", apkSignScheme)
+                .put("apkV1SignerEnabled", apkV1SignerEnabled)
                 .put("apkV1SignerName", apkV1SignerName)
+                .put("apkAutoSign", apkAutoSign)
                 .put("apkKeepV2V3WhenNoSign", apkKeepV2V3WhenNoSign)
                 .put("tempWorkspaceLimit", tempWorkspaceLimit)
                 .put("tempWorkspaceCount", TempWorkspaceManager.count(appContext)))
@@ -847,7 +859,9 @@ class SettingsStore(context: Context) {
         applyStr(mcpTools, "apkSignKeystoreAlias") { apkSignKeystoreAlias = it }
         if (allowSecrets) applyStr(mcpTools, "apkSignKeystorePass") { apkSignKeystorePass = it }
         applyStr(mcpTools, "apkSignScheme") { apkSignScheme = it }
+        applyBool(mcpTools, "apkV1SignerEnabled") { apkV1SignerEnabled = it }
         applyStr(mcpTools, "apkV1SignerName") { apkV1SignerName = it }
+        applyBool(mcpTools, "apkAutoSign") { apkAutoSign = it }
         applyBool(mcpTools, "apkKeepV2V3WhenNoSign") { apkKeepV2V3WhenNoSign = it }
         applyInt(mcpTools, "tempWorkspaceLimit") { tempWorkspaceLimit = it }
 

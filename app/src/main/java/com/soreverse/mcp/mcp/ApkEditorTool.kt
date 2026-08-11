@@ -4,6 +4,8 @@ import com.reandroid.apkeditor.compile.BuildOptions
 import com.reandroid.apkeditor.decompile.DecompileOptions
 import com.reandroid.apkeditor.merge.MergerOptions
 import com.reandroid.apkeditor.refactor.RefactorOptions
+import com.soreverse.mcp.core.ApkSigningPolicy
+import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.bool
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
@@ -95,6 +97,16 @@ object ApkEditorTool {
                             type = args.str("type", "json")
                         }
                         opt.newCommandExecutor().runCommand()
+                        // 设置页「修改APK后自动签名」开启时，回编后直接按签名策略签名
+                        if (out.isFile && SettingsStore(ctx.context).apkAutoSign) {
+                            val signed = signApk(ctx, out, null)
+                            if (signed != null) {
+                                return@runCatching result("build", out, "已回编并自动签名，可直接安装。签名输出: $signed",
+                                    JSONObject().put("signedApk", signed).put("autoSign", true))
+                            }
+                            return@runCatching result("build", out, "已回编，但自动签名失败，请用 taffy_apk_sign 手动签名。",
+                                JSONObject().put("signed", false))
+                        }
                         result("build", out, "已回编成完整 APK。必须用 taffy_apk_sign 签名后才能安装。", null)
                     }
 
@@ -138,6 +150,30 @@ object ApkEditorTool {
             }
             out.parentFile?.mkdirs()
             return out
+        }
+
+        /** 按签名策略（密钥来源/方案/V1 文件名）签名，成功返回签名后路径，失败 null。 */
+        private fun signApk(ctx: ToolContext, apk: File, outPath: String?): String? {
+            return try {
+                val signer = ApkSigningPolicy.resolveSigner(ctx.context) ?: return null
+                val dest = if (outPath != null) File(outPath)
+                    else File(apk.parentFile, "${apk.nameWithoutExtension}-signed.apk")
+                val (v1, v2, v3) = ApkSigningPolicy.schemeFlags(ctx.context)
+                val v1Name = ApkSigningPolicy.v1SignerName(ctx.context)
+                val cfgBuilder = com.android.apksig.ApkSigner.SignerConfig.Builder(v1Name, signer.first, listOf(signer.second))
+                runCatching {
+                    cfgBuilder.javaClass.getMethod("setV1SignerName", String::class.java).invoke(cfgBuilder, v1Name)
+                }
+                com.android.apksig.ApkSigner.Builder(listOf(cfgBuilder.build()))
+                    .setInputApk(apk)
+                    .setOutputApk(dest)
+                    .setV1SigningEnabled(v1)
+                    .setV2SigningEnabled(v2)
+                    .setV3SigningEnabled(v3)
+                    .build()
+                    .sign()
+                dest.absolutePath
+            } catch (e: Exception) { null }
         }
 
         private fun result(action: String, out: File, hint: String, extra: JSONObject?): JSONObject {

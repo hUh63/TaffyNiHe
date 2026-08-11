@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Key
@@ -25,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.SigningKeyStore
 import com.soreverse.mcp.core.TempWorkspaceManager
+import com.soreverse.mcp.core.WorkspacePolicy
 import java.io.File
 
 // ─────────────────────────── APK 签名设置 ───────────────────────────
@@ -67,6 +70,13 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
     val activeKey = settings.apkSignKeystoreName
 
     PageScroll {
+        GlassGroup(title = if (t.zh) "自动签名" else "Auto sign") {
+            ToggleRow(
+                if (t.zh) "修改APK后自动签名" else "Auto-sign after APK edit",
+                settings.apkAutoSign,
+            ) { settings.apkAutoSign = it }
+        }
+
         GlassGroup(title = if (t.zh) "签名密钥" else "Signing key") {
             Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 KeySourceOption(if (t.zh) "默认" else "Default", keySource != "custom", AppPalette.indigo, Modifier.weight(1f)) {
@@ -107,17 +117,24 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
         }
 
         GlassGroup(title = if (t.zh) "V1 签名" else "V1 signing") {
-            var v1Name by remember { mutableStateOf(settings.apkV1SignerName) }
-            Column(Modifier.padding(14.dp)) {
-                OutlinedTextField(
-                    value = v1Name,
-                    onValueChange = { v1Name = it; settings.apkV1SignerName = it },
-                    label = { Text(if (t.zh) "自定义 V1 签名数据文件名" else "Custom V1 signer name") },
-                    supportingText = { Text(if (t.zh) "META-INF 下文件名（不含扩展名，默认 CERT）" else "File name under META-INF (no extension, default CERT)") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            ToggleRow(
+                if (t.zh) "自定义 V1 签名数据文件名" else "Custom V1 signer name",
+                settings.apkV1SignerEnabled,
+            ) { settings.apkV1SignerEnabled = it }
+            if (settings.apkV1SignerEnabled) {
+                GroupDivider()
+                var v1Name by remember { mutableStateOf(settings.apkV1SignerName) }
+                Column(Modifier.padding(14.dp)) {
+                    OutlinedTextField(
+                        value = v1Name,
+                        onValueChange = { v1Name = it; settings.apkV1SignerName = it },
+                        label = { Text(if (t.zh) "V1 签名数据文件名" else "V1 signer file name") },
+                        supportingText = { Text(if (t.zh) "自定义 V1 签名产生的 RSA/SF 文件的文件名，若留空则自动从签名密钥中获取数据" else "File name of the V1 .RSA/.SF files. If empty, derived from the signing key automatically.") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
             GroupDivider()
             ToggleRow(
@@ -262,30 +279,31 @@ private fun IconButtonMini(onClick: () -> Unit, icon: androidx.compose.ui.graphi
 internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
-    var limitText by remember { mutableStateOf(settings.tempWorkspaceLimit.toString()) }
+    var limit by remember { mutableIntStateOf(settings.tempWorkspaceLimit) }
     var showCleanConfirm by remember { mutableStateOf(false) }
     @Suppress("UNUSED_EXPRESSION") refresh
     val count = TempWorkspaceManager.count(context)
     val stats = TempWorkspaceManager.stats(context)
 
     PageScroll {
-        GlassGroup(title = if (t.zh) "临时工作区数量" else "Temp workspace limit") {
-            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = limitText,
-                    onValueChange = { limitText = it.filter(Char::isDigit).take(3) },
-                    label = { Text(if (t.zh) "数量上限 (1..100)" else "Limit (1..100)") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f),
+        GlassGroup(title = if (t.zh) "临时工作区数量上限" else "Temp workspace limit") {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    if (t.zh) "每类临时工作区最多保留 $limit 个，超出时自动删除最旧的"
+                    else "Keep at most $limit per category; the oldest are pruned automatically",
+                    style = MaterialTheme.typography.bodyMedium,
                 )
-                PrimaryActionButton(if (t.zh) "应用" else "Apply", {
-                    val next = limitText.toIntOrNull()?.coerceIn(1, 100) ?: settings.tempWorkspaceLimit
-                    settings.tempWorkspaceLimit = next
-                    limitText = next.toString()
-                    TempWorkspaceManager.pruneToLimit(context)
-                    refresh++
-                })
+                Slider(
+                    value = limit.toFloat(),
+                    onValueChange = { limit = it.toInt() },
+                    onValueChangeFinished = { settings.tempWorkspaceLimit = limit; TempWorkspaceManager.pruneToLimit(context); refresh++ },
+                    valueRange = 1f..100f,
+                    steps = 98,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("1", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("100", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
 
@@ -333,5 +351,62 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
             },
             dismissButton = { TextButton({ showCleanConfirm = false }) { Text(if (t.zh) "取消" else "Cancel") } },
         )
+    }
+}
+
+// ─────────────────────────── 工作区管理 ───────────────────────────
+
+@Composable
+internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore) {
+    val context = LocalContext.current
+    var refresh by remember { mutableIntStateOf(0) }
+    @Suppress("UNUSED_EXPRESSION") refresh
+    val workDir = WorkspacePolicy.workDirPath(context)
+    val tunnelOn = WorkspacePolicy.isTunnelActive(context)
+    val roots = WorkspacePolicy.allowedRoots(context)
+    val tempCount = TempWorkspaceManager.count(context)
+
+    PageScroll {
+        GlassGroup(title = if (t.zh) "工作目录" else "Work directory") {
+            NavRow(
+                title = workDir?.takeIf { it.isNotBlank() } ?: if (t.zh) "未设置" else "Not set",
+                subtitle = if (t.zh) "MCP 工具默认文件访问范围，在「服务配置」中修改" else "Default file scope of MCP tools; change it in Service config",
+                icon = Icons.Default.FolderOpen,
+                onClick = {},
+            )
+        }
+
+        GlassGroup(title = if (t.zh) "访问策略" else "Access policy") {
+            NavRow(
+                title = if (tunnelOn)
+                    if (t.zh) "隧道已开启 · 全盘放行" else "Tunnel active · full access"
+                else
+                    if (t.zh) "隧道未开启 · 仅工作目录" else "No tunnel · work dir only",
+                subtitle = if (t.zh)
+                    "开启任一隧道后 MCP 工具可访问 /sdcard 与 /storage/emulated/0"
+                else
+                    "Starting any tunnel lets MCP tools access /sdcard and /storage/emulated/0",
+                icon = Icons.Default.Cloud,
+                onClick = {},
+            )
+            for (root in roots) {
+                GroupDivider()
+                NavRow(
+                    title = root,
+                    subtitle = if (t.zh) "允许访问" else "Allowed",
+                    icon = Icons.Default.FolderOpen,
+                    onClick = {},
+                )
+            }
+        }
+
+        GlassGroup(title = if (t.zh) "临时工作区" else "Temp workspaces") {
+            NavRow(
+                title = if (t.zh) "$tempCount 个临时工作区" else "$tempCount temp workspaces",
+                subtitle = if (t.zh) "数量上限 ${settings.tempWorkspaceLimit}，在「临时工作区」页管理" else "Limit ${settings.tempWorkspaceLimit}; manage in Temp workspaces",
+                icon = Icons.Default.Storage,
+                onClick = {},
+            )
+        }
     }
 }

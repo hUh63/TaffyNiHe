@@ -78,7 +78,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 val latencyMs = (System.nanoTime() - start) / 1_000_000
                 val parsed = parseTools(resp)
                 // 配置的前缀优先；否则自动检测
-                val prefix = configPrefix.ifBlank { detectPrefix(parsed) }
+                val prefix = configPrefix.ifBlank { detectPrefix(parsed) ?: MT_PREFIX }
                 val prev = state
                 val s = State(
                     name = name,
@@ -177,7 +177,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                         val prefix = detectPrefix(parsed)
                         if (prefix != null || configPrefix.isNotBlank()) {
                             val cur = state
-                            val effectivePrefix = configPrefix.ifBlank { prefix }
+                            val effectivePrefix = configPrefix.ifBlank { prefix ?: MT_PREFIX }
                             state = State(name = name, url = url, online = true, lastError = "", tools = parsed, toolPrefix = effectivePrefix, configPrefix = configPrefix, lastCheckedAt = System.currentTimeMillis())
                             if (!cur.online) AppLog.i("apk-mcp health: $url back online (${parsed.size} tools, prefix=$prefix)")
                         }

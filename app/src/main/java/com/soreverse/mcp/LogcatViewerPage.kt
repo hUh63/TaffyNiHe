@@ -41,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -273,7 +274,12 @@ internal fun LogcatViewerPage(t: UiText) {
         running = false
         runCatching { process?.destroy() }
         process = null
-        if (recording) stopRecord()
+        if (recording) {
+            recording = false
+            runCatching { recordWriter?.flush() }
+            runCatching { recordWriter?.close() }
+            recordWriter = null
+        }
     }
 
     /** 开始录制到文件（与实时流同步写入）。 */
@@ -315,6 +321,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 (keyword.isBlank() || line.raw.contains(keyword, ignoreCase = true))
         }.takeLast(600)
     }
+    val clipboard = LocalClipboardManager.current
 
     // 新日志自动滚动到底部
     LaunchedEffect(visible.size) {

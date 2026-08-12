@@ -1056,6 +1056,8 @@ object ToolCatalog {
         *ApkEditTools.ALL.toTypedArray(),
         // 塔菲逆核: Logcat 日志采集(参考NexusBridge LogFox)
         *LogcatTools.ALL.toTypedArray(),
+        // 塔菲逆核: 抓包/网络流量采集(Root/Shizuku 特权通道 + tcpdump)
+        *CaptureTools.ALL.toTypedArray(),
         // 塔菲逆核: eDBG 官方 eBPF 调试器封装(ShinoLeah/eDBG, 需 Root + 内核 5.10+)
         *EdbgTools.ALL.toTypedArray(),
         // 塔菲逆核: eBPFDexDumper 官方 eBPF DEX dump 封装(chinleez/eBPFDexDumper-rs)

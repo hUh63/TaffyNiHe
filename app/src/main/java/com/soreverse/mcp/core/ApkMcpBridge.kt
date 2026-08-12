@@ -468,7 +468,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 all.addAll(st.tools.map { td ->
                     // 统一加前缀暴露（read_file → MCP1_read_file，mt_apk_open → MCP1_mt_apk_open）；
                     // 仅当工具名已带同一前缀时原样保留，避免用户手动配置相同前缀导致双前缀。
-                    if (td.name.startsWith(st.toolPrefix)) td
+                    if (matchesPrefix(td.name, st.toolPrefix)) td
                     else td.copy(name = st.toolPrefix + td.name)
                 })
             }
@@ -476,11 +476,19 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         return all
     }
 
+    /** 前缀路由匹配：默认 MCP{n}_ 自带下划线分隔符，startsWith 即精确；
+     *  手动配置无分隔符前缀（如 abc）时要求名字中前缀后紧跟 _ 或 :，避免误匹配 abcdef。 */
+    private fun matchesPrefix(name: String, prefix: String): Boolean {
+        if (prefix.isBlank() || !name.startsWith(prefix)) return false
+        if (prefix.endsWith("_") || prefix.endsWith(":")) return true
+        return name.length == prefix.length || name[prefix.length] == '_' || name[prefix.length] == ':'
+    }
+
     /** Check if a tool name is handled by any bridged connection. */
     fun isBridgedTool(name: String): Boolean {
         for (conn in connections) {
             val st = conn.state
-            if (st.online && st.toolPrefix.isNotBlank() && name.startsWith(st.toolPrefix)) return true
+            if (st.online && matchesPrefix(name, st.toolPrefix)) return true
         }
         return false
     }
@@ -508,10 +516,10 @@ class ApkMcpBridge(private val settings: SettingsStore) {
      * Call a tool on the correct bridge connection based on the tool name prefix.
      */
     fun callTool(name: String, arguments: JSONObject): JSONObject {
-        // Find the connection whose prefix matches this tool name
+        // Find the connection whose prefix matches this tool name（前缀路由）
         for (conn in connections) {
             val st = conn.state
-            if (st.online && st.toolPrefix.isNotBlank() && name.startsWith(st.toolPrefix)) {
+            if (st.online && matchesPrefix(name, st.toolPrefix)) {
                 // 暴露名是"前缀+原始名"（统一加前缀模式）→ 剥掉前缀再转发给桥接；
                 // 若工具名本身已带同一前缀（用户手动配置了相同前缀）→ 原样转发。
                 val stripped = name.removePrefix(st.toolPrefix)
@@ -567,7 +575,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 .put("lossRate", st.lossRate())
                 .put("tools", JSONArray().apply { st.tools.forEach { tool -> put(JSONObject()
                     // 管理页显示与 /mcp 一致的暴露名（裸工具名加前缀）
-                    .put("name", if (tool.name.startsWith(st.toolPrefix)) tool.name else st.toolPrefix + tool.name)
+                    .put("name", if (matchesPrefix(tool.name, st.toolPrefix)) tool.name else st.toolPrefix + tool.name)
                     .put("title", tool.title ?: "")
                     .put("description", tool.description ?: "")
                 ) } })

@@ -1130,28 +1130,14 @@ $historyRows
     }
 
     /**
-     * Advertise the full built-in catalog by default so modern MCP clients see every
-     * available tool and advanced SO / APK / file workflows stay discoverable.
-     * The exact count no longer matters: when the total is within a small margin of the
-     * built-in catalog size we advertise everything as-is. Lean exposure only kicks in for
-     * oversized catalogs — typically once dynamic APK-bridge tools (mt_apk_star/np_star) are
-     * merged — where the response would otherwise bloat beyond what clients handle well.
+     * Advertise the full catalog: built-in tools (leanTools 控制精简) plus ALL merged
+     * bridge tools. No truncation — supports any number of bridges and 200+ tools
+     * (modern MCP clients like Trae handle them fine).
      */
     private fun advertisedTools(): JSONArray {
-        val full = tools()
-        if (full.length() <= ToolCatalog.ALL.size + 64) return full
-        return leanAdvertisedTools(full)
-    }
-
-    private fun leanAdvertisedTools(full: JSONArray): JSONArray {
-        val out = JSONArray()
-        val apkPrefixes = apkBridge.allPrefixes()
-        for (i in 0 until full.length()) {
-            val t = full.getJSONObject(i)
-            val name = t.optString("name")
-            if (!apkPrefixes.any { name.startsWith(it) } || out.length() < ToolCatalog.ALL.size + 64) out.put(t)
-        }
-        return out
+        // 全量返回：内置工具（leanTools 控制精简）+ 全部桥接合并工具。
+        // 支持任意数量的桥接与工具（200+ 工具客户端可完整识别，如 Trae）。
+        return tools()
     }
 
     /** Returns a human-readable label for all online APK MCP bridges. */

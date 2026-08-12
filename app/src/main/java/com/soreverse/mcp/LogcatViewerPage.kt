@@ -1,8 +1,10 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,16 +18,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -91,6 +100,60 @@ private fun levelColor(level: String): Color = when (level) {
     else -> Color(0xFF9E9E9E)
 }
 
+/** 是否为崩溃段起始行（LogFox 风格：JAVA / NATIVE / ANR 三分类）。 */
+private fun isCrashStart(raw: String): Boolean {
+    val r = raw.uppercase()
+    return r.contains("FATAL EXCEPTION") ||
+        r.contains("FATAL SIGNAL") ||
+        r.contains("ANR IN") ||
+        r.contains("*** *** ***") ||
+        (r.contains("PROCESS:") && r.contains("PID:")) ||
+        r.contains("SIGSEGV") ||
+        r.contains("SIGABRT")
+}
+
+/** 崩溃类型：JAVA / NATIVE / ANR。 */
+private fun crashType(raw: String): String = when {
+    raw.uppercase().contains("FATAL SIGNAL") || raw.contains("SIGSEGV") || raw.contains("SIGABRT") || raw.contains("*** *** ***") -> "NATIVE"
+    raw.uppercase().contains("ANR IN") -> "ANR"
+    else -> "JAVA"
+}
+
+/** 崩溃标题（LogFox 样式）。 */
+private fun crashTitle(type: String, zh: Boolean): String = when (type) {
+    "NATIVE" -> if (zh) "Native 崩溃: Fatal signal" else "Native crash: Fatal signal"
+    "ANR" -> if (zh) "ANR 无响应" else "ANR"
+    else -> if (zh) "AndroidRuntime 错误" else "AndroidRuntime error"
+}
+
+/** 从日志流中提取崩溃段落（起始行 → 下一个起始行/结尾，截断 300 行）。 */
+private fun groupCrashesFromLogs(logs: List<LogLine>): List<CrashGroup> {
+    val starts = mutableListOf<Int>()
+    logs.forEachIndexed { i, l -> if (isCrashStart(l.raw)) starts.add(i) }
+    if (starts.isEmpty()) return emptyList()
+    val groups = mutableListOf<CrashGroup>()
+    starts.forEachIndexed { idx, s ->
+        val e = if (idx + 1 < starts.size) starts[idx + 1] else logs.size
+        val seg = logs.subList(s, e).take(300)
+        val type = crashType(seg.first().raw)
+        val pkg = seg.firstNotNullOfOrNull { l ->
+            Regex("Process: ([\\w.]+)").find(l.raw)?.groupValues?.get(1)
+                ?: Regex("Cmdline: ([\\w.]+)").find(l.raw)?.groupValues?.get(1)
+                ?: Regex("\\[([\\w.]+)\\]").find(l.raw)?.groupValues?.get(1)
+        } ?: ""
+        groups.add(CrashGroup(type, pkg, seg.first().time, seg.toList()))
+    }
+    return groups.takeLast(50)
+}
+
+/** 崩溃分组（LogFox 崩溃记录卡片的数据模型）。 */
+private data class CrashGroup(
+    val type: String,
+    val packageName: String,
+    val time: String,
+    val lines: List<LogLine>,
+)
+
 private fun parseLogLine(line: String): LogLine? {
     val parts = line.split(" ")
     // logcat -v time: "MM-DD HH:MM:SS.mmm  PID  TID  LEVEL TAG : msg"
@@ -126,8 +189,18 @@ internal fun LogcatViewerPage(t: UiText) {
     var tagFilter by remember { mutableStateOf("") }
     var keyword by remember { mutableStateOf("") }
     var levelSet by remember { mutableStateOf(setOf("V", "D", "I", "W", "E", "F")) }
+    // ── LogFox 实时过滤增强 ──
+    var pkgFilter by remember { mutableStateOf("") }
+    var pidFilter by remember { mutableStateOf("") }
+    var regexEnabled by remember { mutableStateOf(false) }
+    var caseSensitive by remember { mutableStateOf(false) }
+    var crashOnly by remember { mutableStateOf(false) }
     var process by remember { mutableStateOf<Process?>(null) }
     var dropped by remember { mutableStateOf(0) }
+    // 当前采集通道说明（无特权时明确提示，避免"静默空日志"）
+    var channelInfo by remember { mutableStateOf("") }
+    // 启动自检: 权限通道是否真实可用
+    var channelError by remember { mutableStateOf("") }
 
     // ── LogFox 样式扩展状态 ──
     // 采集模式：auto=自动选择 / adb=普通进程 / root / shizuku
@@ -215,20 +288,38 @@ internal fun LogcatViewerPage(t: UiText) {
         if (running) return
         running = true
         paused = false
-        // 按采集模式选择通道：root→su 提权、shizuku→Shizuku 流、adb/默认→普通进程（仅本应用日志）
-        val proc = when (mode) {
-            "root" -> PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
-                ?: ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-            "shizuku" -> PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
-                ?: ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-            else -> {
-                if (mode == "auto" && (PermissionManager.isRootAvailable() || PermissionManager.isShizukuGranted() || PermissionManager.isDhizukuAvailable())) {
-                    PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
-                        ?: ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-                } else {
-                    ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-                }
+        channelError = ""
+        // 按采集模式选择通道。关键: 无特权通道时普通进程在 Android 8.0+ 读不到系统日志,
+        // 必须明确告知用户而不是静默显示空列表(LogFox 通过 Shizuku/ADB/Root 提权才能看全系统日志)。
+        val priv = PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
+        val proc = when {
+            priv != null -> priv
+            mode == "root" -> {
+                channelError = if (PermissionManager.isRootAvailable()) "Root 通道启动失败，已降级普通进程" else "Root 不可用"
+                ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
             }
+            mode == "shizuku" -> {
+                channelError = if (PermissionManager.isShizukuGranted()) "Shizuku 通道启动失败，已降级普通进程" else "Shizuku 未授权"
+                ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
+            }
+            else -> {
+                // auto / adb 模式: 无特权通道时降级普通进程并提示
+                if (!PermissionManager.isRootAvailable() && !PermissionManager.isShizukuGranted() && !PermissionManager.isDhizukuAvailable()) {
+                    channelError = "无 Root/Shizuku 权限，普通进程读不到系统日志（Android 8.0+）"
+                } else if (channelError.isBlank()) {
+                    channelError = "特权通道不可用，已降级普通进程"
+                }
+                ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
+            }
+        }
+        channelInfo = when {
+            priv != null -> when {
+                PermissionManager.isRootAvailable() -> if (zh) "Root 通道" else "Root channel"
+                PermissionManager.isShizukuGranted() -> "Shizuku 通道"
+                PermissionManager.isDhizukuAvailable() -> "Dhizuku 通道"
+                else -> if (zh) "特权通道" else "Privileged channel"
+            }
+            else -> if (zh) "普通进程" else "Normal process"
         }
         process = proc
         scope.launch(Dispatchers.IO) {
@@ -312,13 +403,20 @@ internal fun LogcatViewerPage(t: UiText) {
         onDispose { stop() }
     }
 
-    // 可见日志：级别 + tag + 关键字过滤
-    val visible = remember(logs.size, tagFilter, keyword, levelSet, paused) {
+    // 可见日志：级别 + tag + 关键字 + 包名/PID/正则/崩溃过滤
+    val visible = remember(logs.size, tagFilter, keyword, levelSet, paused, pkgFilter, pidFilter, regexEnabled, caseSensitive, crashOnly) {
         val tags = tagFilter.split(',').map { it.trim() }.filter { it.isNotBlank() }
+        val kw = keyword
+        val pkg = pkgFilter.trim()
+        val pid = pidFilter.trim()
+        val re = if (regexEnabled) runCatching { Regex(kw, if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)) }.getOrNull() else null
         logs.filter { line ->
+            if (crashOnly && !isCrashStart(line.raw)) return@filter false
             levelSet.contains(line.level) &&
                 (tags.isEmpty() || tags.any { line.tag.contains(it, ignoreCase = true) }) &&
-                (keyword.isBlank() || line.raw.contains(keyword, ignoreCase = true))
+                (pkg.isBlank() || line.raw.contains(" $pkg ", ignoreCase = true) || line.raw.contains("/$pkg:", ignoreCase = true)) &&
+                (pid.isBlank() || line.pid == pid) &&
+                (kw.isBlank() || (re?.containsMatchIn(line.raw) ?: line.raw.contains(kw, ignoreCase = !caseSensitive)))
         }.takeLast(600)
     }
     val clipboard = LocalClipboardManager.current
@@ -392,6 +490,47 @@ internal fun LogcatViewerPage(t: UiText) {
             }
         }
 
+        // ── 通道状态提示（无权限时明确告知，LogFox 模式状态行）──
+        if (channelError.isNotBlank()) {
+            Row(
+                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    channelError + (if (zh) "。" else ". "),
+                    modifier = Modifier.weight(1f).padding(start = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                if (!PermissionManager.isShizukuGranted()) {
+                    TextButton(onClick = {
+                        runCatching {
+                            val intent = Intent(Intent.ACTION_MAIN).apply {
+                                `package` = "moe.shizuku.privileged.api"
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                        }
+                    }) { Text(if (zh) "打开 Shizuku" else "Open Shizuku") }
+                    TextButton(onClick = { runCatching { rikka.shizuku.Shizuku.requestPermission(10086) } }) {
+                        Text(if (zh) "授权" else "Grant")
+                    }
+                }
+            }
+        }
+        if (channelInfo.isNotBlank()) {
+            Text(
+                (if (zh) "采集通道: " else "Channel: ") + channelInfo,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (channelInfo.contains("Root") || channelInfo.contains("Shizuku") || channelInfo.contains("Dhizuku") || channelInfo.contains("特权"))
+                    MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (channelInfo.contains("Root") || channelInfo.contains("Shizuku") || channelInfo.contains("Dhizuku") || channelInfo.contains("特权"))
+                    FontWeight.SemiBold else FontWeight.Normal,
+            )
+        }
+
         // ── 标签页：日志 / 过滤器 / 崩溃 / 录制 ──
         val tabs = listOf("log", "filter", "crash", "record")
         val tabIndex = tabs.indexOf(tab).coerceAtLeast(0)
@@ -408,15 +547,32 @@ internal fun LogcatViewerPage(t: UiText) {
 
         when (tab) {
             "filter" -> {
-                // ── 过滤器：级别 + tag + 关键字 ──
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("V", "D", "I", "W", "E", "F").forEach { lv ->
-                        FilterChip(
-                            selected = lv in levelSet,
-                            onClick = { levelSet = if (lv in levelSet) levelSet - lv else levelSet + lv },
-                            label = { Text(lv, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = levelColor(lv)) },
-                        )
-                    }
+                // ── 过滤器（LogFox 实时过滤面板样式）──
+                OutlinedTextField(
+                    value = keyword,
+                    onValueChange = { keyword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(if (zh) "搜索" else "Search", maxLines = 1) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = pkgFilter,
+                        onValueChange = { pkgFilter = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text(if (zh) "包名" else "Package", maxLines = 1) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    )
+                    OutlinedTextField(
+                        value = pidFilter,
+                        onValueChange = { pidFilter = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("PID", maxLines = 1) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    )
                 }
                 OutlinedTextField(
                     value = tagFilter,
@@ -426,18 +582,25 @@ internal fun LogcatViewerPage(t: UiText) {
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 )
-                OutlinedTextField(
-                    value = keyword,
-                    onValueChange = { keyword = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text(if (zh) "关键字搜索（高亮）" else "Keyword search (highlight)", maxLines = 1) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("V", "D", "I", "W", "E", "F").forEach { lv ->
+                        FilterChip(
+                            selected = lv in levelSet,
+                            onClick = { levelSet = if (lv in levelSet) levelSet - lv else levelSet + lv },
+                            label = { Text(lv, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = levelColor(lv)) },
+                        )
+                    }
+                }
+                // 开关行（LogFox 样式）
+                SettingSwitchRow(if (zh) "正则" else "Regex", regexEnabled) { regexEnabled = it }
+                SettingSwitchRow(if (zh) "区分大小写" else "Case sensitive", caseSensitive) { caseSensitive = it }
+                SettingSwitchRow(if (zh) "仅崩溃与 ANR" else "Crashes & ANR only", crashOnly) { crashOnly = it }
             }
             "crash" -> {
-                // ── 崩溃记录 ──
-                if (crashLogs.isEmpty()) {
+                // ── 崩溃记录（LogFox 卡片样式：JAVA / NATIVE / ANR）──
+                val groups = remember(logs.size) { groupCrashesFromLogs(logs) }
+                var expandedIdx by remember { mutableStateOf(-1) }
+                if (groups.isEmpty()) {
                     Text(
                         if (zh) "没有崩溃记录\n捕获结果会显示在这里" else "No crash records\nCaptured results will show here",
                         modifier = Modifier.padding(16.dp),
@@ -445,24 +608,111 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(crashLogs.size) { i ->
-                            val cl = crashLogs[crashLogs.size - 1 - i]
-                            Text(
-                                cl.raw,
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)
-                                    .clip(MaterialTheme.shapes.small)
-                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
-                                    .padding(6.dp),
-                            )
+                    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(groups.size) { i ->
+                            val g = groups[groups.size - 1 - i]
+                            val expanded = expandedIdx == i
+                            Column(
+                                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                // 标题行（LogFox: 图标 + 标题 + 展开）
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(
+                                        when (g.type) {
+                                            "NATIVE" -> Icons.Default.Memory
+                                            "ANR" -> Icons.Default.Warning
+                                            else -> Icons.Default.BugReport
+                                        },
+                                        null,
+                                        tint = when (g.type) {
+                                            "NATIVE" -> AppPalette.red
+                                            "ANR" -> AppPalette.orange
+                                            else -> AppPalette.indigo
+                                        },
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(
+                                        crashTitle(g.type, zh),
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    IconButton(onClick = { expandedIdx = if (expanded) -1 else i }, modifier = Modifier.size(28.dp)) {
+                                        Icon(
+                                            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            contentDescription = if (zh) "展开" else "Expand",
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                                // 包名 + 时间 · 类型 · 行数
+                                Text(
+                                    (if (g.packageName.isNotBlank()) g.packageName + " · " else "") + g.time + " · " + g.type + " · " + g.lines.size + " " + (if (zh) "行" else "lines"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                // 操作按钮（LogFox: 复制 / 删除）
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            clipboard.setText(AnnotatedString(g.lines.joinToString("\n") { it.raw }))
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(if (zh) "复制" else "Copy", fontSize = 11.sp)
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            synchronized(logs) { logs.removeAll(g.lines.toSet()) }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    ) {
+                                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(if (zh) "删除" else "Delete", fontSize = 11.sp)
+                                    }
+                                }
+                                // 日志内容（黑色背景，LogFox 终端样式）
+                                val showLines = if (expanded) g.lines else g.lines.take(6)
+                                Column(
+                                    Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
+                                        .background(Color(0xFF111111))
+                                        .padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                                ) {
+                                    showLines.forEach { l ->
+                                        Text(
+                                            l.raw,
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                                            color = Color(0xFFE0E0E0),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    if (!expanded && g.lines.size > 6) {
+                                        Text(
+                                            if (zh) "… 共 ${g.lines.size} 行，点击展开" else "… ${g.lines.size} lines, tap to expand",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF888888),
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
             "record" -> {
-                // ── 录制：名称 + 录制/停止 + 文件列表 ──
+                // ── 录制：名称 + 录制/停止 + 文件列表（LogFox 样式）──
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = recordName,
@@ -478,7 +728,13 @@ internal fun LogcatViewerPage(t: UiText) {
                         TextButton(onClick = { startRecord() }, enabled = running) { Text(if (zh) "录制" else "Record") }
                     }
                 }
-                val files = remember(recording, logs.size) { recordFiles() }
+                var refreshTick by remember { mutableStateOf(0) }
+                val files = remember(recording, logs.size, refreshTick) { recordFiles() }
+                Text(
+                    (if (zh) "录制文件" else "Recordings") + " · " + files.size,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (files.isEmpty()) {
                     Text(
                         if (zh) "没有录制文件\n录制文件保存在应用私有目录" else "No recorded files\nRecordings are kept in the app-private directory",
@@ -487,12 +743,81 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
+                    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(files.size) { i ->
                             val f = files[i]
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(f.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${f.length() / 1024} KB", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(f.lastModified()))
+                            Column(
+                                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        f.name,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        if (zh) "删除" else "Delete",
+                                        modifier = Modifier.clip(MaterialTheme.shapes.small)
+                                            .clickable {
+                                                runCatching { f.delete() }
+                                                refreshTick++
+                                            }
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                Text(
+                                    "$stamp · ${f.length() / 1024} KB",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            clipboard.setText(AnnotatedString(f.absolutePath))
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(if (zh) "复制路径" else "Copy path", fontSize = 11.sp)
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            runCatching {
+                                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                                    context, "${context.packageName}.fileprovider", f,
+                                                )
+                                                val share = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                context.startActivity(Intent.createChooser(share, if (zh) "分享录制文件" else "Share recording").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    ) {
+                                        Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(if (zh) "分享" else "Share", fontSize = 11.sp)
+                                    }
+                                }
+                                Text(
+                                    f.absolutePath,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
                     }
@@ -630,5 +955,23 @@ private fun StatBox(label: String, value: String, modifier: Modifier = Modifier)
     ) {
         Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** LogFox 样式设置开关行（标签 + Switch）。 */
+@Composable
+private fun SettingSwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

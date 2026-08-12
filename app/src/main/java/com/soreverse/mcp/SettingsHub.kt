@@ -82,6 +82,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.LogcatViewer -> if (t.zh) "Logcat 查看器" else "Logcat Viewer"
     SettingsDest.Edbg -> "eDBG"
     SettingsDest.Rizin -> "Rizin"
+    SettingsDest.Capture -> if (t.zh) "抓包" else "Capture"
 }
 
 @Composable
@@ -196,6 +197,10 @@ internal fun SettingsHub(
                     SettingsTile("eDBG", if (t.zh) "eBPF 调试器 / 图形化 / 反编译" else "eBPF debugger / GUI / decompile", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Edbg) }, Modifier.weight(1f).fillMaxHeight())
                     SettingsTile("Rizin", if (t.zh) "引擎能力 / 工具路由 / 命令速查" else "Engine / tool routing / commands", Icons.Default.Memory, AppPalette.purple, { onDest(SettingsDest.Rizin) }, Modifier.weight(1f).fillMaxHeight())
                 }
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile(if (t.zh) "抓包" else "Capture", if (t.zh) "网络抓包 / 流量采集 / tcpdump" else "Network capture / traffic / tcpdump", Icons.Default.Analytics, AppPalette.teal, { onDest(SettingsDest.Capture) }, Modifier.weight(1f).fillMaxHeight())
+                    Box(Modifier.weight(1f))
+                }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
                     NavRow(if (t.zh) "返回数量" else "Result limits", "limit / disasm / hexdump", Icons.Default.Analytics, onClick = { onDest(SettingsDest.Limits) })
@@ -274,6 +279,7 @@ internal fun SettingsHub(
             SettingsDest.LogcatViewer -> LogcatViewerPage(t)
             SettingsDest.Edbg -> EdbgPage(t)
             SettingsDest.Rizin -> RizinPage(t)
+            SettingsDest.Capture -> CapturePage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

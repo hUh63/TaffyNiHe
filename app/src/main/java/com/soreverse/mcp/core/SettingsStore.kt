@@ -651,6 +651,12 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("apkMcpMergeTools", true)
         set(value) = prefs.edit().putBoolean("apkMcpMergeTools", value).apply()
 
+    /** 统一工具模式：tools/list 只暴露 taffy_unified 一个工具，所有工具经它分发。
+     *  用于客户端工具数量受限（如仅支持少量工具）时绕过限制。默认关闭。 */
+    var unifiedToolMode: Boolean
+        get() = prefs.getBoolean("unifiedToolMode", false)
+        set(value) = prefs.edit().putBoolean("unifiedToolMode", value).apply()
+
     /** MCP 桥接工具禁用映射（key = "bridgeName::toolName"），JSON 字符串。 */
     var toolDisableMapRaw: String
         get() = prefs.getString("toolDisableMap", "{}") ?: "{}"

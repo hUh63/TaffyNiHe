@@ -57,6 +57,9 @@ class McpHttpServer(private val context: Context, private val port: Int, private
          * 新客户端可直接调用 server/discover 协商。
          */
         const val PROTOCOL_VERSION = "2026-07-28"
+
+        /** 统一工具模式下的唯一入口工具名。 */
+        const val UNIFIED_TOOL = "taffy_unified"
     }
     override val coroutineContext = SupervisorJob() + Dispatchers.Default
     private val startedAt = System.currentTimeMillis()
@@ -333,8 +336,10 @@ class McpHttpServer(private val context: Context, private val port: Int, private
 
     private fun browserStatusHtml(): String {
         val uptime = (System.currentTimeMillis() - startedAt) / 1000
-        val bridge = apkBridge.state()
-        val bridgeStatus = if (bridge.online) "Online (${bridge.tools.size} tools)" else "Offline"
+        // 全部桥接的合并工具（统一加前缀后的暴露名），而非只取第一个在线桥接
+        val merged = apkBridge.mergedTools()
+        val onlineCount = apkBridge.snapshotJson().optInt("onlineCount", 0)
+        val bridgeStatus = if (onlineCount > 0) "Online ($onlineCount bridges, ${merged.size} tools)" else "Offline"
         val tunnelUrl = tunnel.status().publicUrl?.takeIf { it.isNotBlank() } ?: "Not configured"
 
         // Build tool catalog grouped by category
@@ -342,11 +347,11 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         val grouped = LinkedHashMap<String, MutableList<Pair<String, String>>>()
         cats.forEach { (cat, _) -> grouped[cat] = mutableListOf() }
         ToolCatalog.ALL.forEach { e -> grouped[e.meta.category]?.add(e.meta.name to e.meta.en) }
-        if (bridge.online) {
-            grouped["apk-bridge"] = bridge.tools.map { it.name to (it.description ?: it.name) }.toMutableList()
+        if (merged.isNotEmpty()) {
+            grouped["apk-bridge"] = merged.map { it.name to (it.description ?: it.name) }.toMutableList()
         }
 
-        val totalTools = ToolCatalog.ALL.size + if (bridge.online) bridge.tools.size else 0
+        val totalTools = ToolCatalog.ALL.size + merged.size
         val toolCards = StringBuilder()
         grouped.forEach { (cat, tools) ->
             if (tools.isEmpty()) return@forEach
@@ -706,6 +711,8 @@ $historyRows
     }
 
     private fun callToolPayload(name: String, args: JSONObject): JSONObject {
+        // 统一工具模式分发：taffy_unified 按 tool 参数路由到目标工具（内置或桥接）
+        if (name == UNIFIED_TOOL) return handleUnifiedCall(args)
         val native = EngineProvider.get(context)
         val settings = SettingsStore(context)
         // 统一工作区路径预检：未开隧道时路径限制在设置页服务配置的工作目录，
@@ -766,6 +773,19 @@ $historyRows
         ToolStats.record(name, isOk, elapsedMicros, errMsg)
         AppLog.i("Tool call $name -> ok=$isOk (${elapsedMicros / 1000.0}ms)")
         return payload
+    }
+
+    /** 统一工具模式：把 taffy_unified 的调用按 tool 参数分发到目标工具（内置或桥接）。 */
+    private fun handleUnifiedCall(args: JSONObject): JSONObject {
+        val tool = args.optString("tool").trim()
+        if (tool.isBlank()) {
+            return err("MISSING_TOOL", "taffy_unified requires 'tool' (the actual tool name, e.g. taffy_so_open or MCP2_read_file).")
+        }
+        if (tool == UNIFIED_TOOL) {
+            return err("INVALID_TOOL", "taffy_unified cannot call itself; pass a real tool name in 'tool'.")
+        }
+        val toolArgs = args.optJSONObject("arguments") ?: JSONObject()
+        return callToolWithPolicy(tool, toolArgs)
     }
 
     private fun wrapToolResult(payload: JSONObject): JSONObject {
@@ -1135,9 +1155,33 @@ $historyRows
      * (modern MCP clients like Trae handle them fine).
      */
     private fun advertisedTools(): JSONArray {
+        // 统一工具模式：只暴露 taffy_unified 一个工具（描述内嵌全部可用工具清单），
+        // 用于客户端工具数量受限（如只支持少量工具）时绕过限制。默认关闭。
+        if (SettingsStore(context).unifiedToolMode) {
+            return JSONArray().put(unifiedToolDescriptor())
+        }
         // 全量返回：内置工具（leanTools 控制精简）+ 全部桥接合并工具。
         // 支持任意数量的桥接与工具（200+ 工具客户端可完整识别，如 Trae）。
         return tools()
+    }
+
+    /** 统一工具描述：tool 参数填目标工具名（内置 taffy_* 或桥接 MCP{n}_*），arguments 为目标工具参数。 */
+    private fun unifiedToolDescriptor(): JSONObject {
+        val allNames = mutableListOf<String>()
+        ToolCatalog.ALL.forEach { allNames.add(it.meta.name) }
+        allNames.addAll(apkBridge.mergedTools().map { it.name })
+        val desc = "统一工具模式：所有工具均通过本工具调用（客户端仅需注册一个工具）。" +
+            "tool 参数填目标工具名（内置 taffy_* 或桥接 MCP{n}_* 前缀工具），arguments 填目标工具的参数对象。可用工具清单：\n" +
+            allNames.joinToString("\n")
+        return JSONObject()
+            .put("name", UNIFIED_TOOL)
+            .put("description", desc)
+            .put("inputSchema", JSONObject()
+                .put("type", "object")
+                .put("properties", JSONObject()
+                    .put("tool", JSONObject().put("type", "string").put("description", "目标工具名，如 taffy_so_open 或 MCP2_read_file"))
+                    .put("arguments", JSONObject().put("type", "object").put("description", "目标工具的参数对象")))
+                .put("required", JSONArray(listOf("tool"))))
     }
 
     /** Returns a human-readable label for all online APK MCP bridges. */

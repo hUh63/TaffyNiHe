@@ -288,6 +288,7 @@ internal fun SettingsAccessPage(t: UiText, settings: SettingsStore) {
     var bindHost by remember { mutableStateOf(settings.bindHost) }
     var authEnabled by remember { mutableStateOf(settings.authEnabled) }
     var accessToken by remember { mutableStateOf(settings.accessToken) }
+    var unifiedMode by remember { mutableStateOf(settings.unifiedToolMode) }
     PageScroll {
         GlassGroup {
             Text(if (t.zh) "谁能连接" else "Who can connect", modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
@@ -335,6 +336,15 @@ internal fun SettingsAccessPage(t: UiText, settings: SettingsStore) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(14.dp)) {
                 PrimaryActionButton(if (t.zh) "重新生成" else "Regenerate", { accessToken = settings.resetAccessToken() })
                 SecondaryActionButton(if (t.zh) "复制 token" else "Copy token") { copy(context, accessToken, t.copied) }
+            }
+        }
+        GlassGroup(footer = if (t.zh)
+            "开启后 tools/list 只暴露 taffy_unified 一个工具，所有内置与桥接工具都经它按 tool 参数分发；适合客户端工具数量受限时绕过限制。默认关闭。"
+        else
+            "When enabled, tools/list exposes only taffy_unified; all built-in & bridged tools are dispatched through it via the tool argument. Use it when the client has a tool-count limit. Off by default.") {
+            ToggleRow(if (t.zh) "统一工具模式" else "Unified tool mode", unifiedMode) {
+                unifiedMode = it
+                settings.unifiedToolMode = it
             }
         }
     }

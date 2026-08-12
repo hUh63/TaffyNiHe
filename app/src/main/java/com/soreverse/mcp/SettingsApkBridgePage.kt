@@ -277,9 +277,10 @@ private fun BridgeCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (prefix.isNotBlank()) {
+        if (online || prefix.isNotBlank()) {
             Text(
-                (if (zh) "工具前缀：" else "Tool prefix: ") + prefix,
+                if (zh) "工具总数：$toolCount  ·  工具前缀：${prefix.ifBlank { "(自动)" }}"
+                else "Tools: $toolCount  ·  Prefix: ${prefix.ifBlank { "(auto)" }}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -288,7 +289,8 @@ private fun BridgeCard(
             Text(
                 "${latencyMs}ms",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
             )
         }
         if (!online && lastError.isNotBlank()) {

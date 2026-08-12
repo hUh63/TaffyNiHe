@@ -74,6 +74,7 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
     var configs by remember { mutableStateOf(settings.apkMcpConfigs) }
     var apkAutoProbe by remember { mutableStateOf(settings.apkMcpAutoProbe) }
     var apkMerge by remember { mutableStateOf(settings.apkMcpMergeTools) }
+    var unifiedMode by remember { mutableStateOf(settings.unifiedToolMode) }
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editTarget by remember { mutableStateOf<SettingsStore.BridgeConfig?>(null) }
@@ -162,7 +163,16 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
                 ToggleRow(if (zh) "持续自动探测" else "Continuous auto-probe", apkAutoProbe) { apkAutoProbe = it; settings.apkMcpAutoProbe = it }
                 GroupDivider()
                 ToggleRow(if (zh) "合并工具到 tools/list" else "Merge tools into tools/list", apkMerge) { apkMerge = it; settings.apkMcpMergeTools = it }
+                GroupDivider()
+                ToggleRow(if (zh) "统一工具模式" else "Unified tool mode", unifiedMode) { unifiedMode = it; settings.unifiedToolMode = it }
             }
+            Text(
+                if (zh) "统一工具模式：tools/list 只暴露 taffy_unified 一个工具，所有内置与桥接工具经它按 tool 参数分发；适合客户端工具数量受限时绕过限制。默认关闭。"
+                else "Unified tool mode: tools/list exposes only taffy_unified; all built-in & bridged tools dispatch through it. For clients with tool-count limits. Off by default.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
     
             // ── 探测全部 ──
             GlassGroup {
@@ -266,7 +276,10 @@ private fun BridgeCard(
                 else if (state != null && lastError.isNotBlank()) (if (zh) "失败" else "Failed")
                 else (if (zh) "未探测" else "Unprobed"),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (!online && state != null && lastError.isNotBlank()) FontWeight.SemiBold else null,
+                color = if (online) MaterialTheme.colorScheme.primary
+                else if (state != null && lastError.isNotBlank()) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Spacer(Modifier.height(4.dp))

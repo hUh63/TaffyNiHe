@@ -92,6 +92,37 @@ object PermissionManager {
         Channel.NONE -> RootShell.Result(-1, "", "Channel not selected")
     }
 
+    /**
+     * 通过特权通道启动一个持续运行的命令流（如 logcat 实时流），返回可读的 Process。
+     * 优先级 root → shizuku → dhizuku；无可用通道返回 null（调用方应降级为普通进程）。
+     */
+    fun startPrivilegedStream(command: String, args: List<String>): Process? {
+        val full = (listOf(command) + args).joinToString(" ")
+        if (isRootAvailable()) {
+            return runCatching {
+                ProcessBuilder("su", "-c", full).redirectErrorStream(true).start()
+            }.getOrNull()
+        }
+        if (isShizukuGranted()) {
+            return runCatching {
+                val method = Shizuku::class.java.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java,
+                )
+                method.isAccessible = true
+                method.invoke(null, (arrayOf(command) + args.toTypedArray()), null, null) as Process
+            }.getOrNull()
+        }
+        if (dhizukuReady) {
+            return runCatching {
+                Dhizuku.newProcess((arrayOf(command) + args.toTypedArray()), null, null)
+            }.getOrNull()
+        }
+        return null
+    }
+
     private fun execShizuku(command: String, timeoutSec: Long): RootShell.Result {
         // Shizuku 13.1.5 中 Shizuku.newProcess 为 private（官方推荐 UserService 模式），
         // 这里用反射调用，保持轻量；后续如需稳定可迁移到 UserService。

@@ -1,21 +1,39 @@
 package com.soreverse.mcp.mcp
 
+import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import com.soreverse.mcp.core.intValue
 import org.json.JSONObject
 import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.StringReader
 
 /**
  * 塔菲逆核: Logcat 日志采集工具(参考 NexusBridge 的 LogFox MCP)。
  * 通过 logcat 命令采集系统日志,支持过滤/搜索/后台持久录制。
- * 需要非 root 也能读自己应用的日志; 读全系统日志需要 root 或 ADB 权限。
+ * 有特权通道(Root/Shizuku/Dhizuku)时读全系统日志; 否则只能读本应用日志。
  *
  * 增强: 后台持久采集(start/stop/status), 录制到文件, 可回放搜索。
  */
 object LogcatTools {
+
+    /**
+     * 执行 logcat 一次性命令: 优先走特权通道(Root→Shizuku→Dhizuku)读全系统日志,
+     * 无特权时降级为普通子进程(仅本应用日志)。返回原始输出。
+     */
+    private fun runLogcatRaw(cmd: List<String>): String {
+        val hasPriv = PermissionManager.isRootAvailable() ||
+            PermissionManager.isShizukuGranted() ||
+            PermissionManager.isDhizukuAvailable()
+        if (hasPriv) {
+            val r = PermissionManager.exec(cmd.joinToString(" "), timeoutSec = 20)
+            if (r.code == 0 && r.stdout.isNotBlank()) return r.stdout
+            if (r.stderr.isNotBlank()) return r.stderr + "\n" + r.stdout
+        }
+        val proc = ProcessBuilder(cmd).redirectErrorStream(true).start()
+        return proc.inputStream.bufferedReader().readText()
+    }
 
     /** 后台采集进程引用 */
     @Volatile private var captureProcess: Process? = null
@@ -69,39 +87,39 @@ object LogcatTools {
             cmd.add(filter)
 
             return runCatching {
-                val proc = ProcessBuilder(cmd).redirectErrorStream(true).start()
-                val output = StringBuilder()
-                BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
-                    val allLines = mutableListOf<String>()
+                // 特权通道优先：root/shizuku 可读全系统日志，否则只能读本应用日志
+                val rawOut = runLogcatRaw(cmd)
+                val allLines = mutableListOf<String>()
+                BufferedReader(StringReader(rawOut)).use { reader ->
                     var line = reader.readLine()
                     while (line != null) {
                         allLines.add(line)
                         line = reader.readLine()
                     }
-                    proc.waitFor()
-                    val keyword = args.str("keyword")
-                    val lineFilter: (String) -> Boolean = { l ->
-                        val kwOk = keyword.isBlank() || l.contains(keyword, ignoreCase = true)
-                        val reOk = regex.isBlank() || runCatching {
-                            Regex(regex, RegexOption.IGNORE_CASE).containsMatchIn(l)
-                        }.getOrDefault(false)
-                        kwOk && reOk
-                    }
-                    val filtered = allLines.filter(lineFilter)
-                    val result = when (action) {
-                        "recent" -> filtered.takeLast(maxLines)
-                        "search" -> filtered.take(maxLines)
-                        "dump" -> filtered.take(maxLines * 5)
-                        else -> filtered.takeLast(maxLines)
-                    }
-                    result.forEach { output.appendLine(it) }
-                    ok(JSONObject()
-                        .put("action", action)
-                        .put("totalLines", filtered.size)
-                        .put("returnedLines", result.size)
-                        .put("truncated", filtered.size > result.size)
-                        .put("logs", output.toString()))
                 }
+                val output = StringBuilder()
+                val keyword = args.str("keyword")
+                val lineFilter: (String) -> Boolean = { l ->
+                    val kwOk = keyword.isBlank() || l.contains(keyword, ignoreCase = true)
+                    val reOk = regex.isBlank() || runCatching {
+                        Regex(regex, RegexOption.IGNORE_CASE).containsMatchIn(l)
+                    }.getOrDefault(false)
+                    kwOk && reOk
+                }
+                val filtered = allLines.filter(lineFilter)
+                val result = when (action) {
+                    "recent" -> filtered.takeLast(maxLines)
+                    "search" -> filtered.take(maxLines)
+                    "dump" -> filtered.take(maxLines * 5)
+                    else -> filtered.takeLast(maxLines)
+                }
+                result.forEach { output.appendLine(it) }
+                ok(JSONObject()
+                    .put("action", action)
+                    .put("totalLines", filtered.size)
+                    .put("returnedLines", result.size)
+                    .put("truncated", filtered.size > result.size)
+                    .put("logs", output.toString()))
             }.getOrElse { e -> err("LOGCAT_FAILED", "logcat 采集失败: ${e.message}", "action", action) }
         }
     }
@@ -126,16 +144,15 @@ object LogcatTools {
             val parse = args.optBoolean("parse", true)
             return runCatching {
                 val cmd = mutableListOf("logcat", "-d", "*:E")
-                val proc = ProcessBuilder(cmd).redirectErrorStream(true).start()
+                val rawOut = runLogcatRaw(cmd)
                 val allLines = mutableListOf<String>()
-                BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                BufferedReader(StringReader(rawOut)).use { reader ->
                     var line = reader.readLine()
                     while (line != null) {
                         allLines.add(line)
                         line = reader.readLine()
                     }
                 }
-                proc.waitFor()
                 val crashKeywords = mutableListOf("CRASH", "FATAL", "ANR", "died", "AndroidRuntime", "SIGSEGV", "SIGABRT", "tombstone", "backtrace")
                 if (extraKeyword.isNotBlank()) crashKeywords.add(extraKeyword)
                 val matches = allLines.filter { l -> crashKeywords.any { l.contains(it, ignoreCase = true) } }

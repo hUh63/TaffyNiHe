@@ -104,6 +104,8 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
     // ── 工具管理子页：全屏替换主内容（避免与桥接列表叠加透明重叠） ──
     val toolsPageName = toolsTarget
     if (toolsPageName != null) {
+        // 系统返回键：回到桥接列表页，而不是退出设置页
+        androidx.activity.compose.BackHandler { toolsTarget = null }
         val st = bridgeStateByName(toolsPageName)
         val toolObjs = st?.optJSONArray("tools") ?: JSONArray()
         BridgeToolsManagerPage(
@@ -193,6 +195,8 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
             initial = null,
             zh = zh,
             existingNames = configs.map { it.name }.toSet(),
+            // 默认前缀与已有桥接数量关联：第 N 个桥接默认 MCP{n}_
+            defaultPrefix = "MCP${configs.size + 1}_",
             onDismiss = { showAddDialog = false },
             onSave = { name, url, token, prefix ->
                 scope.launch {
@@ -326,13 +330,14 @@ private fun BridgeEditDialog(
     initial: SettingsStore.BridgeConfig?,
     zh: Boolean,
     existingNames: Set<String>,
+    defaultPrefix: String = "",
     onDismiss: () -> Unit,
     onSave: (name: String, url: String, token: String, prefix: String) -> Unit,
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var url by remember { mutableStateOf(initial?.url ?: "") }
     var token by remember { mutableStateOf(initial?.token ?: "") }
-    var prefix by remember { mutableStateOf(initial?.prefix ?: "") }
+    var prefix by remember { mutableStateOf(initial?.prefix ?: defaultPrefix) }
 
     AlertDialog(
         onDismissRequest = onDismiss,

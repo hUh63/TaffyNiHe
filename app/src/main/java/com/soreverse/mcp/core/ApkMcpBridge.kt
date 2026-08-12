@@ -40,7 +40,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         val online: Boolean = false,
         val lastError: String = "",
         val tools: List<ToolDef> = emptyList(),
-        val toolPrefix: String = MT_PREFIX,
+        val toolPrefix: String = "",
         val configPrefix: String = "",
         val lastCheckedAt: Long = 0,
         val lastLatencyMs: Long = 0,
@@ -57,7 +57,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
      * Internal representation of a single bridge connection.
      * name 唯一，url 允许重复（多实例指向同一桥接）。
      */
-    private class BridgeConnection(val name: String, val url: String, val token: String, val configPrefix: String) {
+    private class BridgeConnection(val name: String, val url: String, val token: String, val configPrefix: String, val fallbackPrefix: String) {
         @Volatile var state: State = State(url = url)
         private val client: OkHttpClient by lazy {
             OkHttpClient.Builder()
@@ -77,8 +77,8 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 val resp = post(req)
                 val latencyMs = (System.nanoTime() - start) / 1_000_000
                 val parsed = parseTools(resp)
-                // 配置的前缀优先；否则自动检测
-                val prefix = configPrefix.ifBlank { detectPrefix(parsed) ?: MT_PREFIX }
+                // 配置的前缀优先；否则自动检测；检测不到则按桥接序号生成 MCP{n}_
+                val prefix = configPrefix.ifBlank { detectPrefix(parsed) ?: fallbackPrefix }
                 val prev = state
                 val s = State(
                     name = name,
@@ -177,7 +177,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                         val prefix = detectPrefix(parsed)
                         if (prefix != null || configPrefix.isNotBlank()) {
                             val cur = state
-                            val effectivePrefix = configPrefix.ifBlank { prefix ?: MT_PREFIX }
+                            val effectivePrefix = configPrefix.ifBlank { prefix ?: fallbackPrefix }
                             state = State(name = name, url = url, online = true, lastError = "", tools = parsed, toolPrefix = effectivePrefix, configPrefix = configPrefix, lastCheckedAt = System.currentTimeMillis())
                             if (!cur.online) AppLog.i("apk-mcp health: $url back online (${parsed.size} tools, prefix=$prefix)")
                         }
@@ -256,11 +256,18 @@ class ApkMcpBridge(private val settings: SettingsStore) {
             return null
         }
 
-        private fun prefixLabel(prefix: String?): String = when (prefix) {
-            MT_PREFIX -> "MT Manager"
-            NP_PREFIX -> "NP Manager"
+        private fun prefixLabel(prefix: String?): String = when {
+            prefix == MT_PREFIX -> "MT Manager"
+            prefix == NP_PREFIX -> "NP Manager"
+            prefix != null && prefix.startsWith("MCP") -> "MCP Bridge"
             else -> "Unknown"
         }
+    }
+
+    /** 未配置且无法从工具名检测时的兜底前缀：与已有桥接数量关联（第 N 个桥接默认 MCP{n}_）。 */
+    private fun fallbackPrefixFor(name: String): String {
+        val idx = settings.apkMcpConfigs.indexOfFirst { it.name == name }
+        return "MCP${(idx + 1).coerceAtLeast(1)}_"
     }
 
     private val connections = CopyOnWriteArrayList<BridgeConnection>()
@@ -313,14 +320,14 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         val existingNames = connections.map { it.name }.toSet()
         for (config in configs) {
             if (config.name !in existingNames) {
-                connections.add(BridgeConnection(config.name, config.url, config.token, config.prefix))
+                connections.add(BridgeConnection(config.name, config.url, config.token, config.prefix, fallbackPrefixFor(config.name)))
             } else {
                 // 更新已存在桥接的 url/token/prefix（用户在弹窗中改了）
                 val idx = connections.indexOfFirst { it.name == config.name }
                 if (idx >= 0) {
                     val old = connections[idx]
                     if (old.url != config.url || old.token != config.token || old.configPrefix != config.prefix) {
-                        connections[idx] = BridgeConnection(config.name, config.url, config.token, config.prefix)
+                        connections[idx] = BridgeConnection(config.name, config.url, config.token, config.prefix, old.fallbackPrefix)
                     }
                 }
             }
@@ -331,7 +338,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
     private fun ensureConnection(name: String, url: String, token: String = "", prefix: String = ""): BridgeConnection {
         syncConnectionsFromSettings()
         return connections.firstOrNull { it.name == name } ?: run {
-            val conn = BridgeConnection(name, url, token, prefix)
+            val conn = BridgeConnection(name, url, token, prefix, fallbackPrefixFor(name))
             connections.add(conn)
             conn
         }
@@ -358,7 +365,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
             for (url in candidates) {
                 try {
                     val autoName = "桥接 ${connections.size + 1}"
-                    val conn = BridgeConnection(autoName, url, "", "")
+                    val conn = BridgeConnection(autoName, url, "", "", "MCP${connections.size + 1}_")
                     val st = conn.probe()
                     if (st.online) {
                         connections.add(conn)
@@ -485,7 +492,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
             val st = conn.state
             if (st.online) return st.toolPrefix
         }
-        return connections.firstOrNull()?.state?.toolPrefix ?: MT_PREFIX
+        return connections.firstOrNull()?.state?.toolPrefix ?: ""
     }
 
     /** Get all known prefixes from all connections (both online and offline). */
@@ -596,9 +603,10 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         val KNOWN_PREFIXES = listOf(MT_PREFIX, NP_PREFIX)
         private val connIdCounter = AtomicInteger(1000)
 
-        fun prefixLabel(prefix: String?): String = when (prefix) {
-            MT_PREFIX -> "MT Manager"
-            NP_PREFIX -> "NP Manager"
+        fun prefixLabel(prefix: String?): String = when {
+            prefix == MT_PREFIX -> "MT Manager"
+            prefix == NP_PREFIX -> "NP Manager"
+            prefix != null && prefix.startsWith("MCP") -> "MCP Bridge"
             else -> "Unknown"
         }
     }

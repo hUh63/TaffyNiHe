@@ -67,7 +67,7 @@ object CaptureTools {
                         .put("interfaces", ip.second.take(4000)))
                 }
                 "conn" -> {
-                    if (!hasPriv()) return err("当前无 Root/Shizuku 权限，无法读取系统网络连接。")
+                    if (!hasPriv()) return err("NO_PRIV", "当前无 Root/Shizuku 权限，无法读取系统网络连接。")
                     val out = runRaw("ss -tunap 2>/dev/null || netstat -tunap 2>/dev/null || cat /proc/net/tcp /proc/net/tcp6 2>/dev/null")
                     ok(JSONObject().put("action", action).put("connections", out.second.take(8000)))
                 }
@@ -82,11 +82,11 @@ object CaptureTools {
                         .put("resolvConf", resolv.take(2000)))
                 }
                 "sniff_start" -> {
-                    if (sniffProcess != null) return err("已在抓包中: $sniffPcapPath，请先 sniff_stop")
-                    if (!hasPriv()) return err("抓包需要 Root 或 Shizuku 权限。")
+                    if (sniffProcess != null) return err("SNIFF_BUSY", "已在抓包中: $sniffPcapPath，请先 sniff_stop")
+                    if (!hasPriv()) return err("NO_PRIV", "抓包需要 Root 或 Shizuku 权限。")
                     // 检测 tcpdump
                     val probe = runRaw("which tcpdump 2>/dev/null || ls /system/xbin/tcpdump /data/local/tmp/tcpdump 2>/dev/null")
-                    if (probe.second.isBlank()) return err("未找到 tcpdump 二进制。Root 环境可: adb push tcpdump /data/local/tmp && chmod 755 /data/local/tmp/tcpdump")
+                    if (probe.second.isBlank()) return err("NO_TCPDUMP", "未找到 tcpdump 二进制。Root 环境可: adb push tcpdump /data/local/tmp && chmod 755 /data/local/tmp/tcpdump")
                     val iface = args.str("interface", "any")
                     val filter = args.str("filter")
                     val name = "taffy_capture_${System.currentTimeMillis()}.pcap"
@@ -96,7 +96,7 @@ object CaptureTools {
                         if (filter.isNotBlank()) append(" ").append(filter)
                     }
                     val p = PermissionManager.startPrivilegedStream("sh", listOf("-c", cmd))
-                    if (p == null) return err("tcpdump 启动失败。")
+                    if (p == null) return err("SNIFF_START_FAILED", "tcpdump 启动失败。")
                     sniffProcess = p
                     sniffPcapPath = path
                     sniffStartedAt = System.currentTimeMillis()
@@ -122,8 +122,8 @@ object CaptureTools {
                         .put("privileged", hasPriv()))
                 }
                 "sniff_pull" -> {
-                    if (sniffPcapPath.isBlank()) return err("没有可用的抓包文件")
-                    val appCtx = ctx.context ?: return err("no context")
+                    if (sniffPcapPath.isBlank()) return err("NO_PCAP", "没有可用的抓包文件")
+                    val appCtx = ctx.context ?: return err("NO_CONTEXT", "no context")
                     val dst = File(appCtx.filesDir, File(sniffPcapPath).name)
                     val r = runRaw("cp $sniffPcapPath ${dst.absolutePath} && chmod 644 ${dst.absolutePath}")
                     ok(JSONObject().put("action", action)
@@ -131,7 +131,7 @@ object CaptureTools {
                         .put("pcapPath", if (r.first == 0) dst.absolutePath else "")
                         .put("size", if (dst.exists()) dst.length() else 0))
                 }
-                else -> err("未知 action: $action")
+                else -> err("BAD_ACTION", "未知 action: $action")
             }
         }
     }

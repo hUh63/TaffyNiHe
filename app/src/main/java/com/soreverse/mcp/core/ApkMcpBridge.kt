@@ -465,13 +465,18 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         return connections.firstOrNull()?.state ?: State()
     }
 
-    /** Collect all tools from all online bridge connections. */
+    /** Collect all tools from all online bridge connections. 前缀由本应用附加：裸工具名暴露为 {prefix}{name}。 */
     fun mergedTools(): List<ToolDef> {
         val all = mutableListOf<ToolDef>()
         for (conn in connections) {
             val st = conn.state
-            if (st.online) {
-                all.addAll(st.tools.filter { it.name.startsWith(st.toolPrefix) })
+            if (st.online && st.toolPrefix.isNotBlank()) {
+                all.addAll(st.tools.map { td ->
+                    // 工具名已带该前缀（MT/NP 管理器自带 mt_apk_/np_）→ 原样；
+                    // 否则在原始工具名前面加上前缀暴露（如 read_file → MCP1_read_file）
+                    if (td.name.startsWith(st.toolPrefix)) td
+                    else td.copy(name = st.toolPrefix + td.name)
+                })
             }
         }
         return all
@@ -481,7 +486,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
     fun isBridgedTool(name: String): Boolean {
         for (conn in connections) {
             val st = conn.state
-            if (st.online && name.startsWith(st.toolPrefix)) return true
+            if (st.online && st.toolPrefix.isNotBlank() && name.startsWith(st.toolPrefix)) return true
         }
         return false
     }
@@ -512,8 +517,12 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         // Find the connection whose prefix matches this tool name
         for (conn in connections) {
             val st = conn.state
-            if (st.online && name.startsWith(st.toolPrefix)) {
-                return conn.callTool(name, arguments)
+            if (st.online && st.toolPrefix.isNotBlank() && name.startsWith(st.toolPrefix)) {
+                // 若该名字是"本应用附加前缀"的暴露名（前缀+原始名），转发时剥掉前缀；
+                // 若桥接工具名本身就带该前缀（MT/NP 管理器），则原样转发。
+                val stripped = name.removePrefix(st.toolPrefix)
+                val forward = if (st.tools.any { it.name == stripped }) stripped else name
+                return conn.callTool(forward, arguments)
             }
         }
         // If no online connection matches, try finding any connection that was configured for this prefix
@@ -563,7 +572,8 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 .put("probeFailures", st.probeFailures)
                 .put("lossRate", st.lossRate())
                 .put("tools", JSONArray().apply { st.tools.forEach { tool -> put(JSONObject()
-                    .put("name", tool.name)
+                    // 管理页显示与 /mcp 一致的暴露名（裸工具名加前缀）
+                    .put("name", if (tool.name.startsWith(st.toolPrefix)) tool.name else st.toolPrefix + tool.name)
                     .put("title", tool.title ?: "")
                     .put("description", tool.description ?: "")
                 ) } })

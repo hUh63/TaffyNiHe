@@ -101,73 +101,87 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
     // 进入或选项变化时刷新一次
     androidx.compose.runtime.LaunchedEffect(Unit) { refreshSnapshot() }
 
-    PageScroll {
-        // ── 桥接列表 ──
-        GlassGroup(
-            title = if (zh) "桥接列表" else "Bridge List",
-            footer = if (zh) "支持同时连接多个 MCP 桥接服务，每个桥接独立管理" else "Multiple concurrent MCP bridges, each managed independently",
-        ) {
-            if (configs.isEmpty()) {
-                Text(
-                    if (zh) "尚未添加任何桥接" else "No bridges configured",
-                    modifier = Modifier.padding(14.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    // ── 工具管理子页：全屏替换主内容（避免与桥接列表叠加透明重叠） ──
+    val toolsPageName = toolsTarget
+    if (toolsPageName != null) {
+        val st = bridgeStateByName(toolsPageName)
+        val toolObjs = st?.optJSONArray("tools") ?: JSONArray()
+        BridgeToolsManagerPage(
+            bridgeName = toolsPageName,
+            prefix = st?.optString("toolPrefix", "") ?: "",
+            tools = toolObjs,
+            zh = zh,
+            onBack = { toolsTarget = null },
+        )
+    } else {
+        PageScroll {
+            // ── 桥接列表 ──
+            GlassGroup(
+                title = if (zh) "桥接列表" else "Bridge List",
+                footer = if (zh) "支持同时连接多个 MCP 桥接服务，每个桥接独立管理" else "Multiple concurrent MCP bridges, each managed independently",
+            ) {
+                if (configs.isEmpty()) {
+                    Text(
+                        if (zh) "尚未添加任何桥接" else "No bridges configured",
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                configs.forEachIndexed { index, config ->
+                    if (index > 0) GroupDivider()
+                    BridgeCard(
+                        config = config,
+                        state = bridgeStateByName(config.name),
+                        zh = zh,
+                        onManageTools = { toolsTarget = config.name },
+                        onEdit = { editTarget = config },
+                        onDelete = {
+                            bridge.removeBridge(config.name)
+                            configs = settings.apkMcpConfigs
+                            snapshot = null
+                            refreshSnapshot()
+                        },
+                    )
+                }
+                GroupDivider()
+                Row(Modifier.fillMaxWidth().padding(14.dp)) {
+                    PrimaryActionButton(
+                        if (zh) "添加桥接" else "Add Bridge",
+                        { showAddDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        leading = Icons.Default.Add,
+                    )
+                }
             }
-            configs.forEachIndexed { index, config ->
-                if (index > 0) GroupDivider()
-                BridgeCard(
-                    config = config,
-                    state = bridgeStateByName(config.name),
-                    zh = zh,
-                    onManageTools = { toolsTarget = config.name },
-                    onEdit = { editTarget = config },
-                    onDelete = {
-                        bridge.removeBridge(config.name)
-                        configs = settings.apkMcpConfigs
-                        snapshot = null
-                        refreshSnapshot()
-                    },
-                )
+    
+            // ── 选项 ──
+            GlassGroup(title = if (zh) "选项" else "Options") {
+                ToggleRow(if (zh) "持续自动探测" else "Continuous auto-probe", apkAutoProbe) { apkAutoProbe = it; settings.apkMcpAutoProbe = it }
+                GroupDivider()
+                ToggleRow(if (zh) "合并工具到 tools/list" else "Merge tools into tools/list", apkMerge) { apkMerge = it; settings.apkMcpMergeTools = it }
             }
-            GroupDivider()
-            Row(Modifier.fillMaxWidth().padding(14.dp)) {
-                PrimaryActionButton(
-                    if (zh) "添加桥接" else "Add Bridge",
-                    { showAddDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    leading = Icons.Default.Add,
-                )
-            }
-        }
-
-        // ── 选项 ──
-        GlassGroup(title = if (zh) "选项" else "Options") {
-            ToggleRow(if (zh) "持续自动探测" else "Continuous auto-probe", apkAutoProbe) { apkAutoProbe = it; settings.apkMcpAutoProbe = it }
-            GroupDivider()
-            ToggleRow(if (zh) "合并工具到 tools/list" else "Merge tools into tools/list", apkMerge) { apkMerge = it; settings.apkMcpMergeTools = it }
-        }
-
-        // ── 探测全部 ──
-        GlassGroup {
-            Row(Modifier.padding(14.dp)) {
-                PrimaryActionButton(
-                    if (zh) "探测全部" else "Probe All",
-                    { refreshSnapshot() },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            snapshot?.let { snap ->
-                val bridges = snap.optJSONArray("bridges") ?: JSONArray()
-                val onlineCount = snap.optInt("onlineCount")
-                val text = if (zh) "$onlineCount/${bridges.length()} 个桥接在线" else "$onlineCount/${bridges.length()} bridge(s) online"
-                Text(
-                    text,
-                    color = if (onlineCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                )
+    
+            // ── 探测全部 ──
+            GlassGroup {
+                Row(Modifier.padding(14.dp)) {
+                    PrimaryActionButton(
+                        if (zh) "探测全部" else "Probe All",
+                        { refreshSnapshot() },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                snapshot?.let { snap ->
+                    val bridges = snap.optJSONArray("bridges") ?: JSONArray()
+                    val onlineCount = snap.optInt("onlineCount")
+                    val text = if (zh) "$onlineCount/${bridges.length()} 个桥接在线" else "$onlineCount/${bridges.length()} bridge(s) online"
+                    Text(
+                        text,
+                        color = if (onlineCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
     }
@@ -210,19 +224,6 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
                 editTarget = null
                 refreshSnapshot()
             },
-        )
-    }
-
-    // ── 工具管理子页 ──
-    toolsTarget?.let { name ->
-        val st = bridgeStateByName(name)
-        val toolObjs = st?.optJSONArray("tools") ?: JSONArray()
-        BridgeToolsManagerPage(
-            bridgeName = name,
-            prefix = st?.optString("toolPrefix", "") ?: "",
-            tools = toolObjs,
-            zh = zh,
-            onBack = { toolsTarget = null },
         )
     }
 }
@@ -415,7 +416,7 @@ private fun BridgeToolsManagerPage(
         }.getOrDefault(JSONObject())
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

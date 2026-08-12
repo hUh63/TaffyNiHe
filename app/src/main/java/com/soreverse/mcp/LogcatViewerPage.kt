@@ -536,8 +536,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         Icon(Icons.Default.Refresh, contentDescription = if (zh) "清空" else "Clear", modifier = Modifier.size(18.dp))
                     }
                     IconButton(onClick = {
-                        val clip = LocalClipboardManager.current
-                        clip.setText(AnnotatedString(visible.joinToString("\n") { it.raw }))
+                        clipboard.setText(AnnotatedString(visible.joinToString("\n") { it.raw }))
                     }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.ContentCopy, contentDescription = if (zh) "复制" else "Copy", modifier = Modifier.size(18.dp))
                     }

@@ -77,8 +77,8 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                 val resp = post(req)
                 val latencyMs = (System.nanoTime() - start) / 1_000_000
                 val parsed = parseTools(resp)
-                // 配置的前缀优先；否则自动检测；检测不到则按桥接序号生成 MCP{n}_
-                val prefix = configPrefix.ifBlank { detectPrefix(parsed) ?: fallbackPrefix }
+                // 统一前缀：配置的前缀优先，否则按桥接序号生成 MCP{n}_（不自动识别桥接自带前缀）
+                val prefix = configPrefix.ifBlank { fallbackPrefix }
                 val prev = state
                 val s = State(
                     name = name,
@@ -174,12 +174,12 @@ class ApkMcpBridge(private val settings: SettingsStore) {
                         val req = buildJsonRpc(url, "tools/list", JSONObject(), id = connIdCounter.incrementAndGet())
                         val resp = post(req)
                         val parsed = parseTools(resp)
-                        val prefix = detectPrefix(parsed)
-                        if (prefix != null || configPrefix.isNotBlank()) {
+                        if (parsed.isNotEmpty() || configPrefix.isNotBlank()) {
                             val cur = state
-                            val effectivePrefix = configPrefix.ifBlank { prefix ?: fallbackPrefix }
+                            // 统一前缀：配置的前缀优先，否则按桥接序号生成 MCP{n}_
+                            val effectivePrefix = configPrefix.ifBlank { fallbackPrefix }
                             state = State(name = name, url = url, online = true, lastError = "", tools = parsed, toolPrefix = effectivePrefix, configPrefix = configPrefix, lastCheckedAt = System.currentTimeMillis())
-                            if (!cur.online) AppLog.i("apk-mcp health: $url back online (${parsed.size} tools, prefix=$prefix)")
+                            if (!cur.online) AppLog.i("apk-mcp health: $url back online (${parsed.size} tools, prefix=$effectivePrefix)")
                         }
                     } catch (e: Exception) {
                         val cur = state
@@ -248,12 +248,6 @@ class ApkMcpBridge(private val settings: SettingsStore) {
             return JSONObject().put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "APK MCP error [$name]: $msg")))
                 .put("isError", true)
                 .put("source", "apk-mcp-bridge")
-        }
-
-        private fun detectPrefix(tools: List<ToolDef>): String? {
-            tools.firstOrNull { it.name.startsWith(MT_PREFIX) }?.let { return MT_PREFIX }
-            tools.firstOrNull { it.name.startsWith(NP_PREFIX) }?.let { return NP_PREFIX }
-            return null
         }
 
         private fun prefixLabel(prefix: String?): String = when {
@@ -472,8 +466,8 @@ class ApkMcpBridge(private val settings: SettingsStore) {
             val st = conn.state
             if (st.online && st.toolPrefix.isNotBlank()) {
                 all.addAll(st.tools.map { td ->
-                    // 工具名已带该前缀（MT/NP 管理器自带 mt_apk_/np_）→ 原样；
-                    // 否则在原始工具名前面加上前缀暴露（如 read_file → MCP1_read_file）
+                    // 统一加前缀暴露（read_file → MCP1_read_file，mt_apk_open → MCP1_mt_apk_open）；
+                    // 仅当工具名已带同一前缀时原样保留，避免用户手动配置相同前缀导致双前缀。
                     if (td.name.startsWith(st.toolPrefix)) td
                     else td.copy(name = st.toolPrefix + td.name)
                 })
@@ -518,8 +512,8 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         for (conn in connections) {
             val st = conn.state
             if (st.online && st.toolPrefix.isNotBlank() && name.startsWith(st.toolPrefix)) {
-                // 若该名字是"本应用附加前缀"的暴露名（前缀+原始名），转发时剥掉前缀；
-                // 若桥接工具名本身就带该前缀（MT/NP 管理器），则原样转发。
+                // 暴露名是"前缀+原始名"（统一加前缀模式）→ 剥掉前缀再转发给桥接；
+                // 若工具名本身已带同一前缀（用户手动配置了相同前缀）→ 原样转发。
                 val stripped = name.removePrefix(st.toolPrefix)
                 val forward = if (st.tools.any { it.name == stripped }) stripped else name
                 return conn.callTool(forward, arguments)

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -79,6 +80,8 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Workspace -> if (t.zh) "工作区" else "Workspace"
     SettingsDest.Permissions -> if (t.zh) "权限管理" else "Permissions"
     SettingsDest.LogcatViewer -> if (t.zh) "Logcat 查看器" else "Logcat Viewer"
+    SettingsDest.Edbg -> "eDBG"
+    SettingsDest.Rizin -> "Rizin"
 }
 
 @Composable
@@ -189,6 +192,10 @@ internal fun SettingsHub(
                     SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 隧道放行 / 管理" else "Directory / tunnel / manage", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
                     SettingsTile(if (t.zh) "Logcat 查看器" else "Logcat Viewer", if (t.zh) "实时日志 / 过滤 / 着色" else "Live logs / filter / color", Icons.Default.Description, AppPalette.teal, { onDest(SettingsDest.LogcatViewer) }, Modifier.weight(1f).fillMaxHeight())
                 }
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile("eDBG", if (t.zh) "eBPF 调试器 / 图形化 / 反编译" else "eBPF debugger / GUI / decompile", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Edbg) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile("Rizin", if (t.zh) "引擎能力 / 工具路由 / 命令速查" else "Engine / tool routing / commands", Icons.Default.Memory, AppPalette.purple, { onDest(SettingsDest.Rizin) }, Modifier.weight(1f).fillMaxHeight())
+                }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
                     NavRow(if (t.zh) "返回数量" else "Result limits", "limit / disasm / hexdump", Icons.Default.Analytics, onClick = { onDest(SettingsDest.Limits) })
@@ -265,6 +272,8 @@ internal fun SettingsHub(
             SettingsDest.Workspace -> SettingsWorkspacePage(t, settings) { onDest(SettingsDest.ServiceConfig) }
             SettingsDest.Permissions -> SettingsPermissionsPage(t)
             SettingsDest.LogcatViewer -> LogcatViewerPage(t)
+            SettingsDest.Edbg -> EdbgPage(t)
+            SettingsDest.Rizin -> RizinPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

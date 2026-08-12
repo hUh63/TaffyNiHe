@@ -30,7 +30,7 @@ import kotlin.system.exitProcess
  *  - Shizuku v13 需要 `constructor(Context)`, 用 @Keep 防止 R8 裁剪
  */
 @Keep
-class ShizukuUserService : IShizukuService.Stub() {
+class ShizukuUserService() : IShizukuService.Stub() {
 
     @Keep
     constructor(context: Context) : this()

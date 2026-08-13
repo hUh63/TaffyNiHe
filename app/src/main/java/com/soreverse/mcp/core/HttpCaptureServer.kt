@@ -156,7 +156,7 @@ class HttpCaptureServer(
             val url = try { java.net.URI(target) } catch (e: Exception) { null }
             val host = url?.host ?: ""
             val path = if (url?.path.isNullOrEmpty()) "/" else (url?.path ?: "") + (if (url?.query.isNullOrEmpty()) "" else "?" + url?.query)
-            val port = if (url?.port ?: -1 > 0) url.port else 80
+            val port = if (url != null && url.port > 0) url.port else 80
             if (host.isBlank()) return
 
             // 读取并转发 headers + body

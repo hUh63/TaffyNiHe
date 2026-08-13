@@ -493,7 +493,7 @@ internal fun LogcatViewerPage(t: UiText) {
         runCatching {
             val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
             val f = File(context.filesDir, "logcat_saved_$stamp.log")
-            f.writeText(if (appLogMode) appLogLines.joinToString("\n") else visible.joinToString("\n") { it.raw })
+            f.writeText(if (appLogMode) appLogLines.joinToString("\n") else synchronized(logs) { logs.joinToString("\n") { it.raw } })
             Toast.makeText(context, (if (zh) "已保存: " else "Saved: ") + f.absolutePath, Toast.LENGTH_LONG).show()
         }.onFailure { e -> Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show() }
     }

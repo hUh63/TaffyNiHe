@@ -109,10 +109,23 @@ object PermissionManager {
     /** Dhizuku 是否已激活（本应用为设备所有者代理）。 */
     fun isDhizukuAvailable(): Boolean = dhizukuReady
 
-    /** 是否安装了 Dhizuku 应用。 */
+    /** 是否安装 Dhizuku 应用。 */
     fun isDhizukuAppInstalled(context: Context): Boolean =
         runCatching { context.packageManager.getPackageInfo("com.rikka.dhizuku", 0); true }
             .getOrDefault(false)
+
+    /** 是否已授予 READ_LOGS（adb 授予: pm grant <pkg> android.permission.READ_LOGS）。
+     *  授予后 logcat 可读全系统日志，无需 Root/Shizuku（Android 8.0+ 生效）。 */
+    fun hasReadLogs(context: Context): Boolean =
+        runCatching {
+            context.checkSelfPermission(android.Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+
+    /** READ_LOGS 检测（无 context 版本，使用 init 时保存的 applicationContext）。 */
+    fun hasReadLogs(): Boolean {
+        val ctx = appContext ?: return false
+        return hasReadLogs(ctx)
+    }
 
     /** 当前可用最高通道。 */
     fun bestChannel(): Channel = when {

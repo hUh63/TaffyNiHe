@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -15,6 +16,11 @@
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         android:usesPermissionFlags="neverForLocation" />
+    <!-- 读取所有设备日志（adb 授予: adb shell pm grant com.taffynihe android.permission.READ_LOGS）。
+         授予后 logcat 可读全系统日志，无需 Root/Shizuku。 -->
+    <uses-permission
+        android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
     <!-- Android 10 及以下的共享存储读写（Android 11+ 由 MANAGE_EXTERNAL_STORAGE 覆盖） -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"

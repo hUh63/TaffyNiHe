@@ -42,11 +42,16 @@ object AppLog {
         }
     }
 
-    fun i(message: String) = add("I", message)
-    fun w(message: String) = add("W", message)
-    fun e(message: String, throwable: Throwable? = null) {
-        add("E", if (throwable == null) message else "$message: ${throwable.message}")
-    }
+    fun i(message: String) = add("I", null, message)
+    fun w(message: String) = add("W", null, message)
+    fun e(message: String, throwable: Throwable? = null) = add("E", null, if (throwable == null) message else "$message: ${throwable.message}")
+
+    /** 带 tag 的日志（与 android.util.Log 签名对齐，用于应用内精确日志收集）。 */
+    fun d(tag: String, message: String) = add("D", tag, message)
+    fun i(tag: String, message: String) = add("I", tag, message)
+    fun w(tag: String, message: String) = add("W", tag, message)
+    fun e(tag: String, message: String, throwable: Throwable? = null) =
+        add("E", tag, if (throwable == null) message else "$message: ${throwable.message}")
 
     fun snapshot(): List<String> = synchronized(lock) { lines.toList() }
 
@@ -55,12 +60,16 @@ object AppLog {
         deliver("__CLEAR__")
     }
 
-    private fun add(level: String, message: String) {
+    private fun add(level: String, tag: String?, message: String) {
         val minLevel = app?.let { runCatching { SettingsStore(it).logLevel }.getOrNull() } ?: "I"
         if (levelRank(level) < levelRank(minLevel)) return
         val raw = message
         val clipped = if (raw.length > MAX_LINE_LEN) raw.substring(0, MAX_LINE_LEN) + "…(${raw.length})" else raw
-        val nextLine = "${formatter.format(Date())} $level $clipped"
+        val nextLine = if (tag.isNullOrBlank()) {
+            "${formatter.format(Date())} $level $clipped"
+        } else {
+            "${formatter.format(Date())} $level $tag: $clipped"
+        }
         synchronized(lock) {
             if (lines.size == MAX_LINES) lines.removeFirst()
             lines.addLast(nextLine)

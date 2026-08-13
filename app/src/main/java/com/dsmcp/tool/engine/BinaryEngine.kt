@@ -1,7 +1,7 @@
 package com.dsmcp.tool.engine
 
 import android.content.Context
-import android.util.Log
+import com.soreverse.mcp.core.AppLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -47,7 +47,7 @@ class BinaryEngine(
         } else {
             File(context.getExternalFilesDir(null) ?: context.filesDir, "dsmcp_output").apply { mkdirs() }
         }
-        Log.i(TAG, "Output directory: ${dir.absolutePath}")
+        AppLog.i(TAG, "Output directory: ${dir.absolutePath}")
         return dir
     }
 
@@ -55,7 +55,7 @@ class BinaryEngine(
     fun updateWorkDirectory(path: String?) {
         _workDirPath = path
         outputDir = computeOutputDir()
-        Log.i(TAG, "Work directory updated: ${path ?: "(default)"}")
+        AppLog.i(TAG, "Work directory updated: ${path ?: "(default)"}")
     }
 
     fun nativeBridge(): NativeBridge = native
@@ -98,7 +98,7 @@ class BinaryEngine(
             temporary = temporary,
         )
         workspaces[id] = ws
-        Log.i(TAG, "Opened ${file.name} as $format, workspace=$id, ${data.size} bytes")
+        AppLog.i(TAG, "Opened ${file.name} as $format, workspace=$id, ${data.size} bytes")
         return ok(
             "workspaceId" to id,
             "fileName" to ws.fileName,
@@ -113,7 +113,7 @@ class BinaryEngine(
             ?: return err("WORKSPACE_NOT_FOUND", "Workspace not found: $workspaceId")
         // Close all sessions for this workspace
         sessions.entries.removeIf { it.value.workspaceId == workspaceId }
-        Log.i(TAG, "Closed workspace ${ws.fileName}")
+        AppLog.i(TAG, "Closed workspace ${ws.fileName}")
         return ok("closed" to true, "workspaceId" to workspaceId)
     }
 
@@ -149,7 +149,7 @@ class BinaryEngine(
         session.snapshots.add(Snapshot(generateId(), "initial", session.data.copyOf(), System.currentTimeMillis()))
         session.currentIndex = 0
         sessions[sessionId] = session
-        Log.i(TAG, "Opened edit session $sessionId for workspace $workspaceId")
+        AppLog.i(TAG, "Opened edit session $sessionId for workspace $workspaceId")
         return ok("editSessionId" to sessionId, "workspaceId" to workspaceId)
     }
 
@@ -711,7 +711,7 @@ class BinaryEngine(
         finalFile.writeBytes(dataToWrite)
         val output = BuildOutput(finalName, finalFile.absolutePath, finalFile.length(), System.currentTimeMillis(), workspaceId)
         buildOutputs.add(output)
-        Log.i(TAG, "Built ${finalName} (${dataToWrite.size} bytes)")
+        AppLog.i(TAG, "Built ${finalName} (${dataToWrite.size} bytes)")
         return ok("outputPath" to finalFile.absolutePath, "outputName" to finalName,
             "size" to finalFile.length(), "workspaceId" to workspaceId)
     }

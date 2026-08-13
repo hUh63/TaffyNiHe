@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -242,6 +243,8 @@ internal fun LogcatViewerPage(t: UiText) {
     val filterPrefs = remember { context.getSharedPreferences("logcat_filters", Context.MODE_PRIVATE) }
     var filterPresets by remember { mutableStateOf(filterPrefs.all.keys.filter { it.startsWith("preset_") }.sorted()) }
     var presetNameInput by remember { mutableStateOf("") }
+    // 实时过滤面板折叠状态（LogFox: 默认折叠，展开显示完整过滤条件）
+    var filterExpanded by remember { mutableStateOf(false) }
 
     fun notifyCrash(line: LogLine) {
         val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
@@ -1048,7 +1051,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
             }
             else -> {
-                // ── 日志页：实时过滤 + 工具栏 + 列表 ──
+                // ── 日志页：搜索 + 实时过滤（可折叠）+ 工具栏 + 列表 ──
                 OutlinedTextField(
                     value = keyword,
                     onValueChange = { keyword = it },
@@ -1057,34 +1060,66 @@ internal fun LogcatViewerPage(t: UiText) {
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 )
-                // 实时过滤：包名 + PID
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedTextField(
-                        value = pkgFilter,
-                        onValueChange = { pkgFilter = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text(if (zh) "包名" else "Package", maxLines = 1) },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                // 实时过滤折叠面板（LogFox: 默认折叠，展开显示包名/PID/Tag/开关）
+                Row(
+                    Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+                        .clickable { filterExpanded = !filterExpanded }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Tune, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (zh) "实时过滤" else "Live filters", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (filterExpanded) (if (zh) "收起" else "Collapse") else (if (zh) "展开" else "Expand"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    OutlinedTextField(
-                        value = pidFilter,
-                        onValueChange = { pidFilter = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("PID", maxLines = 1) },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                    Icon(
+                        if (filterExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                // 实时过滤：Tag
-                OutlinedTextField(
-                    value = tagFilter,
-                    onValueChange = { tagFilter = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text(if (zh) "Tag 过滤（逗号分隔多 tag）" else "Tag filter (comma separated)", maxLines = 1) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                )
+                if (filterExpanded) {
+                    // 包名 + PID
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = pkgFilter,
+                            onValueChange = { pkgFilter = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text(if (zh) "包名" else "Package", maxLines = 1) },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        )
+                        OutlinedTextField(
+                            value = pidFilter,
+                            onValueChange = { pidFilter = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("PID", maxLines = 1) },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        )
+                    }
+                    // Tag
+                    OutlinedTextField(
+                        value = tagFilter,
+                        onValueChange = { tagFilter = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(if (zh) "Tag 过滤（逗号分隔多 tag）" else "Tag filter (comma separated)", maxLines = 1) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                    )
+                    // 开关行
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FilterChip(selected = regexEnabled, onClick = { regexEnabled = !regexEnabled }, label = { Text(if (zh) "正则" else "Regex", fontSize = 10.sp) })
+                        FilterChip(selected = caseSensitive, onClick = { caseSensitive = !caseSensitive }, label = { Text(if (zh) "区分大小写" else "Case", fontSize = 10.sp) })
+                        FilterChip(selected = crashOnly, onClick = { crashOnly = !crashOnly }, label = { Text(if (zh) "仅崩溃与ANR" else "Crashes", fontSize = 10.sp) })
+                    }
+                }
                 // 级别 + 工具栏
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     listOf("V", "D", "I", "W", "E", "F").forEach { lv ->
@@ -1124,12 +1159,6 @@ internal fun LogcatViewerPage(t: UiText) {
                     IconButton(onClick = { exportZip(visible) }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.FileDownload, contentDescription = if (zh) "导出" else "Export", modifier = Modifier.size(18.dp))
                     }
-                }
-                // 实时过滤开关（LogFox: 正则 / 区分大小写 / 仅崩溃与 ANR）
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    FilterChip(selected = regexEnabled, onClick = { regexEnabled = !regexEnabled }, label = { Text(if (zh) "正则" else "Regex", fontSize = 10.sp) })
-                    FilterChip(selected = caseSensitive, onClick = { caseSensitive = !caseSensitive }, label = { Text(if (zh) "区分大小写" else "Case", fontSize = 10.sp) })
-                    FilterChip(selected = crashOnly, onClick = { crashOnly = !crashOnly }, label = { Text(if (zh) "仅崩溃与ANR" else "Crashes", fontSize = 10.sp) })
                 }
                 // ── 状态栏 ──
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -249,8 +249,26 @@ internal fun LogcatViewerPage(t: UiText) {
     var filterExpanded by remember { mutableStateOf(false) }
     // READ_LOGS 授权引导对话框
     var showReadLogsDialog by remember { mutableStateOf(false) }
+    // ── 应用 tab（LogFox 样式：应用列表按包名过滤日志）──
+    var appSearch by remember { mutableStateOf("") }
+    var appList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // (label, packageName)
+    // ── 设置 tab（LogFox 样式设置项，SharedPreferences 持久化）──
+    val settingsPrefs = remember { context.getSharedPreferences("logcat_settings", Context.MODE_PRIVATE) }
+    var crashNotify by remember { mutableStateOf(settingsPrefs.getBoolean("crash_notify", true)) }
+    var bgCollect by remember { mutableStateOf(settingsPrefs.getBoolean("bg_collect", false)) }
+    var bootRestore by remember { mutableStateOf(settingsPrefs.getBoolean("boot_restore", false)) }
+    var exportDeviceInfo by remember { mutableStateOf(settingsPrefs.getBoolean("export_device_info", true)) }
+    fun saveSettings() {
+        settingsPrefs.edit()
+            .putBoolean("crash_notify", crashNotify)
+            .putBoolean("bg_collect", bgCollect)
+            .putBoolean("boot_restore", bootRestore)
+            .putBoolean("export_device_info", exportDeviceInfo)
+            .apply()
+    }
 
     fun notifyCrash(line: LogLine) {
+        if (!crashNotify) return
         val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
         if (crashKeys.none { line.raw.contains(it, ignoreCase = true) }) return
         val sig = (line.tag + line.message).take(120)
@@ -284,18 +302,20 @@ internal fun LogcatViewerPage(t: UiText) {
             val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
             val zip = File(context.filesDir, "logcat_export_$stamp.zip")
             ZipOutputStream(zip.outputStream()).use { zos ->
-                // 设备信息
-                val deviceInfo = buildString {
-                    appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
-                    appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
-                    appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
-                    appendLine("Kernel: ${System.getProperty("os.version", "")}")
-                    appendLine("Time: $stamp")
-                    appendLine("Filter: tags=[$tagFilter] keyword=[$keyword] levels=$levelSet")
+                // 设备信息（设置项「导出设备信息」控制）
+                if (exportDeviceInfo) {
+                    val deviceInfo = buildString {
+                        appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                        appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+                        appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
+                        appendLine("Kernel: ${System.getProperty("os.version", "")}")
+                        appendLine("Time: $stamp")
+                        appendLine("Filter: tags=[$tagFilter] keyword=[$keyword] levels=$levelSet")
+                    }
+                    zos.putNextEntry(ZipEntry("device_info.txt"))
+                    zos.write(deviceInfo.toByteArray())
+                    zos.closeEntry()
                 }
-                zos.putNextEntry(ZipEntry("device_info.txt"))
-                zos.write(deviceInfo.toByteArray())
-                zos.closeEntry()
                 // 日志
                 val logText = visibleLines.joinToString("\n") { it.raw }
                 zos.putNextEntry(ZipEntry("logcat.txt"))
@@ -732,15 +752,32 @@ internal fun LogcatViewerPage(t: UiText) {
         }
         } // ── 顶部控件区结束 ──
 
-        // ── 标签页：日志 / 过滤器 / 崩溃 / 录制 ──
-        val tabs = listOf("log", "filter", "crash", "record")
+        // ── 标签页：日志 / 过滤器 / 崩溃 / 录制 / 应用 / 设置 ──
+        val tabs = listOf("log", "filter", "crash", "record", "app", "settings")
         val tabIndex = tabs.indexOf(tab).coerceAtLeast(0)
+        // 应用列表加载（IO 线程，PackageManager 查询）
+        LaunchedEffect(Unit) {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val pm = context.packageManager
+                    val apps = pm.getInstalledApplications(0)
+                    appList = apps.mapNotNull { ai ->
+                        runCatching {
+                            val label = pm.getApplicationLabel(ai).toString()
+                            label to ai.packageName
+                        }.getOrNull()
+                    }.sortedBy { it.first.lowercase() }
+                }
+            }
+        }
         TabRow(selectedTabIndex = tabIndex, containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)) {
             listOf(
                 if (zh) "日志" else "Logs",
                 if (zh) "过滤器" else "Filters",
                 if (zh) "崩溃" else "Crashes",
                 if (zh) "录制" else "Record",
+                if (zh) "应用" else "Apps",
+                if (zh) "设置" else "Settings",
             ).forEachIndexed { i, label ->
                 Tab(selected = tabIndex == i, onClick = { tab = tabs[i] }, text = { Text(label, fontSize = 12.sp) })
             }
@@ -1040,6 +1077,84 @@ internal fun LogcatViewerPage(t: UiText) {
                         }
                     }
                 }
+            }
+            "app" -> {
+                // ── 应用列表（LogFox 样式：搜索应用，点击设包名过滤并跳转日志页）──
+                Text(
+                    (if (zh) "应用" else "Apps") + " · " + appList.size,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                OutlinedTextField(
+                    value = appSearch,
+                    onValueChange = { appSearch = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(if (zh) "应用名或包名" else "App name or package", maxLines = 1) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                )
+                val filtered = remember(appList, appSearch) {
+                    if (appSearch.isBlank()) appList
+                    else appList.filter { it.first.contains(appSearch, true) || it.second.contains(appSearch, true) }
+                }
+                if (filtered.isEmpty()) {
+                    Text(
+                        if (zh) "没有匹配的应用" else "No matching apps",
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(filtered.size) { i ->
+                            val (label, pkg) = filtered[i]
+                            Row(
+                                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
+                                    .clickable {
+                                        pkgFilter = pkg
+                                        tab = "log"
+                                        filterExpanded = true
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(pkg, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text(
+                                    if (zh) "过滤" else "Filter",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            "settings" -> {
+                // ── 设置（LogFox 样式：开关 + 状态提示）──
+                Text(
+                    if (zh) "Logcat 设置" else "Logcat settings",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                SettingSwitchRow(if (zh) "崩溃通知" else "Crash notifications", crashNotify) { crashNotify = it; saveSettings() }
+                SettingSwitchRow(if (zh) "后台采集" else "Background collect", bgCollect) { bgCollect = it; saveSettings() }
+                SettingSwitchRow(if (zh) "开机恢复" else "Restore on boot", bootRestore) { bootRestore = it; saveSettings() }
+                SettingSwitchRow(if (zh) "导出设备信息" else "Export device info", exportDeviceInfo) { exportDeviceInfo = it; saveSettings() }
+                Text(
+                    (if (zh) "Root " else "Root ") +
+                        if (PermissionManager.isRootAvailable()) (if (zh) "可用" else "available") else (if (zh) "不可用" else "unavailable") +
+                        " · Shizuku " +
+                        if (PermissionManager.isShizukuGranted()) (if (zh) "可用" else "available") else (if (zh) "不可用" else "unavailable") +
+                        "\n" + channelInfo + (if (zh) " · 缓冲上限 2000 行" else " · buffer 2000 lines"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
             else -> {
                 // ── 日志页：搜索 + 实时过滤（可折叠）+ 工具栏 + 列表 ──

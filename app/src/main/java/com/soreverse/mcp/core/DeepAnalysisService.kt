@@ -1,7 +1,7 @@
 package com.soreverse.mcp.core
 
 import android.content.Context
-import android.util.Log
+import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.mcp.SchemaBuilder
 import com.soreverse.mcp.mcp.ToolCatalog
 import com.soreverse.mcp.mcp.ToolContext
@@ -53,7 +53,7 @@ class DeepAnalysisService(private val appContext: Context) {
         runCatching {
             requireModelCatalogConfigured(settings)
             fetchModelCatalog(settings)
-        }.onFailure { Log.e("SOMCP-DeepAnalysis", "Model listing failed", it) }
+        }.onFailure { AppLog.e("SOMCP-DeepAnalysis", "Model listing failed", it) }
     }
 
     private fun fetchModelCatalog(settings: SettingsStore): List<String> {
@@ -222,7 +222,7 @@ class DeepAnalysisService(private val appContext: Context) {
             _reportDraft.value = finalReport
             emit(DeepAnalysisEvent.Kind.DONE, finalReport)
             finalReport
-        }.onFailure { Log.e("SOMCP-DeepAnalysis", "AI deep analysis failed", it) }
+        }.onFailure { AppLog.e("SOMCP-DeepAnalysis", "AI deep analysis failed", it) }
     }
 
     private fun isRetryable(error: Throwable): Boolean {

@@ -2,6 +2,8 @@ package com.soreverse.mcp
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -245,6 +247,8 @@ internal fun LogcatViewerPage(t: UiText) {
     var presetNameInput by remember { mutableStateOf("") }
     // 实时过滤面板折叠状态（LogFox: 默认折叠，展开显示完整过滤条件）
     var filterExpanded by remember { mutableStateOf(false) }
+    // READ_LOGS 授权引导对话框
+    var showReadLogsDialog by remember { mutableStateOf(false) }
 
     fun notifyCrash(line: LogLine) {
         val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
@@ -539,7 +543,12 @@ internal fun LogcatViewerPage(t: UiText) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // ── 顶部控件区（可滚动，避免小屏显示不完全）──
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
         // ── 状态统计卡片（LogFox 样式）──
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatBox(
@@ -585,31 +594,10 @@ internal fun LogcatViewerPage(t: UiText) {
                 onClick = {
                     if (readLogsGranted) {
                         Toast.makeText(context, if (zh) "已授予 READ_LOGS" else "READ_LOGS granted", Toast.LENGTH_SHORT).show()
-                        return@TextButton
-                    }
-                    scope.launch(Dispatchers.IO) {
-                        val granted = tryGrantReadLogs()
-                        // 授权成功后重启采集（start 内含特权绑定，须在 IO 线程）
-                        if (granted && running) {
-                            stop()
-                            start()
-                        }
-                        withContext(Dispatchers.Main) {
-                            if (granted) {
-                                Toast.makeText(context, if (zh) "READ_LOGS 授予成功，可读全系统日志" else "READ_LOGS granted", Toast.LENGTH_LONG).show()
-                                refreshReadLogs()
-                            } else {
-                                clipboard.setText(AnnotatedString("adb shell pm grant ${context.packageName} android.permission.READ_LOGS"))
-                                Toast.makeText(
-                                    context,
-                                    if (zh) "自动授权失败（无可用特权通道）。已复制 adb 命令到剪贴板" else "Auto-grant failed (no privileged channel). adb command copied",
-                                    Toast.LENGTH_LONG,
-                                ).show()
-                            }
-                        }
+                    } else {
+                        showReadLogsDialog = true
                     }
                 },
-                enabled = !readLogsGranted,
             ) {
                 Icon(Icons.Default.AdminPanelSettings, null, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
@@ -742,6 +730,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     FontWeight.SemiBold else FontWeight.Normal,
             )
         }
+        } // ── 顶部控件区结束 ──
 
         // ── 标签页：日志 / 过滤器 / 崩溃 / 录制 ──
         val tabs = listOf("log", "filter", "crash", "record")
@@ -757,6 +746,8 @@ internal fun LogcatViewerPage(t: UiText) {
             }
         }
 
+        // ── tab 内容区（占剩余高度，内部各自滚动）──
+        Column(Modifier.weight(1f).fillMaxWidth()) {
         when (tab) {
             "filter" -> {
                 // ── 过滤器管理：保存当前过滤条件 / 管理已保存预设（实时过滤已在日志页）──
@@ -1257,8 +1248,59 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
             }
         }
-            }
-        }
+        } // ── tab 内容区结束 ──
+    }
+
+    // ── READ_LOGS 授权引导对话框（系统保护权限无法运行时弹窗，提供自动授权/复制 adb 命令）──
+    if (showReadLogsDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showReadLogsDialog = false },
+            title = { Text(if (zh) "访问所有设备日志" else "Read all device logs") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        if (zh)
+                            "READ_LOGS 是系统保护权限，系统不会弹出授权窗口，需要通过 adb 或特权通道授予。\n\n当前状态：${
+                                if (readLogsGranted) "已授予 ✓" else "未授予"
+                            }"
+                        else
+                            "READ_LOGS is a protected permission - no runtime dialog. Grant via adb or a privileged channel.\n\nStatus: ${
+                                if (readLogsGranted) "Granted ✓" else "Not granted"
+                            }",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showReadLogsDialog = false
+                    scope.launch(Dispatchers.IO) {
+                        val granted = tryGrantReadLogs()
+                        if (granted && running) { stop(); start() }
+                        withContext(Dispatchers.Main) {
+                            if (granted) {
+                                Toast.makeText(context, if (zh) "READ_LOGS 授予成功，已可读全系统日志" else "READ_LOGS granted", Toast.LENGTH_LONG).show()
+                                refreshReadLogs()
+                            } else {
+                                clipboard.setText(AnnotatedString("adb shell pm grant ${context.packageName} android.permission.READ_LOGS"))
+                                Toast.makeText(
+                                    context,
+                                    if (zh) "自动授权失败（无可用特权通道）。adb 命令已复制到剪贴板" else "Auto-grant failed (no privileged channel). adb command copied",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                    }
+                }) { Text(if (zh) "自动授权" else "Auto-grant") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showReadLogsDialog = false
+                    clipboard.setText(AnnotatedString("adb shell pm grant ${context.packageName} android.permission.READ_LOGS"))
+                    Toast.makeText(context, if (zh) "adb 命令已复制，电脑上执行即可" else "adb command copied", Toast.LENGTH_SHORT).show()
+                }) { Text(if (zh) "复制 adb 命令" else "Copy adb cmd") }
+            },
+        )
     }
 }
 

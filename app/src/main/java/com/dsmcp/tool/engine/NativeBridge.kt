@@ -1,6 +1,6 @@
 package com.dsmcp.tool.engine
 
-import android.util.Log
+import com.soreverse.mcp.core.AppLog
 import org.json.JSONObject
 
 /**
@@ -27,9 +27,9 @@ class NativeBridge {
         loaded = result.isSuccess
         if (!loaded) {
             loadError = result.exceptionOrNull()?.message ?: "Unknown load error"
-            Log.w(TAG, "Failed to load libdsmcp_native: $loadError")
+            AppLog.w(TAG, "Failed to load libdsmcp_native: $loadError")
         } else {
-            Log.i(TAG, "libdsmcp_native loaded successfully")
+            AppLog.i(TAG, "libdsmcp_native loaded successfully")
         }
     }
 

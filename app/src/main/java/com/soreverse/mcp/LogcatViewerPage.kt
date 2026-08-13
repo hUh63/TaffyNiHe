@@ -67,6 +67,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.RootShell
 import kotlinx.coroutines.Dispatchers
@@ -202,6 +203,22 @@ internal fun LogcatViewerPage(t: UiText) {
     var channelInfo by remember { mutableStateOf("") }
     // 启动自检: 权限通道是否真实可用
     var channelError by remember { mutableStateOf("") }
+    // 应用日志兜底模式: 无任何系统权限(无 Root/Shizuku/READ_LOGS)时，
+    // Android 11+ 连本应用 logcat 都读不到，降级显示本应用 AppLog（至少能看到软件自己的日志）
+    var appLogMode by remember { mutableStateOf(false) }
+    val appLogLines = remember { mutableStateListOf<String>() }
+    val appLogListener = remember {
+        { line: String ->
+            if (appLogMode) synchronized(appLogLines) {
+                appLogLines.add(line)
+                while (appLogLines.size > 2000) appLogLines.removeAt(0)
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        AppLog.addListener(appLogListener)
+        onDispose { AppLog.removeListener(appLogListener) }
+    }
 
     // ── LogFox 样式扩展状态 ──
     // 采集模式：auto=自动选择 / adb=普通进程 / root / shizuku
@@ -329,6 +346,16 @@ internal fun LogcatViewerPage(t: UiText) {
             hasReadLogs -> "READ_LOGS"
             else -> if (zh) "普通进程" else "Normal process"
         }
+        // 无任何系统权限时降级为应用日志：Android 11+ 普通进程连本应用 logcat 都读不到，
+        // 显示 AppLog（本软件运行日志）让用户至少能看到自己的日志
+        appLogMode = priv == null && !hasReadLogs
+        if (appLogMode) {
+            synchronized(appLogLines) {
+                appLogLines.clear()
+                appLogLines.addAll(AppLog.snapshot())
+            }
+            channelInfo = if (zh) "应用日志（无系统权限）" else "App logs (no system permission)"
+        }
         process = proc
         scope.launch(Dispatchers.IO) {
             try {
@@ -432,9 +459,13 @@ internal fun LogcatViewerPage(t: UiText) {
     val clipboard = LocalClipboardManager.current
 
     // 新日志自动滚动到底部
-    LaunchedEffect(visible.size) {
-        if (!paused && visible.isNotEmpty()) {
-            runCatching { listState.scrollToItem(visible.size - 1) }
+    LaunchedEffect(appLogMode, visible.size, appLogLines.size) {
+        if (!paused) {
+            if (appLogMode) {
+                if (appLogLines.isNotEmpty()) runCatching { listState.scrollToItem(appLogLines.size - 1) }
+            } else if (visible.isNotEmpty()) {
+                runCatching { listState.scrollToItem(visible.size - 1) }
+            }
         }
     }
 
@@ -450,7 +481,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 },
                 Modifier.weight(1f),
             )
-            StatBox(if (zh) "总行" else "Total", logs.size.toString(), Modifier.weight(1f))
+            StatBox(if (zh) "总行" else "Total", if (appLogMode) appLogLines.size.toString() else logs.size.toString(), Modifier.weight(1f))
             StatBox(if (zh) "崩溃" else "Crash", crashLogs.size.toString(), Modifier.weight(1f))
         }
 
@@ -882,7 +913,9 @@ internal fun LogcatViewerPage(t: UiText) {
                 // ── 状态栏 ──
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (zh) "共 ${logs.size} 行" + (if (dropped > 0) "（已丢弃 $dropped 行）" else "") + if (paused) " · 已暂停" else "" + if (recording) " · 录制中" else ""
+                        if (appLogMode) {
+                            if (zh) "应用日志 · ${appLogLines.size} 行" else "App logs · ${appLogLines.size} lines"
+                        } else if (zh) "共 ${logs.size} 行" + (if (dropped > 0) "（已丢弃 $dropped 行）" else "") + if (paused) " · 已暂停" else "" + if (recording) " · 录制中" else ""
                         else "${logs.size} lines" + (if (dropped > 0) " ($dropped dropped)" else "") + if (paused) " · paused" else "" + if (recording) " · recording" else "",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -894,7 +927,32 @@ internal fun LogcatViewerPage(t: UiText) {
             Modifier.weight(1f).fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), MaterialTheme.shapes.medium),
         ) {
-            if (visible.isEmpty()) {
+            if (appLogMode) {
+                // 应用日志模式：无系统权限时的兜底（Android 11+ 普通进程 logcat 为空）
+                if (appLogLines.isEmpty()) {
+                    Text(
+                        if (zh) "暂无应用日志\n（软件运行日志会记录在这里，如 MCP 调用、错误等）" else "No app logs yet\n(Runtime logs such as MCP calls and errors appear here)",
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp),
+                    ) {
+                        items(appLogLines.size) { i ->
+                            Text(
+                                appLogLines[i],
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
+                            )
+                        }
+                    }
+                }
+            } else if (visible.isEmpty()) {
                 Text(
                     if (zh) "暂无匹配日志…（无权限时只能看到本应用日志。全系统日志需 Root/Shizuku，或 adb 授权: adb shell pm grant com.taffynihe android.permission.READ_LOGS）" else "No matching logs… (without privilege only this app's logs are visible. System-wide logs need Root/Shizuku or adb: adb shell pm grant com.taffynihe android.permission.READ_LOGS)",
                     modifier = Modifier.padding(16.dp),

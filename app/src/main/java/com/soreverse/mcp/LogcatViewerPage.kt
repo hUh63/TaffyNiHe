@@ -1248,6 +1248,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
             }
         }
+        } // ── when(tab) 结束 ──
         } // ── tab 内容区结束 ──
     }
 
@@ -1302,6 +1303,7 @@ internal fun LogcatViewerPage(t: UiText) {
             },
         )
     }
+}
 }
 
 /** LogFox 样式状态统计小卡片。 */

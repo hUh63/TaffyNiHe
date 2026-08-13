@@ -1,5 +1,7 @@
 package com.soreverse.mcp
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,26 +15,93 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.EngineProvider
+import com.soreverse.mcp.core.SettingsStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
- * Rizin 引擎信息页：内置 rz 引擎的工具路由、反编译能力说明与常用命令速查。
+ * Rizin 引擎页：引擎说明 + 工具路由 + 命令速查 + 实际 rz 命令执行
+ * （选择 SO 文件打开工作区，输入 rz 命令执行查看输出）。
  */
 @Composable
 internal fun RizinPage(t: UiText) {
     val zh = t.zh
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val settings = remember { SettingsStore(context) }
+    val engine = remember { EngineProvider.get(context) }
+
+    var workspaceId by remember { mutableStateOf("") }
+    var soName by remember { mutableStateOf("") }
+    var cmdInput by remember { mutableStateOf("") }
+    var output by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val input = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (input != null) {
+                        val f = File(context.cacheDir, "rz_open_${System.currentTimeMillis()}.so")
+                        f.writeBytes(input)
+                        val r = engine.open(f.absolutePath, true)
+                        workspaceId = r.optString("workspaceId", r.optString("id"))
+                        soName = f.name
+                        output = if (workspaceId.isNotBlank()) {
+                            if (zh) "已打开: ${f.name}\nworkspace: $workspaceId" else "Opened: ${f.name}\nworkspace: $workspaceId"
+                        } else {
+                            if (zh) "打开失败: ${r.optString("error", "未知错误")}" else "Open failed: ${r.optString("error", "unknown")}"
+                        }
+                    }
+                }.onFailure { e -> output = "Error: ${e.message}" }
+            }
+            busy = false
+        }
+    }
+
+    fun runCmd(cmd: String) {
+        val c = cmd.trim()
+        if (c.isEmpty() || workspaceId.isBlank()) return
+        scope.launch {
+            busy = true
+            output = withContext(Dispatchers.IO) {
+                val r = engine.rzCommand(workspaceId, "", c, false)
+                r.optString("stdout", r.toString(2)).ifBlank { r.toString(2) }
+            }
+            busy = false
+        }
+    }
+
     val rootTools = listOf(
         "taffy_so_open" to (if (zh) "打开 SO/ELF（Rizin 分析会话）" else "Open SO/ELF (Rizin session)"),
         "taffy_analyze_functions" to (if (zh) "函数列表与符号" else "Functions & symbols"),
@@ -42,11 +111,7 @@ internal fun RizinPage(t: UiText) {
         "taffy_rz" to (if (zh) "Rizin 原生命令 / ESIL 模拟 / 反编译(rizin-ghidra)" else "Native rz / ESIL / decompile"),
         "taffy_build_so" to (if (zh) "回写并签名构建 SO" else "Rebuild & sign SO"),
     )
-    val quickCommands = listOf(
-        "af   函数分析", "afl  函数列表", "pdf @addr  函数反汇编",
-        "pdc @addr  反编译（需 ghidra 插件）", "axt @addr  引用", "izz  字符串",
-        "s addr  跳转", "px 64 @addr  hexdump", "aaa  全量分析",
-    )
+    val quickCommands = listOf("afl", "pdf @main", "izz", "iI", "px 64 @main")
 
     Column(
         Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState()),
@@ -66,6 +131,51 @@ internal fun RizinPage(t: UiText) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        // ── 命令执行（选择 SO 打开工作区，执行 rz 命令）──
+        Text(if (zh) "rz 命令执行" else "rz command runner", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (workspaceId.isBlank()) (if (zh) "未打开文件" else "No file opened") else soName,
+                modifier = Modifier.weight(1f).clip(MaterialTheme.shapes.small).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)).padding(8.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (workspaceId.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+            )
+            TextButton(onClick = { fileLauncher.launch(arrayOf("application/octet-stream", "application/x-sharedlib", "*/*")) }, enabled = !busy) {
+                Text(if (zh) "选择 SO" else "Pick SO")
+            }
+        }
+        if (workspaceId.isNotBlank()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                quickCommands.forEach { c ->
+                    FilterChip(selected = false, onClick = { runCmd(c) }, label = { Text(c, fontSize = 10.sp) }, enabled = !busy)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = cmdInput,
+                    onValueChange = { cmdInput = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text(if (zh) "rz 命令，如: afl / pdf @main / izz" else "rz cmd, e.g. afl / pdf @main / izz", maxLines = 1) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                )
+                IconButton(onClick = { runCmd(cmdInput) }, enabled = !busy) {
+                    Icon(Icons.AutoMirrored.Filled.Send, null, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (output.isNotBlank()) {
+                SelectionContainer {
+                    Text(
+                        output,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(androidx.compose.ui.graphics.Color(0xFF111111)).padding(10.dp),
+                    )
+                }
+            }
+        }
 
         // ── 内置工具路由 ──
         Text(if (zh) "内置 rz 工具（MCP 路由）" else "Built-in rz tools (MCP routing)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)

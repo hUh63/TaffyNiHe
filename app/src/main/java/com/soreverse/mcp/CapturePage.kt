@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.EngineProvider
@@ -85,6 +89,29 @@ internal fun CapturePage(t: UiText) {
     }
     val privOk = rootOk || shizukuOk || dhizukuOk
 
+    // ── HTTP 抓包（本地代理，无需 Root）──
+    val proxyPort = 8888
+    val captureServer = remember { com.soreverse.mcp.core.HttpCaptureServer(proxyPort) }
+    var capturing by remember { mutableStateOf(false) }
+    var captureEntries by remember { mutableStateOf<List<com.soreverse.mcp.core.HttpCaptureServer.Entry>>(emptyList()) }
+    var tab by remember { mutableStateOf("http") }
+    LaunchedEffect(Unit) {
+        captureServer.addListener {
+            captureEntries = captureServer.snapshot()
+        }
+    }
+    fun toggleCapture() {
+        if (capturing) {
+            captureServer.stop()
+            capturing = false
+        } else {
+            val ok = captureServer.start()
+            capturing = ok
+            if (!ok) Toast.makeText(context, if (zh) "代理启动失败（端口被占用?）" else "Proxy failed to start", Toast.LENGTH_SHORT).show()
+            else Toast.makeText(context, if (zh) "抓包已启动，请把 WIFI 代理设为 127.0.0.1:$proxyPort" else "Capture started; set WIFI proxy to 127.0.0.1:$proxyPort", Toast.LENGTH_LONG).show()
+        }
+    }
+
     fun callTool(action: String, extra: JSONObject.() -> Unit = {}) {
         scope.launch {
             busy = true
@@ -124,9 +151,103 @@ internal fun CapturePage(t: UiText) {
     }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // ── tab 选择：HTTP 抓包 / 采集工具 ──
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(selected = tab == "http", onClick = { tab = "http" }, label = { Text(if (zh) "HTTP 抓包" else "HTTP capture", fontSize = 11.sp) })
+            FilterChip(selected = tab == "tools", onClick = { tab = "tools" }, label = { Text(if (zh) "采集工具" else "Tools", fontSize = 11.sp) })
+        }
+        if (tab == "http") {
+            // ── HTTP 抓包（本地代理，无需 Root）──
+            GlassGroup(title = if (zh) "HTTP 抓包控制" else "HTTP capture control") {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { toggleCapture() }) {
+                        Icon(if (capturing) Icons.Default.Stop else Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (capturing) (if (zh) "停止抓包" else "Stop") else (if (zh) "开始抓包" else "Start"),
+                            color = if (capturing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Text(
+                        (if (zh) "代理: " else "Proxy: ") + "127.0.0.1:$proxyPort" + if (capturing) (if (zh) " · 抓包中" else " · capturing") else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (capturing) AppPalette.green else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    if (zh)
+                        "使用方式：启动代理后，把设备的 WIFI 代理设为 127.0.0.1:$proxyPort（设置 → WLAN → 修改网络 → 代理 → 手动）。" +
+                        "HTTPS 记录域名与流量大小（内容加密），HTTP 记录完整 URL 与状态码。"
+                    else
+                        "Usage: start the proxy, then set WIFI proxy to 127.0.0.1:$proxyPort (Settings → WLAN → modify network → proxy → manual). " +
+                        "HTTPS shows host & bytes (encrypted); HTTP shows full URL & status.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // 抓包列表
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    (if (zh) "抓包记录" else "Captures") + " · " + captureEntries.size,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { captureServer.clear(); captureEntries = emptyList() }) { Text(if (zh) "清除" else "Clear", fontSize = 11.sp) }
+            }
+            if (captureEntries.isEmpty()) {
+                Text(
+                    if (zh) "暂无抓包记录\n启动代理并设置 WIFI 代理后，应用流量会出现在这里" else "No captures yet\nStart the proxy and set WIFI proxy; app traffic appears here",
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(captureEntries.size) { i ->
+                        val e = captureEntries[captureEntries.size - 1 - i]
+                        Row(
+                            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    e.time + " " + e.method,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                                    color = when (e.method) {
+                                        "GET" -> AppPalette.green
+                                        "POST" -> AppPalette.orange
+                                        "CONNECT" -> AppPalette.purple
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                                Text(
+                                    e.url,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    (if (e.isHttps) "HTTPS" else "HTTP") + " · " + e.status.ifBlank { "—" } + " · " + (e.bytes / 1024) + " KB · " + e.elapsedMs + "ms",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
         // ── 环境检测卡片 ──
         GlassGroup(title = if (zh) "抓包环境" else "Capture environment") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -252,6 +373,8 @@ internal fun CapturePage(t: UiText) {
             }
         }
         Spacer(Modifier.height(8.dp))
+            }
+        }
     }
 }
 

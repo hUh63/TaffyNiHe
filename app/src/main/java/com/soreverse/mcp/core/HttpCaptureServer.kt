@@ -155,7 +155,7 @@ class HttpCaptureServer(
             val isHttps = false
             val url = try { java.net.URI(target) } catch (e: Exception) { null }
             val host = url?.host ?: ""
-            val path = if (url?.path.isNullOrEmpty()) "/" else url.path + (if (url.query.isNullOrEmpty()) "" else "?" + url.query)
+            val path = if (url?.path.isNullOrEmpty()) "/" else (url?.path ?: "") + (if (url?.query.isNullOrEmpty()) "" else "?" + url?.query)
             val port = if (url?.port ?: -1 > 0) url.port else 80
             if (host.isBlank()) return
 

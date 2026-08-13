@@ -42,6 +42,12 @@ object PermissionManager {
     /** UserService 绑定/启动失败的诊断信息（崩溃、版本不兼容等）。 */
     @Volatile private var shizukuServiceError: String = ""
 
+    /** UserService 绑定失败后的冷却截止时间（毫秒）：避免反复触发 server 启动崩溃循环。 */
+    @Volatile private var shizukuCooldownUntil: Long = 0L
+
+    /** 最近一次 UserService 启动失败的时间（毫秒）。 */
+    @Volatile private var shizukuLastFailAt: Long = 0L
+
     /** UserService 绑定超时/失败时记录原因；成功后清空。 */
     fun lastShizukuServiceError(): String = shizukuServiceError
 
@@ -70,6 +76,10 @@ object PermissionManager {
             val ver = shizukuVersion()
             if (ver > 0) sb.append("·v").append(ver)
             if (isSizukuInstalled(context)) sb.append("·Sizuku(分支)")
+            // 混装检测：官方 Shizuku + Sizuku 同时安装是 UserService 崩溃的常见根因
+            val official = isShizukuAppInstalled(context)
+            val sizuku = isSizukuInstalled(context)
+            if (official && sizuku) sb.append("·⚠混装(官方+Sizuku)，UserService 启动可能冲突")
         }
         if (shizukuServiceError.isNotBlank()) sb.append("\nUserService: ").append(shizukuServiceError)
         return sb.toString()
@@ -213,6 +223,13 @@ object PermissionManager {
             shizukuServiceError = if (isShizukuServiceRunning()) "已连接但未授权" else "Shizuku 服务未运行"
             return null
         }
+        // 冷却期：UserService 崩溃(如 Shizuku/Sizuku 混装)时避免反复触发 server 启动
+        val now = System.currentTimeMillis()
+        if (now < shizukuCooldownUntil) {
+            shizukuServiceError = "UserService 启动失败进入冷却期（${(shizukuCooldownUntil - now) / 1000}s 后重试），" +
+                "请检查是否混装了官方 Shizuku 与 Sizuku 分支"
+            return null
+        }
         shizukuService?.let { svc ->
             if (svc.asBinder().pingBinder()) return svc
             shizukuService = null
@@ -241,6 +258,8 @@ object PermissionManager {
                         shizukuServiceError = ""
                     } else {
                         shizukuServiceError = "连接回调无 binder（UserService 可能崩溃）"
+                        shizukuLastFailAt = System.currentTimeMillis()
+                        shizukuCooldownUntil = shizukuLastFailAt + 30_000
                     }
                     latch.countDown()
                 }
@@ -248,10 +267,14 @@ object PermissionManager {
                 override fun onServiceDisconnected(name: ComponentName?) {
                     shizukuService = null
                     shizukuServiceError = "UserService 断开"
+                    shizukuLastFailAt = System.currentTimeMillis()
+                    shizukuCooldownUntil = shizukuLastFailAt + 30_000
                 }
             }
             runCatching { Shizuku.bindUserService(args, conn) }.onFailure {
                 shizukuServiceError = "bindUserService 异常: ${it.message}"
+                shizukuLastFailAt = System.currentTimeMillis()
+                shizukuCooldownUntil = shizukuLastFailAt + 30_000
                 latch.countDown()
             }
             // 注意: 本函数必须在 IO 线程调用（await 阻塞），严禁主线程调用
@@ -264,6 +287,8 @@ object PermissionManager {
                 } else {
                     "UserService 启动超时（进程可能崩溃：Shizuku/Sizuku 版本不兼容或需重装）"
                 }
+                shizukuLastFailAt = System.currentTimeMillis()
+                shizukuCooldownUntil = shizukuLastFailAt + 30_000
             }
             shizukuService = result
             return result

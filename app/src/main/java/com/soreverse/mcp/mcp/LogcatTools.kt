@@ -25,7 +25,8 @@ object LogcatTools {
     private fun runLogcatRaw(cmd: List<String>): String {
         val hasPriv = PermissionManager.isRootAvailable() ||
             PermissionManager.isShizukuGranted() ||
-            PermissionManager.isDhizukuAvailable()
+            PermissionManager.isDhizukuAvailable() ||
+            PermissionManager.hasReadLogs()
         if (hasPriv) {
             val r = PermissionManager.exec(cmd.joinToString(" "), timeoutSec = 20)
             if (r.code == 0 && r.stdout.isNotBlank()) return r.stdout

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GppGood
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
@@ -76,6 +77,7 @@ internal fun SettingsPermissionsPage(t: UiText) {
     var dhizukuOk by remember { mutableStateOf(false) }
     var dhizukuApp by remember { mutableStateOf(false) }
     var best by remember { mutableStateOf(PermissionManager.Channel.NONE) }
+    var readLogs by remember { mutableStateOf(false) }
     LaunchedEffect(refresh) {
         withContext(Dispatchers.IO) {
             rootOk = PermissionManager.isRootAvailable()
@@ -84,6 +86,7 @@ internal fun SettingsPermissionsPage(t: UiText) {
             shizukuApp = PermissionManager.isShizukuAppInstalled(context)
             dhizukuOk = PermissionManager.isDhizukuAvailable()
             dhizukuApp = PermissionManager.isDhizukuAppInstalled(context)
+            readLogs = PermissionManager.hasReadLogs(context)
             best = PermissionManager.bestChannel()
         }
     }
@@ -200,6 +203,24 @@ internal fun SettingsPermissionsPage(t: UiText) {
                 if (zh) "未安装时请先安装 Shizuku（GitHub: RikkaApps/Shizuku），再按应用内引导用 adb 或无线调试启动。"
                 else "Install Shizuku (GitHub: RikkaApps/Shizuku) first, then start it via adb or wireless debugging.",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+
+        // ── READ_LOGS（adb 授予的日志读取权限，无需 Root/Shizuku）──
+        GlassGroup(title = if (zh) "读取所有设备日志 (READ_LOGS)" else "Read all device logs (READ_LOGS)", footer = if (zh) "授予后可读取全系统 logcat，无需 Root/Shizuku。需连接电脑执行 adb 命令。" else "Grants full logcat access without Root/Shizuku. Requires adb on a computer.") {
+            NavRow(
+                title = if (zh) "权限状态" else "Permission status",
+                subtitle = if (readLogs) (if (zh) "已授予（可读全系统日志）" else "Granted (full logcat)") else (if (zh) "未授予" else "Not granted"),
+                icon = Icons.Default.Description,
+                iconTint = if (readLogs) AppPalette.green else MaterialTheme.colorScheme.error,
+            )
+            Text(
+                if (zh) "授权命令（连接电脑后执行）：\nadb shell pm grant com.taffynihe android.permission.READ_LOGS\n\n若已连接 adb 无线调试，可在终端执行。授予后刷新本页确认状态变绿。" +
+                    (if (readLogs) "" else "\n\n当前 Logcat 查看器/taffy_logcat 工具可读全系统日志。")
+                else "Grant via adb:\nadb shell pm grant com.taffynihe android.permission.READ_LOGS\n\nRefresh after granting to confirm.",
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             )

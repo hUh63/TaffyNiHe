@@ -293,8 +293,11 @@ internal fun LogcatViewerPage(t: UiText) {
         // 按采集模式选择通道。关键: 无特权通道时普通进程在 Android 8.0+ 读不到系统日志,
         // 必须明确告知用户而不是静默显示空列表(LogFox 通过 Shizuku/ADB/Root 提权才能看全系统日志)。
         val priv = PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
+        // READ_LOGS（adb 授予）可让普通进程读全系统日志，无需 Root/Shizuku
+        val hasReadLogs = PermissionManager.hasReadLogs(context)
         val proc = when {
             priv != null -> priv
+            hasReadLogs -> ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
             mode == "root" -> {
                 channelError = if (PermissionManager.isRootAvailable()) "Root 通道启动失败，已降级普通进程" else "Root 不可用"
                 ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
@@ -308,7 +311,7 @@ internal fun LogcatViewerPage(t: UiText) {
             else -> {
                 // auto / adb 模式: 无特权通道时降级普通进程并提示
                 if (!PermissionManager.isRootAvailable() && !PermissionManager.isShizukuGranted() && !PermissionManager.isDhizukuAvailable()) {
-                    channelError = "无 Root/Shizuku 权限，普通进程读不到系统日志（Android 8.0+）"
+                    channelError = "无 Root/Shizuku 权限，普通进程读不到系统日志（Android 8.0+）。可用 adb 授权: adb shell pm grant com.taffynihe android.permission.READ_LOGS"
                 } else if (channelError.isBlank()) {
                     val diag = PermissionManager.lastShizukuServiceError()
                     channelError = if (diag.isNotBlank()) "特权通道不可用: $diag" else "特权通道不可用，已降级普通进程"
@@ -323,6 +326,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 PermissionManager.isDhizukuAvailable() -> "Dhizuku 通道"
                 else -> if (zh) "特权通道" else "Privileged channel"
             }
+            hasReadLogs -> "READ_LOGS"
             else -> if (zh) "普通进程" else "Normal process"
         }
         process = proc
@@ -530,9 +534,9 @@ internal fun LogcatViewerPage(t: UiText) {
             Text(
                 (if (zh) "采集通道: " else "Channel: ") + channelInfo,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (channelInfo.contains("Root") || channelInfo.contains("Shizuku") || channelInfo.contains("Dhizuku") || channelInfo.contains("特权"))
+                color = if (channelInfo.contains("Root") || channelInfo.contains("Shizuku") || channelInfo.contains("Dhizuku") || channelInfo.contains("READ_LOGS") || channelInfo.contains("特权"))
                     MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = if (channelInfo.contains("Root") || channelInfo.contains("Shizuku") || channelInfo.contains("Dhizuku") || channelInfo.contains("特权"))
+                fontWeight = if (channelInfo.contains("Root") || channelInfo.contains("Shizuku") || channelInfo.contains("Dhizuku") || channelInfo.contains("READ_LOGS") || channelInfo.contains("特权"))
                     FontWeight.SemiBold else FontWeight.Normal,
             )
         }
@@ -892,7 +896,7 @@ internal fun LogcatViewerPage(t: UiText) {
         ) {
             if (visible.isEmpty()) {
                 Text(
-                    if (zh) "暂无匹配日志…（logcat 无权限时只能看到本应用日志，全系统日志需 Root/Shizuku 或 ADB）" else "No matching logs… (without privilege only this app's logs are visible; system-wide logs need Root/Shizuku/ADB)",
+                    if (zh) "暂无匹配日志…（无权限时只能看到本应用日志。全系统日志需 Root/Shizuku，或 adb 授权: adb shell pm grant com.taffynihe android.permission.READ_LOGS）" else "No matching logs… (without privilege only this app's logs are visible. System-wide logs need Root/Shizuku or adb: adb shell pm grant com.taffynihe android.permission.READ_LOGS)",
                     modifier = Modifier.padding(16.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

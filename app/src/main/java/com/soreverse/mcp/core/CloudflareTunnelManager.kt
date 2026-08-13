@@ -70,7 +70,8 @@ class CloudflareTunnelManager(private val context: Context, private val settings
     fun eventLog(): List<String> = ArrayList(_eventLog)
     fun clearEventLog() { _eventLog.clear() }
     private fun addEvent(msg: String) {
-        _eventLog.add(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date()) + " $msg")
+        val clean = msg.replace("\r", " ").replace("\n", " ").replace("\u001B", "")
+        _eventLog.add(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date()) + " $clean")
         while (_eventLog.size > maxEventLog) _eventLog.removeAt(0)
     }
 
@@ -425,7 +426,9 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         val t = Thread({
             try {
                 BufferedReader(InputStreamReader(p.inputStream, Charsets.UTF_8)).useLines { lines ->
-                    lines.forEach { line ->
+                    lines.forEach { rawLine ->
+                        // 清洗控制字符（cloudflared 可能输出 \r 或 ANSI 码，导致日志粘连）
+                        val line = rawLine.replace("\r", " ").replace("\u001B", "").trimEnd()
                         if (line.isBlank()) return@forEach
                         AppLog.i("clfl: $line")
                         if (generation.get() != runGeneration || process !== p) return@forEach
@@ -590,6 +593,17 @@ class CloudflareTunnelManager(private val context: Context, private val settings
             publish()
             runCatching { owner.destroy() }
         } else if (line.contains("ERR", true) && (line.contains("tunnel") || line.contains("connect"))) {
+            // 噪音过滤：以下 ERR 是 cloudflared 尝试访问 1.1.1.1 的 DNS 失败告警，
+            // 隧道已通过系统 DNS 正常注册运行，不影响连接 —— 降级为信息不打断用户
+            val noise = line.contains("cfd-features", true) ||
+                line.contains("edge discovery", true) ||
+                line.contains("initialize DNS local resolver", true) ||
+                line.contains("origintunneld", true) ||
+                (line.contains("lookup", true) && !line.contains("connection", true) && !line.contains("connect to", true))
+            if (noise) {
+                AppLog.i("clfl(noise): $line")
+                return null
+            }
             AppLog.w("tunnel error: $line")
             // DNS 错误特殊标记
             if (line.contains("DNS", true) || line.contains("lookup", true) || line.contains("resolver", true)) {

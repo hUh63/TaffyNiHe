@@ -39,6 +39,42 @@ object PermissionManager {
     /** 已绑定的 Shizuku UserService（shell 权限执行通道）。 */
     @Volatile private var shizukuService: IShizukuService? = null
 
+    /** UserService 绑定/启动失败的诊断信息（崩溃、版本不兼容等）。 */
+    @Volatile private var shizukuServiceError: String = ""
+
+    /** UserService 绑定超时/失败时记录原因；成功后清空。 */
+    fun lastShizukuServiceError(): String = shizukuServiceError
+
+    /** Shizuku server 版本号（0 = 未连接）。 */
+    fun shizukuVersion(): Int = runCatching {
+        if (Shizuku.pingBinder()) Shizuku.getVersion() else 0
+    }.getOrDefault(0)
+
+    /** 是否安装官方 Shizuku（moe.shizuku.privileged.api）。 */
+    fun isShizukuAppInstalled(context: Context): Boolean =
+        runCatching { context.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0); true }
+            .getOrDefault(false)
+
+    /** 是否安装 Sizuku 等 af.shizuku 包名分支（Shizuku 社区修改版）。 */
+    fun isSizukuInstalled(context: Context): Boolean =
+        runCatching { context.packageManager.getPackageInfo("af.shizuku.privileged.api", 0); true }
+            .getOrDefault(false)
+
+    /** Shizuku 通道诊断：服务/授权/版本/分支/UserService 错误。 */
+    fun shizukuDiagnosis(context: Context): String {
+        val sb = StringBuilder()
+        if (!isShizukuServiceRunning()) sb.append("服务未运行")
+        else {
+            sb.append("服务运行中")
+            if (isShizukuGranted()) sb.append("·已授权") else sb.append("·未授权")
+            val ver = shizukuVersion()
+            if (ver > 0) sb.append("·v").append(ver)
+            if (isSizukuInstalled(context)) sb.append("·Sizuku(分支)")
+        }
+        if (shizukuServiceError.isNotBlank()) sb.append("\nUserService: ").append(shizukuServiceError)
+        return sb.toString()
+    }
+
     /** 初始化：注册 Shizuku binder 监听、初始化 Dhizuku。在 Application.onCreate 调用一次。 */
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -71,10 +107,7 @@ object PermissionManager {
     fun isRootAvailable(): Boolean = RootShell.isRootAvailable()
 
     /** Dhizuku 是否已激活（本应用为设备所有者代理）。 */
-    fun isDhizukuAvailable(): Boolean = dhizukuReady    /** 是否安装了 Shizuku 应用（未安装时引导下载）。 */
-    fun isShizukuAppInstalled(context: Context): Boolean =
-        runCatching { context.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0); true }
-            .getOrDefault(false)
+    fun isDhizukuAvailable(): Boolean = dhizukuReady
 
     /** 是否安装了 Dhizuku 应用。 */
     fun isDhizukuAppInstalled(context: Context): Boolean =
@@ -163,7 +196,10 @@ object PermissionManager {
      * 同步阻塞等待绑定结果(限时 3 秒), 返回 null 表示通道不可用。
      */
     private fun ensureShizukuService(): IShizukuService? {
-        if (!isShizukuGranted()) return null
+        if (!isShizukuGranted()) {
+            shizukuServiceError = if (isShizukuServiceRunning()) "已连接但未授权" else "Shizuku 服务未运行"
+            return null
+        }
         shizukuService?.let { svc ->
             if (svc.asBinder().pingBinder()) return svc
             shizukuService = null
@@ -180,21 +216,42 @@ object PermissionManager {
                     .debuggable(com.soreverse.mcp.BuildConfig.DEBUG)
                     .version(context.packageManager.getPackageInfo(context.packageName, 0).versionCode)
                     .tag("taffy")
-            }.getOrNull() ?: return null
+            }.getOrNull()
+            if (args == null) {
+                shizukuServiceError = "UserServiceArgs 构造失败"
+                return null
+            }
             val conn = object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                     if (binder != null && binder.pingBinder()) {
                         result = IShizukuService.Stub.asInterface(binder)
+                        shizukuServiceError = ""
+                    } else {
+                        shizukuServiceError = "连接回调无 binder（UserService 可能崩溃）"
                     }
                     latch.countDown()
                 }
 
                 override fun onServiceDisconnected(name: ComponentName?) {
                     shizukuService = null
+                    shizukuServiceError = "UserService 断开"
                 }
             }
-            runCatching { Shizuku.bindUserService(args, conn) }.onFailure { latch.countDown() }
-            runCatching { latch.await(3, TimeUnit.SECONDS) }
+            runCatching { Shizuku.bindUserService(args, conn) }.onFailure {
+                shizukuServiceError = "bindUserService 异常: ${it.message}"
+                latch.countDown()
+            }
+            // 注意: 本函数必须在 IO 线程调用（await 阻塞），严禁主线程调用
+            runCatching { latch.await(2, TimeUnit.SECONDS) }
+            if (result == null && shizukuServiceError.isBlank()) {
+                // 超时：UserService 进程可能崩溃（如 Shizuku 分支 starter 缺失）
+                val ver = shizukuVersion()
+                shizukuServiceError = if (ver in 1 until 13) {
+                    "Shizuku 版本过旧(v$ver)，UserService 需要 v13+，请升级 Shizuku"
+                } else {
+                    "UserService 启动超时（进程可能崩溃：Shizuku/Sizuku 版本不兼容或需重装）"
+                }
+            }
             shizukuService = result
             return result
         }

@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,13 +68,25 @@ internal fun SettingsPermissionsPage(t: UiText) {
     }
     @Suppress("UNUSED_EXPRESSION") refresh
 
-    val rootOk = PermissionManager.isRootAvailable()
-    val shizukuService = PermissionManager.isShizukuServiceRunning()
-    val shizukuGranted = PermissionManager.isShizukuGranted()
-    val shizukuApp = PermissionManager.isShizukuAppInstalled(context)
-    val dhizukuOk = PermissionManager.isDhizukuAvailable()
-    val dhizukuApp = PermissionManager.isDhizukuAppInstalled(context)
-    val best = PermissionManager.bestChannel()
+    // 权限探测放 IO 线程（isRootAvailable 首次探测可能等待 su 超时，组合期调用会卡 UI/ANR）
+    var rootOk by remember { mutableStateOf(false) }
+    var shizukuService by remember { mutableStateOf(false) }
+    var shizukuGranted by remember { mutableStateOf(false) }
+    var shizukuApp by remember { mutableStateOf(false) }
+    var dhizukuOk by remember { mutableStateOf(false) }
+    var dhizukuApp by remember { mutableStateOf(false) }
+    var best by remember { mutableStateOf(PermissionManager.Channel.NONE) }
+    LaunchedEffect(refresh) {
+        withContext(Dispatchers.IO) {
+            rootOk = PermissionManager.isRootAvailable()
+            shizukuService = PermissionManager.isShizukuServiceRunning()
+            shizukuGranted = PermissionManager.isShizukuGranted()
+            shizukuApp = PermissionManager.isShizukuAppInstalled(context)
+            dhizukuOk = PermissionManager.isDhizukuAvailable()
+            dhizukuApp = PermissionManager.isDhizukuAppInstalled(context)
+            best = PermissionManager.bestChannel()
+        }
+    }
 
     fun runProbe() {
         probing = true; probeText = ""

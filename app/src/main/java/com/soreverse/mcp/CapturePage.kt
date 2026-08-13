@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,9 +72,17 @@ internal fun CapturePage(t: UiText) {
     var sniffPath by remember { mutableStateOf("") }
     var tcpdumpOk by remember { mutableStateOf(false) }
 
-    val rootOk = PermissionManager.isRootAvailable()
-    val shizukuOk = PermissionManager.isShizukuGranted()
-    val dhizukuOk = PermissionManager.isDhizukuAvailable()
+    // 权限探测放 IO 线程（isRootAvailable 首次探测可能等待 su 超时，组合期调用会卡 UI）
+    var rootOk by remember { mutableStateOf(false) }
+    var shizukuOk by remember { mutableStateOf(false) }
+    var dhizukuOk by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            rootOk = PermissionManager.isRootAvailable()
+            shizukuOk = PermissionManager.isShizukuGranted()
+            dhizukuOk = PermissionManager.isDhizukuAvailable()
+        }
+    }
     val privOk = rootOk || shizukuOk || dhizukuOk
 
     fun callTool(action: String, extra: JSONObject.() -> Unit = {}) {

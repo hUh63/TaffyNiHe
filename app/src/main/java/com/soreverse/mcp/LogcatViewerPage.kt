@@ -71,6 +71,7 @@ import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.RootShell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileWriter
@@ -299,7 +300,9 @@ internal fun LogcatViewerPage(t: UiText) {
                 ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
             }
             mode == "shizuku" -> {
-                channelError = if (PermissionManager.isShizukuGranted()) "Shizuku 通道启动失败，已降级普通进程" else "Shizuku 未授权"
+                channelError = if (PermissionManager.isShizukuGranted()) {
+                    "Shizuku 通道启动失败: ${PermissionManager.lastShizukuServiceError()}"
+                } else "Shizuku 未授权"
                 ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
             }
             else -> {
@@ -307,7 +310,8 @@ internal fun LogcatViewerPage(t: UiText) {
                 if (!PermissionManager.isRootAvailable() && !PermissionManager.isShizukuGranted() && !PermissionManager.isDhizukuAvailable()) {
                     channelError = "无 Root/Shizuku 权限，普通进程读不到系统日志（Android 8.0+）"
                 } else if (channelError.isBlank()) {
-                    channelError = "特权通道不可用，已降级普通进程"
+                    val diag = PermissionManager.lastShizukuServiceError()
+                    channelError = if (diag.isNotBlank()) "特权通道不可用: $diag" else "特权通道不可用，已降级普通进程"
                 }
                 ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
             }
@@ -397,7 +401,9 @@ internal fun LogcatViewerPage(t: UiText) {
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
 
     // 页面进入自动开始采集
-    LaunchedEffect(Unit) { start() }
+    // 必须放 IO 线程: startPrivilegedStream 内 UserService 绑定会阻塞等待(await 2s),
+    // 主线程执行会导致 Input dispatching timeout (ANR)
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { start() } }
     // 页面退出停止
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { stop() }

@@ -1282,7 +1282,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 // 应用日志模式：无系统权限时的兜底（Android 11+ 普通进程 logcat 为空）
                 if (appLogLines.isEmpty()) {
                     Text(
-                        if (zh) "暂无应用日志\n（软件运行日志会记录在这里，如 MCP 调用、错误等）" else "No app logs yet\n(Runtime logs such as MCP calls and errors appear here)",
+                        if (zh) "暂无应用日志\n（应用启动后会记录运行信息。要查看全系统日志，请点击上方「访问所有设备日志」按钮，\n或连接电脑执行: adb shell pm grant com.taffynihe android.permission.READ_LOGS）" else "No app logs yet\n(App runtime logs appear here. For system-wide logs tap 'Read all device logs' above,\nor run: adb shell pm grant com.taffynihe android.permission.READ_LOGS)",
                         modifier = Modifier.padding(16.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

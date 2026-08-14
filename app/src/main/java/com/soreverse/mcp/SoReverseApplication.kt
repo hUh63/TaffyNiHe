@@ -23,5 +23,12 @@ class SoReverseApplication : Application() {
         val integrity = IntegrityGuard.verify(this)
         if (!integrity.trusted) AppLog.e("Integrity check failed: ${integrity.reason}; expected=${integrity.expected}; actual=${integrity.actual.joinToString()}")
         AppLog.i("SOMCP initialized (toolStatsPersist=${settings.toolStatsPersist})")
+        // 启动信息写入应用日志：无系统权限时 Logcat 查看器显示应用日志兜底，保证有内容可看
+        runCatching {
+            val ver = packageManager.getPackageInfo(packageName, 0)
+            AppLog.i("版本: ${ver.versionName} (${ver.versionCode})")
+        }
+        AppLog.i("权限状态: Root=${if (PermissionManager.isRootAvailable()) "可用" else "不可用"} · Shizuku=${if (PermissionManager.isShizukuGranted()) "已授权" else "未授权"} · READ_LOGS=${if (PermissionManager.hasReadLogs(this)) "已授予" else "未授予"}")
+        AppLog.i("Logcat 查看器: 无特权时显示应用日志；全系统日志需 Root/Shizuku 或 adb 授权 READ_LOGS")
     }
 }

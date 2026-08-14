@@ -342,6 +342,38 @@ internal fun LogcatViewerPage(t: UiText) {
         }
     }
 
+    /** 轮询兜底：实时流(pipe)不可用时，用 logcat -d 定时拉取（executeNow 通道已验证可用）。 */
+    fun startPolling() {
+        scope.launch(Dispatchers.IO) {
+            var failCount = 0
+            while (running && pollMode) {
+                val r = PermissionManager.exec("logcat -d -t 500 2>&1", timeoutSec = 10)
+                if (r.code == 0 && r.stdout.isNotBlank()) {
+                    synchronized(logs) {
+                        r.stdout.lines().forEach { line ->
+                            parseLogLine(line)?.let { parsed ->
+                                logs.add(parsed)
+                                while (logs.size > 2000) { logs.removeAt(0); dropped++ }
+                                val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
+                                if (crashKeys.any { line.contains(it, ignoreCase = true) }) {
+                                    synchronized(crashLogs) { crashLogs.add(parsed) }
+                                }
+                            }
+                        }
+                    }
+                    failCount = 0
+                } else {
+                    failCount++
+                    if (failCount >= 5) {
+                        if (running) channelError = "轮询拉取失败: ${r.stderr.ifBlank { r.stdout }.take(150)}"
+                        break
+                    }
+                }
+                delay(2000)
+            }
+        }
+    }
+
     fun start() {
         if (running) return
         running = true
@@ -453,38 +485,6 @@ internal fun LogcatViewerPage(t: UiText) {
                         channelError = "日志读取失败: ${e.message}"
                     }
                 }
-            }
-        }
-    }
-
-    /** 轮询兜底：实时流(pipe)不可用时，用 logcat -d 定时拉取（executeNow 通道已验证可用）。 */
-    fun startPolling() {
-        scope.launch(Dispatchers.IO) {
-            var failCount = 0
-            while (running && pollMode) {
-                val r = PermissionManager.exec("logcat -d -t 500 2>&1", timeoutSec = 10)
-                if (r.code == 0 && r.stdout.isNotBlank()) {
-                    synchronized(logs) {
-                        r.stdout.lines().forEach { line ->
-                            parseLogLine(line)?.let { parsed ->
-                                logs.add(parsed)
-                                while (logs.size > 2000) { logs.removeAt(0); dropped++ }
-                                val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
-                                if (crashKeys.any { line.contains(it, ignoreCase = true) }) {
-                                    synchronized(crashLogs) { crashLogs.add(parsed) }
-                                }
-                            }
-                        }
-                    }
-                    failCount = 0
-                } else {
-                    failCount++
-                    if (failCount >= 5) {
-                        if (running) channelError = "轮询拉取失败: ${r.stderr.ifBlank { r.stdout }.take(150)}"
-                        break
-                    }
-                }
-                delay(2000)
             }
         }
     }

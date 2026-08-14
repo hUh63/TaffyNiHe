@@ -226,6 +226,11 @@ object PermissionManager {
         // 冷却期：UserService 崩溃(如 Shizuku/Sizuku 混装)时避免反复触发 server 启动
         val now = System.currentTimeMillis()
         if (now < shizukuCooldownUntil) {
+            // 缓存的服务若仍活着则直接复用（冷却只阻止重新 bind，不影响已建立通道）
+            shizukuService?.let { svc ->
+                if (svc.asBinder().pingBinder()) return svc
+                shizukuService = null
+            }
             shizukuServiceError = "UserService 启动失败进入冷却期（${(shizukuCooldownUntil - now) / 1000}s 后重试），" +
                 "请检查是否混装了官方 Shizuku 与 Sizuku 分支"
             return null

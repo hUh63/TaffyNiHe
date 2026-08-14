@@ -226,19 +226,6 @@ internal fun LogcatViewerPage(t: UiText) {
         AppLog.addListener(appLogListener)
         onDispose { AppLog.removeListener(appLogListener) }
     }
-    // Shizuku 授权结果监听：授权成功后立即刷新通道并重启采集（页面状态及时更新）
-    DisposableEffect(Unit) {
-        val listener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { _, grantResult ->
-            if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                scope.launch(Dispatchers.IO) {
-                    if (running) stop()
-                    start() // 重新探测通道：Shizuku 已授权，auto/shizuku 模式生效
-                }
-            }
-        }
-        rikka.shizuku.Shizuku.addRequestPermissionResultListener(listener)
-        onDispose { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(listener) }
-    }
 
     // ── LogFox 样式扩展状态 ──
     // 采集模式：auto=自动选择 / adb=普通进程 / root / shizuku
@@ -538,6 +525,21 @@ internal fun LogcatViewerPage(t: UiText) {
             f.writeText(if (appLogMode) appLogLines.joinToString("\n") else synchronized(logs) { logs.joinToString("\n") { it.raw } })
             Toast.makeText(context, (if (zh) "已保存: " else "Saved: ") + f.absolutePath, Toast.LENGTH_LONG).show()
         }.onFailure { e -> Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show() }
+    }
+
+    // Shizuku 授权结果监听（start/stop 定义之后，避免局部函数前向引用）：
+    // 授权成功后立即刷新通道并重启采集，页面状态及时更新
+    DisposableEffect(Unit) {
+        val listener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                scope.launch(Dispatchers.IO) {
+                    if (running) stop()
+                    start() // 重新探测通道：Shizuku 已授权，auto/shizuku 模式生效
+                }
+            }
+        }
+        rikka.shizuku.Shizuku.addRequestPermissionResultListener(listener)
+        onDispose { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(listener) }
     }
 
     // 页面进入自动开始采集
@@ -972,7 +974,6 @@ internal fun LogcatViewerPage(t: UiText) {
                         }
                     }
                 }
-            }
             "record" -> {
                 // ── 录制文件列表（录制控制已移到采集通道区下方；本页只显示文件与保存目录）──
                 var refreshTick by remember { mutableStateOf(0) }

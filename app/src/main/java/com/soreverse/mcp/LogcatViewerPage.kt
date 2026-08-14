@@ -399,7 +399,9 @@ internal fun LogcatViewerPage(t: UiText) {
             try {
                 BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
                     var line = reader.readLine()
+                    var gotAny = false
                     while (line != null && running) {
+                        gotAny = true
                         if (!paused) {
                             parseLogLine(line)?.let { parsed ->
                                 synchronized(logs) {
@@ -420,6 +422,11 @@ internal fun LogcatViewerPage(t: UiText) {
                             runCatching { recordWriter?.write(line + "\n") }
                         }
                         line = reader.readLine()
+                    }
+                    // 无任何数据且仍在运行：流立即结束（logcat 进程可能未输出）
+                    if (!gotAny && running && channelError.isBlank()) {
+                        com.soreverse.mcp.core.AppLog.w("Logcat reader got no data")
+                        channelError = "读取流无任何数据（进程可能未输出）。通道是否可用见上方自测结果"
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -559,10 +566,18 @@ internal fun LogcatViewerPage(t: UiText) {
     // 主线程执行会导致 Input dispatching timeout (ANR)
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { start() }
-        // 启动自检：特权通道已连但 2 秒无日志 → 明确提示（避免静默空列表）
+        // 启动自检：特权通道已连但 2 秒无日志 → 用一次性命令验证通道真实可用性
         delay(2000)
         if (running && !appLogMode && logs.isEmpty() && channelError.isBlank()) {
-            channelError = "通道已连接但无日志输出（读取流可能异常）。可尝试切换采集模式，或点「访问所有设备日志」授权 READ_LOGS"
+            // 通道自测：logcat -d 一次性 dump，能返回内容说明通道可用（问题在实时流），否则通道不可用
+            val test = withContext(Dispatchers.IO) {
+                PermissionManager.exec("logcat -d -t 5 2>&1", timeoutSec = 10)
+            }
+            channelError = if (test.code == 0 && test.stdout.isNotBlank()) {
+                "通道可读（测试返回 ${test.stdout.lineCount()} 行）但实时流无输出——读取流异常，可切换采集模式后重试"
+            } else {
+                "通道测试失败: ${test.stderr.ifBlank { test.stdout }.take(200)}（可点「访问所有设备日志」授权 READ_LOGS 或改用 Root）"
+            }
         }
     }
     // 页面退出停止

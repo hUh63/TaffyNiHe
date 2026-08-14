@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -189,7 +190,8 @@ internal fun LogcatViewerPage(t: UiText) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val logs = remember { mutableStateListOf<LogLine>() }
-    val listState = rememberLazyListState()
+    // 整页滚动状态（整个页面含控件与日志内容一体上下滚动）
+    val pageScroll = rememberScrollState()
 
     var running by remember { mutableStateOf(false) }
     var paused by remember { mutableStateOf(false) }
@@ -223,6 +225,19 @@ internal fun LogcatViewerPage(t: UiText) {
     DisposableEffect(Unit) {
         AppLog.addListener(appLogListener)
         onDispose { AppLog.removeListener(appLogListener) }
+    }
+    // Shizuku 授权结果监听：授权成功后立即刷新通道并重启采集（页面状态及时更新）
+    DisposableEffect(Unit) {
+        val listener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                scope.launch(Dispatchers.IO) {
+                    if (running) stop()
+                    start() // 重新探测通道：Shizuku 已授权，auto/shizuku 模式生效
+                }
+            }
+        }
+        rikka.shizuku.Shizuku.addRequestPermissionResultListener(listener)
+        onDispose { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(listener) }
     }
 
     // ── LogFox 样式扩展状态 ──
@@ -548,27 +563,20 @@ internal fun LogcatViewerPage(t: UiText) {
                 (pkg.isBlank() || line.raw.contains(" $pkg ", ignoreCase = true) || line.raw.contains("/$pkg:", ignoreCase = true)) &&
                 (pid.isBlank() || line.pid == pid) &&
                 (kw.isBlank() || (re?.containsMatchIn(line.raw) ?: line.raw.contains(kw, ignoreCase = !caseSensitive)))
-        }.takeLast(600)
+        }.takeLast(300)
     }
     val clipboard = LocalClipboardManager.current
 
-    // 新日志自动滚动到底部
+    // 新日志自动滚动到页面底部（整页滚动模式）
     LaunchedEffect(appLogMode, visible.size, appLogLines.size) {
         if (!paused) {
-            if (appLogMode) {
-                if (appLogLines.isNotEmpty()) runCatching { listState.scrollToItem(appLogLines.size - 1) }
-            } else if (visible.isNotEmpty()) {
-                runCatching { listState.scrollToItem(visible.size - 1) }
+            runCatching {
+                if (pageScroll.maxValue > 0) pageScroll.scrollTo(pageScroll.maxValue)
             }
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // ── 顶部控件区（可滚动，避免小屏显示不完全）──
-        Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+    Column(Modifier.fillMaxSize().padding(10.dp).verticalScroll(pageScroll), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // ── 状态统计卡片（LogFox 样式）──
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatBox(
@@ -750,7 +758,6 @@ internal fun LogcatViewerPage(t: UiText) {
                     FontWeight.SemiBold else FontWeight.Normal,
             )
         }
-        } // ── 顶部控件区结束 ──
 
         // ── 标签页：日志 / 过滤器 / 崩溃 / 录制 / 应用 / 设置 ──
         val tabs = listOf("log", "filter", "crash", "record", "app", "settings")
@@ -783,8 +790,6 @@ internal fun LogcatViewerPage(t: UiText) {
             }
         }
 
-        // ── tab 内容区（占剩余高度，内部各自滚动）──
-        Column(Modifier.weight(1f).fillMaxWidth()) {
         when (tab) {
             "filter" -> {
                 // ── 过滤器管理：保存当前过滤条件 / 管理已保存预设（实时过滤已在日志页）──
@@ -829,24 +834,21 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(filterPresets.size) { i ->
-                            val key = filterPresets[i]
-                            val name = key.removePrefix("preset_")
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    name,
-                                    modifier = Modifier.weight(1f).clip(MaterialTheme.shapes.small).clickable { applyPreset(key) }.padding(6.dp),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                TextButton(onClick = { applyPreset(key) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text(if (zh) "应用" else "Apply", fontSize = 11.sp)
-                                }
-                                TextButton(onClick = { deletePreset(key) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                    Text(if (zh) "删除" else "Delete", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                                }
+                    filterPresets.forEach { key ->
+                        val name = key.removePrefix("preset_")
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                name,
+                                modifier = Modifier.weight(1f).clip(MaterialTheme.shapes.small).clickable { applyPreset(key) }.padding(6.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            TextButton(onClick = { applyPreset(key) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                Text(if (zh) "应用" else "Apply", fontSize = 11.sp)
+                            }
+                            TextButton(onClick = { deletePreset(key) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                Text(if (zh) "删除" else "Delete", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
                             }
                         }
                     }
@@ -870,10 +872,8 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(groups.size) { i ->
-                            val g = groups[groups.size - 1 - i]
-                            val expanded = expandedIdx == i
+                    groups.asReversed().forEachIndexed { i, g ->
+                        val expanded = expandedIdx == i
                             Column(
                                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
                                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
@@ -998,10 +998,8 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(files.size) { i ->
-                            val f = files[i]
-                            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(f.lastModified()))
+                    files.forEach { f ->
+                        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(f.lastModified()))
                             Column(
                                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
                                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
@@ -1075,7 +1073,6 @@ internal fun LogcatViewerPage(t: UiText) {
                                 )
                             }
                         }
-                    }
                 }
             }
             "app" -> {
@@ -1106,10 +1103,8 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(filtered.size) { i ->
-                            val (label, pkg) = filtered[i]
-                            Row(
+                    filtered.take(100).forEach { (label, pkg) ->
+                        Row(
                                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
                                     .clickable {
                                         pkgFilter = pkg
@@ -1129,7 +1124,6 @@ internal fun LogcatViewerPage(t: UiText) {
                                     color = MaterialTheme.colorScheme.primary,
                                 )
                             }
-                        }
                     }
                 }
             }
@@ -1278,9 +1272,9 @@ internal fun LogcatViewerPage(t: UiText) {
                     )
                 }
 
-        // ── 日志列表 ──
+        // ── 日志列表（最小高度保障：顶部控件挤压时列表仍可滚动）──
         androidx.compose.foundation.layout.Box(
-            Modifier.weight(1f).fillMaxWidth()
+            Modifier.fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), MaterialTheme.shapes.medium),
         ) {
             if (appLogMode) {
@@ -1293,19 +1287,13 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp),
-                    ) {
-                        items(appLogLines.size) { i ->
-                            Text(
-                                appLogLines[i],
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
-                            )
-                        }
+                    appLogLines.takeLast(500).forEach { l ->
+                        Text(
+                            l,
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
+                        )
                     }
                 }
             } else if (visible.isEmpty()) {
@@ -1316,27 +1304,22 @@ internal fun LogcatViewerPage(t: UiText) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp),
-                ) {
-                    items(visible, key = { it.raw.hashCode() }) { line ->
-                        SelectionContainer {
-                            Text(
-                                text = buildAnnotatedString {
-                                    withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
-                                        append(line.time + " ")
-                                    }
-                                    withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
-                                        append(line.pid + " ")
-                                    }
-                                    withStyle(SpanStyle(color = levelColor(line.level), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
-                                        append(line.level + " ")
-                                    }
-                                    withStyle(SpanStyle(color = Color(0xFF4DD0E1), fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
-                                        append("${line.tag} ")
-                                    }
+                visible.forEach { line ->
+                    SelectionContainer {
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                    append(line.time + " ")
+                                }
+                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                    append(line.pid + " ")
+                                }
+                                withStyle(SpanStyle(color = levelColor(line.level), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                    append(line.level + " ")
+                                }
+                                withStyle(SpanStyle(color = Color(0xFF4DD0E1), fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                    append("${line.tag} ")
+                                }
                                     // 消息（关键字高亮）
                                     val msg = line.message
                                     if (keyword.isNotBlank()) {
@@ -1359,12 +1342,10 @@ internal fun LogcatViewerPage(t: UiText) {
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
                             )
                         }
-                    }
                 }
             }
         }
         } // ── when(tab) 结束 ──
-        } // ── tab 内容区结束 ──
     }
 
     // ── READ_LOGS 授权引导对话框（系统保护权限无法运行时弹窗，提供自动授权/复制 adb 命令）──
@@ -1418,7 +1399,6 @@ internal fun LogcatViewerPage(t: UiText) {
             },
         )
     }
-}
 }
 
 /** LogFox 样式状态统计小卡片。 */

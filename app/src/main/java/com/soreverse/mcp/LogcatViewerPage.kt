@@ -574,7 +574,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 PermissionManager.exec("logcat -d -t 5 2>&1", timeoutSec = 10)
             }
             channelError = if (test.code == 0 && test.stdout.isNotBlank()) {
-                "通道可读（测试返回 ${test.stdout.lineCount()} 行）但实时流无输出——读取流异常，可切换采集模式后重试"
+                "通道可读（测试返回 ${test.stdout.lines().size} 行）但实时流无输出——读取流异常，可切换采集模式后重试"
             } else {
                 "通道测试失败: ${test.stderr.ifBlank { test.stdout }.take(200)}（可点「访问所有设备日志」授权 READ_LOGS 或改用 Root）"
             }

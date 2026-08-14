@@ -77,6 +77,7 @@ import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.RootShell
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -426,9 +427,20 @@ internal fun LogcatViewerPage(t: UiText) {
             } catch (e: java.io.IOException) {
                 // destroy()/stop() 会关闭流导致 readLine 抛 InterruptedIOException，
                 // 这是正常停止路径，静默忽略；仅非正常退出才记录
-                if (running) com.soreverse.mcp.core.AppLog.e("Logcat reader ended: ${e.message}")
+                if (running) {
+                    com.soreverse.mcp.core.AppLog.e("Logcat reader ended: ${e.message}")
+                    // 非正常退出时显示原因到界面（如 UserService 通道流中断）
+                    if (channelError.isBlank()) {
+                        channelError = "日志读取中断: ${e.message}"
+                    }
+                }
             } catch (e: Exception) {
-                if (running) com.soreverse.mcp.core.AppLog.e("Logcat reader failed: ${e.message}")
+                if (running) {
+                    com.soreverse.mcp.core.AppLog.e("Logcat reader failed: ${e.message}")
+                    if (channelError.isBlank()) {
+                        channelError = "日志读取失败: ${e.message}"
+                    }
+                }
             }
         }
     }
@@ -545,7 +557,14 @@ internal fun LogcatViewerPage(t: UiText) {
     // 页面进入自动开始采集
     // 必须放 IO 线程: startPrivilegedStream 内 UserService 绑定会阻塞等待(await 2s),
     // 主线程执行会导致 Input dispatching timeout (ANR)
-    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { start() } }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { start() }
+        // 启动自检：特权通道已连但 2 秒无日志 → 明确提示（避免静默空列表）
+        delay(2000)
+        if (running && !appLogMode && logs.isEmpty() && channelError.isBlank()) {
+            channelError = "通道已连接但无日志输出（读取流可能异常）。可尝试切换采集模式，或点「访问所有设备日志」授权 READ_LOGS"
+        }
+    }
     // 页面退出停止
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { stop() }
@@ -634,9 +653,10 @@ internal fun LogcatViewerPage(t: UiText) {
                 Text(if (zh) "访问所有设备日志" else "Read all device logs", fontSize = 11.sp)
             }
             Text(
-                if (readLogsGranted) (if (zh) "已授权 ✓" else "Granted ✓") else (if (zh) "未授予（adb: pm grant READ_LOGS）" else "Not granted"),
+                if (readLogsGranted) (if (zh) "已授权 ✓" else "Granted ✓") else (if (zh) "未授予" else "Not granted"),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (readLogsGranted) AppPalette.green else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (readLogsGranted) AppPalette.green else MaterialTheme.colorScheme.error,
+                maxLines = 1,
             )
         }
 

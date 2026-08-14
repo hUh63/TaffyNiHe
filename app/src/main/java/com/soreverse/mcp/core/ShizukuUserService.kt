@@ -48,11 +48,29 @@ class ShizukuUserService() : IShizukuService.Stub() {
         exitProcess(0)
     }
 
+    /**
+     * 启动进程（数组形式 exec，避免 Runtime.exec(String) 按空格拆分破坏引号）。
+     * 兼容 "sh -c \"cmd\"" 包装：正确解析引号后以数组方式执行。
+     */
+    private fun execProcess(command: String): Process {
+        val trimmed = command.trim()
+        return if (trimmed.startsWith("sh -c ")) {
+            var script = trimmed.removePrefix("sh -c ").trim()
+            if (script.length >= 2 && script.startsWith("\"") && script.endsWith("\"")) {
+                script = script.substring(1, script.length - 1)
+            }
+            Runtime.getRuntime().exec(arrayOf("sh", "-c", script))
+        } else {
+            // 简单命令直接按 token 拆分（无引号语义需求）
+            Runtime.getRuntime().exec(trimmed)
+        }
+    }
+
     /** 一次性命令: 返回 [exitCode, stdout, stderr]。 */
     override fun executeNow(command: String?): Array<String> = runBlocking(Dispatchers.IO) {
         if (command.isNullOrBlank()) return@runBlocking arrayOf("-1", "", "empty command")
         try {
-            val process = Runtime.getRuntime().exec(command)
+            val process = execProcess(command)
             val output = async { process.inputStream.readBytes().decodeToString() }
             val error = async { process.errorStream.readBytes().decodeToString() }
             val exitCode = process.waitFor()
@@ -67,7 +85,7 @@ class ShizukuUserService() : IShizukuService.Stub() {
         if (command.isNullOrBlank()) return -1
         return try {
             val processId = latestId++
-            val process = Runtime.getRuntime().exec(command)
+            val process = execProcess(command)
             currentProcesses[processId] = process
             processId
         } catch (e: Exception) {

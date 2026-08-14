@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -1294,8 +1295,9 @@ internal fun LogcatViewerPage(t: UiText) {
                         FilterChip(selected = crashOnly, onClick = { crashOnly = !crashOnly }, label = { Text(if (zh) "仅崩溃与ANR" else "Crashes", fontSize = 10.sp) })
                     }
                 }
-                // 级别 + 工具栏
+                // 级别（中间横滑）+ 工具栏（两端固定）
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // 全部（固定左）
                     FilterChip(
                         selected = levelSet.size == 6,
                         onClick = {
@@ -1303,14 +1305,20 @@ internal fun LogcatViewerPage(t: UiText) {
                         },
                         label = { Text(if (zh) "全部" else "All", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
                     )
-                    listOf("V", "D", "I", "W", "E", "F").forEach { lv ->
-                        FilterChip(
-                            selected = lv in levelSet,
-                            onClick = { levelSet = if (lv in levelSet) levelSet - lv else levelSet + lv },
-                            label = { Text(lv, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = levelColor(lv)) },
-                        )
+                    // 级别按钮（可左右滑动）
+                    Row(
+                        Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        listOf("V", "D", "I", "W", "E", "F").forEach { lv ->
+                            FilterChip(
+                                selected = lv in levelSet,
+                                onClick = { levelSet = if (lv in levelSet) levelSet - lv else levelSet + lv },
+                                label = { Text(lv, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = levelColor(lv)) },
+                            )
+                        }
                     }
-                    Spacer(Modifier.weight(1f))
+                    // 工具栏（固定右）
                     IconButton(onClick = {
                         if (running) stop()
                         else scope.launch(Dispatchers.IO) { start() }

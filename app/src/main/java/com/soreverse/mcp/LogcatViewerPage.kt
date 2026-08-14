@@ -214,6 +214,8 @@ internal fun LogcatViewerPage(t: UiText) {
     // 应用日志兜底模式: 无任何系统权限(无 Root/Shizuku/READ_LOGS)时，
     // Android 11+ 连本应用 logcat 都读不到，降级显示本应用 AppLog（至少能看到软件自己的日志）
     var appLogMode by remember { mutableStateOf(false) }
+    // 轮询兜底模式: 实时流(execute+pipe)无数据但一次性命令可读时，降级为 logcat -d 轮询
+    var pollMode by remember { mutableStateOf(false) }
     val appLogLines = remember { mutableStateListOf<String>() }
     val appLogListener = remember {
         { line: String ->
@@ -423,10 +425,13 @@ internal fun LogcatViewerPage(t: UiText) {
                         }
                         line = reader.readLine()
                     }
-                    // 无任何数据且仍在运行：流立即结束（logcat 进程可能未输出）
+                    // 无任何数据且仍在运行：实时流立即结束（pipe 异常）
+                    // → 降级为轮询模式（用一次性 logcat -d，通道自测已证明可用）
                     if (!gotAny && running && channelError.isBlank()) {
-                        com.soreverse.mcp.core.AppLog.w("Logcat reader got no data")
-                        channelError = "读取流无任何数据（进程可能未输出）。通道是否可用见上方自测结果"
+                        com.soreverse.mcp.core.AppLog.w("Logcat reader got no data, fallback to polling")
+                        pollMode = true
+                        channelInfo = if (zh) "Shizuku 通道（轮询模式）" else "Shizuku channel (polling)"
+                        startPolling()
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -452,8 +457,41 @@ internal fun LogcatViewerPage(t: UiText) {
         }
     }
 
+    /** 轮询兜底：实时流(pipe)不可用时，用 logcat -d 定时拉取（executeNow 通道已验证可用）。 */
+    fun startPolling() {
+        scope.launch(Dispatchers.IO) {
+            var failCount = 0
+            while (running && pollMode) {
+                val r = PermissionManager.exec("logcat -d -t 500 2>&1", timeoutSec = 10)
+                if (r.code == 0 && r.stdout.isNotBlank()) {
+                    synchronized(logs) {
+                        r.stdout.lines().forEach { line ->
+                            parseLogLine(line)?.let { parsed ->
+                                logs.add(parsed)
+                                while (logs.size > 2000) { logs.removeAt(0); dropped++ }
+                                val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
+                                if (crashKeys.any { line.contains(it, ignoreCase = true) }) {
+                                    synchronized(crashLogs) { crashLogs.add(parsed) }
+                                }
+                            }
+                        }
+                    }
+                    failCount = 0
+                } else {
+                    failCount++
+                    if (failCount >= 5) {
+                        if (running) channelError = "轮询拉取失败: ${r.stderr.ifBlank { r.stdout }.take(150)}"
+                        break
+                    }
+                }
+                delay(2000)
+            }
+        }
+    }
+
     fun stop() {
         running = false
+        pollMode = false
         runCatching { process?.destroy() }
         process = null
         if (recording) {
@@ -1258,6 +1296,13 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
                 // 级别 + 工具栏
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(
+                        selected = levelSet.size == 6,
+                        onClick = {
+                            levelSet = if (levelSet.size == 6) emptySet() else setOf("V", "D", "I", "W", "E", "F")
+                        },
+                        label = { Text(if (zh) "全部" else "All", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                    )
                     listOf("V", "D", "I", "W", "E", "F").forEach { lv ->
                         FilterChip(
                             selected = lv in levelSet,
@@ -1323,7 +1368,14 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    appLogLines.takeLast(500).forEach { l ->
+                    // 应用日志按级别过滤（AppLog 行格式: HH:mm:ss.SSS L [TAG:] msg）
+                    val appLogVisible = remember(appLogLines.size, levelSet) {
+                        val full = levelSet.size == 6
+                        appLogLines.filter { l ->
+                            full || levelSet.contains(l.split(" ").getOrNull(2)?.take(1) ?: "")
+                        }.takeLast(500)
+                    }
+                    appLogVisible.forEach { l ->
                         Text(
                             l,
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
@@ -1374,7 +1426,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                         append(msg)
                                     }
                                 },
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace),
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp),
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
                             )
                         }

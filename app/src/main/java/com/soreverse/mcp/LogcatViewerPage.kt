@@ -1401,6 +1401,7 @@ internal fun LogcatViewerPage(t: UiText) {
         )
     }
 }
+}
 
 /** LogFox 样式状态统计小卡片。 */
 @Composable

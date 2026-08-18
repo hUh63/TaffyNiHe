@@ -89,6 +89,13 @@ object CaptureTools {
                     if (probe.second.isBlank()) return err("NO_TCPDUMP", "未找到 tcpdump 二进制。Root 环境可: adb push tcpdump /data/local/tmp && chmod 755 /data/local/tmp/tcpdump")
                     val iface = args.str("interface", "any")
                     val filter = args.str("filter")
+                    // 命令注入防护：iface/filter 拼入 tcpdump 命令行，必须校验安全字符
+                    if (!com.soreverse.mcp.core.RootShell.isSafeArg(iface)) {
+                        return err("BAD_INTERFACE", "interface 含非法字符（仅允许字母数字._/- 和空格）", "interface", iface)
+                    }
+                    if (filter.isNotBlank() && !com.soreverse.mcp.core.RootShell.isSafeArg(filter)) {
+                        return err("BAD_FILTER", "filter 含非法字符（仅允许字母数字._/- 和空格，不支持 shell 元字符）", "filter", filter)
+                    }
                     val name = "taffy_capture_${System.currentTimeMillis()}.pcap"
                     val path = "/data/local/tmp/$name"
                     val cmd = buildString {

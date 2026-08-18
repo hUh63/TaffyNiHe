@@ -1,6 +1,8 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
@@ -258,6 +262,9 @@ internal fun LogcatViewerPage(t: UiText) {
     // ── 应用 tab（LogFox 样式：应用列表按包名过滤日志）──
     var appSearch by remember { mutableStateOf("") }
     var appList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // (label, packageName)
+    // 应用多选（长按进入，点选切换，再点选中项取消；全选/取消/过滤所选）
+    var appSelectMode by remember { mutableStateOf(false) }
+    var selectedApps by remember { mutableStateOf(setOf<String>()) }
     // ── 设置 tab（LogFox 样式设置项，SharedPreferences 持久化）──
     val settingsPrefs = remember { context.getSharedPreferences("logcat_settings", Context.MODE_PRIVATE) }
     var crashNotify by remember { mutableStateOf(settingsPrefs.getBoolean("crash_notify", true)) }
@@ -604,6 +611,8 @@ internal fun LogcatViewerPage(t: UiText) {
     // 必须放 IO 线程: startPrivilegedStream 内 UserService 绑定会阻塞等待(await 2s),
     // 主线程执行会导致 Input dispatching timeout (ANR)
     LaunchedEffect(Unit) {
+        // 设置「后台采集」开启时，页面退出后由 LogcatTools 后台进程继续采集；
+        // 进入页面时接管前台实时显示
         withContext(Dispatchers.IO) { start() }
         // 启动自检：特权通道已连但 2 秒无日志 → 用一次性命令验证通道真实可用性
         delay(2000)
@@ -619,23 +628,41 @@ internal fun LogcatViewerPage(t: UiText) {
             }
         }
     }
-    // 页面退出停止
+    // 页面退出停止（「后台采集」开启时转交 LogcatTools 后台进程继续采集）
     androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { stop() }
+        onDispose {
+            if (bgCollect) {
+                // 转后台：启动 LogcatTools 持久采集进程（独立于页面存活）
+                Thread {
+                    runCatching {
+                        val appCtx = context.applicationContext
+                        val ctx = com.soreverse.mcp.mcp.ToolContext(
+                            appCtx, com.soreverse.mcp.core.SettingsStore(appCtx), com.soreverse.mcp.core.EngineProvider.get(appCtx),
+                        )
+                        com.soreverse.mcp.mcp.LogcatTools.capture.handle(
+                            ctx, org.json.JSONObject().put("action", "start"),
+                        )
+                    }
+                }.start()
+            } else {
+                stop()
+            }
+        }
     }
 
     // 可见日志：级别 + tag + 关键字 + 包名/PID/正则/崩溃过滤
     val visible = remember(logs.size, tagFilter, keyword, levelSet, paused, pkgFilter, pidFilter, regexEnabled, caseSensitive, crashOnly) {
         val tags = tagFilter.split(',').map { it.trim() }.filter { it.isNotBlank() }
         val kw = keyword
-        val pkg = pkgFilter.trim()
+        // 包名支持逗号分隔多选（应用 tab 多选过滤写入）
+        val pkgs = pkgFilter.split(',').map { it.trim() }.filter { it.isNotBlank() }
         val pid = pidFilter.trim()
         val re = if (regexEnabled) runCatching { Regex(kw, if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)) }.getOrNull() else null
         logs.filter { line ->
             if (crashOnly && !isCrashStart(line.raw)) return@filter false
             levelSet.contains(line.level) &&
                 (tags.isEmpty() || tags.any { line.tag.contains(it, ignoreCase = true) }) &&
-                (pkg.isBlank() || line.raw.contains(" $pkg ", ignoreCase = true) || line.raw.contains("/$pkg:", ignoreCase = true)) &&
+                (pkgs.isEmpty() || pkgs.any { p -> line.raw.contains(" $p ", ignoreCase = true) || line.raw.contains("/$p:", ignoreCase = true) }) &&
                 (pid.isBlank() || line.pid == pid) &&
                 (kw.isBlank() || (re?.containsMatchIn(line.raw) ?: line.raw.contains(kw, ignoreCase = !caseSensitive)))
         }.takeLast(300)
@@ -1178,25 +1205,82 @@ internal fun LogcatViewerPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
+                    // 选中模式操作栏：已选 N · 全选 · 过滤所选 · 取消选择
+                    if (appSelectMode) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                (if (zh) "已选 ${selectedApps.size} 个" else "${selectedApps.size} selected") + "  ",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = {
+                                selectedApps = filtered.take(100).map { it.second }.toSet()
+                            }) { Text(if (zh) "全选" else "All", style = MaterialTheme.typography.labelMedium) }
+                            TextButton(
+                                enabled = selectedApps.isNotEmpty(),
+                                onClick = {
+                                    pkgFilter = selectedApps.joinToString(",")
+                                    appSelectMode = false
+                                    tab = "log"
+                                    filterExpanded = true
+                                },
+                            ) { Text(if (zh) "过滤所选" else "Filter", style = MaterialTheme.typography.labelMedium) }
+                            TextButton(onClick = {
+                                selectedApps = emptySet()
+                                appSelectMode = false
+                            }) { Text(if (zh) "取消" else "Cancel", style = MaterialTheme.typography.labelMedium) }
+                        }
+                    }
                     filtered.take(100).forEach { (label, pkg) ->
+                        val selected = pkg in selectedApps
                         Row(
                                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
-                                    .clickable {
-                                        pkgFilter = pkg
-                                        tab = "log"
-                                        filterExpanded = true
-                                    }
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                        else androidx.compose.ui.graphics.Color.Transparent,
+                                    )
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (appSelectMode) {
+                                                // 选中模式：点选切换；再点选中项取消
+                                                selectedApps = if (selected) selectedApps - pkg else selectedApps + pkg
+                                                if (selectedApps.isEmpty()) appSelectMode = false
+                                            } else {
+                                                pkgFilter = pkg
+                                                tab = "log"
+                                                filterExpanded = true
+                                            }
+                                        },
+                                        onLongClick = {
+                                            // 长按进入多选
+                                            appSelectMode = true
+                                            selectedApps = setOf(pkg)
+                                        },
+                                    )
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                if (appSelectMode) {
+                                    Icon(
+                                        if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                        contentDescription = null,
+                                        modifier = Modifier.padding(end = 8.dp).size(18.dp),
+                                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 Column(Modifier.weight(1f)) {
                                     Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(pkg, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                                 Text(
-                                    if (zh) "过滤" else "Filter",
+                                    if (appSelectMode) (if (selected) "已选" else "") else (if (zh) "过滤" else "Filter"),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                     }

@@ -183,11 +183,23 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      - name: 生成 SHA256SUMS 校验文件 (Generate SHA256SUMS)
+        run: |
+          cd apk-output
+          echo "=== 计算 SHA-256 ==="
+          sha256sum *.apk | tee SHA256SUMS
+          echo ""
+          echo "=== SHA256SUMS 内容 ==="
+          cat SHA256SUMS
+          echo "sha256sums=$(ls SHA256SUMS)" >> $GITHUB_OUTPUT
+
       - name: 创建 GitHub Release (发布版本)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          files: apk-output/*.apk
+          files: |
+            apk-output/*.apk
+            apk-output/SHA256SUMS
           generate_release_notes: true
           draft: false
           prerelease: false

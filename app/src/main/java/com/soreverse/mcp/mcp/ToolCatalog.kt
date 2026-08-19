@@ -1078,6 +1078,8 @@ object ToolCatalog {
         *PatchTemplateTool.ALL.toTypedArray(),
         // 塔菲逆核: APK 加固检测(只读, 逆向第一步判断壳)
         *ShellDetectorTool.ALL.toTypedArray(),
+        // 塔菲逆核: APK 签名校验绕过(去签名校验, 对标 kstools/ApkSignatureKiller)
+        *ApkSignKillTool.ALL.toTypedArray(),
         // 塔菲逆核: 原生库自检(预防类SOMCP丢库导致大面积失效)
         *NativeSelfTestTool.ALL.toTypedArray(),
         // 塔菲逆核: 高级DEX分析(指令级交叉引用/类大纲/字节码/deodex/增量重编)

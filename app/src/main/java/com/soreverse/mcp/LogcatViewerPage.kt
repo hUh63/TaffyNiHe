@@ -354,11 +354,21 @@ internal fun LogcatViewerPage(t: UiText) {
     fun startPolling() {
         scope.launch(Dispatchers.IO) {
             var failCount = 0
+            var lastLine: String? = null // 上次轮询最后一行原始文本，用于去重（logcat -d 每次返回完整缓冲区）
             while (running && pollMode) {
                 val r = PermissionManager.exec("logcat -d -t 500 2>&1", timeoutSec = 10)
                 if (r.code == 0 && r.stdout.isNotBlank()) {
+                    val lines = r.stdout.lines()
                     synchronized(logs) {
-                        r.stdout.lines().forEach { line ->
+                        // 去重：logcat -d 每次 dump 完整缓冲区，只添加上次最后一行之后的新行
+                        var startIdx = 0
+                        if (lastLine != null) {
+                            val idx = lines.indexOfLast { it == lastLine }
+                            startIdx = if (idx >= 0) idx + 1
+                            else if (lines.size > 50) lines.size / 2 // 找不到标记(缓冲区滚动)，从后半开始减少重复
+                            else 0
+                        }
+                        for (line in lines.subList(startIdx, lines.size)) {
                             parseLogLine(line)?.let { parsed ->
                                 logs.add(parsed)
                                 while (logs.size > 2000) { logs.removeAt(0); dropped++ }
@@ -368,6 +378,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                 }
                             }
                         }
+                        if (lines.isNotEmpty()) lastLine = lines.last()
                     }
                     failCount = 0
                 } else {
@@ -479,7 +490,8 @@ internal fun LogcatViewerPage(t: UiText) {
             } catch (e: java.io.IOException) {
                 // destroy()/stop() 会关闭流导致 readLine 抛 InterruptedIOException，
                 // 这是正常停止路径，静默忽略；仅非正常退出才记录
-                if (running) {
+                // 轮询降级时 destroy 实时流也会触发此异常，此时 pollMode 已 true，同样静默
+                if (running && !pollMode) {
                     com.soreverse.mcp.core.AppLog.e("Logcat reader ended: ${e.message}")
                     // 非正常退出时显示原因到界面（如 UserService 通道流中断）
                     if (channelError.isBlank()) {
@@ -621,10 +633,14 @@ internal fun LogcatViewerPage(t: UiText) {
             val test = withContext(Dispatchers.IO) {
                 PermissionManager.exec("logcat -d -t 5 2>&1", timeoutSec = 10)
             }
-            channelError = if (test.code == 0 && test.stdout.isNotBlank()) {
-                "通道可读（测试返回 ${test.stdout.lines().size} 行）但实时流无输出——读取流异常，可切换采集模式后重试"
+            if (test.code == 0 && test.stdout.isNotBlank()) {
+                // 通道可读但实时流无输出 → 主动降级轮询（readLine 可能阻塞不返回 null，不能等它自然结束）
+                channelInfo = if (zh) "轮询模式（实时流异常，已自动降级）" else "Polling mode (stream failed, auto-fallback)"
+                runCatching { process?.destroy() }
+                pollMode = true
+                startPolling()
             } else {
-                "通道测试失败: ${test.stderr.ifBlank { test.stdout }.take(200)}（可点「访问所有设备日志」授权 READ_LOGS 或改用 Root）"
+                channelError = "通道测试失败: ${test.stderr.ifBlank { test.stdout }.take(200)}（可点「访问所有设备日志」授权 READ_LOGS 或改用 Root）"
             }
         }
     }

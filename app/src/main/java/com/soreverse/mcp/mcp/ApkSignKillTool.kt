@@ -26,6 +26,9 @@ object ApkSignKillTool {
     /** 签名校验检测模式: 名称 -> 正则(在方法体文本中匹配) */
     private data class Pattern(val name: String, val desc: String, val regex: Regex)
 
+    /** 解析出的单个 .method 块: 方法签名行、方法体文本、起始行号 */
+    private data class MethodBlock(val sigLine: String, val body: String, val startLine: Int)
+
     private val patterns = listOf(
         Pattern("signatures_field", "读取 PackageInfo.signatures 字段", Regex("""Landroid/content/pm/PackageInfo;->signatures:""")),
         Pattern("signing_info_field", "读取 PackageInfo.signingInfo 字段", Regex("""Landroid/content/pm/PackageInfo;->signingInfo:""")),
@@ -84,8 +87,6 @@ object ApkSignKillTool {
                 .toList()
 
         /** 解析单个 smali 文件里所有 .method 块, 返回 (方法签名行, 方法体文本, 起始行号) */
-        private data class MethodBlock(val sigLine: String, val body: String, val startLine: Int)
-
         private fun parseMethods(text: String): List<MethodBlock> {
             val lines = text.split("\n")
             val result = mutableListOf<MethodBlock>()

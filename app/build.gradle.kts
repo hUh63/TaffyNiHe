@@ -22,8 +22,8 @@ android {
         applicationId = "com.taffynihe"
         minSdk = 26
         targetSdk = 36
-        versionCode = 59
-        versionName = "1.0.59"
+        versionCode = 60
+        versionName = "1.0.60"
 
         // 逆核: 禁用 CMake native 编译, 完全使用从原版 SOMCP 提取的预编译 so(在 jniLibs/)。
         // 原因: 我们没有 rizin/lief 的交叉编译产物, CMake 只会产出 stub 桩覆盖真 so。
@@ -78,7 +78,9 @@ android {
             isShrinkResources = true
             isDebuggable = false
             isJniDebuggable = false
-            buildConfigField("String", "EXPECTED_SIGNER_SHA256", "\"3CC2D37005933116AC2C91735BC9C72A48C2319AF58EA224AD84EF850F7E1ABB\"")
+            // 签名摘要已从 BuildConfig 明文迁移到 IntegrityGuard 的 XOR 混淆字节数组
+            // (移除 dex 明文存储, 防止字符串直接提取; 见 IntegrityGuard.kt OBFUSCATED_SIGNER_DIGEST)
+            buildConfigField("String", "EXPECTED_SIGNER_SHA256", "\"\"")
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -161,7 +163,7 @@ dependencies {
     implementation("org.apache.commons:commons-collections4:4.5.0")
     implementation("commons-io:commons-io:2.21.0")
     implementation("com.alibaba:fastjson:1.2.83")
-    implementation("com.lambdapioneer.argon2kt:argon2kt:1.5.0")
+    implementation("com.lambdapioneer.argon2kt:argon2kt:1.6.0")
 
     // 逆核: 内置逆向静态分析工具(纯 Java, 作为 MCP 工具聚合)。
     // jadx: dex→java 反编译

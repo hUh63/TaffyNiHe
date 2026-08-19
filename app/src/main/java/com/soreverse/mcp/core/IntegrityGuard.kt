@@ -6,7 +6,6 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Debug
-import com.soreverse.mcp.BuildConfig
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -22,6 +21,27 @@ object IntegrityGuard {
         val threats: List<String> = emptyList(),
     )
 
+    // ── 签名者摘要混淆存储 ──
+    // 上游 SOMCP 1.0.17 加固项: 移除 BuildConfig 明文, 防止 dex 字符串直接提取签名摘要。
+    // 塔菲逆核禁用 CMake native 编译(用预编译 so), 故用 XOR 混淆字节数组替代 native 混淆,
+    // 达到同等效果 —— APK 内不再有明文的 64 位 hex 签名摘要字符串。
+    // 原始摘要(仅供参考, 勿回填): 3CC2D37005933116AC2C91735BC9C72A48C2319AF58EA224AD84EF850F7E1ABB
+    private val OBFUSCATION_KEY: Byte = 0x5A
+    private val OBFUSCATED_SIGNER_DIGEST = byteArrayOf(
+        0x66, 0x98.toByte(), 0x89.toByte(), 0x2A, 0x5F, 0xC9.toByte(), 0x6B, 0x4C,
+        0xF6.toByte(), 0x76, 0xCB.toByte(), 0x29, 0x01, 0x93.toByte(), 0x9D.toByte(), 0x70,
+        0x12, 0x98.toByte(), 0x6B, 0xC0.toByte(), 0xAF.toByte(), 0xD4.toByte(), 0xF8.toByte(), 0x7E,
+        0xF7.toByte(), 0xDE.toByte(), 0xB5.toByte(), 0xDF.toByte(), 0x55, 0x24, 0x40, 0xE1.toByte(),
+    )
+
+    private fun expectedSignerDigest(): String {
+        val bytes = ByteArray(OBFUSCATED_SIGNER_DIGEST.size)
+        for (i in bytes.indices) {
+            bytes[i] = (OBFUSCATED_SIGNER_DIGEST[i].toInt() xor OBFUSCATION_KEY.toInt()).toByte()
+        }
+        return bytes.joinToString("") { "%02X".format(it) }
+    }
+
     @Volatile private var cached: Pair<Long, Result>? = null
 
     fun verify(context: Context): Result {
@@ -29,7 +49,7 @@ object IntegrityGuard {
             if (System.currentTimeMillis() - time < 2_000L) return result
         }
         val result = runCatching {
-            val expected = BuildConfig.EXPECTED_SIGNER_SHA256.normalizeDigest()
+            val expected = expectedSignerDigest()
             val actual = signingCertificateDigests(context).map { it.normalizeDigest() }
             if (expected.isBlank()) {
                 Result(true, "no release signer pin configured", expected, actual)
@@ -43,7 +63,7 @@ object IntegrityGuard {
                 )
             }
         }.getOrElse {
-            Result(false, it.message ?: it.javaClass.simpleName, BuildConfig.EXPECTED_SIGNER_SHA256.normalizeDigest(), emptyList())
+            Result(false, it.message ?: it.javaClass.simpleName, expectedSignerDigest(), emptyList())
         }
         cached = System.currentTimeMillis() to result
         return result

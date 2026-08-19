@@ -45,6 +45,22 @@ object ApkSignKillTool {
     private val getPackageInfoRe = Regex("""Landroid/content/pm/PackageManager;->getPackageInfo\(""")
     private val signFlagsRe = Regex("""0x40\b|0x8000000\b|0x80000000\b""")
 
+    /** native .so 签名校验特征(ASCII 子串 -> 说明, 扫描 lib 目录下 so 二进制) */
+    private val nativePatterns = listOf(
+        "Landroid/content/pm/PackageManager;" to "JNI PackageManager 类型描述符",
+        "Landroid/content/pm/PackageInfo;" to "JNI PackageInfo 类型描述符",
+        "Landroid/content/pm/Signature;" to "JNI Signature 类型描述符",
+        "getPackageInfo" to "JNI getPackageInfo 调用",
+        "getSignatures" to "getSignatures 调用",
+        "getSigningCertificates" to "getSigningCertificates 调用",
+        "getApkContentsSigners" to "getApkContentsSigners 调用",
+        "signingInfo" to "signingInfo 字段访问",
+        "checkSignature" to "checkSignature 校验函数",
+        "verifySignature" to "verifySignature 校验函数",
+        "isSignatureValid" to "isSignatureValid 校验函数",
+        "get_signature" to "get_signature 校验函数",
+    )
+
     val kill: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "taffy_apk_sign_kill",
@@ -174,11 +190,39 @@ object ApkSignKillTool {
                     }
                 }
             }
+            // native .so 签名校验特征检测(只检测不绕过: native 校验需动态 hook 或手动 patch)
+            val nativeHits = JSONArray()
+            for (so in soFiles(root)) {
+                val hits = scanNativeSo(so)
+                if (hits.isNotEmpty()) {
+                    nativeHits.put(JSONObject()
+                        .put("file", so.relativeTo(root).path)
+                        .put("size", so.length())
+                        .put("patterns", JSONArray(hits)))
+                }
+            }
             return ok(JSONObject()
                 .put("action", "detect")
                 .put("found", methodCount)
                 .put("methods", out)
-                .put("hint", "确认上述方法为签名校验后, 用 action=patch 绕过; 回编+重签名后即可绕过重打包签名校验。误报可用 action=patch 的 file 参数只 patch 指定文件。"))
+                .put("nativeFound", nativeHits.length())
+                .put("nativeHits", nativeHits)
+                .put("hint", "smali 层校验方法可用 action=patch 静态绕过; native 层校验(见 nativeHits)需用 frida hook(taffy_frida_control)或手动 patch .so。回编+重签名后即可绕过重打包签名校验。"))
+        }
+
+        /** 找 decode 目录下的 native .so(通常 lib/<abi>/*.so 或顶层 *.so) */
+        private fun soFiles(root: File): List<File> =
+            root.walkTopDown()
+                .filter { it.isFile && it.extension == "so" }
+                .take(200)
+                .toList()
+
+        /** 在 .so 二进制里搜索签名校验 ASCII 特征 */
+        private fun scanNativeSo(so: File): List<String> {
+            val bytes = runCatching { so.readBytes() }.getOrNull() ?: return emptyList()
+            if (bytes.isEmpty()) return emptyList()
+            val ascii = String(bytes, Charsets.ISO_8859_1)
+            return nativePatterns.filter { (needle, _) -> ascii.contains(needle) }.map { (needle, desc) -> "$needle ($desc)" }
         }
 
         private fun patch(root: File, args: JSONObject): JSONObject {

@@ -210,7 +210,7 @@ object ApkSignKillTool {
                 .put("hint", "smali 层校验方法可用 action=patch 静态绕过; native 层校验(见 nativeHits)需用 frida hook(taffy_frida_control)或手动 patch .so。回编+重签名后即可绕过重打包签名校验。"))
         }
 
-        /** 找 decode 目录下的 native .so(通常 lib/<abi>/*.so 或顶层 *.so) */
+        /** 找 decode 目录下的 native .so(通常 lib 各 ABI 目录或顶层) */
         private fun soFiles(root: File): List<File> =
             root.walkTopDown()
                 .filter { it.isFile && it.extension == "so" }

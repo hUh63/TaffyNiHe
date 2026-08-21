@@ -76,6 +76,8 @@ object NativeSelfTestTool {
                     allSo.put(JSONObject().put("name", it.name).put("sizeBytes", it.length()))
                 }
                 val rizinAvailable = runCatching { NativeEngine.active().available() }.getOrDefault(false)
+                // rizin 0.10.0 深度自检(新 so 导出; 失败则忽略, 不影响整体结论)
+                val rzSelf = runCatching { com.soreverse.mcp.nativecore.RizinNativeEngine.rzSelfTest() }.getOrNull() ?: ""
                 ok(JSONObject()
                     .put("tool", "taffy_native_self_test")
                     .put("nativeLibraryDir", nativeDir.absolutePath)
@@ -83,6 +85,7 @@ object NativeSelfTestTool {
                     .put("allNativeSoCount", allSo.length())
                     .put("allNativeSo", allSo)
                     .put("rizinActiveAvailable", rizinAvailable)
+                    .put("rizinSelfTest", if (rzSelf.isBlank()) JSONObject.NULL else runCatching { JSONObject(rzSelf) }.getOrDefault(rzSelf))
                     .put("healthy", broken == 0 && missing == 0)
                     .put("hint", if (broken + missing > 0) "存在缺失或加载失败的原生库, 会导致相关功能(反汇编/模拟/隧道)失效。" else "关键原生库齐全且可加载, 反汇编/模拟/隧道后端正常。"))
             }.getOrElse { e ->

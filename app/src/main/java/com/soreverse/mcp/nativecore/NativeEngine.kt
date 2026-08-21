@@ -128,6 +128,8 @@ object RizinNativeEngine : NativeEngine {
     }
 
     // JNI surface implemented in cpp/rizin_core.cpp.
+    // 与上游 SOMCP v1.0.18 的 RizinNativeEngine 声明逐参数一致(2026-08 已验证)。
+    external fun rzSelfTest(): String // rizin 内部深度自检(0.10.0 新增导出)
     external fun rzDisassemble(bytes: ByteArray, arch: String, address: Long, thumb: Boolean, limit: Int): String
     external fun rzAssemble(asm: String, arch: String, address: Long, thumb: Boolean): ByteArray
     external fun rzXrefs(bytes: ByteArray, arch: String, atVa: Long, direction: String): String

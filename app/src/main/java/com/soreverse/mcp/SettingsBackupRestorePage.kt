@@ -242,7 +242,11 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
         verticalArrangement = Arrangement.spacedBy(LocalUiMetrics.current.sectionGap),
     ) {
         GlassGroup(title = t.backupLocal) {
-            ToggleRow(t.backupIncludeSecrets, includeSecrets) { includeSecrets = it }
+            ToggleRow(t.backupIncludeSecrets, includeSecrets) { enabled ->
+                includeSecrets = enabled
+                // 上游 1.0.18 借鉴: 包含敏感信息时强制启用加密
+                if (enabled) encryptEnabled = true
+            }
             GroupDivider()
             Text(
                 t.backupSecretsMasked,
@@ -309,11 +313,19 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
                 Modifier.fillMaxWidth().padding(14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                val exportEnabled = !encryptEnabled || (encryptPassword.isNotBlank() && encryptPassword == encryptConfirm)
+                // 上游 1.0.18 借鉴: 备份包含敏感信息(includeSecrets)时强制启用密码加密
+                val secretsNeedEncryption = includeSecrets
+                val passwordValid = encryptPassword.isNotBlank() && encryptPassword == encryptConfirm
+                val exportEnabled = (!encryptEnabled && !secretsNeedEncryption) ||
+                    (encryptEnabled && passwordValid) ||
+                    (secretsNeedEncryption && encryptEnabled && passwordValid)
                 PrimaryActionButton(
                     text = t.backupExport,
                     onClick = {
-                        if (encryptEnabled && encryptPassword.isBlank()) {
+                        if (secretsNeedEncryption && !encryptEnabled) {
+                            resultOk = false
+                            resultMessage = "备份包含敏感信息(令牌/密钥)，必须启用密码加密后才能导出"
+                        } else if (secretsNeedEncryption && encryptPassword.isBlank()) {
                             resultOk = false
                             resultMessage = t.backupPasswordRequired
                         } else if (encryptEnabled && encryptPassword != encryptConfirm) {

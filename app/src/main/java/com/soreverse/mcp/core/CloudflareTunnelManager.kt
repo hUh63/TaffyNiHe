@@ -760,13 +760,21 @@ class CloudflareTunnelManager(private val context: Context, private val settings
     fun snapshotJson(): JSONObject {
         val s = _status.get()
         val stats = tunnelStats()
+        // 上游 1.0.18 借鉴: 二进制状态独立探测（不依赖 MCP/隧道是否启动）
+        val binFile = binary()
+        val binaryState = when {
+            binFile == null -> "unknown"
+            binFile.exists() && binFile.length() > 0 -> "ready"
+            else -> "not_found"
+        }
         return JSONObject().apply {
             put("state", s.state.name)
             put("mode", s.mode.name)
             put("publicUrl", s.publicUrl ?: JSONObject.NULL)
             put("targetPort", s.targetPort)
             put("message", s.message)
-            put("binaryAvailable", binary()?.exists() == true)
+            put("binaryAvailable", binFile?.exists() == true)
+            put("binaryState", binaryState)
             put("history", settings.tunnelHistoryUrls)
             put("totalRunningMs", stats.optLong("totalRunningMs"))
             put("currentRunningMs", stats.optLong("currentRunningMs"))

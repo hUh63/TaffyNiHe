@@ -63,6 +63,15 @@ internal class BlutterCoordinator(private val context: Context, private val stor
         if (runner != null) {
             return runCatching {
                 val libraries = resolveLibraries(args, workDirectory)
+                // 上游 1.0.18 借鉴: Flutter 分析缓存 —— 相同输入(libapp/libflutter/runner/options)直接复用上次结果
+                val cacheKey = blutterCacheKey(libraries.libapp, libraries.libflutter, runner.sha256, args.toString())
+                store.lookup(cacheKey)?.let { cached ->
+                    store.update(jobId, "succeeded", "cache_lookup", resultKey = cacheKey)
+                    return@runCatching ok(JSONObject()
+                        .put("jobId", jobId).put("status", "succeeded").put("backend", "cache")
+                        .put("cacheHit", true).put("runner", runner.toJson())
+                        .put("message", "Reused identical previous analysis result (cache hit)"))
+                }
                 embedded.start(jobId, runner, libraries, args)
                 ok(JSONObject().put("jobId", jobId).put("status", "running").put("backend", "embedded").put("runner", runner.toJson()))
             }.getOrElse { error ->
@@ -206,4 +215,14 @@ internal class BlutterCoordinator(private val context: Context, private val stor
         cp in 0xD800..0xDFFF -> false // 孤立代理(需配对, 不单独当作字符串内容)
         else -> false
     }
+}
+
+/** 上游 1.0.18 借鉴: Flutter 分析缓存键 —— libapp+libflutter+runner+options 的 SHA-256 */
+private fun blutterCacheKey(libapp: ByteArray, libflutter: ByteArray, runnerSha256: String, options: String): String {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    digest.update(libapp)
+    digest.update(libflutter)
+    digest.update(runnerSha256.toByteArray())
+    digest.update(options.toByteArray())
+    return digest.digest().joinToString("") { "%02x".format(it) }
 }

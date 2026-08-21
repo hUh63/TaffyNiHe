@@ -124,6 +124,10 @@ internal fun EngineRuntime.open(path: String, temporary: Boolean): JSONObject = 
 internal fun EngineRuntime.analyzeApk(path: String, entryLimit: Int = 500): JSONObject = guarded {
     if (path.isBlank()) return@guarded err("INVALID_ARGUMENT", "APK path is required", "path", path)
     val local = File(path)
+    // 上游 1.0.18 借鉴: 禁止分析自身 Artifact（签名匹配 → 拦截，防误操作/自我分析）
+    if (local.isFile && com.soreverse.mcp.nativecore.SignatureVerifier.isSelfSignedApk(local.absolutePath)) {
+        return@guarded err("SELF_ANALYSIS_FORBIDDEN", "塔菲逆核不能分析自身 APK（签名匹配），请选择其他 APK", "path", path)
+    }
     if (local.isFile && local.length() > ApkAnalyzer.MAX_INPUT_BYTES) return@guarded err("APK_LIMIT_EXCEEDED", "APK exceeds ${ApkAnalyzer.MAX_INPUT_BYTES / 1024 / 1024} MiB input limit", "path", path)
     val bytes = try {
         if (local.isFile) local.readBytes() else (workDir ?: return@guarded err("WORK_DIRECTORY_NOT_SELECTED", "APK path is not a local file and no work directory is selected", "path", path)).readFile(path, ApkAnalyzer.MAX_INPUT_BYTES)
@@ -146,9 +150,11 @@ internal fun EngineRuntime.openUrl(url: String, outputName: String = "", tempora
     val conn = (parsed.openConnection() as HttpURLConnection).apply { connectTimeout = timeout.coerceAtMost(30_000); readTimeout = timeout; instanceFollowRedirects = true; requestMethod = "GET" }
     val status = conn.responseCode
     if (status !in 200..299) return@guarded err("DOWNLOAD_FAILED", "HTTP download failed with status $status", "url", url)
-    val maxBytes = 256L * 1024L * 1024L
-    if (conn.contentLengthLong > maxBytes) return@guarded err("DOWNLOAD_TOO_LARGE", "SO download exceeds 256 MiB limit", "contentLength", conn.contentLengthLong)
-    val bytes = conn.inputStream.use { input -> java.io.ByteArrayOutputStream().apply { val buf = ByteArray(64 * 1024); var total = 0L; while (true) { val n = input.read(buf); if (n < 0) break; total += n; if (total > maxBytes) return@guarded err("DOWNLOAD_TOO_LARGE", "SO download exceeds 256 MiB limit", "url", url); write(buf, 0, n) } }.toByteArray() }
+    // 上游 1.0.18 借鉴: 下载上限按进程堆内存与存储空间动态调整（而非固定 256MiB）
+    val maxBytes = soDownloadMaxBytes()
+    val maxMiB = maxBytes / (1024L * 1024L)
+    if (conn.contentLengthLong > maxBytes) return@guarded err("DOWNLOAD_TOO_LARGE", "SO download exceeds $maxMiB MiB dynamic limit (heap/storage)", "contentLength", conn.contentLengthLong)
+    val bytes = conn.inputStream.use { input -> java.io.ByteArrayOutputStream().apply { val buf = ByteArray(64 * 1024); var total = 0L; while (true) { val n = input.read(buf); if (n < 0) break; total += n; if (total > maxBytes) return@guarded err("DOWNLOAD_TOO_LARGE", "SO download exceeds $maxMiB MiB dynamic limit (heap/storage)", "url", url); write(buf, 0, n) } }.toByteArray() }
     if (bytes.size < 4 || bytes[0] != 0x7f.toByte() || bytes[1] != 'E'.code.toByte() || bytes[2] != 'L'.code.toByte() || bytes[3] != 'F'.code.toByte()) return@guarded err("NOT_ELF_SO", "Downloaded file is not an ELF/SO file", "url", url)
     val rawName = outputName.ifBlank { parsed.path.substringAfterLast('/').substringBefore('?').ifBlank { "downloaded.so" } }
     val safeName = rawName.substringAfterLast('/').substringAfterLast('\\').let { if (it.endsWith(".so", ignoreCase = true)) it else "$it.so" }
@@ -192,6 +198,10 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     if (archiveEntry.isNotBlank() && !archiveEntry.endsWith(".so", ignoreCase = true)) error("NOT_ELF_INPUT: $path is an APK/JAR entry, not an ELF SO file. Use apk_analyze or an APK MCP tool.")
     val keyFallback = "local:$path"
     val src = findSource(path) ?: resolveLocalSoSource(path) ?: error("SO path not found: $path")
+    // 上游 1.0.18 借鉴: 禁止分析自身 Artifact（包名/签名匹配 → 拦截，防误操作/自我分析）
+    if (src.source == "apk" && src.apkPath != null && com.soreverse.mcp.nativecore.SignatureVerifier.isSelfSignedApk(src.apkPath)) {
+        error("SELF_ANALYSIS_FORBIDDEN: 塔菲逆核不能分析自身 APK 内嵌的 SO ${src.apkPath}")
+    }
     val key = sourceKey(src).ifBlank { keyFallback }
     workspaceBySourceKey[key]?.let { existingId -> workspaces[existingId]?.let { return it } }
     val original = when (src.source) { "build_output", "local_file" -> runCatching { File(src.path).readBytes() }.getOrElse { error("SO path not found: $path") }; else -> (workDir ?: error("No work directory selected")).readSource(src) }
@@ -291,3 +301,22 @@ internal fun EngineRuntime.sourceSummary(dir: WorkDirectory, src: SoSource): Sou
 }
 
 internal fun EngineRuntime.sourceKey(src: SoSource): String = "${src.path}|${src.size}|${src.modified}"
+
+/**
+ * 上游 1.0.18 借鉴: 单个 SO 下载的动态上限，由进程最大堆内存与工作目录剩余空间推导。
+ * 下载的 ELF 随后整体读入内存（另有 LIEF/xanso 解析副本），大内存设备上限随之放大，
+ * 低内存设备优雅降级，避免 OutOfMemoryError 崩溃。
+ */
+internal fun EngineRuntime.soDownloadMaxBytes(): Long {
+    val heapMaxMiB = Runtime.getRuntime().maxMemory() / (1024L * 1024L)
+    // 解析约需一半堆余量；用 ~50% 最大堆做安全上限
+    val heapCapMiB = (heapMaxMiB * 5) / 10
+    val storageFreeMiB = workDir?.let { wd ->
+        runCatching {
+            val free = android.os.StatFs(wd.rootAbsolutePath()).availableBytes / (1024L * 1024L)
+            (free - 16L).coerceAtLeast(0L) // 磁盘保留余量
+        }.getOrDefault(heapCapMiB)
+    } ?: heapCapMiB
+    val capMiB = minOf(heapCapMiB, storageFreeMiB).coerceIn(64L, 2048L)
+    return capMiB * 1024L * 1024L
+}

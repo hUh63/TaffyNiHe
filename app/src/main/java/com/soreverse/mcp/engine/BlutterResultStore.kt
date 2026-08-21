@@ -39,6 +39,15 @@ internal class BlutterResultStore(context: Context) {
     @Synchronized
     fun get(jobId: String): JSONObject? = readState(jobId)
 
+    /** 上游 1.0.18 借鉴: 按内容指纹查找缓存结果（results/<key>/result.json） */
+    @Synchronized
+    fun lookup(key: String): JSONObject? {
+        if (!key.matches(Regex("^[a-f0-9]{32,128}$"))) return null
+        val file = File(File(results, key), "result.json")
+        if (!file.isFile) return null
+        return runCatching { JSONObject(file.readText()) }.getOrNull()
+    }
+
     @Synchronized
     fun commit(jobId: String, result: JSONObject, key: String): JSONObject {
         requireValidJobId(jobId)

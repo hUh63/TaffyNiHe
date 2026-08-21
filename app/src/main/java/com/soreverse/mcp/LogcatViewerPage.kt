@@ -1553,11 +1553,11 @@ internal fun LogcatViewerPage(t: UiText) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         if (zh)
-                            "READ_LOGS 是系统保护权限，系统不会弹出授权窗口，需要通过 adb 或特权通道授予。\n\n当前状态：${
+                            "READ_LOGS 是系统保护权限，系统不会弹出授权窗口，需要通过 adb 或特权通道授予。\n\n⚠️ 授予后应用会自动重启（Android 系统保护权限的固有行为，非崩溃），重启后即可读取全系统日志。\n\n当前状态：${
                                 if (readLogsGranted) "已授予 ✓" else "未授予"
                             }"
                         else
-                            "READ_LOGS is a protected permission - no runtime dialog. Grant via adb or a privileged channel.\n\nStatus: ${
+                            "READ_LOGS is a protected permission - no runtime dialog. Grant via adb or a privileged channel.\n\n⚠️ The app will restart after granting (Android requires a process restart for protected permissions - this is normal, not a crash). System-wide logs become readable after restart.\n\nStatus: ${
                                 if (readLogsGranted) "Granted ✓" else "Not granted"
                             }",
                         style = MaterialTheme.typography.bodySmall,

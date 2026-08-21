@@ -41,6 +41,21 @@ jobs:
           echo ""
           echo "=== libs 内容 ==="
           find app/libs -name '*.jar' -exec ls -lh {} \; 2>/dev/null || echo "警告: libs 目录为空或不存在"
+          echo "=== jar 完整性校验（排查 checkout 损坏）==="
+          sha256sum app/libs/*.jar 2>/dev/null || true
+          python3 - << 'PYEOF'
+import zipfile, glob
+ok = True
+for f in sorted(glob.glob('app/libs/*.jar')):
+    try:
+        z = zipfile.ZipFile(f)
+        print(f'{f}: OK ({len(z.namelist())} entries)')
+    except Exception as e:
+        ok = False
+        print(f'{f}: CORRUPT ({e})')
+import sys
+sys.exit(0 if ok else 1)
+PYEOF
 
       - name: 配置 JDK 17 (Setup JDK)
         uses: actions/setup-java@v5

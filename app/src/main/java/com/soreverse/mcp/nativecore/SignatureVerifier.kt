@@ -9,7 +9,7 @@ import java.security.cert.CertificateFactory
  * Native APK signature verifier（上游 SOMCP 1.0.18 移植，防御 SigKill/TweakMe/ApkSignatureKiller）。
  *
  * 与 [com.soreverse.mcp.core.IntegrityGuard]（走 Java PackageManager API）不同，
- * 本类在 native (C++) 层直接读 APK 文件系统里的 META-INF/*.RSA/.DSA/.EC PKCS7 签名，
+ * 本类在 native (C++) 层直接读 APK 文件系统里的 META-INF 目录下 .RSA/.DSA/.EC PKCS7 签名，
  * 绕过 Binder 代理 —— 无法被 kstools / ApkSignatureKiller / MT 的 Binder-hook 技术拦截。
  *
  * 依赖: librz_native.so（新全静态 so 内置 nativeGetExpectedSignerDigest / nativeReadApkCertificate）。

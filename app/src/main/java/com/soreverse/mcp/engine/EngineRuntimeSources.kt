@@ -311,12 +311,11 @@ internal fun EngineRuntime.soDownloadMaxBytes(): Long {
     val heapMaxMiB = Runtime.getRuntime().maxMemory() / (1024L * 1024L)
     // 解析约需一半堆余量；用 ~50% 最大堆做安全上限
     val heapCapMiB = (heapMaxMiB * 5) / 10
-    val storageFreeMiB = workDir?.let { wd ->
-        runCatching {
-            val free = android.os.StatFs(wd.rootAbsolutePath()).availableBytes / (1024L * 1024L)
-            (free - 16L).coerceAtLeast(0L) // 磁盘保留余量
-        }.getOrDefault(heapCapMiB)
-    } ?: heapCapMiB
+    // 应用私有目录所在存储的剩余空间（SAF 工作目录无路径，用 filesDir 所在分区估算）
+    val storageFreeMiB = runCatching {
+        val free = android.os.StatFs(context.filesDir.absolutePath).availableBytes / (1024L * 1024L)
+        (free - 16L).coerceAtLeast(0L) // 磁盘保留余量
+    }.getOrDefault(heapCapMiB)
     val capMiB = minOf(heapCapMiB, storageFreeMiB).coerceIn(64L, 2048L)
     return capMiB * 1024L * 1024L
 }

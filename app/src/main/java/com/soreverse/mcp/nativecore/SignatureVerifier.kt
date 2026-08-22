@@ -2,6 +2,7 @@ package com.soreverse.mcp.nativecore
 
 import android.content.Context
 import com.soreverse.mcp.core.AppLog
+import java.io.File
 import java.security.MessageDigest
 import java.security.cert.CertificateFactory
 

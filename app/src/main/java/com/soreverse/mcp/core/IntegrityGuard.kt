@@ -19,6 +19,7 @@ object IntegrityGuard {
         val expected: String,
         val actual: List<String>,
         val threats: List<String> = emptyList(),
+        val integrityCode: Int = 0, // 上游 1.0.19: APK 完整性位标志（0=完整）
     )
 
     // ── 签名者摘要混淆存储 ──
@@ -51,8 +52,10 @@ object IntegrityGuard {
         val result = runCatching {
             val expected = expectedSignerDigest()
             val actual = signingCertificateDigests(context).map { it.normalizeDigest() }
+            // 上游 1.0.19 借鉴: APK 完整性校验（EOCD/central-dir 边界 + 关键条目 + classes.dex CRC）
+            val integrityCode = com.soreverse.mcp.nativecore.SignatureVerifier.verifyApkIntegrityKotlin(context)
             if (expected.isBlank()) {
-                Result(true, "no release signer pin configured", expected, actual)
+                Result(true, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
             } else {
                 val signerTrusted = actual.any { it == expected }
                 Result(
@@ -60,6 +63,7 @@ object IntegrityGuard {
                     reason = if (signerTrusted) "trusted release signer" else "application signature mismatch",
                     expected = expected,
                     actual = actual,
+                    integrityCode = integrityCode,
                 )
             }
         }.getOrElse {

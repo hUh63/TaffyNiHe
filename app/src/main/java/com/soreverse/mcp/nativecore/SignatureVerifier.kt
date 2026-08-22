@@ -107,4 +107,97 @@ object SignatureVerifier {
     }
 
     private fun normalizeSignerDigest(value: String): String = value.filter { it.isLetterOrDigit() }.uppercase()
+
+    // ── 上游 1.0.19 移植: APK 完整性校验（Kotlin 等价实现）──
+    // 上游用 cpp/signature_verify.cpp 的 nativeVerifyApkIntegrity（mmap + 64 位溢出防护 +
+    // 流式 CRC32）；我们的 1.0.17 预编译 so 无该导出，故用纯 Kotlin 实现等价检查项：
+    //   EOCD/central-directory 边界、关键条目存在性、classes.dex CRC（ZipFile 自动处理 deflate）。
+
+    object IntegrityCode {
+        const val OK = 0
+        const val READ_FAILED = 1 shl 0
+        const val EOCD_NOT_FOUND = 1 shl 1
+        const val CENTRAL_DIR_INVALID = 1 shl 2
+        const val MISSING_CLASSES = 1 shl 3
+        const val MISSING_MANIFEST = 1 shl 4
+        const val MISSING_ARSC = 1 shl 5
+        const val MISSING_SIGNATURE = 1 shl 6
+        const val MISSING_NATIVE = 1 shl 7
+        const val CRC_MISMATCH = 1 shl 8
+    }
+
+    /**
+     * 纯 Kotlin APK 完整性校验（等价上游 native verify_apk_integrity）。
+     * @return [IntegrityCode] 位标志；[IntegrityCode.OK] 表示完整。
+     */
+    fun verifyApkIntegrityKotlin(context: Context): Int {
+        val apkPath = try {
+            context.packageCodePath
+        } catch (e: Exception) {
+            AppLog.e("SignatureVerifier: cannot get packageCodePath", e)
+            return IntegrityCode.READ_FAILED
+        }
+        val file = File(apkPath)
+        if (!file.isFile || file.length() < 22L) return IntegrityCode.READ_FAILED
+        return try {
+            var code = 0
+            // 1) EOCD 存在性 + central-directory 边界（64 位安全计算，防 32 位溢出）
+            val eocdOk = java.io.RandomAccessFile(file, "r").use { raf ->
+                val len = raf.length()
+                val searchStart = if (len > 65557L) len - 65557L else 0L
+                var pos = len - 22L
+                var found = false
+                while (pos >= searchStart && pos >= 0) {
+                    raf.seek(pos)
+                    if (raf.readInt() == 0x06054b50.toInt()) { found = true; break }
+                    pos--
+                }
+                if (!found) {
+                    code = IntegrityCode.EOCD_NOT_FOUND
+                    false
+                } else {
+                    raf.seek(pos + 16)
+                    val cdSize = raf.readInt().toLong() and 0xFFFFFFFFL
+                    val cdOffset = raf.readInt().toLong() and 0xFFFFFFFFL
+                    if (cdOffset + cdSize > len) {
+                        code = IntegrityCode.CENTRAL_DIR_INVALID
+                        false
+                    } else true
+                }
+            }
+            // 2) 关键条目存在性 + classes.dex CRC
+            if (eocdOk) {
+                java.util.zip.ZipFile(file).use { zf ->
+                    val names = zf.entries().asSequence().map { it.name }.toSet()
+                    if ("classes.dex" !in names) code = code or IntegrityCode.MISSING_CLASSES
+                    if ("AndroidManifest.xml" !in names) code = code or IntegrityCode.MISSING_MANIFEST
+                    if ("resources.arsc" !in names) code = code or IntegrityCode.MISSING_ARSC
+                    if (!names.any { it.startsWith("META-INF/") && (it.endsWith(".RSA") || it.endsWith(".DSA") || it.endsWith(".EC")) }) {
+                        code = code or IntegrityCode.MISSING_SIGNATURE
+                    }
+                    if (!names.any { it.startsWith("lib/") && it.endsWith("librz_native.so") }) {
+                        code = code or IntegrityCode.MISSING_NATIVE
+                    }
+                    zf.getEntry("classes.dex")?.let { e ->
+                        val expected = e.crc
+                        val actual = zf.getInputStream(e).use { input ->
+                            val crc = java.util.zip.CRC32()
+                            val buf = ByteArray(64 * 1024)
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                crc.update(buf, 0, n)
+                            }
+                            crc.value
+                        }
+                        if (actual != expected) code = code or IntegrityCode.CRC_MISMATCH
+                    }
+                }
+            }
+            code
+        } catch (e: Exception) {
+            AppLog.e("SignatureVerifier: verifyApkIntegrityKotlin failed", e)
+            IntegrityCode.READ_FAILED
+        }
+    }
 }

@@ -39,6 +39,10 @@ object SignatureVerifier {
     // JNI: implemented in cpp/signature_verify.cpp (静态链接进 librz_native.so)
     private external fun nativeReadApkCertificate(apkPath: String): ByteArray?
     private external fun nativeGetExpectedSignerDigest(): String
+    // 上游 1.0.19 新增导出（1.0.19 重新发布后资产可用，已升级 so 获得）
+    private external fun nativeVerifyPackageName(packageName: String): Boolean
+    private external fun nativeVerifyApkIntegrity(apkPath: String): Int
+    private external fun nativeComputeSha256Hex(data: ByteArray): String?
 
     /** 直接从 APK 文件读取签名证书（绕过 PackageManager Binder）。@return DER X.509 或 null */
     fun readApkCertificate(apkPath: String): ByteArray? {
@@ -128,8 +132,61 @@ object SignatureVerifier {
     }
 
     /**
-     * 纯 Kotlin APK 完整性校验（等价上游 native verify_apk_integrity）。
+     * 上游 1.0.19: 包名原生校验（native 层比对，防 context.packageName 被 hook/spoof）。
+     */
+    fun verifyPackageName(context: Context): Boolean {
+        if (!loaded) return false
+        val packageName = try {
+            context.packageName
+        } catch (e: Exception) {
+            AppLog.e("SignatureVerifier: cannot get packageName", e)
+            return false
+        }
+        return try {
+            nativeVerifyPackageName(packageName)
+        } catch (e: Exception) {
+            AppLog.e("SignatureVerifier: nativeVerifyPackageName failed", e)
+            false
+        }
+    }
+
+    /**
+     * 上游 1.0.19: APK 完整性原生校验（mmap + 64 位溢出防护 + 流式 CRC32，比 Kotlin 版更快更全）。
+     * native 不可用时回退到 [verifyApkIntegrityKotlin]。
      * @return [IntegrityCode] 位标志；[IntegrityCode.OK] 表示完整。
+     */
+    fun verifyApkIntegrity(context: Context): Int {
+        if (loaded) {
+            val apkPath = try {
+                context.packageCodePath
+            } catch (e: Exception) {
+                AppLog.e("SignatureVerifier: cannot get packageCodePath", e)
+                return IntegrityCode.READ_FAILED
+            }
+            val native = try {
+                nativeVerifyApkIntegrity(apkPath)
+            } catch (e: Exception) {
+                AppLog.e("SignatureVerifier: nativeVerifyApkIntegrity failed", e)
+                -1
+            }
+            if (native >= 0) return native
+        }
+        return verifyApkIntegrityKotlin(context)
+    }
+
+    /** 计算数据的 SHA-256 hex（native 实现，供防篡改比对） */
+    fun computeSha256Hex(data: ByteArray): String? {
+        if (!loaded) return null
+        return try {
+            nativeComputeSha256Hex(data)
+        } catch (e: Exception) {
+            AppLog.e("SignatureVerifier: nativeComputeSha256Hex failed", e)
+            null
+        }
+    }
+
+    /**
+     * 纯 Kotlin APK 完整性校验（等价上游 native verify_apk_integrity；native 不可用时 fallback）。
      */
     fun verifyApkIntegrityKotlin(context: Context): Int {
         val apkPath = try {

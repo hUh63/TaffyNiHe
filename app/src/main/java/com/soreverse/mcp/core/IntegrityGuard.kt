@@ -52,8 +52,8 @@ object IntegrityGuard {
         val result = runCatching {
             val expected = expectedSignerDigest()
             val actual = signingCertificateDigests(context).map { it.normalizeDigest() }
-            // 上游 1.0.19 借鉴: APK 完整性校验（EOCD/central-dir 边界 + 关键条目 + classes.dex CRC）
-            val integrityCode = com.soreverse.mcp.nativecore.SignatureVerifier.verifyApkIntegrityKotlin(context)
+            // 上游 1.0.19 借鉴: APK 完整性校验（native mmap/CRC 优先，Kotlin fallback）
+            val integrityCode = com.soreverse.mcp.nativecore.SignatureVerifier.verifyApkIntegrity(context)
             if (expected.isBlank()) {
                 Result(true, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
             } else {

@@ -118,5 +118,10 @@
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- 无 root 沙箱安装/卸载回调（PackageInstaller） -->
+        <receiver
+            android:name="com.soreverse.mcp.mcp.SandboxInstallReceiver"
+            android:exported="false" />
     </application>
 </manifest>

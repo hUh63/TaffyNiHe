@@ -1082,6 +1082,10 @@ object ToolCatalog {
         *ApkSignKillTool.ALL.toTypedArray(),
         // 塔菲逆核: C/C++ 编译(方案A, 调用设备外部编译器 Termux clang/NDK)
         *CompileTool.ALL.toTypedArray(),
+        // 塔菲逆核: 动态分析沙箱(安装→启动→看门狗→日志/崩溃→清理, 无 root 可降级)
+        *SandboxTool.ALL.toTypedArray(),
+        // 塔菲逆核: 终端执行(Termux python/node/busybox, root 调用)
+        *TerminalTool.ALL.toTypedArray(),
         // 塔菲逆核: 原生库自检(预防类SOMCP丢库导致大面积失效)
         *NativeSelfTestTool.ALL.toTypedArray(),
         // 塔菲逆核: 高级DEX分析(指令级交叉引用/类大纲/字节码/deodex/增量重编)

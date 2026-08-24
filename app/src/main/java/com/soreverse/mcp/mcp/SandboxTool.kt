@@ -7,6 +7,7 @@ import android.content.IntentSender
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.RootShell
 import com.soreverse.mcp.core.err
+import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import org.json.JSONArray
@@ -95,7 +96,7 @@ object SandboxTool {
                     android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL)
                 val sessionId = installer.createSession(params)
                 val session = installer.openSession(sessionId)
-                session.openWrite("base.apk").use { out ->
+                session.openWrite("base.apk", 0, apk.length()).use { out ->
                     apk.inputStream().use { it.copyTo(out) }
                 }
                 val pi = android.app.PendingIntent.getBroadcast(ctx.context, sessionId,

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -83,6 +85,9 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Edbg -> "eDBG"
     SettingsDest.Rizin -> "Rizin"
     SettingsDest.Capture -> if (t.zh) "抓包" else "Capture"
+    SettingsDest.Linux -> if (t.zh) "Linux 环境" else "Linux Environment"
+    SettingsDest.Terminal -> if (t.zh) "终端执行" else "Terminal"
+    SettingsDest.Sandbox -> if (t.zh) "动态沙箱" else "Sandbox"
 }
 
 @Composable
@@ -199,7 +204,11 @@ internal fun SettingsHub(
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "抓包" else "Capture", if (t.zh) "网络抓包 / 流量采集 / tcpdump" else "Network capture / traffic / tcpdump", Icons.Default.Analytics, AppPalette.teal, { onDest(SettingsDest.Capture) }, Modifier.weight(1f).fillMaxHeight())
-                    Box(Modifier.weight(1f))
+                    SettingsTile(if (t.zh) "Linux 环境" else "Linux Env", if (t.zh) "Alpine / Ubuntu / 无 root 可用" else "Alpine / Ubuntu / no-root", Icons.Default.Terminal, AppPalette.green, { onDest(SettingsDest.Linux) }, Modifier.weight(1f).fillMaxHeight())
+                }
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile(if (t.zh) "终端执行" else "Terminal", if (t.zh) "内置 Python / Termux 运行时" else "Built-in Python / Termux", Icons.Default.Code, AppPalette.orange, { onDest(SettingsDest.Terminal) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "动态沙箱" else "Sandbox", if (t.zh) "安装 / 启动 / 日志 / 崩溃" else "Install / launch / logs", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Sandbox) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
@@ -280,6 +289,9 @@ internal fun SettingsHub(
             SettingsDest.Edbg -> EdbgPage(t)
             SettingsDest.Rizin -> RizinPage(t)
             SettingsDest.Capture -> CapturePage(t)
+            SettingsDest.Linux -> SettingsLinuxPage(t)
+            SettingsDest.Terminal -> SettingsTerminalPage(t)
+            SettingsDest.Sandbox -> SettingsSandboxPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

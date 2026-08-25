@@ -100,9 +100,6 @@ object TerminalTool {
         }
 
         private fun run(ctx: ToolContext, args: JSONObject): JSONObject {
-            if (!RootShell.isRootAvailable() && !PermissionManager.isShizukuGranted()) {
-                return err("NO_PRIVILEGE", "终端执行需要 root/Shizuku（无 root 无法访问 Termux 运行时）", "action", "run")
-            }
             val command = args.str("command").ifBlank { "" }
             val script = args.str("script").ifBlank { "" }
             if (command.isBlank() && script.isBlank()) {

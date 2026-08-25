@@ -52,33 +52,51 @@ object TerminalTool {
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             return runCatching {
                 when (args.str("action", "detect").ifBlank { "detect" }) {
-                    "detect" -> detect()
+                    "detect" -> detect(ctx)
                     "run" -> run(ctx, args)
                     else -> err("BAD_ACTION", "未知 action", "action", args.str("action"))
                 }
             }.getOrElse { e -> err("TERMINAL_FAILED", "终端操作失败: ${e.message ?: e.javaClass.simpleName}", "action", args.str("action")) }
         }
 
-        private fun detect(): JSONObject {
-            if (!RootShell.isRootAvailable() && !PermissionManager.isShizukuGranted()) {
-                return err("NO_PRIVILEGE", "终端执行需要 root/Shizuku（无 root 无法访问 Termux 运行时）", "action", "detect")
-            }
-            val termuxOk = isExecutable("$TERMUX_PREFIX/bin/sh")
+        private fun detect(ctx: com.soreverse.mcp.mcp.ToolContext): JSONObject {
             val runtimes = JSONArray()
-            for ((name, path, desc) in candidates) {
-                if (isExecutable(path)) {
-                    val ver = RootShell.exec("env ${termuxEnv()} \"$path\" --version 2>&1 | head -1", timeoutSec = 10).stdout.trim().take(120)
-                    runtimes.put(JSONObject().put("name", name).put("path", path).put("desc", desc).put("version", ver))
-                }
+            // 内置 Python（零依赖，无 root 可用）
+            val builtinPy = com.soreverse.mcp.core.PythonRuntime.pythonPath(ctx.context)
+            if (builtinPy != null) {
+                val ver = com.soreverse.mcp.core.PythonRuntime.run(ctx.context, "import sys; print(sys.version)", timeoutSec = 15)
+                    .output.trim().take(120)
+                runtimes.put(JSONObject().put("name", "python3").put("path", builtinPy)
+                    .put("desc", "内置 Python(零依赖)").put("version", ver).put("builtin", true))
             }
+            // Termux 运行时（需 root）
+            if (RootShell.isRootAvailable() || PermissionManager.isShizukuGranted()) {
+                val termuxOk = isExecutable("$TERMUX_PREFIX/bin/sh")
+                for ((name, path, desc) in candidates) {
+                    if (name == "python3" && builtinPy != null) continue // 已有内置
+                    if (isExecutable(path)) {
+                        val ver = RootShell.exec("env ${termuxEnv()} \"$path\" --version 2>&1 | head -1", timeoutSec = 10).stdout.trim().take(120)
+                        runtimes.put(JSONObject().put("name", name).put("path", path).put("desc", desc).put("version", ver).put("builtin", false))
+                    }
+                }
+                return ok(JSONObject()
+                    .put("action", "detect")
+                    .put("termuxInstalled", termuxOk)
+                    .put("termuxPrefix", TERMUX_PREFIX)
+                    .put("runtimes", runtimes)
+                    .put("hint", if (runtimes.length() == 0)
+                        "未检测到运行时。请安装 Termux 并执行: pkg install python nodejs busybox"
+                    else "检测到 ${runtimes.length()} 个运行时（内置 python 无需 root），可用 action=run 执行。"))
+            }
+            // 无 root 但内置 python 可用
             return ok(JSONObject()
                 .put("action", "detect")
-                .put("termuxInstalled", termuxOk)
+                .put("termuxInstalled", false)
                 .put("termuxPrefix", TERMUX_PREFIX)
                 .put("runtimes", runtimes)
                 .put("hint", if (runtimes.length() == 0)
-                    "未检测到 Termux 运行时。请安装 Termux 并执行: pkg install python nodejs busybox (或只用 detect 确认)"
-                else "检测到 ${runtimes.length()} 个运行时，可用 action=run 执行。"))
+                    "内置 Python 解压失败，且无 root 无法访问 Termux；请检查内置运行时。"
+                else "无 root 模式：仅内置 Python 可用（零依赖），可用 action=run 执行。"))
         }
 
         private fun run(ctx: ToolContext, args: JSONObject): JSONObject {
@@ -94,6 +112,28 @@ object TerminalTool {
             val runtime = args.str("runtime", "auto").ifBlank { "auto" }
 
             // 选择运行时
+            val wantPython = runtime == "python3" || (runtime == "auto" && script.lineSequence().firstOrNull()?.contains("python") == true)
+            val builtinPy = com.soreverse.mcp.core.PythonRuntime.pythonPath(ctx.context)
+            // 内置 Python 优先（零依赖，无需 root）
+            if (wantPython && builtinPy != null) {
+                val pyResult = if (script.isNotBlank()) {
+                    com.soreverse.mcp.core.PythonRuntime.run(ctx.context, script, timeoutSec = timeout.toLong())
+                } else {
+                    com.soreverse.mcp.core.PythonRuntime.run(ctx.context, "import subprocess,sys\nsys.exit(subprocess.call([\"sh\",\"-c\",\"$command\"]))", timeoutSec = timeout.toLong())
+                }
+                return ok(JSONObject()
+                    .put("action", "run")
+                    .put("runtime", "python3 (内置)")
+                    .put("exitCode", pyResult.code)
+                    .put("output", pyResult.output.take(20000))
+                    .put("stderr", pyResult.error.take(3000))
+                    .put("truncated", pyResult.output.length > 20000)
+                    .put("hint", if (pyResult.success) "执行完成（内置 Python，零依赖）" else "执行失败(exit=${pyResult.code})，详见 stderr"))
+            }
+            // Termux 运行时（需 root）
+            if (!RootShell.isRootAvailable() && !PermissionManager.isShizukuGranted()) {
+                return err("NO_PRIVILEGE", "该运行时需要 root/Shizuku；内置 Python 已优先（python 脚本无需 root）", "runtime", runtime)
+            }
             val runtimeBin: String = when (runtime) {
                 "python3" -> "$TERMUX_PREFIX/bin/python3"
                 "node" -> "$TERMUX_PREFIX/bin/node"

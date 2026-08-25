@@ -348,13 +348,16 @@ class ApkMcpBridge(private val settings: SettingsStore) {
     @Synchronized
     fun autoDiscover(port: Int = DEFAULT_PORT): State {
         syncConnectionsFromSettings()
-        val allPorts = listOf(port, NP_PORT).distinct()
+        // 通用桥接: 扫描一段端口范围(覆盖 MT/NP 及其他软件的 MCP 服务器)，而非仅 8787/8788
+        val allPorts = (DISCOVER_PORT_RANGE).plus(port).distinct()
         var firstState: State? = null
         for (p in allPorts) {
             if (connections.any { it.url.contains(":$p/") }) continue
             val candidates = listOf(
                 "http://127.0.0.1:$p/mcp",
                 "http://localhost:$p/mcp",
+                "http://127.0.0.1:$p/",
+                "http://localhost:$p/",
             )
             for (url in candidates) {
                 try {
@@ -376,7 +379,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
             }
         }
         if (firstState == null) {
-            AppLog.i("apk-mcp auto-discovery: no APK MCP found on ports $allPorts")
+            AppLog.i("apk-mcp auto-discovery: no MCP server found on ports $allPorts")
         }
         return firstState ?: State()
     }
@@ -613,13 +616,16 @@ class ApkMcpBridge(private val settings: SettingsStore) {
         const val MT_PREFIX = "mt_apk_"
         const val NP_PREFIX = "np_"
         val KNOWN_PREFIXES = listOf(MT_PREFIX, NP_PREFIX)
+        /** 通用桥接: 自动发现的端口扫描范围（覆盖 MT/NP 及其他软件的 MCP 服务器常用端口） */
+        val DISCOVER_PORT_RANGE = (8780..8805).toList()
         private val connIdCounter = AtomicInteger(1000)
 
         fun prefixLabel(prefix: String?): String = when {
             prefix == MT_PREFIX -> "MT Manager"
             prefix == NP_PREFIX -> "NP Manager"
-            prefix != null && prefix.startsWith("MCP") -> "MCP Bridge"
-            else -> "Unknown"
+            prefix != null && prefix.startsWith("MCP") -> "外部 MCP 桥接"
+            prefix != null && prefix.isNotBlank() -> "外部 MCP ($prefix)"
+            else -> "外部 MCP"
         }
     }
 }

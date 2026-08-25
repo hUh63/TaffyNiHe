@@ -2,8 +2,8 @@ package com.soreverse.mcp.core
 
 import android.content.Context
 import java.io.File
-import java.io.GZIPInputStream
 import java.io.InputStream
+import java.util.zip.GZIPInputStream
 
 /**
  * 内置 Linux rootfs（Alpine / Ubuntu / 任意通用 Linux rootfs）——零外部依赖。
@@ -286,7 +286,8 @@ object TarGzExtractor {
 
             var name = entryName(header)
             if (longName != null) { name = longName; longName = null }
-            if (paxPath != null) { name = paxPath; paxPath = null }
+            val paxPathNow = paxPath
+            if (paxPathNow != null) { name = paxPathNow; paxPath = null }
             if (name.isEmpty()) { skipData(gz, size); continue }
             sawAny = true
 
@@ -297,7 +298,8 @@ object TarGzExtractor {
 
             var linkName = String(header, 157, 100, Charsets.UTF_8).trimEnd('\u0000')
             if (longLink != null) { linkName = longLink; longLink = null }
-            if (paxLink != null) { linkName = paxLink; paxLink = null }
+            val paxLinkNow = paxLink
+            if (paxLinkNow != null) { linkName = paxLinkNow; paxLink = null }
 
             val mode = parseNumber(header, 100, 8)
             val isDir = type == '5' || (type != '2' && type != '1' && type != '0' && type != '\u0000' && type != '7' && clean.endsWith("/"))

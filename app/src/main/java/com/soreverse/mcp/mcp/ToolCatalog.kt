@@ -1086,6 +1086,8 @@ object ToolCatalog {
         *SandboxTool.ALL.toTypedArray(),
         // 塔菲逆核: 终端执行(Termux python/node/busybox, root 调用)
         *TerminalTool.ALL.toTypedArray(),
+        // 塔菲逆核: 内置 Linux rootfs(Alpine/Ubuntu/通用, chroot/proot 双通道)
+        *LinuxTool.ALL.toTypedArray(),
         // 塔菲逆核: 原生库自检(预防类SOMCP丢库导致大面积失效)
         *NativeSelfTestTool.ALL.toTypedArray(),
         // 塔菲逆核: 高级DEX分析(指令级交叉引用/类大纲/字节码/deodex/增量重编)

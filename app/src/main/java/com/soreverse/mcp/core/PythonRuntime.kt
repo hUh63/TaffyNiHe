@@ -79,10 +79,12 @@ object PythonRuntime {
             val cmd = mutableListOf(python.absolutePath)
             cmd.addAll(args)
             val pb = ProcessBuilder(cmd)
-            pb.environment()["LD_LIBRARY_PATH"] = File(dir, "lib").absolutePath
-            pb.environment()["PATH"] = File(dir, "bin").absolutePath + ":/system/bin"
-            pb.environment()["HOME"] = File(dir).absolutePath
-            pb.environment()["PYTHONHOME"] = dir.absolutePath
+            pb.environment().apply {
+                put("LD_LIBRARY_PATH", File(dir, "lib").absolutePath)
+                put("PATH", File(dir, "bin").absolutePath + ":/system/bin")
+                put("HOME", dir.absolutePath)
+                put("PYTHONHOME", dir.absolutePath)
+            }
             val proc = pb.redirectErrorStream(true).start()
             proc.outputStream.use { it.write(script.toByteArray(Charsets.UTF_8)); it.flush() }
             proc.outputStream.close()

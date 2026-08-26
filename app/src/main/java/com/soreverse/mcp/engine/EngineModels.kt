@@ -14,6 +14,8 @@ data class Workspace(
     val analysisInputSource: String,
     val structureRecovery: JSONObject,
     val edits: MutableMap<String, EditSession> = ConcurrentHashMap(),
+    /** 创建时间戳——用于超限自动淘汰（对标 SOMCP Issue #63 渐进 OOM 模式）。 */
+    val createdAt: Long = System.currentTimeMillis(),
 )
 
 internal data class SourceSummary(

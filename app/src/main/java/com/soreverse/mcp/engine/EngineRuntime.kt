@@ -25,6 +25,12 @@ internal class EngineRuntime(internal val context: Context) {
     internal val searchCache = ConcurrentHashMap<String, List<JSONObject>>()
     internal val workspaces = ConcurrentHashMap<String, Workspace>()
 
+    // 对标 SOMCP Issue #63（启动后渐进 OOM）: 工作区自动淘汰阈值。
+    // 每个工作区持有完整 SO 字节 + ELF 解析对象（data 的 2-3 倍），256MB largeHeap 下
+    // data 总量超过 ~96MB 即接近危险区；数量兜底防海量小文件。
+    internal val MAX_WORKSPACES = 16
+    internal val MAX_WORKSPACE_BYTES = 96L * 1024 * 1024
+
     internal fun guarded(block: () -> JSONObject): JSONObject = try {
         block()
     } catch (error: CancellationException) {

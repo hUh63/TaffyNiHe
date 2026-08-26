@@ -220,9 +220,36 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     val ws = Workspace("so-ws-${UUID.randomUUID()}", src, prepared.data, prepared.elf, temporary, sha256(original), prepared.source, prepared.facts)
     workspaces[ws.id] = ws
     workspaceBySourceKey[key] = ws.id
+    // 对标 SOMCP Issue #63（启动后渐进 OOM）：workspaces 无上限时，AI 反复
+    // so_open 不 close 会持续累积完整 SO 字节 + ELF 解析对象直至堆耗尽。
+    // 这里按总字节 + 数量双阈值自动淘汰最旧工作区（temporary 优先）。
+    evictWorkspacesIfNeeded()
     AppLog.i("Opened ${src.path} as ${ws.id}")
     return ws
 }
+
+/** 工作区自动淘汰：data 总字节或数量超限时关闭最旧（temporary 优先）。 */
+internal fun EngineRuntime.evictWorkspacesIfNeeded() {
+    if (workspaces.size <= MAX_WORKSPACES && totalWorkspaceBytes() <= MAX_WORKSPACE_BYTES) return
+    var evicted = 0
+    // temporary 优先淘汰（compareByDescending: true 排前），同类型按最旧
+    val victims = workspaces.values.sortedWith(
+        compareByDescending<Workspace> { it.temporary }.thenBy { it.createdAt }
+    )
+    for (ws in victims) {
+        if (workspaces.size <= MAX_WORKSPACES && totalWorkspaceBytes() <= MAX_WORKSPACE_BYTES) break
+        if (workspaces.remove(ws.id) != null) {
+            evicted++
+            AppLog.i("Workspace evicted (limit): ${ws.id} (${ws.source.name}, temporary=${ws.temporary}, ${ws.data.size / 1024}KB)")
+        }
+    }
+    if (evicted > 0) {
+        workspaceBySourceKey.entries.removeIf { it.value !in workspaces.keys }
+    }
+}
+
+private fun EngineRuntime.totalWorkspaceBytes(): Long =
+    workspaces.values.sumOf { it.data.size.toLong() }
 
 internal data class AnalysisInput(
     val data: ByteArray,

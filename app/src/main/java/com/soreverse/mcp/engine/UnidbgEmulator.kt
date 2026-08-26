@@ -125,6 +125,9 @@ class UnidbgEmulator(private val context: Context) {
         val objects: MutableMap<String, Any> = LinkedHashMap(),
         val traceHooks: MutableMap<String, Any> = LinkedHashMap(),
         val traceEvents: MutableList<JSONObject> = ArrayList(),
+        // 上游 1.0.20 借鉴: 幂等关闭标记——防止 session_close 重复调用
+        // emulator.close() 触发二次释放(native 层 use-after-free / 双 free 崩溃)。
+        val closed: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
     )
 
     fun available(): Boolean = runCatching {
@@ -247,6 +250,8 @@ class UnidbgEmulator(private val context: Context) {
     }
 
     fun closeSession(live: LiveSession) {
+        // 上游 1.0.20 借鉴: CAS 幂等——已关闭的会话不再重复释放 native 资源
+        if (!live.closed.compareAndSet(false, true)) return
         synchronized(live.lock) {
             runCatching { live.emulator.javaClass.getMethod("close").invoke(live.emulator) }
             runCatching { live.path.delete() }

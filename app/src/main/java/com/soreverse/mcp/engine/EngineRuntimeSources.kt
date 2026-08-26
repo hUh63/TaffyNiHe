@@ -129,6 +129,10 @@ internal fun EngineRuntime.analyzeApk(path: String, entryLimit: Int = 500): JSON
         return@guarded err("SELF_ANALYSIS_FORBIDDEN", "塔菲逆核不能分析自身 APK（签名匹配），请选择其他 APK", "path", path)
     }
     if (local.isFile && local.length() > ApkAnalyzer.MAX_INPUT_BYTES) return@guarded err("APK_LIMIT_EXCEEDED", "APK exceeds ${ApkAnalyzer.MAX_INPUT_BYTES / 1024 / 1024} MiB input limit", "path", path)
+    // 上游 1.0.20 借鉴: MemoryGuard——APK 读入前估算堆余量
+    if (local.isFile) {
+        com.soreverse.mcp.core.MemoryGuard.ensureAnalysisMemory(local.length(), "apk_analyze(${local.name})")
+    }
     val bytes = try {
         if (local.isFile) local.readBytes() else (workDir ?: return@guarded err("WORK_DIRECTORY_NOT_SELECTED", "APK path is not a local file and no work directory is selected", "path", path)).readFile(path, ApkAnalyzer.MAX_INPUT_BYTES)
     } catch (error: ApkAnalysisLimitException) {
@@ -204,6 +208,12 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     }
     val key = sourceKey(src).ifBlank { keyFallback }
     workspaceBySourceKey[key]?.let { existingId -> workspaces[existingId]?.let { return it } }
+    // 上游 1.0.20 借鉴: MemoryGuard——本地文件读取前估算堆余量, 不足提前拒绝而非 OOM 崩溃
+    if (src.source == "build_output" || src.source == "local_file") {
+        runCatching { File(src.path).length() }.getOrDefault(0L).takeIf { it > 0 }?.let { fileSize ->
+            com.soreverse.mcp.core.MemoryGuard.ensureAnalysisMemory(fileSize, "so_open(${src.name})")
+        }
+    }
     val original = when (src.source) { "build_output", "local_file" -> runCatching { File(src.path).readBytes() }.getOrElse { error("SO path not found: $path") }; else -> (workDir ?: error("No work directory selected")).readSource(src) }
     require(original.size >= 4 && original[0] == 0x7f.toByte() && original[1] == 'E'.code.toByte() && original[2] == 'L'.code.toByte() && original[3] == 'F'.code.toByte()) { "NOT_ELF_INPUT: ${src.path} is not an ELF SO file. Use apk_analyze or an APK MCP tool." }
     val prepared = prepareAnalysisInput(original)

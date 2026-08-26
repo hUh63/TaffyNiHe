@@ -54,13 +54,29 @@ object IntegrityGuard {
             val actual = signingCertificateDigests(context).map { it.normalizeDigest() }
             // 上游 1.0.19 借鉴: APK 完整性校验（native mmap/CRC 优先，Kotlin fallback）
             val integrityCode = com.soreverse.mcp.nativecore.SignatureVerifier.verifyApkIntegrity(context)
+            // 上游 1.0.20 借鉴: v2/v3 APK Signing Block 证书校验——防"签名方案混淆重打包"
+            // （攻击者保留 v1 真证书、把 v2/v3 块换成自己密钥）。v2/v3 块存在时必须匹配 pin。
+            val v23Digest = runCatching {
+                com.soreverse.mcp.nativecore.ApkSigningBlock.signingBlockCertDigest(
+                    context.packageCodePath
+                )
+            }.getOrNull()
+            val v23Trusted = when (v23Digest) {
+                null -> true                                   // 无 v2/v3 块（纯 v1 签名）
+                com.soreverse.mcp.nativecore.ApkSigningBlock.PARSE_ERROR -> false // 块存在但解析失败（可疑）
+                else -> v23Digest.normalizeDigest() == expected
+            }
             if (expected.isBlank()) {
                 Result(true, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
             } else {
-                val signerTrusted = actual.any { it == expected }
+                val signerTrusted = actual.any { it == expected } && v23Trusted
                 Result(
                     trusted = signerTrusted,
-                    reason = if (signerTrusted) "trusted release signer" else "application signature mismatch",
+                    reason = when {
+                        !actual.any { it == expected } -> "application signature mismatch"
+                        !v23Trusted -> "v2/v3 signing block signer mismatch (signing-scheme confusion)"
+                        else -> "trusted release signer"
+                    },
                     expected = expected,
                     actual = actual,
                     integrityCode = integrityCode,

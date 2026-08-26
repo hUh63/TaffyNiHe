@@ -97,7 +97,12 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 subtitle = if (t.zh) "用于扫描、打开、修改与导出 SO" else "Used to scan, open, edit and export SO files",
                 icon = Icons.Default.FolderOpen,
                 trailing = if (t.zh) "选择" else "Choose",
-                onClick = { pickTree.launch(null) },
+                onClick = {
+                    // 上游 1.0.20 借鉴: SAF 选择器保护——部分设备(定制 ROM/无 DocumentsUI)会抛 ActivityNotFoundException
+                    runCatching { pickTree.launch(null) }.onFailure {
+                        Toast.makeText(context, if (t.zh) "系统文件选择器不可用" else "File picker unavailable", Toast.LENGTH_SHORT).show()
+                    }
+                },
             )
             GroupDivider()
             ToggleRow(

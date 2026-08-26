@@ -297,7 +297,12 @@ internal fun CommandHubScreen(
                 )
             }
             if (running) Icon(Icons.Filled.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
-            else Icon(Icons.Filled.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { pickTree.launch(null) })
+            // 上游 1.0.20 借鉴: SAF 选择器保护——部分设备(定制 ROM/无 DocumentsUI)会抛 ActivityNotFoundException
+            else Icon(Icons.Filled.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable {
+                runCatching { pickTree.launch(null) }.onFailure {
+                    Toast.makeText(context, if (t.zh) "系统文件选择器不可用" else "File picker unavailable", Toast.LENGTH_SHORT).show()
+                }
+            })
         }
         Spacer(Modifier.height(12.dp))
     }

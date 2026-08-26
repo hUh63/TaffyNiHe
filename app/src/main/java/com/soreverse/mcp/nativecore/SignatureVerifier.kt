@@ -200,6 +200,8 @@ object SignatureVerifier {
         return try {
             var code = 0
             // 1) EOCD 存在性 + central-directory 边界（64 位安全计算，防 32 位溢出）
+            //    ⚠ 修复: ZIP 为小端存储, RandomAccessFile.readInt() 大端读出 0x504B0506,
+            //    旧比较 0x06054b50 永远 false 导致 EOCD_NOT_FOUND 恒置位、完整性检查失效。
             val eocdOk = java.io.RandomAccessFile(file, "r").use { raf ->
                 val len = raf.length()
                 val searchStart = if (len > 65557L) len - 65557L else 0L
@@ -207,7 +209,7 @@ object SignatureVerifier {
                 var found = false
                 while (pos >= searchStart && pos >= 0) {
                     raf.seek(pos)
-                    if (raf.readInt() == 0x06054b50.toInt()) { found = true; break }
+                    if (raf.readInt() == 0x504b0506) { found = true; break }
                     pos--
                 }
                 if (!found) {
@@ -215,8 +217,8 @@ object SignatureVerifier {
                     false
                 } else {
                     raf.seek(pos + 16)
-                    val cdSize = raf.readInt().toLong() and 0xFFFFFFFFL
-                    val cdOffset = raf.readInt().toLong() and 0xFFFFFFFFL
+                    val cdSize = raf.readIntLE().toLong() and 0xFFFFFFFFL
+                    val cdOffset = raf.readIntLE().toLong() and 0xFFFFFFFFL
                     if (cdOffset + cdSize > len) {
                         code = IntegrityCode.CENTRAL_DIR_INVALID
                         false
@@ -258,4 +260,167 @@ object SignatureVerifier {
             IntegrityCode.READ_FAILED
         }
     }
+}
+
+// ====================================================================
+// APK Signing Block（v2/v3 签名方案）证书提取 —— 纯 Kotlin
+// 上游 SOMCP 1.0.20 借鉴: 防"签名方案混淆重打包"——攻击者保留 v1(META-INF) 真证书,
+// 把 v2/v3 Signing Block 换成自己密钥签名; 只校验 v1 的检查器会误判为可信。
+// 这里从 APK Signing Block 提取 v2/v3 签名证书并计算 SHA-256, 与内嵌 pin 对比。
+// 布局 (google/apksigner ApkSigningBlockUtils):
+//   [uint64 blockSize][(uint64 pairSize + uint32 id + value)...][uint64 blockSize]["APK Sig Block 42"]
+//   紧邻 ZIP central directory 之前。
+// ====================================================================
+object ApkSigningBlock {
+
+    /** 签名块存在但解析失败（可疑，视为不匹配）。 */
+    const val PARSE_ERROR = "__PARSE_ERROR__"
+
+    private val MAGIC = "APK Sig Block 42".toByteArray(Charsets.US_ASCII)
+    private const val V2_ID = 0x7109871aL
+    private const val V3_ID = 0xf05368c0L
+
+    /**
+     * 提取 APK 的 v2/v3 签名块证书 SHA-256（大写 hex）。
+     * @return null=无 v2/v3 签名块（纯 v1 签名）；[PARSE_ERROR]=块存在但解析失败；否则证书摘要。
+     */
+    fun signingBlockCertDigest(apkPath: String): String? {
+        val file = File(apkPath)
+        if (!file.isFile || file.length() < 32L) return null
+        return try {
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                val cert = findSignBlockCert(raf) ?: return null
+                MessageDigest.getInstance("SHA-256").digest(cert).joinToString("") { "%02X".format(it) }
+            }
+        } catch (e: Exception) {
+            AppLog.e("ApkSigningBlock: parse failed", e)
+            PARSE_ERROR
+        }
+    }
+
+    /** 在 APK 中定位 v2/v3 签名块并提取第一张签名证书（X.509 DER）。 */
+    private fun findSignBlockCert(raf: java.io.RandomAccessFile): ByteArray? {
+        val len = raf.length()
+
+        // 1) EOCD：文件末尾 22..65557 字节内搜索
+        val searchStart = if (len > 65557L) len - 65557L else 0L
+        var eocdPos = -1L
+        var pos = len - 22L
+        while (pos >= searchStart && pos >= 0) {
+            raf.seek(pos)
+            if (raf.readInt() == 0x06054b50.toInt()) { eocdPos = pos; break }
+            pos--
+        }
+        if (eocdPos < 0) return null
+
+        // 2) central directory offset（ZIP 小端存储）
+        raf.seek(eocdPos + 16)
+        val cdOffset = raf.readIntLE().toLong() and 0xFFFFFFFFL
+        if (cdOffset < 24L || cdOffset > len) return null
+
+        // 3) magic "APK Sig Block 42" 位于 central directory 前 16 字节
+        val magicOff = cdOffset - 16
+        raf.seek(magicOff)
+        val magic = ByteArray(16)
+        raf.readFully(magic)
+        if (!magic.contentEquals(MAGIC)) return null // 无 v2/v3 签名块
+
+        // 4) trailing block size（magic 前 8 字节）
+        raf.seek(magicOff - 8)
+        val trailingSize = raf.readLongLE()
+        if (trailingSize <= 0) return PARSE_ERROR
+        val blockEnd = magicOff - 8
+        if (trailingSize > blockEnd - 8) return PARSE_ERROR
+        val blockStart = blockEnd - trailingSize - 8
+
+        // 5) leading size 交叉校验
+        raf.seek(blockStart)
+        val leadingSize = raf.readLongLE()
+        if (leadingSize != trailingSize) return PARSE_ERROR
+
+        // 6) 遍历 block pairs
+        var pairPos = blockStart + 8
+        val pairsEnd = blockEnd
+        var v2Cert: ByteArray? = null
+        var v3Cert: ByteArray? = null
+        while (pairPos + 8 <= pairsEnd) {
+            raf.seek(pairPos)
+            val pairSize = raf.readLongLE()
+            val valueOff = pairPos + 8
+            if (pairSize < 4) { pairPos = valueOff + pairSize; continue }
+            if (valueOff + pairSize > pairsEnd) return PARSE_ERROR
+            raf.seek(valueOff)
+            val id = raf.readInt().toLong() and 0xFFFFFFFFL
+            val valueLen = (pairSize - 4).toInt()
+            val value = ByteArray(valueLen)
+            raf.readFully(value)
+            when (id) {
+                V3_ID -> v3Cert = extractCertFromSignBlock(value)
+                V2_ID -> v2Cert = extractCertFromSignBlock(value)
+            }
+            pairPos = valueOff + pairSize
+        }
+        // 优先 v3（Android 校验最强方案优先）
+        return v3Cert ?: v2Cert
+    }
+
+    /**
+     * 从 v2/v3 签名块 payload 提取第一张 X.509 证书。
+     * 布局（对照 apksig getApkSignatureBlockSigners，已用真实 apksig 签名 APK 验证）:
+     *   signers(长度前缀) → signer(长度前缀) → signedData(长度前缀) →
+     *   digests(长度前缀, 跳过) → certificates(长度前缀) → 每张证书 = [u32 长度][DER bytes]。
+     * 所有长度均为 uint32 LE。
+     */
+    private fun extractCertFromSignBlock(block: ByteArray): ByteArray? {
+        var pos = 0
+        fun u32(): Long {
+            if (pos + 4 > block.size) return -1
+            val v = ((block[pos].toLong() and 0xFF)) or
+                ((block[pos + 1].toLong() and 0xFF) shl 8) or
+                ((block[pos + 2].toLong() and 0xFF) shl 16) or
+                ((block[pos + 3].toLong() and 0xFF) shl 24)
+            pos += 4
+            return v
+        }
+        // signers 序列
+        val signersLen = u32()
+        if (signersLen < 0 || pos + signersLen > block.size) return null
+        // signer（单个，v2 通常只有 1 个 signer）
+        val signerLen = u32()
+        if (signerLen < 0 || pos + signerLen > block.size) return null
+        val signerEnd = pos + signerLen
+        // signedData
+        val sdLen = u32()
+        if (sdLen < 0 || pos + sdLen > signerEnd) return null
+        val sdEnd = pos + sdLen
+        // digests（跳过）
+        val digestsLen = u32()
+        if (digestsLen < 0 || pos + digestsLen > sdEnd) return null
+        pos += digestsLen.toInt()
+        // certificates 序列
+        val certsLen = u32()
+        if (certsLen < 0 || pos + certsLen > sdEnd) return null
+        val certsEnd = pos + certsLen
+        // 第一张证书: [u32 长度][DER bytes]（直接 getInt，非 length-prefixed slice）
+        val certLen = u32()
+        if (certLen < 0 || pos + certLen > certsEnd) return null
+        return block.copyOfRange(pos, pos + certLen.toInt())
+    }
+
+    private fun java.io.RandomAccessFile.readLongLE(): Long {
+        val b = ByteArray(8)
+        readFully(b)
+        return (b[0].toLong() and 0xFF) or ((b[1].toLong() and 0xFF) shl 8) or
+            ((b[2].toLong() and 0xFF) shl 16) or ((b[3].toLong() and 0xFF) shl 24) or
+            ((b[4].toLong() and 0xFF) shl 32) or ((b[5].toLong() and 0xFF) shl 40) or
+            ((b[6].toLong() and 0xFF) shl 48) or ((b[7].toLong() and 0xFF) shl 56)
+    }
+}
+
+/** ZIP 小端 int 读取（RandomAccessFile.readInt() 是大端，直接用于 ZIP 字段会读反）。 */
+private fun java.io.RandomAccessFile.readIntLE(): Int {
+    val b = ByteArray(4)
+    readFully(b)
+    return (b[0].toInt() and 0xFF) or ((b[1].toInt() and 0xFF) shl 8) or
+        ((b[2].toInt() and 0xFF) shl 16) or ((b[3].toInt() and 0xFF) shl 24)
 }

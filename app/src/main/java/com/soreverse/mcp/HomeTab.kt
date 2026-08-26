@@ -160,7 +160,12 @@ internal fun HomeTab(
                 title = if (treeUri != null) (if (t.zh) "已设置目录" else "Directory set") else (if (t.zh) "选择工作目录" else "Choose directory"),
                 subtitle = if (t.zh) "放要分析的 APK / SO / DEX 文件的文件夹" else "Folder with APK/SO/DEX to analyze",
                 icon = Icons.Filled.FolderOpen,
-                onClick = { pickTree.launch(null) },
+                onClick = {
+                    // 上游 1.0.20 借鉴: SAF 选择器保护——部分设备(定制 ROM/无 DocumentsUI)会抛 ActivityNotFoundException
+                    runCatching { pickTree.launch(null) }.onFailure {
+                        Toast.makeText(context, if (t.zh) "系统文件选择器不可用" else "File picker unavailable", Toast.LENGTH_SHORT).show()
+                    }
+                },
             )
         }
 

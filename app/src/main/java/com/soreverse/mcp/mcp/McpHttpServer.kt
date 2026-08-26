@@ -6,6 +6,7 @@ import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.core.ApkMcpBridge
 import com.soreverse.mcp.core.CloudflareTunnelManager
 import com.soreverse.mcp.core.EngineProvider
+import com.soreverse.mcp.core.SelfArtifactGuard
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.StoragePermissionHelper
 import com.soreverse.mcp.core.WorkspacePolicy
@@ -616,6 +617,10 @@ $historyRows
             busy.put("nextActions", JSONArray(listOf("Retry the exact same tool call after a short delay.")))
             return busy
         }
+        // 上游 1.0.20 借鉴: 自身 artifact 守卫——任何工具(含桥接转发/unified 路由)
+        // 的参数引用塔菲自身 APK 或内置 SO 时拒绝, 防止 MCP 客户端/桥接工具
+        // 读改运行中应用的文件或破坏自身完整性校验。
+        SelfArtifactGuard.findSelfArg(context, args)?.let { return SelfArtifactGuard.forbidden(it, name) }
         return try {
             callToolPayload(name, args)
         } catch (t: Throwable) {

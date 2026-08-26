@@ -21,6 +21,17 @@ internal fun EngineRuntime.unidbgDispatch(workspaceId: String, editSessionId: St
         "session_open" -> {
             val elf = elfFor(workspaceId, editSessionId)
             val id = "emu-${UUID.randomUUID()}"
+            // 上游 1.0.20 借鉴: 会话缓存上限——模拟器会话各占 native 内存(反汇编/代码块/模块缓存),
+            // 无限制累积会泄漏。超过上限自动关闭最旧的会话(按 createdAt)。
+            val MAX_LIVE_SESSIONS = 8
+            if (emulatorSessions.size >= MAX_LIVE_SESSIONS) {
+                emulatorSessions.values
+                    .minByOrNull { it.createdAt }
+                    ?.let { oldest ->
+                        emulatorSessions.remove(oldest.id)
+                        oldest.live?.let(unidbg::closeSession)
+                    }
+            }
             val open = unidbg.openSession(dataFor(workspaceId, editSessionId), elf.architecture, args.optBoolean(1, true))
             if (!open.optBoolean("ok", false)) return@guarded wrapUnidbgResult(open.put("workspaceId", workspaceId).put("architecture", elf.architecture))
             val live = open.remove("live") as? UnidbgEmulator.LiveSession

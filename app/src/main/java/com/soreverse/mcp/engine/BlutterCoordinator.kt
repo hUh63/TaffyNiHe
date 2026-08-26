@@ -29,6 +29,8 @@ internal class BlutterCoordinator(private val context: Context, private val stor
         val file = File(path)
         return try {
             if (file.isDirectory) inspectDirectory(file, path, args.str("abi", "auto")) else if (file.isFile) {
+                // 上游 1.0.20 借鉴: MemoryGuard——APK 读入前估算堆余量
+                com.soreverse.mcp.core.MemoryGuard.ensureAnalysisMemory(file.length(), "flutter_inspect(${file.name})")
                 val bytes = file.readBytes()
                 if (!file.extension.equals("apk", true)) return err("UNSUPPORTED_INPUT", "inspect currently accepts an APK or a libapp/libflutter directory", "path", path)
                 val inventory = FlutterArtifactInspector.inspectApk(bytes, path, args.str("abi", "auto"))
@@ -43,6 +45,8 @@ internal class BlutterCoordinator(private val context: Context, private val stor
                 val selected = inventory.optJSONObject("selected")
                 if (selected == null) ok(inventory) else ok(inventory.put("selectedAnalysis", FlutterArtifactInspector.inspectLibraries(FlutterArtifactInspector.extractLibraries(bytes, path, args.str("abi", "auto")))))
             } else err("INPUT_NOT_FOUND", "Input path does not exist and no work directory is selected", "path", path)
+        } catch (error: com.soreverse.mcp.core.InsufficientMemoryException) {
+            err("INSUFFICIENT_MEMORY", error.message ?: "heap headroom too low", "path", path)
         } catch (error: Exception) { err(error.message?.substringBefore(':')?.takeIf { it in setOf("INPUT_LIMIT_EXCEEDED", "APK_INVALID", "UNSUPPORTED_ELF") } ?: "FLUTTER_INSPECT_FAILED", error.message ?: "Flutter inspection failed", "path", path) }
     }
 

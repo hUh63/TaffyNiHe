@@ -29,6 +29,10 @@ internal class EngineRuntime(internal val context: Context) {
         block()
     } catch (error: CancellationException) {
         throw error
+    } catch (error: com.soreverse.mcp.core.InsufficientMemoryException) {
+        // 上游 1.0.20 借鉴: 内存不足提前拒绝, 明确报错而非 OOM 崩溃
+        AppLog.e("Tool blocked by MemoryGuard", error)
+        err("INSUFFICIENT_MEMORY", error.message ?: "heap headroom too low for this analysis")
     } catch (error: Exception) {
         AppLog.e("Tool failed", error)
         val message = error.message ?: "Tool failed"

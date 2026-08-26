@@ -302,13 +302,13 @@ object ApkSigningBlock {
     private fun findSignBlockCert(raf: java.io.RandomAccessFile): ByteArray? {
         val len = raf.length()
 
-        // 1) EOCD：文件末尾 22..65557 字节内搜索
+        // 1) EOCD：文件末尾 22..65557 字节内搜索（ZIP 小端; readInt 大端读出 0x504b0506）
         val searchStart = if (len > 65557L) len - 65557L else 0L
         var eocdPos = -1L
         var pos = len - 22L
         while (pos >= searchStart && pos >= 0) {
             raf.seek(pos)
-            if (raf.readInt() == 0x06054b50.toInt()) { eocdPos = pos; break }
+            if (raf.readInt() == 0x504b0506) { eocdPos = pos; break }
             pos--
         }
         if (eocdPos < 0) return null
@@ -325,18 +325,18 @@ object ApkSigningBlock {
         raf.readFully(magic)
         if (!magic.contentEquals(MAGIC)) return null // 无 v2/v3 签名块
 
-        // 4) trailing block size（magic 前 8 字节）
+        // 4) trailing block size（magic 前 8 字节）；结构异常抛异常 → 外层转 PARSE_ERROR
         raf.seek(magicOff - 8)
         val trailingSize = raf.readLongLE()
-        if (trailingSize <= 0) return PARSE_ERROR
+        if (trailingSize <= 0) throw IllegalStateException("invalid signing block size")
         val blockEnd = magicOff - 8
-        if (trailingSize > blockEnd - 8) return PARSE_ERROR
+        if (trailingSize > blockEnd - 8) throw IllegalStateException("signing block size out of range")
         val blockStart = blockEnd - trailingSize - 8
 
         // 5) leading size 交叉校验
         raf.seek(blockStart)
         val leadingSize = raf.readLongLE()
-        if (leadingSize != trailingSize) return PARSE_ERROR
+        if (leadingSize != trailingSize) throw IllegalStateException("signing block size mismatch")
 
         // 6) 遍历 block pairs
         var pairPos = blockStart + 8
@@ -348,7 +348,7 @@ object ApkSigningBlock {
             val pairSize = raf.readLongLE()
             val valueOff = pairPos + 8
             if (pairSize < 4) { pairPos = valueOff + pairSize; continue }
-            if (valueOff + pairSize > pairsEnd) return PARSE_ERROR
+            if (valueOff + pairSize > pairsEnd) throw IllegalStateException("signing block pair out of bounds")
             raf.seek(valueOff)
             val id = raf.readInt().toLong() and 0xFFFFFFFFL
             val valueLen = (pairSize - 4).toInt()

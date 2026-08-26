@@ -221,6 +221,9 @@ internal fun LogcatViewerPage(t: UiText) {
     var appLogMode by remember { mutableStateOf(false) }
     // 轮询兜底模式: 实时流(execute+pipe)无数据但一次性命令可读时，降级为 logcat -d 轮询
     var pollMode by remember { mutableStateOf(false) }
+    // 实时流读取协程引用——降级轮询前必须确保实时流完全停止，
+    // 否则两路采集同时写 logs 会造成日志重叠（用户报告的 bug）
+    val readerJob = remember { java.util.concurrent.atomic.AtomicReference<kotlinx.coroutines.Job?>(null) }
     val appLogLines = remember { mutableStateListOf<String>() }
     val appLogListener = remember {
         { line: String ->
@@ -350,11 +353,13 @@ internal fun LogcatViewerPage(t: UiText) {
         }
     }
 
-    /** 轮询兜底：实时流(pipe)不可用时，用 logcat -d 定时拉取（executeNow 通道已验证可用）。 */
-    fun startPolling() {
+    /** 轮询兜底：实时流(pipe)不可用时，用 logcat -d 定时拉取（executeNow 通道已验证可用）。
+     *  @param initialLastLine 切换前实时流已显示的最后一行——首轮 dump 的 500 行中
+     *  该行之前的行已显示过，跳过以避免与实时流尾部重叠。 */
+    fun startPolling(initialLastLine: String? = null) {
         scope.launch(Dispatchers.IO) {
             var failCount = 0
-            var lastLine: String? = null // 上次轮询最后一行原始文本，用于去重（logcat -d 每次返回完整缓冲区）
+            var lastLine: String? = initialLastLine // 上次轮询最后一行原始文本，用于去重（logcat -d 每次返回完整缓冲区）
             while (running && pollMode) {
                 val r = PermissionManager.exec("logcat -d -t 500 2>&1", timeoutSec = 10)
                 if (r.code == 0 && r.stdout.isNotBlank()) {
@@ -395,6 +400,9 @@ internal fun LogcatViewerPage(t: UiText) {
 
     fun start() {
         if (running) return
+        // 清理上一次可能残留的读取协程（防止新实时流与旧协程并存导致重叠）
+        readerJob.get()?.cancel()
+        readerJob.set(null)
         running = true
         paused = false
         channelError = ""
@@ -448,12 +456,14 @@ internal fun LogcatViewerPage(t: UiText) {
             channelInfo = if (zh) "应用日志（无系统权限）" else "App logs (no system permission)"
         }
         process = proc
-        scope.launch(Dispatchers.IO) {
+        val job = scope.launch(Dispatchers.IO) {
             try {
                 BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
                     var line = reader.readLine()
                     var gotAny = false
-                    while (line != null && running) {
+                    // !pollMode: 降级轮询置位后立即停止实时流写入（配合 cancel 中断阻塞 readLine），
+                    // 杜绝实时流与轮询两路数据同时写 logs 造成的日志重叠
+                    while (line != null && running && !pollMode) {
                         gotAny = true
                         if (!paused) {
                             parseLogLine(line)?.let { parsed ->
@@ -478,11 +488,11 @@ internal fun LogcatViewerPage(t: UiText) {
                     }
                     // 无任何数据且仍在运行：实时流立即结束（pipe 异常）
                     // → 降级为轮询模式（用一次性 logcat -d，通道自测已证明可用）
-                    if (!gotAny && running && channelError.isBlank()) {
+                    if (!gotAny && running && channelError.isBlank() && !pollMode) {
                         com.soreverse.mcp.core.AppLog.w("Logcat reader got no data, fallback to polling")
                         pollMode = true
                         channelInfo = if (zh) "Shizuku 通道（轮询模式）" else "Shizuku channel (polling)"
-                        startPolling()
+                        startPolling(synchronized(logs) { logs.lastOrNull()?.raw })
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -507,11 +517,14 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
             }
         }
+        readerJob.set(job)
     }
 
     fun stop() {
         running = false
         pollMode = false
+        readerJob.get()?.cancel()   // 中断阻塞中的 readLine（若在降级窗口内残留）
+        readerJob.set(null)
         runCatching { process?.destroy() }
         process = null
         if (recording) {
@@ -636,9 +649,12 @@ internal fun LogcatViewerPage(t: UiText) {
             if (test.code == 0 && test.stdout.isNotBlank()) {
                 // 通道可读但实时流无输出 → 主动降级轮询（readLine 可能阻塞不返回 null，不能等它自然结束）
                 channelInfo = if (zh) "轮询模式（实时流异常，已自动降级）" else "Polling mode (stream failed, auto-fallback)"
+                // 必须彻底停止实时流：destroy 是异步的，reader 协程可能仍在阻塞 readLine，
+                // 不 cancel 会造成实时流与轮询两路同时写 logs → 日志重叠
                 runCatching { process?.destroy() }
                 pollMode = true
-                startPolling()
+                readerJob.get()?.cancel()
+                startPolling(synchronized(logs) { logs.lastOrNull()?.raw })
             } else {
                 channelError = "通道测试失败: ${test.stderr.ifBlank { test.stdout }.take(200)}（可点「访问所有设备日志」授权 READ_LOGS 或改用 Root）"
             }

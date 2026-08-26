@@ -55,26 +55,36 @@ object IntegrityGuard {
             // 上游 1.0.19 借鉴: APK 完整性校验（native mmap/CRC 优先，Kotlin fallback）
             val integrityCode = com.soreverse.mcp.nativecore.SignatureVerifier.verifyApkIntegrity(context)
             // 上游 1.0.20 借鉴: v2/v3 APK Signing Block 证书校验——防"签名方案混淆重打包"
-            // （攻击者保留 v1 真证书、把 v2/v3 块换成自己密钥）。v2/v3 块存在时必须匹配 pin。
+            // （攻击者保留 v1 真证书、把 v2/v3 块换成自己密钥）。
+            // ⚠ 降级为"警告不阻断"：v1(PackageManager) 已匹配 pin 时，v2/v3 不匹配只可能是
+            // 用户用签名工具自行重签（逆向工具用户常态，如 MT/NP 去签名校验后重签），
+            // 而非攻击（攻击者无法在保留 v1 真证书的同时替换 v2/v3——那需要原签名密钥）。
+            // 此前直接判失败导致官方包也进不去（真实环境证书链/多 signer 提取差异），
+            // 已在 v1.0.72 修复为软警告。
             val v23Digest = runCatching {
                 com.soreverse.mcp.nativecore.ApkSigningBlock.signingBlockCertDigest(
                     context.packageCodePath
                 )
             }.getOrNull()
-            val v23Trusted = when (v23Digest) {
-                null -> true                                   // 无 v2/v3 块（纯 v1 签名）
-                com.soreverse.mcp.nativecore.ApkSigningBlock.PARSE_ERROR -> false // 块存在但解析失败（可疑）
-                else -> v23Digest.normalizeDigest() == expected
+            val v23Warning = when (v23Digest) {
+                null -> ""                                   // 无 v2/v3 块（纯 v1 签名）
+                com.soreverse.mcp.nativecore.ApkSigningBlock.PARSE_ERROR ->
+                    "v2/v3 signing block parse error (warning)"
+                else -> {
+                    val norm = v23Digest.normalizeDigest()
+                    if (norm == expected || actual.any { it == norm }) ""
+                    else "v2/v3 signing block signer differs from v1 (possible signing-scheme confusion, v1 still verified)"
+                }
             }
             if (expected.isBlank()) {
                 Result(true, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
             } else {
-                val signerTrusted = actual.any { it == expected } && v23Trusted
+                val signerTrusted = actual.any { it == expected }
                 Result(
                     trusted = signerTrusted,
                     reason = when {
-                        !actual.any { it == expected } -> "application signature mismatch"
-                        !v23Trusted -> "v2/v3 signing block signer mismatch (signing-scheme confusion)"
+                        !signerTrusted -> "application signature mismatch"
+                        v23Warning.isNotEmpty() -> v23Warning
                         else -> "trusted release signer"
                     },
                     expected = expected,

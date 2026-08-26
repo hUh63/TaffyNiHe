@@ -148,12 +148,19 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
         return
     }
     var remaining by remember { mutableStateOf(10) }
-    LaunchedEffect(Unit) {
+    var proceed by remember { mutableStateOf(false) }
+    // 用户选择"仍然使用"后立即放行，不再倒计时退出
+    LaunchedEffect(proceed) {
+        if (proceed) return@LaunchedEffect
         while (remaining > 0) {
             delay(1000)
             remaining--
         }
-        activity?.let { IntegrityGuard.terminate(it) }
+        if (!proceed) activity?.let { IntegrityGuard.terminate(it) }
+    }
+    if (proceed) {
+        content()
+        return
     }
     MaterialTheme(colorScheme = appleDarkColors()) {
         Box(Modifier.fillMaxSize().background(AppleColors.Dark.background), contentAlignment = Alignment.Center) {
@@ -170,9 +177,13 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
                         if (result.expected.isNotBlank()) Text("期望: ${result.expected.take(16)}...${result.expected.takeLast(16)}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         if (result.actual.isNotEmpty()) Text("实际: ${result.actual.joinToString { it.take(16) + "..." + it.takeLast(16) }}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         if (result.threats.isNotEmpty()) Text("威胁: ${result.threats.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        Text("如果这是你自行签名/修改的安装包，可点击「仍然使用」继续（下次安装官方签名包即恢复校验）。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
-                confirmButton = {},
+                confirmButton = {
+                    TextButton(onClick = { proceed = true }) { Text("仍然使用", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) }
+                },
+                dismissButton = {},
             )
         }
     }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -723,7 +724,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 else -> if (zh) "采集中" else "Running"
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.size(8.dp).clip(androidx.compose.foundation.CircleShape).background(statusColor))
+                Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(statusColor))
                 Text(statusText, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = statusColor)
             }
             // 统计
@@ -1477,6 +1478,15 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
 
         // ── 日志列表（LazyColumn 只渲染可见行，2000 行也不卡；weight 占满剩余空间）──
+        // appLogVisible 计算必须在 LazyColumn 之外（LazyListScope 非 Composable 上下文，不能调 remember）
+        val appLogVisible = remember(appLogLines.size, levelSet) {
+            if (!appLogMode) emptyList() else {
+                val full = levelSet.size == 6
+                appLogLines.filter { l ->
+                    full || levelSet.contains(l.split(" ").getOrNull(2)?.take(1) ?: "")
+                }.takeLast(500)
+            }
+        }
         val logListState = rememberLazyListState()
         // 新日志到达自动滚到底部（暂停时不滚）
         LaunchedEffect(appLogMode, visible.size, appLogLines.size) {
@@ -1504,13 +1514,6 @@ internal fun LogcatViewerPage(t: UiText) {
                         )
                     }
                 } else {
-                    // 应用日志按级别过滤（AppLog 行格式: HH:mm:ss.SSS L [TAG:] msg）
-                    val appLogVisible = remember(appLogLines.size, levelSet) {
-                        val full = levelSet.size == 6
-                        appLogLines.filter { l ->
-                            full || levelSet.contains(l.split(" ").getOrNull(2)?.take(1) ?: "")
-                        }.takeLast(500)
-                    }
                     items(appLogVisible) { l ->
                         Text(
                             l,

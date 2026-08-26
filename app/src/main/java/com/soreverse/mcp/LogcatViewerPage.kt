@@ -196,8 +196,6 @@ internal fun LogcatViewerPage(t: UiText) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val logs = remember { mutableStateListOf<LogLine>() }
-    // 整页滚动状态（整个页面含控件与日志内容一体上下滚动）
-    val pageScroll = rememberScrollState()
 
     var running by remember { mutableStateOf(false) }
     var paused by remember { mutableStateOf(false) }
@@ -701,29 +699,42 @@ internal fun LogcatViewerPage(t: UiText) {
     }
     val clipboard = LocalClipboardManager.current
 
-    // 新日志自动滚动到页面底部（整页滚动模式）
-    LaunchedEffect(appLogMode, visible.size, appLogLines.size) {
-        if (!paused) {
-            runCatching {
-                if (pageScroll.maxValue > 0) pageScroll.scrollTo(pageScroll.maxValue)
-            }
-        }
-    }
 
-    Column(Modifier.fillMaxSize().padding(10.dp).verticalScroll(pageScroll), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // ── 状态统计卡片（LogFox 样式）──
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatBox(
-                if (zh) "状态" else "Status",
-                when {
-                    running && paused -> if (zh) "已暂停" else "Paused"
-                    running -> if (zh) "采集中" else "Running"
-                    else -> if (zh) "待机" else "Standby"
-                },
-                Modifier.weight(1f),
+    // 日志区用 LazyColumn 独立滚动（整页滚动 300 行全量渲染会卡），
+    // 控件区固定、日志区 weight 自适应——操作控件常驻可见，日志滚动流畅。
+    Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // ── 状态条：状态胶囊 + 实时统计（统一为一行，视觉更轻盈）──
+        Row(
+            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // 状态胶囊：圆点 + 状态文字
+            val statusColor = when {
+                !running -> MaterialTheme.colorScheme.outline
+                paused -> AppPalette.orange
+                else -> AppPalette.green
+            }
+            val statusText = when {
+                !running -> if (zh) "待机" else "Standby"
+                paused -> if (zh) "已暂停" else "Paused"
+                else -> if (zh) "采集中" else "Running"
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(8.dp).clip(androidx.compose.foundation.CircleShape).background(statusColor))
+                Text(statusText, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = statusColor)
+            }
+            // 统计
+            Text(
+                (if (zh) "总行 " else "Lines ") + (if (appLogMode) appLogLines.size else logs.size) +
+                    (if (zh) " · 崩溃 " else " · Crashes ") + crashLogs.size +
+                    (if (dropped > 0) (if (zh) " · 丢弃 " else " · Dropped ") + dropped else ""),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
             )
-            StatBox(if (zh) "总行" else "Total", if (appLogMode) appLogLines.size.toString() else logs.size.toString(), Modifier.weight(1f))
-            StatBox(if (zh) "崩溃" else "Crash", crashLogs.size.toString(), Modifier.weight(1f))
         }
 
         // ── 采集模式选择（自动 / ADB默认 / Root / Shizuku）──
@@ -789,20 +800,8 @@ internal fun LogcatViewerPage(t: UiText) {
                 TextButton(onClick = { startRecord() }, enabled = running) { Text(if (zh) "录制" else "Record") }
             }
         }
-        // 录制操作四按钮 + 录制状态文本
+        // 文件操作行：保存 .log / 导出 .zip + 录制状态（实时操作按钮在日志页工具栏，避免重复）
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { logs.clear(); dropped = 0 }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
-                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.width(2.dp))
-                Text(if (zh) "清除" else "Clear", fontSize = 10.sp)
-            }
-            TextButton(onClick = {
-                clipboard.setText(AnnotatedString(if (appLogMode) appLogLines.joinToString("\n") else visible.joinToString("\n") { it.raw }))
-            }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
-                Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.width(2.dp))
-                Text(if (zh) "复制" else "Copy", fontSize = 10.sp)
-            }
             TextButton(onClick = { saveLogFile() }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
                 Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(2.dp))
@@ -811,7 +810,7 @@ internal fun LogcatViewerPage(t: UiText) {
             TextButton(onClick = { exportZip(visible) }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
                 Icon(Icons.Default.Archive, null, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(2.dp))
-                Text(if (zh) "保存.zip" else "Save .zip", fontSize = 10.sp)
+                Text(if (zh) "导出.zip" else "Export .zip", fontSize = 10.sp)
             }
             Text(
                 when {
@@ -926,7 +925,7 @@ internal fun LogcatViewerPage(t: UiText) {
         }
 
         when (tab) {
-            "filter" -> {
+            "filter" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ── 过滤器管理：保存当前过滤条件 / 管理已保存预设（实时过滤已在日志页）──
                 Text(
                     if (zh) "保存过滤器" else "Save filter",
@@ -989,7 +988,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     }
                 }
             }
-            "crash" -> {
+            "crash" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ── 崩溃记录（LogFox 卡片样式：JAVA / NATIVE / ANR）──
                 val groups = remember(logs.size) { groupCrashesFromLogs(logs) }
                 var expandedIdx by remember { mutableStateOf(-1) }
@@ -1107,7 +1106,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         }
                     }
                 }
-            "record" -> {
+            "record" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ── 录制文件列表（录制控制已移到采集通道区下方；本页只显示文件与保存目录）──
                 var refreshTick by remember { mutableStateOf(0) }
                 val files = remember(recording, logs.size, refreshTick) { recordFiles() }
@@ -1209,7 +1208,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         }
                 }
             }
-            "app" -> {
+            "app" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ── 应用列表（LogFox 样式：搜索应用，点击设包名过滤并跳转日志页）──
                 Text(
                     (if (zh) "应用" else "Apps") + " · " + appList.size,
@@ -1318,7 +1317,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     }
                 }
             }
-            "settings" -> {
+            "settings" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ── 设置（LogFox 样式：开关 + 状态提示）──
                 Text(
                     if (zh) "Logcat 设置" else "Logcat settings",
@@ -1341,7 +1340,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            else -> {
+            else -> Column(Modifier.weight(1f)) {
                 // ── 日志页：搜索 + 实时过滤（可折叠）+ 工具栏 + 列表 ──
                 OutlinedTextField(
                     value = keyword,
@@ -1477,20 +1476,33 @@ internal fun LogcatViewerPage(t: UiText) {
                     )
                 }
 
-        // ── 日志列表（最小高度保障：顶部控件挤压时列表仍可滚动）──
-        androidx.compose.foundation.layout.Box(
-            Modifier.fillMaxWidth()
+        // ── 日志列表（LazyColumn 只渲染可见行，2000 行也不卡；weight 占满剩余空间）──
+        val logListState = rememberLazyListState()
+        // 新日志到达自动滚到底部（暂停时不滚）
+        LaunchedEffect(appLogMode, visible.size, appLogLines.size) {
+            if (!paused) {
+                runCatching {
+                    val total = logListState.layoutInfo.totalItemsCount
+                    if (total > 0) logListState.scrollToItem(total - 1)
+                }
+            }
+        }
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), MaterialTheme.shapes.medium),
+            state = logListState,
         ) {
             if (appLogMode) {
                 // 应用日志模式：无系统权限时的兜底（Android 11+ 普通进程 logcat 为空）
                 if (appLogLines.isEmpty()) {
-                    Text(
-                        if (zh) "暂无应用日志\n（应用启动后会记录运行信息。要查看全系统日志，请点击上方「访问所有设备日志」按钮，\n或连接电脑执行: adb shell pm grant com.taffynihe android.permission.READ_LOGS）" else "No app logs yet\n(App runtime logs appear here. For system-wide logs tap 'Read all device logs' above,\nor run: adb shell pm grant com.taffynihe android.permission.READ_LOGS)",
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    item {
+                        Text(
+                            if (zh) "暂无应用日志\n（应用启动后会记录运行信息。要查看全系统日志，请点击上方「访问所有设备日志」按钮，\n或连接电脑执行: adb shell pm grant com.taffynihe android.permission.READ_LOGS）" else "No app logs yet\n(App runtime logs appear here. For system-wide logs tap 'Read all device logs' above,\nor run: adb shell pm grant com.taffynihe android.permission.READ_LOGS)",
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 } else {
                     // 应用日志按级别过滤（AppLog 行格式: HH:mm:ss.SSS L [TAG:] msg）
                     val appLogVisible = remember(appLogLines.size, levelSet) {
@@ -1499,7 +1511,7 @@ internal fun LogcatViewerPage(t: UiText) {
                             full || levelSet.contains(l.split(" ").getOrNull(2)?.take(1) ?: "")
                         }.takeLast(500)
                     }
-                    appLogVisible.forEach { l ->
+                    items(appLogVisible) { l ->
                         Text(
                             l,
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
@@ -1509,14 +1521,16 @@ internal fun LogcatViewerPage(t: UiText) {
                     }
                 }
             } else if (visible.isEmpty()) {
-                Text(
-                    if (zh) "暂无匹配日志…（无权限时只能看到本应用日志。全系统日志需 Root/Shizuku，或 adb 授权: adb shell pm grant com.taffynihe android.permission.READ_LOGS）" else "No matching logs… (without privilege only this app's logs are visible. System-wide logs need Root/Shizuku or adb: adb shell pm grant com.taffynihe android.permission.READ_LOGS)",
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                item {
+                    Text(
+                        if (zh) "暂无匹配日志…（无权限时只能看到本应用日志。全系统日志需 Root/Shizuku，或 adb 授权: adb shell pm grant com.taffynihe android.permission.READ_LOGS）" else "No matching logs… (without privilege only this app's logs are visible. System-wide logs need Root/Shizuku or adb: adb shell pm grant com.taffynihe android.permission.READ_LOGS)",
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             } else {
-                visible.forEach { line ->
+                items(visible) { line ->
                     SelectionContainer {
                         Text(
                             text = buildAnnotatedString {
@@ -1551,7 +1565,13 @@ internal fun LogcatViewerPage(t: UiText) {
                                     }
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp),
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
+                                // 点击日志行=复制该行（长按仍可文本选择）
+                                modifier = Modifier.fillMaxWidth()
+                                    .clickable {
+                                        clipboard.setText(AnnotatedString(line.raw))
+                                        Toast.makeText(context, (if (zh) "已复制: " else "Copied: ") + line.raw.take(80), Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 1.dp),
                             )
                         }
                 }
@@ -1612,20 +1632,6 @@ internal fun LogcatViewerPage(t: UiText) {
         )
     }
 }
-}
-
-/** LogFox 样式状态统计小卡片。 */
-@Composable
-private fun StatBox(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier.clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
 }
 
 /** LogFox 样式设置开关行（标签 + Switch）。 */

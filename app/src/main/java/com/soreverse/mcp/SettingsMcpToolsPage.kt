@@ -358,7 +358,7 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
 // ─────────────────────────── 工作区管理 ───────────────────────────
 
 @Composable
-internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenServiceConfig: () -> Unit) {
+internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenServiceConfig: () -> Unit, onOpenTemp: () -> Unit = {}) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var refresh by remember { mutableIntStateOf(0) }
@@ -430,9 +430,9 @@ internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenSer
         GlassGroup(title = if (t.zh) "临时工作区" else "Temp workspaces") {
             NavRow(
                 title = if (t.zh) "$tempCount 个临时工作区" else "$tempCount temp workspaces",
-                subtitle = if (t.zh) "数量上限 ${settings.tempWorkspaceLimit}，在「临时工作区」页管理" else "Limit ${settings.tempWorkspaceLimit}; manage in Temp workspaces",
+                subtitle = if (t.zh) "数量上限 ${settings.tempWorkspaceLimit}，点按进入管理（上限/清理）" else "Limit ${settings.tempWorkspaceLimit}; tap to manage (limit / clean)",
                 icon = Icons.Default.Storage,
-                onClick = {},
+                onClick = onOpenTemp,
             )
         }
     }

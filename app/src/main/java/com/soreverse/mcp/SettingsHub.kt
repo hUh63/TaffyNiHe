@@ -19,16 +19,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
@@ -89,6 +91,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Terminal -> if (t.zh) "终端执行" else "Terminal"
     SettingsDest.Sandbox -> if (t.zh) "动态沙箱" else "Sandbox"
     SettingsDest.Python -> if (t.zh) "编辑器" else "Editor"
+    SettingsDest.Git -> if (t.zh) "Git 仓库" else "Git Repository"
 }
 
 @Composable
@@ -190,29 +193,30 @@ internal fun SettingsHub(
                     SettingsTile(if (t.zh) "外观" else "Look", if (t.zh) "主题 / 强调色 / 密度" else "Theme / accent / density", Icons.Default.Tune, AppPalette.indigo, { onDest(SettingsDest.Appearance) }, Modifier.weight(1f).fillMaxHeight())
                     SettingsTile(if (t.zh) "保活" else "Keep-alive", if (t.zh) "唤醒锁 / 自启" else "Wake lock / boot", Icons.Default.PowerSettingsNew, AppPalette.green, { onDest(SettingsDest.KeepAlive) }, Modifier.weight(1f).fillMaxHeight())
                 }
-                Text(if (t.zh) "MCP 工具" else "MCP Tools", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                Text(if (t.zh) "逆向分析" else "Reverse Analysis", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "APK 签名设置" else "APK Signing", if (t.zh) "APK签名/密钥" else "APK signing / keys", Icons.Default.Build, AppPalette.orange, { onDest(SettingsDest.ApkSign) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "临时工作区" else "Temp Workspaces", if (t.zh) "数量 / 清理" else "Limit / clean", Icons.Default.DeleteSweep, AppPalette.green, { onDest(SettingsDest.TempWorkspace) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 隧道放行 / 管理" else "Directory / tunnel / manage", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "Logcat 查看器" else "Logcat Viewer", if (t.zh) "实时日志 / 过滤 / 着色" else "Live logs / filter / color", Icons.Default.Description, AppPalette.teal, { onDest(SettingsDest.LogcatViewer) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile("eDBG", if (t.zh) "eBPF 调试器 / 图形化 / 反编译" else "eBPF debugger / GUI / decompile", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Edbg) }, Modifier.weight(1f).fillMaxHeight())
                     SettingsTile("Rizin", if (t.zh) "引擎能力 / 工具路由 / 命令速查" else "Engine / tool routing / commands", Icons.Default.Memory, AppPalette.purple, { onDest(SettingsDest.Rizin) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile("eDBG", if (t.zh) "eBPF 调试器 / 图形化 / 反编译" else "eBPF debugger / GUI / decompile", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Edbg) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "抓包" else "Capture", if (t.zh) "网络抓包 / 流量采集 / tcpdump" else "Network capture / traffic / tcpdump", Icons.Default.Analytics, AppPalette.teal, { onDest(SettingsDest.Capture) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "动态沙箱" else "Sandbox", if (t.zh) "安装 / 启动 / 日志 / 崩溃" else "Install / launch / logs", Icons.Default.PlayArrow, AppPalette.red, { onDest(SettingsDest.Sandbox) }, Modifier.weight(1f).fillMaxHeight())
+                }
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile(if (t.zh) "Logcat 查看器" else "Logcat Viewer", if (t.zh) "实时日志 / 过滤 / 着色" else "Live logs / filter / color", Icons.Default.Description, AppPalette.teal, { onDest(SettingsDest.LogcatViewer) }, Modifier.weight(1f).fillMaxHeight())
+                    Box(Modifier.weight(1f))
+                }
+                Text(if (t.zh) "开发环境" else "Dev Environment", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "Linux 环境" else "Linux Env", if (t.zh) "Alpine / Ubuntu / 无 root 可用" else "Alpine / Ubuntu / no-root", Icons.Default.Terminal, AppPalette.green, { onDest(SettingsDest.Linux) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "终端执行" else "Terminal", if (t.zh) "真会话 / Python / taffy CLI" else "Real session / Python / taffy CLI", Icons.Default.Code, AppPalette.orange, { onDest(SettingsDest.Terminal) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "终端执行" else "Terminal", if (t.zh) "内置 Python / Termux 运行时" else "Built-in Python / Termux", Icons.Default.Code, AppPalette.orange, { onDest(SettingsDest.Terminal) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "动态沙箱" else "Sandbox", if (t.zh) "安装 / 启动 / 日志 / 崩溃" else "Install / launch / logs", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Sandbox) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "编辑器" else "Editor", if (t.zh) "Python/Shell/JSON + 工作区/快照" else "Python/Shell/JSON + workspace", Icons.Default.Create, AppPalette.blue, { onDest(SettingsDest.Python) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile("Git", if (t.zh) "完整版本管理 / commit / push" else "Full version control / commit / push", Icons.Default.AccountTree, AppPalette.orange, { onDest(SettingsDest.Git) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "编辑器" else "Editor", if (t.zh) "Python/Shell/JSON 多模式" else "Python/Shell/JSON multi-mode", Icons.Default.Code, AppPalette.blue, { onDest(SettingsDest.Python) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 管理 / 临时清理" else "Directory / manage / temp clean", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
                     Box(Modifier.weight(1f))
                 }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
@@ -222,6 +226,8 @@ internal fun SettingsHub(
                     NavRow(if (t.zh) "导出" else "Export", if (t.zh) "冲突策略与构建镜像" else "Conflict strategy", Icons.Default.Storage, onClick = { onDest(SettingsDest.Export) })
                     GroupDivider()
                     NavRow(if (t.zh) "编辑校验与审计" else "Edit & Audit", if (t.zh) "快照 / 并发 / 模拟" else "Snapshot / concurrency", Icons.Default.Security, onClick = { onDest(SettingsDest.Audit) })
+                    GroupDivider()
+                    NavRow(if (t.zh) "APK 签名设置" else "APK Signing", if (t.zh) "APK 签名 / 密钥（构建产物相关）" else "APK signing / keys", Icons.Default.Build, onClick = { onDest(SettingsDest.ApkSign) })
                     GroupDivider()
                     NavRow("Blutter", if (t.zh) "Flutter 3.44 / Dart 3.12.2 / 完全离线" else "Flutter 3.44 / Dart 3.12.2 / fully offline", Icons.Default.Memory, onClick = { onDest(SettingsDest.Blutter) })
                 }
@@ -288,7 +294,7 @@ internal fun SettingsHub(
             SettingsDest.Probe -> SettingsProbePage(t, settings)
             SettingsDest.ApkSign -> SettingsApkSignPage(t, settings)
             SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings)
-            SettingsDest.Workspace -> SettingsWorkspacePage(t, settings) { onDest(SettingsDest.ServiceConfig) }
+            SettingsDest.Workspace -> SettingsWorkspacePage(t, settings, { onDest(SettingsDest.ServiceConfig) }, { onDest(SettingsDest.TempWorkspace) })
             SettingsDest.Permissions -> SettingsPermissionsPage(t)
             SettingsDest.LogcatViewer -> LogcatViewerPage(t)
             SettingsDest.Edbg -> EdbgPage(t)
@@ -296,6 +302,7 @@ internal fun SettingsHub(
             SettingsDest.Capture -> CapturePage(t)
             SettingsDest.Linux -> SettingsLinuxPage(t)
             SettingsDest.Terminal -> SettingsTerminalPage(t)
+            SettingsDest.Git -> SettingsGitPage(t)
             SettingsDest.Sandbox -> SettingsSandboxPage(t)
             SettingsDest.Python -> SettingsEditorPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)

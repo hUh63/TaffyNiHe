@@ -186,10 +186,26 @@ object LinuxRootfs {
      * @param distro 发行版名（alpine/ubuntu/任意已解压 rootfs）
      * @param script shell 脚本内容（多行）
      * @param timeoutSec 超时秒数
+     * @param binds 宿主目录挂载列表 (宿主绝对路径, rootfs 内路径)。proot 通道用 -b，chroot 通道用 bind mount（自动挂载/卸载）。
      */
-    fun exec(context: Context, distro: String, script: String, timeoutSec: Long = 60): ExecResult? {
+    fun exec(
+        context: Context,
+        distro: String,
+        script: String,
+        timeoutSec: Long = 60,
+        binds: List<Pair<String, String>> = emptyList(),
+    ): ExecResult? {
         val rootfs = ensureExtracted(context, distro) ?: return null
         val ch = channel(context) ?: return ExecResult(-1, "无可用通道（无 root 且内置 proot 未就绪）", "none")
+        // bind 前置：chroot 通道需要把宿主目录预先 bind 进 rootfs
+        val mountCmds = StringBuilder()
+        val umountCmds = StringBuilder()
+        for ((host, guest) in binds) {
+            val gf = File(rootfs, guest.trimStart('/'))
+            gf.mkdirs()
+            mountCmds.append("mount -o bind \"$host\" \"${gf.absolutePath}\" 2>/dev/null; ")
+            umountCmds.append("umount \"${gf.absolutePath}\" 2>/dev/null; ")
+        }
         // 脚本写入 rootfs 内 /tmp（chroot 与 proot 均可访问）
         val tmpDir = File(rootfs, "tmp").apply { mkdirs() }
         val scriptFile = File(tmpDir, "taffy_${System.currentTimeMillis()}.sh")
@@ -199,27 +215,32 @@ object LinuxRootfs {
             if (ch == "chroot") {
                 // root 通道: 原生 chroot（挂载 /proc /dev /sys, 执行后卸载）
                 val r = PermissionManager.exec(
+                    mountCmds.toString() +
                     "mount -t proc proc \"$rootfs/proc\" 2>/dev/null; " +
                     "mount -t sysfs sysfs \"$rootfs/sys\" 2>/dev/null; " +
                     "mount -o bind /dev \"$rootfs/dev\" 2>/dev/null; " +
                     "chroot \"$rootfs\" /bin/sh \"$rel\" 2>&1; rc=\$?; " +
                     "umount \"$rootfs/proc\" 2>/dev/null; umount \"$rootfs/sys\" 2>/dev/null; " +
-                    "umount \"$rootfs/dev\" 2>/dev/null; exit \$rc",
+                    "umount \"$rootfs/dev\" 2>/dev/null; " +
+                    umountCmds.toString() + "exit \$rc",
                     timeoutSec = timeoutSec,
                 )
                 ExecResult(r.code, r.stdout, "chroot")
             } else {
                 // 无 root 通道: 内置 proot（用户态模拟）
                 val pd = prootDir(context) ?: return ExecResult(-1, "内置 proot 不可用", "none")
-                val cmd = listOf(
+                val cmd = mutableListOf(
                     File(pd, "proot").absolutePath,
                     "-r", rootfs.absolutePath,
                     "-0",                       // 模拟 root 身份（无 root 也能装包）
                     "-b", "/dev", "-b", "/proc", "-b", "/sys",
+                )
+                for ((host, guest) in binds) { cmd.add("-b"); cmd.add("$host:$guest") }
+                cmd.addAll(listOf(
                     "--loader-path=" + File(pd, "loader").absolutePath,
                     "-w", "/",
                     "/bin/sh", rel,
-                )
+                ))
                 val pb = ProcessBuilder(cmd)
                 pb.environment().apply {
                     put("LD_LIBRARY_PATH", pd.absolutePath)

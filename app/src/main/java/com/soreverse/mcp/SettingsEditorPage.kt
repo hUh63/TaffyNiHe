@@ -84,7 +84,8 @@ internal fun SettingsEditorPage(t: UiText) {
     var currentFile by remember { mutableStateOf<String?>(null) }
     var currentFilePath by remember { mutableStateOf<String?>(null) }   // 工作区文件完整路径（写回用）
     var recentFiles by remember { mutableStateOf<List<String>>(emptyList()) }
-    var wsFiles by remember { mutableStateOf<List<String>>(emptyList()) } // 工作区文件列表
+    var wsFiles by remember { mutableStateOf<List<String>>(emptyList()) } // 工作区当前目录条目（📁/ 前缀=子目录）
+    var wsDir by remember { mutableStateOf("") }                          // 工作区浏览当前相对目录（""=根）
     val consoleScroll = rememberScrollState()
 
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -105,13 +106,16 @@ internal fun SettingsEditorPage(t: UiText) {
             dir.listFiles { f -> f.isFile && f.name.endsWith(".py") || f.name.endsWith(".sh") || f.name.endsWith(".json") || f.name.endsWith(".txt") }
                 ?.sortedByDescending { it.lastModified() }?.map { it.name }?.take(6).orEmpty()
         }.getOrDefault(emptyList())
-        // 工作区文件浏览（借鉴 Xed-Editor 项目管理理念）
+        // 工作区文件浏览（借鉴 Xed-Editor 项目管理理念：目录导航 + 文件点开）
         wsFiles = runCatching {
             val ws = WorkspacePolicy.workDirPath(context) ?: return@runCatching emptyList()
-            val dir = File(ws)
+            val dir = File(ws, wsDir)
             if (!dir.isDirectory) emptyList() else {
-                dir.listFiles { f -> f.isFile && !f.name.startsWith(".") }
-                    ?.sortedByDescending { it.lastModified() }?.map { it.name }?.take(12).orEmpty()
+                val dirs = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
+                    ?.map { "\u{1F4C1}/${it.name}" }.orEmpty()
+                val files = dir.listFiles { f -> f.isFile && !f.name.startsWith(".") }
+                    ?.sortedByDescending { it.lastModified() }?.map { it.name }.orEmpty()
+                (dirs.sorted() + files).take(16)
             }
         }.getOrDefault(emptyList())
     }
@@ -391,23 +395,53 @@ internal fun SettingsEditorPage(t: UiText) {
                 }
             }
         }
-        // ── 工作区文件（借鉴 Xed-Editor 项目管理：浏览→编辑→写回）──
-        if (wsFiles.isNotEmpty()) {
+        // ── 工作区文件（借鉴 Xed-Editor 项目管理：目录导航→编辑→写回）──
+        if (wsFiles.isNotEmpty() || wsDir.isNotEmpty()) {
             Text(
-                (if (zh) "工作区文件（点按编辑，保存写回，自动留备份）" else "Workspace files (tap to edit, save writes back, backup kept)"),
+                (if (zh) "工作区（点目录进入，点文件编辑，保存写回并自动留备份）" else "Workspace (tap dir to enter, tap file to edit; save writes back + backup)"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                wsFiles.forEach { name ->
+            // 面包屑：当前位置 + 返回上级
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (wsDir.isNotEmpty()) {
                     FilterChip(
-                        selected = currentFile == name,
+                        selected = false,
+                        onClick = {
+                            wsDir = wsDir.substringBeforeLast('/', "").also { refreshRecent() }
+                        },
+                        label = { Text("← ..", fontSize = 10.sp) },
+                    )
+                }
+                Text(
+                    "/" + wsDir,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
+            }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                wsFiles.forEach { entry ->
+                    val isDir = entry.startsWith("\u{1F4C1}/")
+                    val name = if (isDir) entry.removePrefix("\u{1F4C1}/") else entry
+                    FilterChip(
+                        selected = !isDir && currentFile == name,
                         onClick = {
                             val ws = WorkspacePolicy.workDirPath(context)
-                            if (ws != null) loadWsFile(File(ws, name).absolutePath)
+                            if (ws != null) {
+                                if (isDir) {
+                                    wsDir = if (wsDir.isEmpty()) name else "$wsDir/$name"
+                                    refreshRecent()
+                                } else {
+                                    loadWsFile(File(ws, if (wsDir.isEmpty()) name else "$wsDir/$name").absolutePath)
+                                }
+                            }
                         },
-                        label = { Text(name, fontSize = 10.sp, maxLines = 1) },
+                        label = { Text(if (isDir) "\uD83D\uDCC1 $name" else name, fontSize = 10.sp, maxLines = 1) },
                     )
+                }
+                if (wsFiles.isEmpty() && wsDir.isNotEmpty()) {
+                    Text(if (zh) "（空目录）" else "(empty dir)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

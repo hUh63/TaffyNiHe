@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.PythonRuntime
 import com.soreverse.mcp.core.RootShell
+import com.soreverse.mcp.core.WorkspacePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -116,6 +117,13 @@ internal fun SettingsTerminalPage(t: UiText) {
         sessionProc = proc
         sessionChannel = if (privileged) "sh -i (特权)" else "python3 -i (内置)"
         sessionOutput = if (zh) "── Taffy 终端会话已启动 ──\n通道: ${sessionChannel}\n输入命令开始（↑↓ 历史）\n" else "── Taffy terminal session started ──\nchannel: ${sessionChannel}\ntype commands (↑↓ history)\n"
+        // 自动切换到工作区（workDirPath 为真实路径；无 root 时内置 python 受限于 app 权限）
+        val wsPath = runCatching { WorkspacePolicy.workDirPath(context) }.getOrNull()
+        if (!wsPath.isNullOrBlank()) {
+            val cd = if (sessionChannel.startsWith("python")) "import os; os.chdir(r'$wsPath'); os.getcwd()" else "cd '$wsPath' && pwd"
+            writeToSession(proc, cd)
+            sessionOutput = sessionOutput + (if (zh) "\n# 工作区: $wsPath（已自动 cd）\n" else "\n# workspace: $wsPath (auto-cd)\n")
+        }
         // 读线程：持续读取输出，过滤分隔标记，限制显示长度
         val sb = StringBuilder(sessionOutput)
         Thread {
@@ -155,15 +163,20 @@ internal fun SettingsTerminalPage(t: UiText) {
         history = (listOf(c) + history.filter { it != c }).take(60)
         histIdx = -1
         input = ""
+        writeToSession(proc, c)
+        sessionOutput = sessionOutput + (if (zh) "\n$ " else "\n$ ") + c + "\n"
+    }
+
+    /** 直接写命令到会话（不追加历史/提示符）——用于启动时的自动 cd 等内部命令。 */
+    fun writeToSession(proc: Process, cmd: String) {
         try {
             val os = proc.outputStream
-            os.write((c + "\n").toByteArray(Charsets.UTF_8))
+            os.write((cmd + "\n").toByteArray(Charsets.UTF_8))
             os.flush()
             // 分隔标记（python 交互用 print）
             val markerCmd = if (sessionChannel.startsWith("python")) "print('$marker')\n" else "echo $marker\n"
             os.write(markerCmd.toByteArray(Charsets.UTF_8))
             os.flush()
-            sessionOutput = sessionOutput + (if (zh) "\n$ " else "\n$ ") + c + "\n"
         } catch (e: Exception) {
             sessionOutput = sessionOutput + "\n[写入失败: ${e.message}]\n"
             sessionProc = null
@@ -176,13 +189,32 @@ internal fun SettingsTerminalPage(t: UiText) {
         runCatching { outputScroll.scrollTo(outputScroll.maxValue) }
     }
 
-    // 快捷命令
-    val quick = if (sessionChannel.startsWith("python"))
-        listOf("print('hi')" to "Py Hello", "import os; os.getcwd()" to "CWD", "import platform; platform.platform()" to "平台")
-    else listOf(
-        "uname -a" to "uname", "pwd" to "pwd", "ls -la" to "ls", "df -h /" to "磁盘",
-        "ps -A | head" to "进程", "apk update" to "apk update", "id" to "id", "echo \$HOME" to "HOME",
-    )
+    // 快捷命令（按通道自适应 + 工作区联动）
+    val wsPath = remember { runCatching { WorkspacePolicy.workDirPath(context) }.getOrNull() }
+    val quick = remember(sessionChannel, wsPath) {
+        val base = if (sessionChannel.startsWith("python")) {
+            mutableListOf(
+                "print('hi')" to "Py Hello",
+                "import os; os.getcwd()" to "CWD",
+                "import platform; platform.platform()" to "平台",
+            )
+        } else {
+            mutableListOf(
+                "uname -a" to "uname", "pwd" to "pwd", "ls -la" to "ls", "df -h /" to "磁盘",
+                "ps -A | head" to "进程", "apk update" to "apk update", "id" to "id", "echo \$HOME" to "HOME",
+            )
+        }
+        // 工作区入口：查看（ls）与编辑提示（vi/cat 视环境支持）
+        if (!wsPath.isNullOrBlank()) {
+            if (sessionChannel.startsWith("python")) {
+                base.add(0, "import os; os.chdir(r'$wsPath'); os.listdir('.')[:20]" to (if (zh) "工作区" else "Workspace"))
+            } else {
+                base.add(0, "cd '$wsPath' && ls -la" to (if (zh) "工作区" else "Workspace"))
+                base.add(1, "cd '$wsPath' && ls -la | head" to (if (zh) "工作区浏览" else "WS list"))
+            }
+        }
+        base
+    }
 
     Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // ── 会话控制条 ──

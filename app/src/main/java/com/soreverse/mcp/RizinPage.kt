@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -86,6 +87,10 @@ internal fun RizinPage(t: UiText) {
                 }.onFailure { e -> output = "Error: ${e.message}" }
             }
             busy = false
+            // 打开成功后自动展示文件头信息（iI）
+            if (workspaceId.isNotBlank() && output.startsWith(if (zh) "已打开" else "Opened")) {
+                runCmd("iI")
+            }
         }
     }
 
@@ -112,6 +117,12 @@ internal fun RizinPage(t: UiText) {
         "taffy_build_so" to (if (zh) "回写并签名构建 SO" else "Rebuild & sign SO"),
     )
     val quickCommands = listOf("afl", "pdf @main", "izz", "iI", "px 64 @main")
+    // 分组快捷命令（分析 / 反汇编 / 信息）
+    val quickGroups = listOf(
+        (if (zh) "分析" else "Analyze") to listOf("afl" to "函数列表", "izz" to "字符串", "axt @main" to "交叉引用"),
+        (if (zh) "反汇编" else "Disasm") to listOf("pdf @main" to "反汇编 main", "pdf @entry0" to "反汇编入口", "px 64 @main" to "main 前 64 字节"),
+        (if (zh) "信息" else "Info") to listOf("iI" to "文件头", "iS" to "节区", "ii" to "导入", "iE" to "导出"),
+    )
 
     Column(
         Modifier.fillMaxSize().padding(10.dp).verticalScroll(rememberScrollState()),
@@ -147,9 +158,13 @@ internal fun RizinPage(t: UiText) {
             }
         }
         if (workspaceId.isNotBlank()) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                quickCommands.forEach { c ->
-                    FilterChip(selected = false, onClick = { runCmd(c) }, label = { Text(c, fontSize = 10.sp) }, enabled = !busy)
+            // 分组快捷命令
+            quickGroups.forEach { (groupName, cmds) ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(groupName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 4.dp))
+                    cmds.forEach { (c, label) ->
+                        FilterChip(selected = false, onClick = { runCmd(c) }, label = { Text(label, fontSize = 10.sp) }, enabled = !busy)
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -163,6 +178,10 @@ internal fun RizinPage(t: UiText) {
                 )
                 IconButton(onClick = { runCmd(cmdInput) }, enabled = !busy) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, tint = MaterialTheme.colorScheme.primary)
+                }
+                // 清空输出
+                IconButton(onClick = { output = "" }, enabled = output.isNotBlank()) {
+                    Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
             }
             if (output.isNotBlank()) {

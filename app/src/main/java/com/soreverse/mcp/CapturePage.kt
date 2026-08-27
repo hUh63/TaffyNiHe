@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,10 +16,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.LocalClipboardManager
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -368,6 +372,24 @@ internal fun CapturePage(t: UiText) {
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
                             color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
                         )
+                    }
+                }
+            }
+            // 输出操作：复制 / 清空
+            if (output.isNotBlank()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        LocalClipboardManager.current.setText(androidx.compose.ui.text.AnnotatedString(output))
+                        Toast.makeText(context, if (zh) "已复制" else "Copied", Toast.LENGTH_SHORT).show()
+                    }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                        Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (zh) "复制" else "Copy", fontSize = 10.sp)
+                    }
+                    TextButton(onClick = { output = "" }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (zh) "清空" else "Clear", fontSize = 10.sp)
                     }
                 }
             }

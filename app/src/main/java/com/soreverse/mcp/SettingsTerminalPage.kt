@@ -89,6 +89,24 @@ internal fun SettingsTerminalPage(t: UiText) {
     val privileged = remember { RootShell.isRootAvailable() || PermissionManager.isShizukuGranted() }
     val sessionActive = sessionProc != null
 
+    /** 直接写命令到会话（不追加历史/提示符）——用于启动时的自动 cd 等内部命令。
+     *  必须定义在 startSession/send 之前（Kotlin 局部函数先声明后使用）。 */
+    fun writeToSession(proc: Process, cmd: String) {
+        try {
+            val os = proc.outputStream
+            os.write((cmd + "\n").toByteArray(Charsets.UTF_8))
+            os.flush()
+            // 分隔标记（python 交互用 print）
+            val markerCmd = if (sessionChannel.startsWith("python")) "print('$marker')\n" else "echo $marker\n"
+            os.write(markerCmd.toByteArray(Charsets.UTF_8))
+            os.flush()
+        } catch (e: Exception) {
+            sessionOutput = sessionOutput + "\n[写入失败: ${e.message}]\n"
+            sessionProc = null
+            sessionChannel = ""
+        }
+    }
+
     fun stopSession() {
         val p = sessionProc
         sessionProc = null
@@ -165,23 +183,6 @@ internal fun SettingsTerminalPage(t: UiText) {
         input = ""
         writeToSession(proc, c)
         sessionOutput = sessionOutput + (if (zh) "\n$ " else "\n$ ") + c + "\n"
-    }
-
-    /** 直接写命令到会话（不追加历史/提示符）——用于启动时的自动 cd 等内部命令。 */
-    fun writeToSession(proc: Process, cmd: String) {
-        try {
-            val os = proc.outputStream
-            os.write((cmd + "\n").toByteArray(Charsets.UTF_8))
-            os.flush()
-            // 分隔标记（python 交互用 print）
-            val markerCmd = if (sessionChannel.startsWith("python")) "print('$marker')\n" else "echo $marker\n"
-            os.write(markerCmd.toByteArray(Charsets.UTF_8))
-            os.flush()
-        } catch (e: Exception) {
-            sessionOutput = sessionOutput + "\n[写入失败: ${e.message}]\n"
-            sessionProc = null
-            sessionChannel = ""
-        }
     }
 
     // 输出自动滚动到底部

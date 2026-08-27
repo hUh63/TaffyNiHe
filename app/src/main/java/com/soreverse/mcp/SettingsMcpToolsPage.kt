@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.SettingsStore
@@ -383,6 +384,18 @@ internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenSer
                     PrimaryActionButton(
                         if (t.zh) "选择工作目录" else "Choose work directory",
                         onOpenServiceConfig,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                GroupDivider()
+                Row(Modifier.padding(14.dp)) {
+                    SecondaryActionButton(
+                        if (t.zh) "复制路径" else "Copy path",
+                        {
+                            LocalClipboardManager.current.setText(androidx.compose.ui.text.AnnotatedString(workDir))
+                            Toast.makeText(context, (if (t.zh) "已复制: " else "Copied: ") + workDir, Toast.LENGTH_LONG).show()
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

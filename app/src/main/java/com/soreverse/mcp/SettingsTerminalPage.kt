@@ -1,25 +1,49 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.PermissionManager
@@ -30,187 +54,215 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 设置 → 终端执行：内置 Python（零依赖，无 root 可用）与 Termux 运行时。
- * 对应 MCP 工具 taffy_terminal_exec（detect/run）。
+ * 设置 → 终端执行：真正的终端体验（对应 taffy_terminal_exec）。
  *
- * 功能：运行时检测与手动选择 / 常用脚本模板 / 执行输出。
+ * - 持久会话终端：特权通道启动 `sh -i`（root/Shizuku），无 root 用内置 Python `-i`，
+ *   cd/环境变量等状态跨命令保持——不再是"每次新进程"的伪终端。
+ * - 黑底等宽终端风 UI：输出自动滚动、过滤分隔标记、输入行固定底部。
+ * - 命令历史：↑↓ 键切换。
+ * - 快捷命令 chips（uname/pwd/ls/apk 等）。
  */
 @Composable
 internal fun SettingsTerminalPage(t: UiText) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val zh = t.zh
-    var refreshTick by remember { mutableIntStateOf(0) }
-    var busy by remember { mutableStateOf(false) }
-    var runtime by remember { mutableStateOf("builtin-python") }
-    var script by remember { mutableStateOf("") }
-    var output by remember { mutableStateOf("") }
-    var execInfo by remember { mutableStateOf("") }
-
     val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-    // 运行时检测
-    val builtinPyPath = remember(refreshTick) { PythonRuntime.pythonPath(context) }
-    val builtinPyVersion = remember(refreshTick) {
-        if (builtinPyPath != null) {
-            PythonRuntime.run(context, "import sys; print(sys.version.split()[0])", timeoutSec = 15).output.trim()
-        } else ""
-    }
-    val privileged = remember(refreshTick) { RootShell.isRootAvailable() || PermissionManager.isShizukuGranted() }
-    data class Rt(val key: String, val label: String, val bin: String, val available: Boolean, val desc: String)
-    val runtimes = remember(refreshTick, privileged) {
-        val list = mutableListOf(
-            Rt("builtin-python", if (zh) "内置 Python" else "Built-in Py", "builtin", builtinPyPath != null,
-                if (zh) "零依赖 · 无 root 可用" else "no-root, zero-dep"),
-        )
-        if (privileged) {
-            list += listOf(
-                Rt("termux-python", "Termux Python", "$TERMUX_PREFIX/bin/python3",
-                    RootShell.exec("test -x \"$TERMUX_PREFIX/bin/python3\" && echo Y || echo N", timeoutSec = 8).stdout.trim() == "Y", "pkg install python"),
-                Rt("termux-node", "Termux Node", "$TERMUX_PREFIX/bin/node",
-                    RootShell.exec("test -x \"$TERMUX_PREFIX/bin/node\" && echo Y || echo N", timeoutSec = 8).stdout.trim() == "Y", "pkg install nodejs"),
-                Rt("termux-busybox", "Termux BusyBox", "$TERMUX_PREFIX/bin/busybox",
-                    RootShell.exec("test -x \"$TERMUX_PREFIX/bin/busybox\" && echo Y || echo N", timeoutSec = 8).stdout.trim() == "Y", "pkg install busybox"),
-                Rt("termux-bash", "Termux Bash", "$TERMUX_PREFIX/bin/bash",
-                    RootShell.exec("test -x \"$TERMUX_PREFIX/bin/bash\" && echo Y || echo N", timeoutSec = 8).stdout.trim() == "Y", "pkg install bash"),
-                Rt("termux-sh", "Termux sh", "$TERMUX_PREFIX/bin/sh",
-                    RootShell.exec("test -x \"$TERMUX_PREFIX/bin/sh\" && echo Y || echo N", timeoutSec = 8).stdout.trim() == "Y", "Termux 自带"),
-            )
+    // 终端配色
+    val bg = Color(0xFF0B0F14)
+    val fg = Color(0xFFD6E2F0)
+    val promptColor = Color(0xFF4DD0E1)
+    val marker = "__TAFFY_END__"
+
+    var busy by remember { mutableStateOf(false) }
+    var input by remember { mutableStateOf("") }
+    var sessionProc by remember { mutableStateOf<Process?>(null) }
+    var sessionOutput by remember { mutableStateOf("") }
+    var sessionChannel by remember { mutableStateOf("") }
+    var history by remember { mutableStateOf(listOf<String>()) }
+    var histIdx by remember { mutableStateOf(-1) }
+    val outputScroll = rememberScrollState()
+
+    val builtinPyPath = remember { PythonRuntime.pythonPath(context) }
+    val privileged = remember { RootShell.isRootAvailable() || PermissionManager.isShizukuGranted() }
+    val sessionActive = sessionProc != null
+
+    fun stopSession() {
+        val p = sessionProc
+        sessionProc = null
+        runCatching { p?.destroy() }
+        if (!sessionChannel.startsWith("python")) {
+            // 附加换行提示
+            sessionOutput = sessionOutput.ifEmpty { "" } + "\n[会话已结束]\n"
         }
-        list
+        sessionChannel = ""
     }
 
-    // 常用模板
-    val templates = listOf(
-        "print('hello from taffy')" to (if (zh) "Python Hello" else "Py Hello"),
-        "import platform; print(platform.platform()); print(platform.machine())" to (if (zh) "系统信息" else "Sys info"),
-        "import urllib.request; print(urllib.request.urlopen('https://www.baidu.com', timeout=5).status)" to (if (zh) "网络请求" else "HTTP GET"),
-        "uname -a" to (if (zh) "内核信息" else "Kernel"),
-        "node -v && npm -v" to "Node 版本",
+    fun startSession() {
+        stopSession()
+        sessionOutput = ""
+        val proc = when {
+            privileged -> PermissionManager.startPrivilegedStream("/system/bin/sh", listOf("-i"))
+            builtinPyPath != null -> runCatching {
+                ProcessBuilder(builtinPyPath, "-i").redirectErrorStream(true).start()
+            }.getOrNull()
+            else -> null
+        }
+        if (proc == null) {
+            sessionOutput = if (zh) "[无法启动会话：无特权且内置 Python 不可用]" else "[cannot start session]"
+            return
+        }
+        sessionProc = proc
+        sessionChannel = if (privileged) "sh -i (特权)" else "python3 -i (内置)"
+        sessionOutput = if (zh) "── Taffy 终端会话已启动 ──\n通道: ${sessionChannel}\n输入命令开始（↑↓ 历史）\n" else "── Taffy terminal session started ──\nchannel: ${sessionChannel}\ntype commands (↑↓ history)\n"
+        // 读线程：持续读取输出，过滤分隔标记，限制显示长度
+        val sb = StringBuilder(sessionOutput)
+        Thread {
+            val buf = ByteArray(4096)
+            try {
+                while (sessionProc === proc) {
+                    val n = proc.inputStream.read(buf)
+                    if (n < 0) break
+                    var text = String(buf, 0, n, Charsets.UTF_8)
+                    // 过滤分隔标记行
+                    text = text.replace("$marker\n", "").replace(marker, "")
+                    synchronized(sb) {
+                        sb.append(text)
+                        // 限制保留最近 12000 字符（滚动窗口）
+                        if (sb.length > 12000) sb.delete(0, sb.length - 12000)
+                    }
+                    sessionOutput = sb.toString()
+                }
+            } catch (_: Exception) {
+            } finally {
+                if (sessionProc === proc) {
+                    sessionOutput = sb.toString() + (if (zh) "\n[会话已断开]\n" else "\n[disconnected]\n")
+                    sessionProc = null
+                    sessionChannel = ""
+                }
+            }
+        }.apply { isDaemon = true; name = "taffy-terminal-reader" }.start()
+    }
+
+    fun send(cmdRaw: String) {
+        val proc = sessionProc ?: run {
+            sessionOutput = if (zh) "[会话未启动，先点「启动会话」]" else "[start session first]"
+            return
+        }
+        val c = cmdRaw.trim()
+        if (c.isEmpty()) return
+        history = (listOf(c) + history.filter { it != c }).take(60)
+        histIdx = -1
+        input = ""
+        try {
+            val os = proc.outputStream
+            os.write((c + "\n").toByteArray(Charsets.UTF_8))
+            os.flush()
+            // 分隔标记（python 交互用 print）
+            val markerCmd = if (sessionChannel.startsWith("python")) "print('$marker')\n" else "echo $marker\n"
+            os.write(markerCmd.toByteArray(Charsets.UTF_8))
+            os.flush()
+            sessionOutput = sessionOutput + (if (zh) "\n$ " else "\n$ ") + c + "\n"
+        } catch (e: Exception) {
+            sessionOutput = sessionOutput + "\n[写入失败: ${e.message}]\n"
+            sessionProc = null
+            sessionChannel = ""
+        }
+    }
+
+    // 输出自动滚动到底部
+    LaunchedEffect(sessionOutput) {
+        runCatching { outputScroll.scrollTo(outputScroll.maxValue) }
+    }
+
+    // 快捷命令
+    val quick = if (sessionChannel.startsWith("python"))
+        listOf("print('hi')" to "Py Hello", "import os; os.getcwd()" to "CWD", "import platform; platform.platform()" to "平台")
+    else listOf(
+        "uname -a" to "uname", "pwd" to "pwd", "ls -la" to "ls", "df -h /" to "磁盘",
+        "ps -A | head" to "进程", "apk update" to "apk update", "id" to "id", "echo \$HOME" to "HOME",
     )
 
-    fun run() {
-        val s = script.trim()
-        if (s.isEmpty() || busy) return
-        busy = true
-        output = if (zh) "执行中…" else "Running…"
-        scope.launch {
-            val r = withContext(Dispatchers.IO) {
-                val rt = runtimes.firstOrNull { it.key == runtime } ?: runtimes.first()
-                when {
-                    rt.key == "builtin-python" -> {
-                        val res = PythonRuntime.run(context, s, timeoutSec = 60)
-                        Triple(res.code, res.output, "内置 Python")
-                    }
-                    rt.available -> {
-                        val env = "PREFIX=$TERMUX_PREFIX PATH=$TERMUX_PREFIX/bin:/system/bin HOME=/data/data/com.termux/files/home"
-                        val bin = rt.bin
-                        // 脚本写临时文件执行，规避引号问题
-                        val tmp = "/data/local/tmp/taffy_ui_${System.currentTimeMillis()}"
-                        val b64 = java.util.Base64.getEncoder().encodeToString(s.toByteArray(Charsets.UTF_8))
-                        val r = PermissionManager.exec("echo $b64 | base64 -d > $tmp && env $env \"$bin\" $tmp 2>&1; rm -f $tmp", timeoutSec = 60)
-                        Triple(r.code, r.stdout, rt.label)
-                    }
-                    else -> Triple(-1, (if (zh) "该运行时不可用（未安装或需权限）" else "runtime unavailable"), rt.label)
-                }
-            }
-            output = r.second.take(20000)
-            execInfo = "exit=${r.first} runtime=${r.third}"
-            busy = false
-        }
-    }
-
-    PageScroll {
-        // ── 运行时 ──
-        GlassGroup(
-            title = if (zh) "运行时" else "Runtimes",
-            footer = if (zh) "内置 Python 零依赖无 root；Termux 运行时需 root/Shizuku。点选切换执行目标" else "Built-in Python needs no root; Termux runtimes need privileges. Tap to switch target",
-        ) {
-            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                runtimes.forEach { rt ->
-                    FilterChip(
-                        selected = runtime == rt.key,
-                        enabled = rt.available,
-                        onClick = { runtime = rt.key },
-                        label = {
-                            Text(
-                                rt.label + (if (rt.available) "" else " (✗)"),
-                                fontSize = 11.sp,
-                            )
-                        },
-                    )
-                }
-            }
-            GroupDivider()
-            runtimes.firstOrNull { it.key == runtime }?.let { rt ->
-                Text(
-                    (if (zh) "当前: " else "Now: ") + rt.label +
-                        (if (rt.key == "builtin-python") (if (zh) " ${builtinPyVersion}" else " $builtinPyVersion") else "") +
-                        "　" + rt.desc + (if (!rt.available && privileged) "（未安装）" else ""),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                )
-            }
-        }
-
-        // ── 执行 ──
-        GlassGroup(
-            title = if (zh) "执行" else "Run",
-            footer = if (zh) "输入代码或命令后执行；脚本写临时文件运行，规避引号与命令长度问题" else "Script written to temp file to avoid quoting issues",
-        ) {
-            // 模板快捷
-            Text(
-                (if (zh) "模板: " else "Templates: "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 14.dp),
+    Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // ── 会话控制条 ──
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.width(8.dp).height(8.dp).background(
+                    if (sessionActive) AppPalette.green else AppPalette.mono,
+                    RoundedCornerShape(4.dp),
+                ),
             )
-            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                templates.forEach { (code, label) ->
-                    FilterChip(
-                        selected = false,
-                        onClick = { script = code },
-                        label = { Text(label, fontSize = 10.sp) },
-                    )
-                }
+            Text(
+                if (sessionActive) (if (zh) "会话中 · " else "Session · ") + sessionChannel else if (zh) "会话未启动" else "No session",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (sessionActive) AppPalette.green else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (sessionActive) {
+                SecondaryActionButton(if (zh) "重启" else "Restart", { startSession() }, Modifier.width(84.dp).height(38.dp))
+                SecondaryActionButton(if (zh) "结束" else "Stop", { stopSession() }, Modifier.width(84.dp).height(38.dp))
+            } else {
+                PrimaryActionButton(if (zh) "启动会话" else "Start Session", { startSession() }, Modifier.width(120.dp).height(38.dp))
             }
+        }
+
+        // ── 终端显示区 ──
+        Box(
+            Modifier.fillMaxWidth().weight(1f)
+                .background(bg, RoundedCornerShape(14.dp))
+                .verticalScroll(outputScroll),
+        ) {
+            Text(
+                sessionOutput.ifEmpty { if (zh) "启动会话后在此显示终端输出…" else "Terminal output appears here after starting…" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp),
+                color = fg,
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+            )
+        }
+
+        // ── 快捷命令 ──
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            quick.forEach { (c, label) ->
+                FilterChip(selected = false, onClick = { send(c) }, label = { Text(label, fontSize = 10.sp) }, enabled = sessionActive)
+            }
+        }
+
+        // ── 输入行（终端风格）──
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = script,
-                onValueChange = { script = it },
-                placeholder = { Text(if (zh) "输入 Python 代码或 shell 命令…" else "Python code or shell command…") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-                minLines = 2,
-                maxLines = 10,
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.weight(1f).onPreviewKeyEvent { ev ->
+                    when {
+                        ev.key == Key.DirectionUp && ev.type == androidx.compose.ui.input.key.KeyEventType.KeyDown -> {
+                            if (history.isNotEmpty()) {
+                                histIdx = (histIdx + 1).coerceAtMost(history.size - 1)
+                                input = history[histIdx]
+                            }
+                            true
+                        }
+                        ev.key == Key.DirectionDown && ev.type == androidx.compose.ui.input.key.KeyEventType.KeyDown -> {
+                            if (histIdx > 0) { histIdx--; input = history[histIdx] }
+                            else if (histIdx == 0) { histIdx = -1; input = "" }
+                            true
+                        }
+                        ev.key == Key.Enter && ev.type == androidx.compose.ui.input.key.KeyEventType.KeyDown -> {
+                            send(input)
+                            true
+                        }
+                        else -> false
+                    }
+                },
+                placeholder = { Text(if (zh) "输入命令，Enter 发送（↑↓ 历史）" else "Type command, Enter to send (↑↓ history)", color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = fg),
+                shape = RoundedCornerShape(12.dp),
             )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryActionButton(if (zh) "执行" else "Run", { run() }, Modifier.weight(1f))
-                SecondaryActionButton(if (zh) "清空" else "Clear", { output = ""; execInfo = "" }, Modifier.weight(0.5f))
+            IconButton(onClick = { send(input) }, enabled = sessionActive) {
+                Icon(Icons.Default.Send, null, tint = MaterialTheme.colorScheme.primary)
             }
-            if (output.isNotEmpty()) {
-                GroupDivider()
-                Text(
-                    output,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp).fillMaxWidth(),
-                )
-                Text(
-                    execInfo,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
-                )
-            }
-        }
-
-        // ── MCP 对应工具 ──
-        GlassGroup(title = if (zh) "MCP 工具" else "MCP Tool", footer = "taffy_terminal_exec") {
-            Text(
-                if (zh) "AI/脚本可用 taffy_terminal_exec：action=detect 探测；action=run 传 script（按 shebang 自动选运行时）或 command。" else "AI/scripts can call taffy_terminal_exec: detect probes; run takes script (auto runtime by shebang) or command.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(14.dp),
-            )
         }
     }
 }

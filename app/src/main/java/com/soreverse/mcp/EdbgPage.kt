@@ -277,9 +277,28 @@ internal fun EdbgPage(t: UiText) {
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 )
             }
-            // ── 命令面板 ──
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("c", "s", "finish", "info regs").forEach { quick ->
+            // ── 命令面板：执行控制 / 断点内存 两组快捷 ──
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (zh) "执行" else "Run", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                listOf("c", "s", "finish", "run", "bt").forEach { quick ->
+                    FilterChip(
+                        selected = false,
+                        onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
+                        enabled = sessionActive && !busy,
+                        label = { Text(quick, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (zh) "断点" else "BP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // 用偏移输入框的值直接下断点
+                FilterChip(
+                    selected = false,
+                    onClick = { if (sessionActive && brkInput.isNotBlank()) { cmdInput = "b ${brkInput.trim()}"; runAction("cmd") } },
+                    enabled = sessionActive && !busy && brkInput.isNotBlank(),
+                    label = { Text("b ${brkInput.ifBlank { "0x…" }}", fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                )
+                listOf("hbreak", "watch", "info regs", "x/16gx \$pc").forEach { quick ->
                     FilterChip(
                         selected = false,
                         onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },

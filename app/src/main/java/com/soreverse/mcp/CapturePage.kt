@@ -69,6 +69,7 @@ import org.json.JSONObject
 internal fun CapturePage(t: UiText) {
     val zh = t.zh
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val settings = remember { SettingsStore(context) }
 
@@ -379,7 +380,7 @@ internal fun CapturePage(t: UiText) {
             if (output.isNotBlank()) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = {
-                        LocalClipboardManager.current.setText(androidx.compose.ui.text.AnnotatedString(output))
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(output))
                         Toast.makeText(context, if (zh) "已复制" else "Copied", Toast.LENGTH_SHORT).show()
                     }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                         Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(12.dp))

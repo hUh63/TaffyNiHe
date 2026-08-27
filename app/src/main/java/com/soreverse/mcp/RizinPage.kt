@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -87,9 +88,13 @@ internal fun RizinPage(t: UiText) {
                 }.onFailure { e -> output = "Error: ${e.message}" }
             }
             busy = false
-            // 打开成功后自动展示文件头信息（iI）
+            // 打开成功后自动展示文件头信息（iI）（不调 runCmd：局部函数必须先声明后使用）
             if (workspaceId.isNotBlank() && output.startsWith(if (zh) "已打开" else "Opened")) {
-                runCmd("iI")
+                val info = withContext(Dispatchers.IO) {
+                    val r = engine.rzCommand(workspaceId, "", "iI", false)
+                    r.optString("stdout", r.toString(2)).ifBlank { r.toString(2) }
+                }
+                output = info
             }
         }
     }

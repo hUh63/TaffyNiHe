@@ -88,7 +88,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Linux -> if (t.zh) "Linux 环境" else "Linux Environment"
     SettingsDest.Terminal -> if (t.zh) "终端执行" else "Terminal"
     SettingsDest.Sandbox -> if (t.zh) "动态沙箱" else "Sandbox"
-    SettingsDest.Python -> if (t.zh) "Python 编辑器" else "Python"
+    SettingsDest.Python -> if (t.zh) "编辑器" else "Editor"
 }
 
 @Composable
@@ -212,7 +212,7 @@ internal fun SettingsHub(
                     SettingsTile(if (t.zh) "动态沙箱" else "Sandbox", if (t.zh) "安装 / 启动 / 日志 / 崩溃" else "Install / launch / logs", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Sandbox) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "Python 编辑器" else "Python", if (t.zh) "编辑器 + 控制台 / 零依赖" else "Editor + console / no-root", Icons.Default.Code, AppPalette.blue, { onDest(SettingsDest.Python) }, Modifier.weight(1f).fillMaxHeight())
+                    SettingsTile(if (t.zh) "编辑器" else "Editor", if (t.zh) "Python/Shell/JSON 多模式" else "Python/Shell/JSON multi-mode", Icons.Default.Code, AppPalette.blue, { onDest(SettingsDest.Python) }, Modifier.weight(1f).fillMaxHeight())
                     Box(Modifier.weight(1f))
                 }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
@@ -297,7 +297,7 @@ internal fun SettingsHub(
             SettingsDest.Linux -> SettingsLinuxPage(t)
             SettingsDest.Terminal -> SettingsTerminalPage(t)
             SettingsDest.Sandbox -> SettingsSandboxPage(t)
-            SettingsDest.Python -> SettingsPythonPage(t)
+            SettingsDest.Python -> SettingsEditorPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

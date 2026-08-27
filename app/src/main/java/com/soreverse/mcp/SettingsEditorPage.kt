@@ -112,7 +112,7 @@ internal fun SettingsEditorPage(t: UiText) {
             val dir = File(ws, wsDir)
             if (!dir.isDirectory) emptyList() else {
                 val dirs = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
-                    ?.map { "\u{1F4C1}/${it.name}" }.orEmpty()
+                    ?.map { "📁/${it.name}" }.orEmpty()
                 val files = dir.listFiles { f -> f.isFile && !f.name.startsWith(".") }
                     ?.sortedByDescending { it.lastModified() }?.map { it.name }.orEmpty()
                 (dirs.sorted() + files).take(16)
@@ -422,8 +422,8 @@ internal fun SettingsEditorPage(t: UiText) {
             }
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 wsFiles.forEach { entry ->
-                    val isDir = entry.startsWith("\u{1F4C1}/")
-                    val name = if (isDir) entry.removePrefix("\u{1F4C1}/") else entry
+                    val isDir = entry.startsWith("📁/")
+                    val name = if (isDir) entry.removePrefix("📁/") else entry
                     FilterChip(
                         selected = !isDir && currentFile == name,
                         onClick = {

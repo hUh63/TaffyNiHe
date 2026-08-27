@@ -72,7 +72,7 @@ object CodeHighlighter {
         val sh = lang == Lang.SHELL
         val json = lang == Lang.JSON
         if (lang == Lang.TEXT) {
-            builder.append(line, mono(DEF))
+            builder.withStyle(mono(DEF)) { append(line) }
             return
         }
         var i = 0
@@ -80,8 +80,8 @@ object CodeHighlighter {
         while (i < n) {
             val c = line[i]
             // 注释
-            if (py && c == '#') { builder.append(line.substring(i), mono(COM)); return }
-            if (sh && c == '#') { builder.append(line.substring(i), mono(COM)); return }
+            if (py && c == '#') { builder.withStyle(mono(COM)) { append(line.substring(i)) }; return }
+            if (sh && c == '#') { builder.withStyle(mono(COM)) { append(line.substring(i)) }; return }
             // 字符串
             if (c == '"' || c == '\'') {
                 val quote = c
@@ -91,7 +91,7 @@ object CodeHighlighter {
                     j++
                 }
                 val end = if (j < n) j + 1 else n
-                builder.append(line.substring(i, end), mono(STR))
+                builder.withStyle(mono(STR)) { append(line.substring(i, end)) }
                 i = end
                 continue
             }
@@ -103,7 +103,7 @@ object CodeHighlighter {
                     var k = j + 1
                     while (k < n && line[k].isWhitespace()) k++
                     if (k < n && line[k] == ':') {
-                        builder.append(line.substring(i, j + 1), mono(KEY))
+                        builder.withStyle(mono(KEY)) { append(line.substring(i, j + 1)) }
                         i = k
                         continue
                     }
@@ -113,7 +113,7 @@ object CodeHighlighter {
             if (c.isDigit() || (c == '-' && i + 1 < n && line[i + 1].isDigit())) {
                 var j = i + 1
                 while (j < n && (line[j].isDigit() || line[j] == '.' || line[j] == 'x' || line[j] in 'a'..'f' || line[j] in 'A'..'F' || line[j] == 'e' || line[j] == '+' || line[j] == '-')) j++
-                builder.append(line.substring(i, j), mono(NUM))
+                builder.withStyle(mono(NUM)) { append(line.substring(i, j)) }
                 i = j
                 continue
             }
@@ -129,12 +129,12 @@ object CodeHighlighter {
                     sh && word in SH_BUILTINS -> FNC
                     else -> DEF
                 }
-                builder.append(word, mono(style))
+                builder.withStyle(mono(style)) { append(word) }
                 i = j
                 continue
             }
             // 其他字符
-            builder.append(c.toString(), mono(DEF))
+            builder.withStyle(mono(DEF)) { append(c.toString()) }
             i++
         }
     }

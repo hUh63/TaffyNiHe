@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.FilterChip
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.PythonRuntime
 import com.soreverse.mcp.core.RootShell
+import com.soreverse.mcp.core.WorkspacePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -80,7 +82,9 @@ internal fun SettingsEditorPage(t: UiText) {
     var busy by remember { mutableStateOf(false) }
     var replInput by remember { mutableStateOf("") }
     var currentFile by remember { mutableStateOf<String?>(null) }
+    var currentFilePath by remember { mutableStateOf<String?>(null) }   // 工作区文件完整路径（写回用）
     var recentFiles by remember { mutableStateOf<List<String>>(emptyList()) }
+    var wsFiles by remember { mutableStateOf<List<String>>(emptyList()) } // 工作区文件列表
     val consoleScroll = rememberScrollState()
 
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -101,8 +105,52 @@ internal fun SettingsEditorPage(t: UiText) {
             dir.listFiles { f -> f.isFile && f.name.endsWith(".py") || f.name.endsWith(".sh") || f.name.endsWith(".json") || f.name.endsWith(".txt") }
                 ?.sortedByDescending { it.lastModified() }?.map { it.name }?.take(6).orEmpty()
         }.getOrDefault(emptyList())
+        // 工作区文件浏览（借鉴 Xed-Editor 项目管理理念）
+        wsFiles = runCatching {
+            val ws = WorkspacePolicy.workDirPath(context) ?: return@runCatching emptyList()
+            val dir = File(ws)
+            if (!dir.isDirectory) emptyList() else {
+                dir.listFiles { f -> f.isFile && !f.name.startsWith(".") }
+                    ?.sortedByDescending { it.lastModified() }?.map { it.name }?.take(12).orEmpty()
+            }
+        }.getOrDefault(emptyList())
     }
     LaunchedEffect(Unit) { refreshRecent() }
+
+    /** 快照：保存/运行前，若文件已存在且内容变化，备份到 editor_files/backup/（借鉴 Git 版本管理简化版）。 */
+    fun snapshotIfChanged(path: String) {
+        runCatching {
+            val f = File(path)
+            if (!f.isFile) return
+            val bakDir = File(context.filesDir, "editor_files/backup").apply { mkdirs() }
+            val bak = File(bakDir, "${f.name}.${System.currentTimeMillis()}.bak")
+            bak.writeBytes(f.readBytes())
+            // 只保留最近 5 份同名备份
+            bakDir.listFiles { it -> it.name.startsWith(f.name) }
+                ?.sortedByDescending { it.lastModified() }?.drop(5)?.forEach { it.delete() }
+        }
+    }
+
+    /** 加载工作区文件（任意路径，写回原文件）。 */
+    fun loadWsFile(path: String) {
+        scope.launch {
+            val text = withContext(Dispatchers.IO) { runCatching { File(path).readText() }.getOrNull() }
+            if (text != null) {
+                snapshotIfChanged(path)
+                code = text
+                currentFilePath = path
+                currentFile = File(path).name
+                mode = when (File(path).extension.lowercase()) {
+                    "py" -> CodeHighlighter.Lang.PYTHON
+                    "sh" -> CodeHighlighter.Lang.SHELL
+                    "json" -> CodeHighlighter.Lang.JSON
+                    else -> CodeHighlighter.Lang.TEXT
+                }
+            } else {
+                appendOut("\n[无法读取: $path]\n")
+            }
+        }
+    }
 
     // ── Python REPL 会话 ──
     fun stopSession() {
@@ -209,16 +257,23 @@ internal fun SettingsEditorPage(t: UiText) {
     fun saveFile() {
         if (code.isBlank()) return
         scope.launch {
-            val path = withContext(Dispatchers.IO) {
-                val dir = File(context.filesDir, "editor_files").apply { mkdirs() }
-                val ext = when (mode) { CodeHighlighter.Lang.PYTHON -> "py"; CodeHighlighter.Lang.SHELL -> "sh"; CodeHighlighter.Lang.JSON -> "json"; else -> "txt" }
-                val name = currentFile ?: "file_${System.currentTimeMillis()}.$ext"
-                val f = File(dir, name)
-                f.writeText(code)
-                f.absolutePath
+            val result = withContext(Dispatchers.IO) {
+                // 工作区文件：快照 + 写回原路径（借鉴 Git 版本管理：改前留备份）
+                val target = currentFilePath
+                if (target != null && File(target).isFile) {
+                    snapshotIfChanged(target)
+                    val ok = runCatching { File(target).writeText(code); true }.getOrDefault(false)
+                    if (ok) "已保存到工作区: $target" else "写回失败（无权限？用 root/Termux 或改为另存）"
+                } else {
+                    val dir = File(context.filesDir, "editor_files").apply { mkdirs() }
+                    val ext = when (mode) { CodeHighlighter.Lang.PYTHON -> "py"; CodeHighlighter.Lang.SHELL -> "sh"; CodeHighlighter.Lang.JSON -> "json"; else -> "txt" }
+                    val name = currentFile ?: "file_${System.currentTimeMillis()}.$ext"
+                    val f = File(dir, name)
+                    f.writeText(code)
+                    "已保存: ${f.absolutePath}"
+                }
             }
-            currentFile = File(path).name
-            appendOut("\n[已保存: $path]\n")
+            appendOut("\n[$result]\n")
             refreshRecent()
         }
     }
@@ -304,7 +359,23 @@ internal fun SettingsEditorPage(t: UiText) {
             }
             IconButton(onClick = { saveFile() }, enabled = code.isNotBlank()) { Icon(Icons.Default.Save, null, tint = MaterialTheme.colorScheme.primary) }
             IconButton(onClick = { loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*")) }) { Icon(Icons.Default.FileOpen, null, tint = MaterialTheme.colorScheme.primary) }
-            IconButton(onClick = { code = ""; currentFile = null }) { Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = { code = ""; currentFile = null; currentFilePath = null }) { Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = {
+                // 从最近备份回滚（快照管理）
+                val name = currentFile
+                if (name == null) { appendOut("\n[先打开或保存一个文件]\n"); return@IconButton }
+                val bakDir = File(context.filesDir, "editor_files/backup")
+                val latest = bakDir.listFiles { it -> it.name.startsWith("$name.") && it.name.endsWith(".bak") }
+                    ?.maxByOrNull { it.lastModified() }
+                if (latest == null) { appendOut("\n[没有可回滚的备份]\n") } else {
+                    scope.launch {
+                        val text = withContext(Dispatchers.IO) { runCatching { latest.readText() }.getOrNull() }
+                        if (text != null) { code = text; appendOut("\n[已回滚到备份: ${latest.name}]\n") }
+                    }
+                }
+            }, enabled = currentFile != null) {
+                Icon(Icons.Default.Restore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             IconButton(onClick = { output = "" }, enabled = output.isNotBlank()) { Icon(Icons.Default.Clear, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
 
@@ -316,6 +387,26 @@ internal fun SettingsEditorPage(t: UiText) {
                         selected = currentFile == name,
                         onClick = { loadFile(name) },
                         label = { Text(name, fontSize = 10.sp) },
+                    )
+                }
+            }
+        }
+        // ── 工作区文件（借鉴 Xed-Editor 项目管理：浏览→编辑→写回）──
+        if (wsFiles.isNotEmpty()) {
+            Text(
+                (if (zh) "工作区文件（点按编辑，保存写回，自动留备份）" else "Workspace files (tap to edit, save writes back, backup kept)"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                wsFiles.forEach { name ->
+                    FilterChip(
+                        selected = currentFile == name,
+                        onClick = {
+                            val ws = WorkspacePolicy.workDirPath(context)
+                            if (ws != null) loadWsFile(File(ws, name).absolutePath)
+                        },
+                        label = { Text(name, fontSize = 10.sp, maxLines = 1) },
                     )
                 }
             }

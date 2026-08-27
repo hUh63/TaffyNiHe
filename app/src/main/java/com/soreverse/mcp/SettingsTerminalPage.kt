@@ -181,11 +181,14 @@ internal fun SettingsTerminalPage(t: UiText) {
                 sessionOutput = sessionOutput + (if (zh) "\n# taffy 已就绪: taffy('taffy_so_open', path='/sdcard/…') 或 taffy('tools')\n" else "\n# taffy ready: taffy('taffy_so_open', path='/sdcard/…') or taffy('tools')\n")
             } else {
                 // sh 会话：taffy() 函数（调内置 python + cli；token 用 base64 避免引号破坏）
+                // 同时注入 python3 命令：终端里可直接运行内置 Python（任意代码/脚本/REPL）
                 val pythonBin = File(File(cli).parentFile, "bin/python3").absolutePath
                 val shInj = "export TAFFY_URL='$tUrl'; export TAFFY_TOKEN=\$(printf '%s' '$tokenB64' | base64 -d 2>/dev/null); " +
-                    "taffy() { '$pythonBin' '$cli' \"\$@\"; }"
+                    "taffy() { '$pythonBin' '$cli' \"\$@\"; }; " +
+                    "python3() { '$pythonBin' \"\$@\"; }; py() { '$pythonBin' \"\$@\"; }; " +
+                    "alias py=python3"
                 writeToSession(proc, shInj)
-                sessionOutput = sessionOutput + (if (zh) "\n# taffy 已就绪: taffy taffy_so_open path=/sdcard/… 或 taffy tools\n" else "\n# taffy ready: taffy taffy_so_open path=/sdcard/… or taffy tools\n")
+                sessionOutput = sessionOutput + (if (zh) "\n# taffy 已就绪: taffy taffy_so_open path=/sdcard/… 或 taffy tools\n# python3 已就绪: python3 script.py / python3（进入 REPL）\n" else "\n# taffy ready: taffy taffy_so_open path=/sdcard/… or taffy tools\n# python3 ready: python3 script.py / python3 (REPL)\n")
             }
         } else {
             sessionOutput = sessionOutput + (if (zh) "\n# 警告: taffy CLI 初始化失败（内置 Python 未就绪）\n" else "\n# warn: taffy CLI unavailable\n")

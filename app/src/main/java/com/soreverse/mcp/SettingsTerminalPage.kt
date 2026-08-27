@@ -51,6 +51,7 @@ import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.PythonRuntime
 import com.soreverse.mcp.core.RootShell
 import com.soreverse.mcp.core.WorkspacePolicy
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -118,13 +119,38 @@ internal fun SettingsTerminalPage(t: UiText) {
         sessionChannel = ""
     }
 
+    /** 确保 taffy_cli.py（MCP CLI）已复制到内置 Python 目录，返回其路径。 */
+    fun ensureTaffyCli(): String? {
+        val dir = PythonRuntime.ensureExtracted(context) ?: return null
+        val cli = File(dir, "taffy_cli.py")
+        if (!cli.isFile) {
+            runCatching {
+                context.assets.open("terminal/taffy_cli.py").use { input ->
+                    cli.outputStream().use { out -> input.copyTo(out) }
+                }
+            }
+        }
+        return if (cli.isFile) cli.absolutePath else null
+    }
+
+    /** 会话注入 taffy 命令所需的 MCP 连接信息（URL + token）。 */
+    fun taffyEnv(): Pair<String, String> {
+        val settings = com.soreverse.mcp.core.SettingsStore(context)
+        return "http://127.0.0.1:${settings.port}/mcp" to settings.accessToken
+    }
+
     fun startSession() {
         stopSession()
         sessionOutput = ""
         val proc = when {
             privileged -> PermissionManager.startPrivilegedStream("/system/bin/sh", listOf("-i"))
             builtinPyPath != null -> runCatching {
-                ProcessBuilder(builtinPyPath, "-i").redirectErrorStream(true).start()
+                ProcessBuilder(builtinPyPath, "-i").redirectErrorStream(true).apply {
+                    // 内置 python 会话：注入 MCP 连接信息（taffy CLI 使用）
+                    val (url, token) = taffyEnv()
+                    environment()["TAFFY_URL"] = url
+                    environment()["TAFFY_TOKEN"] = token
+                }.start()
             }.getOrNull()
             else -> null
         }
@@ -141,6 +167,28 @@ internal fun SettingsTerminalPage(t: UiText) {
             val cd = if (sessionChannel.startsWith("python")) "import os; os.chdir(r'$wsPath'); os.getcwd()" else "cd '$wsPath' && pwd"
             writeToSession(proc, cd)
             sessionOutput = sessionOutput + (if (zh) "\n# 工作区: $wsPath（已自动 cd）\n" else "\n# workspace: $wsPath (auto-cd)\n")
+        }
+        // ── 注入 taffy 命令：终端里直接调用塔菲 MCP 工具 ──
+        val cli = ensureTaffyCli()
+        val (tUrl, tToken) = taffyEnv()
+        val tokenB64 = java.util.Base64.getEncoder().encodeToString(tToken.toByteArray(Charsets.UTF_8))
+        if (cli != null) {
+            if (sessionChannel.startsWith("python")) {
+                // python 会话：taffy(tool, **kwargs) 函数（单行定义，python -i 可执行）
+                val pyInj = "import subprocess as _s; _C=r'$cli'; " +
+                    "taffy=lambda *a,**kw: _s.call([_C]+list(a)+['%s=%s'%(k,v) for k,v in kw.items()])"
+                writeToSession(proc, pyInj)
+                sessionOutput = sessionOutput + (if (zh) "\n# taffy 已就绪: taffy('taffy_so_open', path='/sdcard/…') 或 taffy('tools')\n" else "\n# taffy ready: taffy('taffy_so_open', path='/sdcard/…') or taffy('tools')\n")
+            } else {
+                // sh 会话：taffy() 函数（调内置 python + cli；token 用 base64 避免引号破坏）
+                val pythonBin = File(File(cli).parentFile, "bin/python3").absolutePath
+                val shInj = "export TAFFY_URL='$tUrl'; export TAFFY_TOKEN=\$(printf '%s' '$tokenB64' | base64 -d 2>/dev/null); " +
+                    "taffy() { '$pythonBin' '$cli' \"\$@\"; }"
+                writeToSession(proc, shInj)
+                sessionOutput = sessionOutput + (if (zh) "\n# taffy 已就绪: taffy taffy_so_open path=/sdcard/… 或 taffy tools\n" else "\n# taffy ready: taffy taffy_so_open path=/sdcard/… or taffy tools\n")
+            }
+        } else {
+            sessionOutput = sessionOutput + (if (zh) "\n# 警告: taffy CLI 初始化失败（内置 Python 未就绪）\n" else "\n# warn: taffy CLI unavailable\n")
         }
         // 读线程：持续读取输出，过滤分隔标记，限制显示长度
         val sb = StringBuilder(sessionOutput)
@@ -214,6 +262,10 @@ internal fun SettingsTerminalPage(t: UiText) {
                 base.add(1, "cd '$wsPath' && ls -la | head" to (if (zh) "工作区浏览" else "WS list"))
             }
         }
+        // taffy CLI 入口（终端控制塔菲 MCP 工具）；python 会话是函数调用语法
+        val isPy = sessionChannel.startsWith("python")
+        base.add(0, (if (isPy) "taffy('tools')" else "taffy tools") to "taffy 工具")
+        base.add(1, (if (isPy) "taffy('taffy_linux', action='shell', distro='alpine', command='uname -a')" else "taffy --help") to "taffy 示例")
         base
     }
 

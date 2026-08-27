@@ -309,7 +309,7 @@ internal fun SettingsGitPage(t: UiText) {
                         modifier = Modifier.clickable { if (output.isNotBlank()) clipboard.setText(AnnotatedString(output)) }.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
-                androidx.compose.foundation.layout.Divider(color = Color(0xFF1E2630))
+                androidx.compose.material3.HorizontalDivider(thickness = 1.dp, color = Color(0xFF1E2630))
                 SelectionContainer {
                     Column(Modifier.fillMaxSize().verticalScroll(outScroll).padding(horizontal = 12.dp, vertical = 8.dp)) {
                         Text(

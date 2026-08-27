@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.LinuxRootfs
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.RootShell

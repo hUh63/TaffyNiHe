@@ -360,6 +360,7 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
 @Composable
 internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenServiceConfig: () -> Unit) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var refresh by remember { mutableIntStateOf(0) }
     @Suppress("UNUSED_EXPRESSION") refresh
     val workDir = WorkspacePolicy.workDirPath(context)
@@ -393,7 +394,7 @@ internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenSer
                     SecondaryActionButton(
                         if (t.zh) "复制路径" else "Copy path",
                         {
-                            LocalClipboardManager.current.setText(androidx.compose.ui.text.AnnotatedString(workDir))
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(workDir))
                             Toast.makeText(context, (if (t.zh) "已复制: " else "Copied: ") + workDir, Toast.LENGTH_LONG).show()
                         },
                         modifier = Modifier.fillMaxWidth(),

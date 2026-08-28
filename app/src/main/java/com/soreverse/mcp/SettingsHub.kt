@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Extensions
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
@@ -92,6 +93,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Sandbox -> if (t.zh) "动态沙箱" else "Sandbox"
     SettingsDest.Python -> if (t.zh) "编辑器" else "Editor"
     SettingsDest.Git -> if (t.zh) "Git 仓库" else "Git Repository"
+    SettingsDest.Extensions -> if (t.zh) "扩展系统" else "Extensions"
 }
 
 @Composable
@@ -217,7 +219,7 @@ internal fun SettingsHub(
                 }
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 管理 / 临时清理" else "Directory / manage / temp clean", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
-                    Box(Modifier.weight(1f))
+                    SettingsTile(if (t.zh) "扩展系统" else "Extensions", if (t.zh) "Python 插件 / Xed 转换 / 教程" else "Python plugins / Xed convert / guide", Icons.Default.Extensions, AppPalette.blue, { onDest(SettingsDest.Extensions) }, Modifier.weight(1f).fillMaxHeight())
                 }
                 Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
@@ -303,6 +305,7 @@ internal fun SettingsHub(
             SettingsDest.Linux -> SettingsLinuxPage(t)
             SettingsDest.Terminal -> SettingsTerminalPage(t)
             SettingsDest.Git -> SettingsGitPage(t)
+            SettingsDest.Extensions -> SettingsExtensionsPage(t, onDest)
             SettingsDest.Sandbox -> SettingsSandboxPage(t)
             SettingsDest.Python -> SettingsEditorPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)

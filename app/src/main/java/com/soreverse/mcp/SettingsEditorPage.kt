@@ -3,6 +3,7 @@ package com.soreverse.mcp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -43,7 +45,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.PermissionManager
@@ -51,8 +55,10 @@ import com.soreverse.mcp.core.PythonRuntime
 import com.soreverse.mcp.core.RootShell
 import com.soreverse.mcp.core.WorkspacePolicy
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -75,6 +81,11 @@ internal fun SettingsEditorPage(t: UiText) {
 
     var mode by remember { mutableStateOf(CodeHighlighter.Lang.PYTHON) }
     var code by remember { mutableStateOf("") }
+    var tf by remember { mutableStateOf(TextFieldValue("")) }             // 带光标状态（jedi 补全用）
+    var completions by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var showCompletions by remember { mutableStateOf(false) }
+    var completing by remember { mutableStateOf(false) }
+    var lastInputAt by remember { mutableStateOf(0L) }                    // 防抖自动补全
     var preview by remember { mutableStateOf(false) }   // 高亮预览开关
     var output by remember { mutableStateOf("") }
     var sessionProc by remember { mutableStateOf<Process?>(null) }
@@ -94,7 +105,7 @@ internal fun SettingsEditorPage(t: UiText) {
             val text = withContext(Dispatchers.IO) {
                 runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
             }
-            if (text != null) { code = text; currentFile = null }
+            if (text != null) { setCode(text); currentFile = null }
         }
     }
 
@@ -141,7 +152,7 @@ internal fun SettingsEditorPage(t: UiText) {
             val text = withContext(Dispatchers.IO) { runCatching { File(path).readText() }.getOrNull() }
             if (text != null) {
                 snapshotIfChanged(path)
-                code = text
+                setCode(text)
                 currentFilePath = path
                 currentFile = File(path).name
                 mode = when (File(path).extension.lowercase()) {
@@ -153,6 +164,89 @@ internal fun SettingsEditorPage(t: UiText) {
             } else {
                 appendOut("\n[无法读取: $path]\n")
             }
+        }
+    }
+
+    // ── jedi 代码智能（完整版：补全 / 悬停文档 / 跳转定义）──
+    fun setCode(text: String) {
+        code = text
+        tf = TextFieldValue(text, selection = TextRange(text.length))
+    }
+
+    /** 光标 → jedi 的 (line, col)，均 1-based。 */
+    fun cursorLineCol(): Pair<Int, Int> {
+        val s = tf.selection.start.coerceIn(0, tf.text.length)
+        val before = tf.text.substring(0, s)
+        val line = before.count { it == '\n' } + 1
+        val col = s - (before.lastIndexOf('\n') + 1) + 1
+        return line to col
+    }
+
+    fun requestCompletion(kind: String) {
+        if (mode != CodeHighlighter.Lang.PYTHON) return
+        val script = PythonRuntime.supportScript(context, "completion.py")
+        if (script == null) { appendOut("\n[补全服务不可用：内置 Python 未就绪]\n"); return }
+        if (kind == "complete" && tf.selection.start > 0) {
+            val prev = tf.text[tf.selection.start - 1]
+            if (prev == '\n' || prev == '\t' || prev == ' ' || prev == '(') { showCompletions = false; return }
+        }
+        val (ln, col) = cursorLineCol()
+        completing = true
+        scope.launch {
+            val payload = JSONObject().put("code", code).put("line", ln).put("col", col).put("kind", kind)
+            val r = withContext(Dispatchers.IO) {
+                PythonRuntime.run(context, payload.toString(), args = listOf(script), timeoutSec = 30)
+            }
+            completing = false
+            val items = mutableListOf<JSONObject>()
+            // 稳健解析：completion.py 只输出一个 JSON 数组
+            runCatching {
+                val out = r.output.trim()
+                val start = out.indexOf('[')
+                val end = out.lastIndexOf(']')
+                if (start >= 0 && end > start) {
+                    val arr = JSONArray(out.substring(start, end + 1))
+                    for (i in 0 until arr.length()) items.add(arr.getJSONObject(i))
+                }
+            }
+            when (kind) {
+                "complete" -> {
+                    completions = items.filter { it.optString("name") != "__error__" }
+                    showCompletions = completions.isNotEmpty()
+                    val err = items.firstOrNull { it.optString("name") == "__error__" }
+                    if (err != null) appendOut("\n[jedi] ${err.optString("doc")}\n")
+                }
+                else -> {
+                    appendOut("\n── 代码智能 ($kind) ──\n")
+                    if (items.isEmpty()) appendOut("(无结果)\n")
+                    items.forEach { c -> appendOut("${c.optString("name")} [${c.optString("type")}] ${c.optString("doc").lineSequence().firstOrNull().orEmpty()}\n") }
+                }
+            }
+        }
+    }
+
+    fun insertCompletion(name: String) {
+        val t = tf.text
+        val s = tf.selection.start.coerceIn(0, t.length)
+        val wordStart = Regex("[A-Za-z0-9_]*$").find(t.substring(0, s))?.range?.first ?: s
+        val newText = t.substring(0, wordStart) + name + t.substring(s)
+        tf = TextFieldValue(newText, selection = TextRange(wordStart + name.length))
+        code = newText
+        showCompletions = false
+    }
+
+    // 输入后 800ms 防抖自动补全（仅 Python 模式）
+    LaunchedEffect(lastInputAt) {
+        if (lastInputAt == 0L) return@LaunchedEffect
+        delay(800)
+        if (mode == CodeHighlighter.Lang.PYTHON && !preview) requestCompletion("complete")
+    }
+
+    // 扩展页/外部跳转打开指定文件
+    LaunchedEffect(Unit) {
+        EditorBridge.pendingPath?.let { p ->
+            EditorBridge.pendingPath = null
+            loadWsFile(p)
         }
     }
 
@@ -288,7 +382,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 runCatching { File(File(context.filesDir, "editor_files"), name).readText() }.getOrNull()
             }
             if (text != null) {
-                code = text
+                setCode(text)
                 currentFile = name
                 // 按扩展名推断模式
                 mode = when (name.substringAfterLast('.', "")) {
@@ -332,8 +426,11 @@ internal fun SettingsEditorPage(t: UiText) {
                 }
             } else {
                 OutlinedTextField(
-                    value = code,
-                    onValueChange = { code = it },
+                    value = tf,
+                    onValueChange = {
+                        tf = it; code = it.text
+                        if (mode == CodeHighlighter.Lang.PYTHON) lastInputAt = System.currentTimeMillis()
+                    },
                     modifier = Modifier.fillMaxSize(),
                     placeholder = { Text(
                         when (mode) {
@@ -352,6 +449,47 @@ internal fun SettingsEditorPage(t: UiText) {
             }
         }
 
+        // ── jedi 补全面板（Python 模式）──
+        if (showCompletions && mode == CodeHighlighter.Lang.PYTHON) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 190.dp)
+                    .background(Color(0xFF0E141C), RoundedCornerShape(12.dp)),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        (if (zh) "补全 (jedi)" else "Completion (jedi)") + if (completing) " · 分析中…" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AppPalette.teal,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "✕",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { showCompletions = false }.padding(4.dp),
+                    )
+                }
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    completions.forEach { c ->
+                        val name = c.optString("name")
+                        val type = c.optString("type")
+                        val doc = c.optString("doc").lineSequence().firstOrNull().orEmpty()
+                        Column(
+                            Modifier.fillMaxWidth().clickable { insertCompletion(name) }
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp), color = fg, modifier = Modifier.weight(1f), maxLines = 1)
+                                Text(type, style = MaterialTheme.typography.labelSmall, color = AppPalette.blue, fontSize = 9.sp)
+                            }
+                            if (doc.isNotBlank()) {
+                                Text(doc, style = MaterialTheme.typography.labelSmall, color = Color(0xFF607D8B), fontSize = 9.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ── 操作栏 ──
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             PrimaryActionButton(
@@ -361,9 +499,30 @@ internal fun SettingsEditorPage(t: UiText) {
             IconButton(onClick = { preview = !preview }, enabled = mode != CodeHighlighter.Lang.TEXT) {
                 Icon(Icons.Default.Visibility, null, tint = if (preview) AppPalette.teal else MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            if (mode == CodeHighlighter.Lang.PYTHON) {
+                // jedi 代码智能：补全 / 悬停文档 / 跳转定义
+                FilterChip(
+                    selected = false,
+                    onClick = { requestCompletion("complete") },
+                    label = { Text(if (zh) "⚡补全" else "⚡Complete", fontSize = 10.sp) },
+                    enabled = !completing,
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { requestCompletion("hover") },
+                    label = { Text(if (zh) "?文档" else "?Doc", fontSize = 10.sp) },
+                    enabled = !completing,
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { requestCompletion("defs") },
+                    label = { Text(if (zh) "→定义" else "→Def", fontSize = 10.sp) },
+                    enabled = !completing,
+                )
+            }
             IconButton(onClick = { saveFile() }, enabled = code.isNotBlank()) { Icon(Icons.Default.Save, null, tint = MaterialTheme.colorScheme.primary) }
             IconButton(onClick = { loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*")) }) { Icon(Icons.Default.FileOpen, null, tint = MaterialTheme.colorScheme.primary) }
-            IconButton(onClick = { code = ""; currentFile = null; currentFilePath = null }) { Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = { setCode(""); currentFile = null; currentFilePath = null; showCompletions = false }) { Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             IconButton(onClick = {
                 // 从最近备份回滚（快照管理）
                 val name = currentFile
@@ -374,7 +533,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 if (latest == null) { appendOut("\n[没有可回滚的备份]\n") } else {
                     scope.launch {
                         val text = withContext(Dispatchers.IO) { runCatching { latest.readText() }.getOrNull() }
-                        if (text != null) { code = text; appendOut("\n[已回滚到备份: ${latest.name}]\n") }
+                        if (text != null) { setCode(text); appendOut("\n[已回滚到备份: ${latest.name}]\n") }
                     }
                 }
             }, enabled = currentFile != null) {

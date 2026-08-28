@@ -25,3 +25,4 @@ Thumbs.db
 
 # Integration report
 INTEGRATION_CHECK_REPORT.md
+__pycache__/

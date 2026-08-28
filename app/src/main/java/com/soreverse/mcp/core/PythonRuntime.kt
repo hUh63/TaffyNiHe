@@ -70,8 +70,14 @@ object PythonRuntime {
         return if (p.isFile) p.absolutePath else null
     }
 
-    /** 运行 Python 脚本（一行代码或脚本内容），返回输出。 */
-    fun run(context: Context, script: String, args: List<String> = emptyList(), timeoutSec: Long = 30): Result {
+    /** 运行 Python 脚本（一行代码或脚本内容），返回输出。extraEnv: 附加环境变量（如扩展运行的 TAFFY_*）。 */
+    fun run(
+        context: Context,
+        script: String,
+        args: List<String> = emptyList(),
+        timeoutSec: Long = 30,
+        extraEnv: Map<String, String> = emptyMap(),
+    ): Result {
         val dir = ensureExtracted(context) ?: return Result(-1, "", "内置 Python 解压失败")
         val python = File(dir, "bin/python3")
         if (!python.isFile) return Result(-1, "", "内置 Python 不存在: ${python.absolutePath}")
@@ -84,6 +90,9 @@ object PythonRuntime {
                 put("PATH", File(dir, "bin").absolutePath + ":/system/bin")
                 put("HOME", dir.absolutePath)
                 put("PYTHONHOME", dir.absolutePath)
+                // jedi/parso 等支持库安装位置
+                put("PYTHONPATH", File(dir, "lib/python3.14/site-packages").absolutePath)
+                putAll(extraEnv)
             }
             val proc = pb.redirectErrorStream(true).start()
             proc.outputStream.use { it.write(script.toByteArray(Charsets.UTF_8)); it.flush() }
@@ -94,6 +103,32 @@ object PythonRuntime {
             Result(proc.exitValue(), output, "")
         }.getOrElse { e -> Result(-1, "", "Python 执行失败: ${e.message}") }
     }
+
+    /** 支持脚本版本号（变更时自动重复制）。 */
+    private const val SUPPORT_VERSION = "2"
+
+    /**
+     * 确保支持脚本从 assets/editor/ 复制到 filesDir/editor_support/（幂等，版本变更自动更新）。
+     * 返回脚本绝对路径，失败返回 null。
+     * 内置: completion.py（jedi 补全）/ plugin_runner.py（扩展运行器）/ taffy_ext.py（扩展 API）/ taffy_cli.py（MCP CLI 副本）
+     */
+    fun supportScript(context: Context, name: String): String? {
+        val dir = File(context.filesDir, "editor_support")
+        val f = File(dir, name)
+        val mark = File(dir, "$name.v")
+        if (!f.isFile || mark.readTextOrNull() != SUPPORT_VERSION) {
+            runCatching {
+                dir.mkdirs()
+                context.assets.open("editor/$name").use { input ->
+                    f.outputStream().use { out -> input.copyTo(out) }
+                }
+                mark.writeText(SUPPORT_VERSION)
+            }
+        }
+        return if (f.isFile) f.absolutePath else null
+    }
+
+    private fun File.readTextOrNull(): String? = runCatching { readText() }.getOrNull()
 
     data class Result(val code: Int, val output: String, val error: String) {
         val success: Boolean get() = code == 0

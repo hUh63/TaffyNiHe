@@ -140,18 +140,48 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
                     val conn = java.net.URL(fileUrl).openConnection() as java.net.HttpURLConnection
-                    conn.connectTimeout = 10000; conn.readTimeout = 30000
+                    conn.connectTimeout = 10000; conn.readTimeout = 60000
                     conn.setRequestProperty("User-Agent", "TaffyNiHe-extensions")
-                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    val bytes = conn.inputStream.use { it.readBytes() }
                     val dir = File(pluginsRoot, id).apply { mkdirs() }
-                    File(dir, "plugin.py").writeText(text)
-                    val meta = JSONObject()
-                        .put("name", o.optString("name", id)).put("id", id)
-                        .put("version", o.optString("version", "1.0"))
-                        .put("author", o.optString("author", "market"))
-                        .put("description", o.optString("description", ""))
-                        .put("source", "market")
-                    File(dir, "meta.json").writeText(meta.toString(2))
+                    val isZip = bytes.size > 2 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()
+                    if (isZip) {
+                        // zip 包插件：解包（plugin.py + meta.json + assets/ 等），内含 meta.json 时以包内为准
+                        var innerMeta = false
+                        java.util.zip.ZipInputStream(bytes.inputStream().buffered()).use { zis ->
+                            var e = zis.nextEntry
+                            while (e != null) {
+                                val name = e.name.trimStart('/').removePrefix("plugin/").removePrefix("${id}/")
+                                if (name.isBlank() || name.contains("..")) { zis.closeEntry(); e = zis.nextEntry; continue }
+                                val out = File(dir, name)
+                                if (e.isDirectory) out.mkdirs() else {
+                                    out.parentFile?.mkdirs()
+                                    out.outputStream().use { zis.copyTo(it) }
+                                    if (name == "meta.json") innerMeta = true
+                                }
+                                zis.closeEntry(); e = zis.nextEntry
+                            }
+                        }
+                        if (!File(dir, "plugin.py").isFile) throw IllegalStateException("zip 内缺少 plugin.py")
+                        if (!innerMeta) {
+                            File(dir, "meta.json").writeText(JSONObject()
+                                .put("schema", 1).put("name", o.optString("name", id)).put("id", id)
+                                .put("version", o.optString("version", "1.0"))
+                                .put("author", o.optString("author", "market"))
+                                .put("description", o.optString("description", ""))
+                                .put("source", "market").put("entry", "plugin.py").toString(2))
+                        }
+                    } else {
+                        // 单文件 .py 插件
+                        File(dir, "plugin.py").writeText(bytes.decodeToString())
+                        File(dir, "meta.json").writeText(JSONObject()
+                            .put("schema", 1)
+                            .put("name", o.optString("name", id)).put("id", id)
+                            .put("version", o.optString("version", "1.0"))
+                            .put("author", o.optString("author", "market"))
+                            .put("description", o.optString("description", ""))
+                            .put("source", "market").put("entry", "plugin.py").toString(2))
+                    }
                     "ok"
                 }
             }

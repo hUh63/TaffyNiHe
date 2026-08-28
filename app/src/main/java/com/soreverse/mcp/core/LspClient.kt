@@ -31,6 +31,19 @@ object LspClient {
     /** 最近一次诊断消息（服务端窗口日志），调试用。 */
     fun lastDiagnostics(): List<String> = synchronized(diagLock) { diagnosticsBuffer.toList() }
 
+    data class Diag(val severity: String, val line: Int, val message: String)
+
+    private val publishDiags = mutableListOf<Diag>()
+
+    /** 取出并清空最新诊断（textDocument/publishDiagnostics 推送）。 */
+    fun takeDiagnostics(): List<Diag> = synchronized(diagLock) {
+        val out = publishDiags.toList()
+        publishDiags.clear()
+        out
+    }
+
+    fun diagCount(): Int = synchronized(diagLock) { publishDiags.size }
+
     @Synchronized
     fun ensureStarted(context: Context): Boolean {
         if (proc != null && proc!!.isAlive) return true
@@ -77,7 +90,23 @@ object LspClient {
                             pending.remove(id)?.complete(msg)
                         } else if (msg.has("method")) {
                             val m = msg.optString("method")
-                            if (m.startsWith("window/")) {
+                            if (m == "textDocument/publishDiagnostics") {
+                                // 诊断推送：severity(1=Err 2=Warn 3=Info 4=Hint)/message/行号
+                                val arr = msg.optJSONObject("params")?.optJSONArray("diagnostics") ?: continue
+                                val list = mutableListOf<Diag>()
+                                for (i in 0 until arr.length()) {
+                                    val d = arr.optJSONObject(i) ?: continue
+                                    val sev = when (d.optInt("severity", 3)) { 1 -> "E"; 2 -> "W"; 3 -> "I"; else -> "H" }
+                                    val line = d.optJSONObject("range")?.optJSONObject("start")?.optInt("line", 0) ?: 0
+                                    list.add(Diag(sev, line + 1, d.optString("message", "")))
+                                }
+                                synchronized(diagLock) {
+                                    diagnosticsBuffer.clear()
+                                    diagnosticsBuffer.addAll(list.map { "${it.severity} L${it.line}: ${it.message.replace("\n", " ").take(160)}" })
+                                    publishDiags.clear()
+                                    publishDiags.addAll(list)
+                                }
+                            } else if (m.startsWith("window/")) {
                                 val text = msg.optJSONObject("params")?.optString("message") ?: ""
                                 if (text.isNotBlank()) synchronized(diagLock) {
                                     diagnosticsBuffer.add(text)

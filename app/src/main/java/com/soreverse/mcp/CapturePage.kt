@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -112,6 +113,48 @@ internal fun CapturePage(t: UiText) {
     val filteredEntries = captureEntries.filter { e ->
         (methodFilter == "全部" || (methodFilter == "HTTPS" && e.isHttps) || (methodFilter == "HTTP" && !e.isHttps) || e.method == methodFilter) &&
             (listFilter.isBlank() || e.url.contains(listFilter, ignoreCase = true) || e.host.contains(listFilter, ignoreCase = true) || e.status.contains(listFilter, ignoreCase = true))
+    }
+    // 详情弹窗 + 重放（明文 HTTP GET/HEAD；HTTPS 为加密隧道无法重放）
+    var detailEntry by remember { mutableStateOf<com.soreverse.mcp.core.HttpCaptureServer.Entry?>(null) }
+    var replaying by remember { mutableStateOf(false) }
+    var replayResult by remember { mutableStateOf("") }
+    fun replay(e: com.soreverse.mcp.core.HttpCaptureServer.Entry) {
+        replaying = true
+        replayResult = ""
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = java.net.URL(e.url).openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = e.method.uppercase()
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 15000
+                    conn.instanceFollowRedirects = true
+                    // 复制原请求头（跳过宿主相关的）
+                    e.reqHeaders.lineSequence().forEach { h ->
+                        val idx = h.indexOf(':')
+                        if (idx > 0) {
+                            val k = h.substring(0, idx).trim()
+                            val v = h.substring(idx + 1).trim()
+                            if (k.isNotBlank() && !k.equals("host", true) && !k.equals("connection", true) &&
+                                !k.equals("content-length", true) && !k.equals("accept-encoding", true)) {
+                                runCatching { conn.setRequestProperty(k, v) }
+                            }
+                        }
+                    }
+                    val t0 = System.currentTimeMillis()
+                    val code = conn.responseCode
+                    val ms = System.currentTimeMillis() - t0
+                    val bodyPreview = runCatching {
+                        (if (code in 200..399) conn.inputStream else conn.errorStream)?.use { s ->
+                            val b = ByteArray(2048); val n = s.read(b); String(b, 0, if (n > 0) n else 0)
+                        } ?: ""
+                    }.getOrDefault("")
+                    "HTTP $code · ${ms}ms\n" + (if (bodyPreview.isNotBlank()) "响应预览:\n" + bodyPreview.take(600) else "（无响应体）")
+                }.getOrElse { "重放失败: ${it.message}" }
+            }
+            replaying = false
+            replayResult = r
+        }
     }
     fun toggleCapture() {
         if (capturing) {
@@ -264,6 +307,7 @@ internal fun CapturePage(t: UiText) {
                         Row(
                             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                                .clickable { detailEntry = e; replayResult = "" }
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -445,6 +489,47 @@ internal fun CapturePage(t: UiText) {
             }
         }
     }
+
+    // ── 请求详情弹窗（点击记录打开）──
+    detailEntry?.let { e ->
+        AlertDialog(
+            onDismissRequest = { detailEntry = null },
+            title = { Text(e.method + " · " + e.status.ifBlank { if (e.isHttps) "隧道" else "—" }, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(e.url, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp), color = MaterialTheme.colorScheme.onSurface)
+                    Text("${e.time} · ${e.bytes / 1024} KB · ${e.elapsedMs}ms · ${if (e.isHttps) "HTTPS(加密隧道)" else "HTTP"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (e.reqHeaders.isNotBlank()) {
+                        Text(if (zh) "请求头" else "Request headers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        SelectionContainer {
+                            Text(e.reqHeaders, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp, lineHeight = 13.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
+                        }
+                    }
+                    if (e.respHeaders.isNotBlank()) {
+                        Text(if (zh) "响应头" else "Response headers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        SelectionContainer {
+                            Text(e.respHeaders, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp, lineHeight = 13.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
+                        }
+                    }
+                    if (e.isHttps) {
+                        Text(if (zh) "ⓘ HTTPS 为加密隧道：无明文请求头，不可重放。解密方案见「教程」tab。" else "ⓘ HTTPS tunnel: no plaintext headers, not replayable. See Guide tab.", style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = 9.sp)
+                    }
+                    if (replayResult.isNotBlank()) {
+                        Text(if (zh) "重放结果" else "Replay result", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        SelectionContainer {
+                            Text(replayResult, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (e.replayable) {
+                    TextButton(onClick = { replay(e) }, enabled = !replaying) { Text(if (replaying) "…" else if (zh) "重放请求" else "Replay") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { detailEntry = null }) { Text(if (zh) "关闭" else "Close") } },
+        )
+    }
 }
 
 /** 状态小胶囊：可用=绿，不可用=红。 */
@@ -526,8 +611,9 @@ private const val CAPTURE_GUIDE = """═══ 塔菲抓包 · 完整教程 ═�
 
 【6. 与 ProxyPin 的差异（能力边界）】
   ✅ 塔菲: 零 root 元数据抓包 + tcpdump + 导出 JSON
+     + 明文 HTTP 请求头捕获/详情/重放
      + 与 MCP/AI 联动（可直接让 AI 分析流量结构）
-  ❌ 塔菲: 暂无 HTTPS MITM 解密 / 请求重放 / 重写脚本
+  ❌ 塔菲: 暂无 HTTPS MITM 解密 / 重写脚本
   需要"看 HTTPS 明文请求体"时：先按第 2 节把证书
   装成系统证书的思路解决信任问题，再选工具。
   逆向场景下更推荐：塔菲 eDBG/动态沙箱直接看行为。

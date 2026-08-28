@@ -312,10 +312,29 @@ internal fun SettingsEditorPage(t: UiText) {
     /** 代码智能入口：按模式分流。 */
     fun requestCompletion(kind: String) {
         when (mode) {
-            CodeHighlighter.Lang.PYTHON -> requestPythonSmart(kind)
+            CodeHighlighter.Lang.PYTHON -> if (kind == "diag") requestDiagnostics() else requestPythonSmart(kind)
             CodeHighlighter.Lang.SHELL -> if (kind == "complete") showCompletionsFor(shellCompletions(), if (zh) "补全 (shell 命令表)" else "Completion (shell commands)")
             CodeHighlighter.Lang.JSON -> if (kind == "complete") showCompletionsFor(jsonKeyCompletions(), if (zh) "补全 (文档已有键)" else "Completion (keys in doc)")
             else -> {}
+        }
+    }
+
+    /** LSP 诊断（publishDiagnostics 推送缓存）：拉取并显示到控制台。 */
+    fun requestDiagnostics() {
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (!LspClient.ensureStarted(context)) return@runCatching false
+                    LspClient.didChange(code)
+                    // 诊断是推送制：didChange 后等一小段时间收推送
+                    Thread.sleep(1200)
+                    true
+                }.getOrDefault(false)
+            }
+            val diags = if (ok) LspClient.takeDiagnostics() else emptyList()
+            appendOut("\n── 诊断 (LSP) ──\n")
+            if (diags.isEmpty()) appendOut("（无诊断问题）\n")
+            diags.forEach { appendOut("[${it.severity}] 行 ${it.line}: ${it.message}\n") }
         }
     }
 
@@ -611,6 +630,12 @@ internal fun SettingsEditorPage(t: UiText) {
                     selected = false,
                     onClick = { requestCompletion("defs") },
                     label = { Text(if (zh) "→定义" else "→Def", fontSize = 10.sp) },
+                    enabled = !completing,
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { requestCompletion("diag") },
+                    label = { Text(if (zh) "⚠诊断" else "⚠Diag", fontSize = 10.sp) },
                     enabled = !completing,
                 )
             }

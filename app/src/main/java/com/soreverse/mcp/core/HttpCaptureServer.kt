@@ -32,8 +32,11 @@ class HttpCaptureServer(
         val bytes: Long,
         val elapsedMs: Long,
         val isHttps: Boolean,
+        val reqHeaders: String = "",
+        val respHeaders: String = "",
     ) {
         val url: String get() = (if (isHttps) "https://" else "http://") + host + path
+        val replayable: Boolean get() = !isHttps && (method.equals("GET", true) || method.equals("HEAD", true))
     }
 
     @Volatile private var running = false
@@ -83,8 +86,8 @@ class HttpCaptureServer(
         }
     }
 
-    private fun record(method: String, host: String, path: String, status: String, bytes: Long, elapsedMs: Long, isHttps: Boolean) {
-        val e = Entry(formatter.format(Date()), method, host, path, status, bytes, elapsedMs, isHttps)
+    private fun record(method: String, host: String, path: String, status: String, bytes: Long, elapsedMs: Long, isHttps: Boolean, reqHeaders: String = "", respHeaders: String = "") {
+        val e = Entry(formatter.format(Date()), method, host, path, status, bytes, elapsedMs, isHttps, reqHeaders, respHeaders)
         synchronized(lock) {
             entries.addLast(e)
             while (entries.size > 500) entries.removeFirst()
@@ -204,7 +207,9 @@ class HttpCaptureServer(
                 total += n
                 if (contentLength > 0 && sent >= contentLength) break
             }
-            record(method, host, path, status, total, System.currentTimeMillis() - t0, isHttps)
+            record(method, host, path, status, total, System.currentTimeMillis() - t0, isHttps,
+                reqHeaders = headerLines.joinToString("\n"),
+                respHeaders = statusLine + "\n" + respHeaders.joinToString("\n"))
             runCatching { upstream.close() }
         } catch (e: Exception) {
             // 连接中断等：忽略，不影响代理继续运行

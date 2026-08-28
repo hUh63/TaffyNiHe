@@ -309,16 +309,6 @@ internal fun SettingsEditorPage(t: UiText) {
             .map { JSONObject().put("name", it).put("type", "key").put("doc", if (zh) "文档中已有的键" else "existing key") }
     }
 
-    /** 代码智能入口：按模式分流。 */
-    fun requestCompletion(kind: String) {
-        when (mode) {
-            CodeHighlighter.Lang.PYTHON -> if (kind == "diag") requestDiagnostics() else requestPythonSmart(kind)
-            CodeHighlighter.Lang.SHELL -> if (kind == "complete") showCompletionsFor(shellCompletions(), if (zh) "补全 (shell 命令表)" else "Completion (shell commands)")
-            CodeHighlighter.Lang.JSON -> if (kind == "complete") showCompletionsFor(jsonKeyCompletions(), if (zh) "补全 (文档已有键)" else "Completion (keys in doc)")
-            else -> {}
-        }
-    }
-
     /** LSP 诊断（publishDiagnostics 推送缓存）：拉取并显示到控制台。 */
     fun requestDiagnostics() {
         scope.launch {
@@ -335,6 +325,16 @@ internal fun SettingsEditorPage(t: UiText) {
             appendOut("\n── 诊断 (LSP) ──\n")
             if (diags.isEmpty()) appendOut("（无诊断问题）\n")
             diags.forEach { appendOut("[${it.severity}] 行 ${it.line}: ${it.message}\n") }
+        }
+    }
+
+    /** 代码智能入口：按模式分流。 */
+    fun requestCompletion(kind: String) {
+        when (mode) {
+            CodeHighlighter.Lang.PYTHON -> if (kind == "diag") requestDiagnostics() else requestPythonSmart(kind)
+            CodeHighlighter.Lang.SHELL -> if (kind == "complete") showCompletionsFor(shellCompletions(), if (zh) "补全 (shell 命令表)" else "Completion (shell commands)")
+            CodeHighlighter.Lang.JSON -> if (kind == "complete") showCompletionsFor(jsonKeyCompletions(), if (zh) "补全 (文档已有键)" else "Completion (keys in doc)")
+            else -> {}
         }
     }
 

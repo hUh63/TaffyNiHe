@@ -214,6 +214,41 @@ internal fun SettingsEditorPage(t: UiText) {
     }
     var activeTab by remember { mutableIntStateOf(0) }
 
+    // 自动草稿：进入页面时恢复上次未保存的全部标签；编辑中 2s 防抖落盘（防切页/杀进程丢稿）
+    val autosaveFile = remember { File(context.filesDir, "editor_files/autosave.json") }
+    LaunchedEffect(Unit) {
+        val saved = runCatching { JSONArray(autosaveFile.readText()) }.getOrNull() ?: return@LaunchedEffect
+        if (saved.length() == 0) return@LaunchedEffect
+        val list = mutableListOf<EditorTab>()
+        for (i in 0 until saved.length()) {
+            val o = saved.optJSONObject(i) ?: continue
+            val m = runCatching { CodeHighlighter.Lang.valueOf(o.optString("mode", "PYTHON")) }.getOrDefault(CodeHighlighter.Lang.PYTHON)
+            list.add(EditorTab(o.optString("name", if (zh) "草稿" else "Draft"), o.optString("path").ifBlank { null }, o.optString("code"), m, o.optBoolean("untitled", true)))
+        }
+        if (list.isEmpty()) return@LaunchedEffect
+        tabs = list
+        activeTab = 0
+        val first = list[0]
+        code = first.code
+        tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
+        mode = first.mode
+        currentFile = if (first.untitled) null else first.name
+        currentFilePath = first.path
+        appendOut(if (zh) "\n[已恢复 ${list.size} 个未关闭标签的自动草稿]\n" else "\n[Restored ${list.size} autosaved tab(s)]\n")
+    }
+    LaunchedEffect(code, tabs.size) {
+        delay(2000)
+        snapshotCurrent()
+        runCatching {
+            val arr = JSONArray()
+            tabs.forEach { t ->
+                arr.put(JSONObject().put("name", t.name).put("path", t.path ?: "").put("code", t.code)
+                    .put("mode", t.mode.name).put("untitled", t.untitled))
+            }
+            autosaveFile.writeText(arr.toString())
+        }
+    }
+
     fun snapshotCurrent() {
         if (activeTab >= tabs.size) return
         tabs = tabs.toMutableList().also { it[activeTab] = it[activeTab].copy(code = code, mode = mode) }
@@ -232,6 +267,18 @@ internal fun SettingsEditorPage(t: UiText) {
     }
 
     fun closeTab(i: Int) {
+        // 关闭前自动备份有内容的 tab（不打断操作流，防丢稿）
+        val closing = tabs[i]
+        val closingCode = if (i == activeTab) code else closing.code
+        if (closingCode.isNotBlank()) {
+            runCatching {
+                val bakDir = File(context.filesDir, "editor_files/backup").apply { mkdirs() }
+                File(bakDir, "${closing.name}.${System.currentTimeMillis()}.bak").writeText(closingCode)
+                // 每个文件只留最近 5 份
+                bakDir.listFiles { f -> f.name.startsWith(closing.name) }
+                    ?.sortedByDescending { it.lastModified() }?.drop(5)?.forEach { it.delete() }
+            }
+        }
         val nt = tabs.toMutableList().also { it.removeAt(i) }
         val finalTabs = if (nt.isEmpty()) listOf(EditorTab(if (zh) "草稿" else "Draft", null, "", CodeHighlighter.Lang.PYTHON, true)) else nt
         val na = (if (i < activeTab) activeTab - 1 else if (i == activeTab) activeTab.coerceAtMost(finalTabs.size - 1) else activeTab)

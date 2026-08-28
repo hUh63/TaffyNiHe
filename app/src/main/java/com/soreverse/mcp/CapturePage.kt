@@ -161,6 +161,7 @@ internal fun CapturePage(t: UiText) {
         if (capturing) {
             captureServer.stop()
             capturing = false
+            Toast.makeText(context, if (zh) "抓包已停止——记得清除 WIFI 代理，否则会断网！" else "Capture stopped — clear the WIFI proxy or you will lose network!", Toast.LENGTH_LONG).show()
         } else {
             val ok = captureServer.start()
             capturing = ok

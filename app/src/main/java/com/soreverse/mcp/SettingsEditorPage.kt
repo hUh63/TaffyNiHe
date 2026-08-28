@@ -238,7 +238,9 @@ internal fun SettingsEditorPage(t: UiText) {
     }
     LaunchedEffect(code, tabs.size) {
         delay(2000)
-        snapshotCurrent()
+        if (activeTab < tabs.size) {
+            tabs = tabs.toMutableList().also { it[activeTab] = it[activeTab].copy(code = code, mode = mode) }
+        }
         runCatching {
             val arr = JSONArray()
             tabs.forEach { t ->

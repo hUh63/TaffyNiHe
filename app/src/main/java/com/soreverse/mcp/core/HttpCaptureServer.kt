@@ -102,7 +102,8 @@ class HttpCaptureServer(
                 }
                 sink("[$tag] $text")
                 pos += total
-            }            if (pos > 0) buf = buf.copyOfRange(pos, buf.size)
+            }
+            if (pos > 0) buf = buf.copyOfRange(pos, buf.size)
         }
     }
 

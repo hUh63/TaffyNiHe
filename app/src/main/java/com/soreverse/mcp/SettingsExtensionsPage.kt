@@ -250,12 +250,18 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         appendOut("──── 运行插件: ${dir.name} ────\n")
         scope.launch {
             val settings = com.soreverse.mcp.core.SettingsStore(context)
+            val ws = WorkspacePolicy.workDirPath(context) ?: ""
+            // 沙箱: 禁外网（仅放行塔菲 MCP 端口）/ 禁子进程 / 写白名单=工作区+插件目录
+            val sandboxWrite = listOf(ws, dir.absolutePath).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
             val env = mapOf(
-                "TAFFY_WORKSPACE" to (WorkspacePolicy.workDirPath(context) ?: ""),
+                "TAFFY_WORKSPACE" to ws,
                 "TAFFY_PLUGIN_DIR" to dir.absolutePath,
                 "TAFFY_SUPPORT" to File(cli).parentFile.absolutePath,
                 "TAFFY_MCP_URL" to "http://127.0.0.1:${settings.port}/mcp",
                 "TAFFY_TOKEN" to settings.accessToken,
+                "TAFFY_SANDBOX" to "1",
+                "TAFFY_SANDBOX_WRITE" to sandboxWrite,
+                "TAFFY_SANDBOX_NET" to "127.0.0.1:${settings.port}",
             )
             val r = withContext(Dispatchers.IO) {
                 PythonRuntime.run(context, "", args = listOf(runner, pluginPy.absolutePath), timeoutSec = 180, extraEnv = env)

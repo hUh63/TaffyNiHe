@@ -105,7 +105,7 @@ object PythonRuntime {
     }
 
     /** 支持脚本版本号（变更时自动重复制）。 */
-    private const val SUPPORT_VERSION = "2"
+    private const val SUPPORT_VERSION = "3"
 
     /**
      * 确保支持脚本从 assets/editor/ 复制到 filesDir/editor_support/（幂等，版本变更自动更新）。

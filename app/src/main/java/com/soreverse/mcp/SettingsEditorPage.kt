@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,6 +84,15 @@ private val SHELL_CMDS: List<Pair<String, String>> = listOf(
     "apt" to "Debian 包管理", "am" to "Android 组件", "pm" to "Android 包管理", "dumpsys" to "系统服务",
     "logcat" to "系统日志", "settings" to "系统设置", "getprop" to "系统属性", "setprop" to "设置属性",
     "svc" to "服务控制", "input" to "注入输入", "screencap" to "截屏", "screenrecord" to "录屏", "wm" to "窗口管理",
+)
+
+/** 编辑器多 tab 的标签快照（借鉴 Xed-Editor 多文件编辑）。 */
+private data class EditorTab(
+    val name: String,
+    val path: String?,      // 工作区/最近文件完整路径（草稿为 null）
+    val code: String,       // 快照内容
+    val mode: CodeHighlighter.Lang,
+    val untitled: Boolean = false,
 )
 
 /**
@@ -195,6 +206,51 @@ internal fun SettingsEditorPage(t: UiText) {
     fun setCode(text: String) {
         code = text
         tf = TextFieldValue(text, selection = TextRange(text.length))
+    }
+
+    // ── 多 tab（借鉴 Xed-Editor 多文件编辑：快照切换 / dirty 标记 / 关闭）──
+    var tabs by remember {
+        mutableStateOf(listOf(EditorTab(if (zh) "草稿" else "Draft", null, "", CodeHighlighter.Lang.PYTHON, true)))
+    }
+    var activeTab by remember { mutableIntStateOf(0) }
+
+    fun snapshotCurrent() {
+        if (activeTab >= tabs.size) return
+        tabs = tabs.toMutableList().also { it[activeTab] = it[activeTab].copy(code = code, mode = mode) }
+    }
+
+    fun switchTab(i: Int) {
+        if (i == activeTab || i !in tabs.indices) return
+        snapshotCurrent()
+        activeTab = i
+        val t = tabs[i]
+        setCode(t.code)
+        mode = t.mode
+        currentFile = if (t.untitled) null else t.name
+        currentFilePath = t.path
+        showCompletions = false
+    }
+
+    fun closeTab(i: Int) {
+        val nt = tabs.toMutableList().also { it.removeAt(i) }
+        val finalTabs = if (nt.isEmpty()) listOf(EditorTab(if (zh) "草稿" else "Draft", null, "", CodeHighlighter.Lang.PYTHON, true)) else nt
+        val na = (if (i < activeTab) activeTab - 1 else if (i == activeTab) activeTab.coerceAtMost(finalTabs.size - 1) else activeTab)
+            .coerceIn(0, finalTabs.size - 1)
+        tabs = finalTabs
+        activeTab = na
+        val t = finalTabs[na]
+        setCode(t.code)
+        mode = t.mode
+        currentFile = if (t.untitled) null else t.name
+        currentFilePath = t.path
+    }
+
+    /** UI 层打开文件前调用：同路径已开 tab 直接切换，否则预登记新 tab（内容随后由 loadWsFile 填充）。 */
+    fun ensureTab(name: String, path: String?) {
+        if (path != null && tabs.any { it.path == path }) return
+        snapshotCurrent()
+        tabs = tabs + EditorTab(name, path, "", CodeHighlighter.Lang.PYTHON, path == null)
+        activeTab = tabs.size - 1
     }
 
     /** 光标 → jedi 的 (line, col)，均 1-based。 */
@@ -526,6 +582,31 @@ internal fun SettingsEditorPage(t: UiText) {
         }
 
         // ── 编辑器（高亮预览切换）──
+        // ── 多 tab 条（借鉴 Xed-Editor 多文件编辑）──
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEachIndexed { i, t ->
+                val dirty = i == activeTab && t.code != code
+                FilterChip(
+                    selected = i == activeTab,
+                    onClick = { switchTab(i) },
+                    label = { Text((if (dirty) "• " else "") + (if (t.untitled) (if (zh) "草稿" else "Draft") else t.name), fontSize = 10.sp, maxLines = 1) },
+                    trailingIcon = {
+                        Text(
+                            "×",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable { closeTab(i) }.padding(start = 2.dp),
+                        )
+                    },
+                )
+            }
+        }
+
+        // ── 编辑区 ──
         Box(Modifier.fillMaxWidth().height(260.dp)) {
             if (preview) {
                 // 高亮只读预览
@@ -641,7 +722,10 @@ internal fun SettingsEditorPage(t: UiText) {
             }
             IconButton(onClick = { saveFile() }, enabled = code.isNotBlank()) { Icon(Icons.Default.Save, null, tint = MaterialTheme.colorScheme.primary) }
             IconButton(onClick = { loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*")) }) { Icon(Icons.Default.FileOpen, null, tint = MaterialTheme.colorScheme.primary) }
-            IconButton(onClick = { setCode(""); currentFile = null; currentFilePath = null; showCompletions = false }) { Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = {
+                setCode(""); currentFile = null; currentFilePath = null; showCompletions = false
+                tabs = tabs.toMutableList().also { it[activeTab] = EditorTab(if (zh) "草稿" else "Draft", null, "", mode, true) }
+            }) { Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             IconButton(onClick = {
                 // 从最近备份回滚（快照管理）
                 val name = currentFile
@@ -667,7 +751,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 recentFiles.forEach { name ->
                     FilterChip(
                         selected = currentFile == name,
-                        onClick = { loadFile(name) },
+                        onClick = { ensureTab(name, File(File(context.filesDir, "editor_files"), name).absolutePath); loadFile(name) },
                         label = { Text(name, fontSize = 10.sp) },
                     )
                 }
@@ -711,7 +795,9 @@ internal fun SettingsEditorPage(t: UiText) {
                                     wsDir = if (wsDir.isEmpty()) name else "$wsDir/$name"
                                     refreshRecent()
                                 } else {
-                                    loadWsFile(File(ws, if (wsDir.isEmpty()) name else "$wsDir/$name").absolutePath)
+                                    val target = File(ws, if (wsDir.isEmpty()) name else "$wsDir/$name").absolutePath
+                                    ensureTab(name, target)
+                                    loadWsFile(target)
                                 }
                             }
                         },

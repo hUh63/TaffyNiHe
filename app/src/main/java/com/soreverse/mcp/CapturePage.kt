@@ -500,6 +500,20 @@ internal fun CapturePage(t: UiText) {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(e.url, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp), color = MaterialTheme.colorScheme.onSurface)
                     Text("${e.time} · ${e.bytes / 1024} KB · ${e.elapsedMs}ms · ${if (e.isHttps) "HTTPS(加密隧道)" else "HTTP"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (e.isWs) {
+                        Text(
+                            if (zh) "WebSocket 帧（↑客户端发 / ↓服务端回，最多 200 条）" else "WS frames (↑client / ↓server, max 200)",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                        )
+                        SelectionContainer {
+                            Text(
+                                e.frames.ifEmpty { listOf(if (zh) "（尚未捕获到帧——保持会话打开）" else "(no frames yet)") }.joinToString("\n"),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp, lineHeight = 13.sp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp),
+                            )
+                        }
+                    }
                     if (e.reqHeaders.isNotBlank()) {
                         Text(if (zh) "请求头" else "Request headers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         SelectionContainer {
@@ -609,6 +623,14 @@ private const val CAPTURE_GUIDE = """═══ 塔菲抓包 · 完整教程 ═�
   · 连接列表/流量统计/DNS：系统级视角
   · tcpdump：链路层抓包（pcap，Wireshark 可开），
     能看到 TLS SNI（域名），无需证书
+
+【5b. WebSocket 明文抓取（新）】
+  ws://（明文）连接自动识别：条目 method 显示 WS，
+  点开可看双向帧（↑客户端 / ↓服务端），文本帧直接
+  显示内容（text/close/ping/pong 分类，客户端帧自动
+  去 mask 还原）。wss://（TLS 内 WS）无法旁路——同
+  HTTPS 限制。HTTP/2：明文 h2c 会标记 H2C（二进制
+  分帧不解析）；真正的 h2 都走 TLS，需 MITM 才能看。
 
 【6. 与 ProxyPin 的差异（能力边界）】
   ✅ 塔菲: 零 root 元数据抓包 + tcpdump + 导出 JSON

@@ -206,16 +206,7 @@ internal fun SettingsEditorPage(t: UiText) {
         return line to col
     }
 
-    fun requestCompletion(kind: String) {
-        when (mode) {
-            CodeHighlighter.Lang.PYTHON -> requestPythonSmart(kind)
-            CodeHighlighter.Lang.SHELL -> if (kind == "complete") showCompletionsFor(shellCompletions(), if (zh) "补全 (shell 命令表)" else "Completion (shell commands)")
-            CodeHighlighter.Lang.JSON -> if (kind == "complete") showCompletionsFor(jsonKeyCompletions(), if (zh) "补全 (文档已有键)" else "Completion (keys in doc)")
-            else -> {}
-        }
-    }
-
-    private fun showCompletionsFor(items: List<JSONObject>, via: String) {
+    fun showCompletionsFor(items: List<JSONObject>, via: String) {
         completions = items
         completionVia = via
         showCompletions = items.isNotEmpty()
@@ -316,6 +307,16 @@ internal fun SettingsEditorPage(t: UiText) {
         val keys = Regex("\"([A-Za-z0-9_\\-.]+)\"\\s*:").findAll(tf.text).map { it.groupValues[1] }.distinct().toList()
         return keys.filter { it.startsWith(word) && it != word }.take(30)
             .map { JSONObject().put("name", it).put("type", "key").put("doc", if (zh) "文档中已有的键" else "existing key") }
+    }
+
+    /** 代码智能入口：按模式分流。 */
+    fun requestCompletion(kind: String) {
+        when (mode) {
+            CodeHighlighter.Lang.PYTHON -> requestPythonSmart(kind)
+            CodeHighlighter.Lang.SHELL -> if (kind == "complete") showCompletionsFor(shellCompletions(), if (zh) "补全 (shell 命令表)" else "Completion (shell commands)")
+            CodeHighlighter.Lang.JSON -> if (kind == "complete") showCompletionsFor(jsonKeyCompletions(), if (zh) "补全 (文档已有键)" else "Completion (keys in doc)")
+            else -> {}
+        }
     }
 
     fun insertCompletion(name: String) {

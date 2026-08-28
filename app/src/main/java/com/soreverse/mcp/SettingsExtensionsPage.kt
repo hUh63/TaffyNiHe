@@ -1,5 +1,6 @@
 package com.soreverse.mcp
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -48,6 +49,7 @@ import com.soreverse.mcp.core.XedExtensionConverter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -91,6 +93,16 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     var marketLoading by remember { mutableStateOf(false) }
     var marketMsg by remember { mutableStateOf("") }
     val scroll = rememberScrollState()
+
+    fun appendOut(s: String) { output = (output + s).takeLast(30000) }
+
+    fun refresh() {
+        plugins = runCatching {
+            pluginsRoot.listFiles { f -> f.isDirectory && File(f, "plugin.py").isFile }
+                ?.sortedBy { it.name }.orEmpty()
+        }.getOrDefault(emptyList())
+    }
+    LaunchedEffect(Unit) { refresh() }
 
     fun fetchMarket(url: String = marketSource.trim()) {
         if (url.isBlank()) { marketMsg = if (zh) "请填写市场源地址" else "Market URL required"; return }
@@ -149,16 +161,6 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         }
     }
 
-    fun appendOut(s: String) { output = (output + s).takeLast(30000) }
-
-    fun refresh() {
-        plugins = runCatching {
-            pluginsRoot.listFiles { f -> f.isDirectory && File(f, "plugin.py").isFile }
-                ?.sortedBy { it.name }.orEmpty()
-        }.getOrDefault(emptyList())
-    }
-    LaunchedEffect(Unit) { refresh() }
-
     /** 导入分流: taffy 原生直装；Xed 的 apk/zip 走转换器。 */
     fun import(file: File) {
         val kind = XedExtensionConverter.detectKind(file)
@@ -206,12 +208,14 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         }
     }
 
-    /** 运行插件: plugin_runner.py 注入 taffy_ext + TAFFY_* 环境。 */
+    /** 运行插件: plugin_runner.py 注入 taffy_ext + TAFFY_* 环境。入口文件由 meta.json entry 决定（默认 plugin.py）。 */
     fun runPlugin(dir: File) {
         val runner = PythonRuntime.supportScript(context, "plugin_runner.py")
         val cli = PythonRuntime.supportScript(context, "taffy_cli.py")
         if (runner == null || cli == null) { appendOut("[运行器不可用]\n"); return }
-        val pluginPy = File(dir, "plugin.py")
+        val entry = runCatching { JSONObject(File(dir, "meta.json").readText()).optString("entry", "plugin.py") }.getOrDefault("plugin.py")
+        val pluginPy = File(dir, entry)
+        if (!pluginPy.isFile) { appendOut("[入口文件不存在: $entry]\n"); return }
         running = true
         appendOut("──── 运行插件: ${dir.name} ────\n")
         scope.launch {
@@ -257,8 +261,25 @@ def run(ext):
 """.trim() + "\n",
         )
         File(dir, "meta.json").writeText(
-            JSONObject().put("name", name.ifBlank { clean }).put("id", clean).put("version", "1.0")
-                .put("author", "taffy user").put("description", "塔菲逆核插件").put("source", "taffy").toString(2),
+            JSONObject().put("schema", 1).put("name", name.ifBlank { clean }).put("id", clean).put("version", "1.0")
+                .put("author", "taffy user").put("description", "塔菲逆核插件").put("source", "taffy")
+                .put("entry", "plugin.py").toString(2),
+        )
+        File(dir, "README.md").writeText(
+            """# $clean
+
+${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
+
+## 结构（标准）
+- plugin.py   入口（meta.json 的 entry 指向它）
+- meta.json   元数据（schema/name/id/version/author/description/source/entry）
+- README.md   本说明
+- assets/     可选：插件自带资源
+
+## 开发
+在编辑器打开 plugin.py 写 run(ext)，扩展页点「运行」验证。
+完整教程见扩展页「教程 / API」tab。
+""".trim() + "\n",
         )
         refresh()
         message = if (zh) "已创建插件: $clean（点「编辑」开始写代码）" else "Created: $clean"
@@ -374,12 +395,21 @@ def run(ext):
                         OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "编辑" else "Edit", fontSize = 11.sp) }
                         OutlinedButton(onClick = { deleteTarget = dir }, modifier = Modifier.weight(1f)) { Text(if (zh) "删除" else "Delete", fontSize = 11.sp) }
                     }
-                    if (source == "xed" && File(dir, "CONVERT_INFO.md").isFile()) {
-                        Text(
-                            if (zh) "ⓘ 含 CONVERT_INFO.md 转换报告 —— 在编辑器打开按 TODO 补齐逻辑" else "ⓘ CONVERT_INFO.md available — complete TODOs in editor",
-                            style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = 9.sp,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
+                    if (source == "xed") {
+                        val promptFile = File(dir, "AI_CONVERT_PROMPT.txt")
+                        if (promptFile.isFile) {
+                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = {
+                                    clipboard.setText(AnnotatedString(promptFile.readText()))
+                                    Toast.makeText(context, if (zh) "AI 转换 prompt 已复制——粘贴给 AI 即可自动生成完整 plugin.py" else "AI convert prompt copied", Toast.LENGTH_LONG).show()
+                                }, modifier = Modifier.weight(1f)) { Text(if (zh) "🤖 AI 全自动转换" else "🤖 AI convert", fontSize = 10.sp) }
+                                OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "看转换报告" else "Report", fontSize = 10.sp) }
+                            }
+                            Text(
+                                if (zh) "逻辑无法从字节码自动翻译——点上方按钮复制 prompt 给 AI，自动产出完整 plugin.py 后在编辑器粘贴保存" else "Copy the AI prompt to auto-generate full plugin.py",
+                                style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = 9.sp,
+                            )
+                        }
                     }
                 }
             }
@@ -505,17 +535,38 @@ def run(ext):
     return ext.mcp("taffy_rz", action="command",
                    command="afl", target="/sdcard/.../libdemo.so")
 
-【7. Xed-Editor 扩展导入】
+【7. Xed-Editor 扩展导入（含 AI 全自动转换）】
 直接「导入」Xed 的 .apk 或商店 .zip —— 塔菲自动:
   ① 解包读 manifest.json（id/mainClass/版本）
   ② dexlib2 解析 classes.dex: 入口类、生命周期钩子、
      字符串常量表、对宿主 API 的调用面
   ③ assets/ 资源原样迁移到插件 xed_assets/
-  ④ 生成可运行 plugin.py 骨架 + CONVERT_INFO.md 转换报告
-字节码逻辑无法自动翻译成 Python —— 按报告在 TODO 处
-补齐即可。Xed API → taffy_ext 对应关系见报告。
+  ④ 生成可运行 plugin.py 骨架 + CONVERT_INFO.md 报告
+     + AI_CONVERT_PROMPT.txt（AI 转换提示词）
+字节码逻辑无法从静态解析直接翻译成 Python —— 用
+插件卡的「🤖 AI 全自动转换」: 复制 prompt 粘给任意
+AI（或塔菲 AI 深度分析），AI 按 taffy_ext 规范自动
+产出完整 plugin.py，粘贴回编辑器保存即完成。
+这就是"导入即转换，AI 补逻辑"的完整流程。
 
-【8. 提示】
+【8. 插件标准结构】
+plugins/<id>/
+  plugin.py    入口（meta.json entry 指向，可换名）
+  meta.json    {"schema":1,"name","id","version",
+                "author","description","source",
+                "entry"}
+  README.md    说明（新建时自动生成）
+  assets/      可选资源（Xed 转换为 xed_assets/）
+  AI_CONVERT_PROMPT.txt / CONVERT_INFO.md
+               （仅 Xed 转换插件有）
+runner 按 meta.json 的 entry 加载入口文件。
+
+【9. AI 辅助写插件（不用 Xed 也能用 AI）】
+把「教程/API」整段 + 你的需求描述发给 AI，让它按
+规范输出 plugin.py；粘贴到新建插件里即可运行。
+要点: 只用 ext API、入口 run(ext)、返回值即输出。
+
+【10. 提示】
 · 运行有 180s 超时；长任务建议分步
 · 插件与 MCP 服务共享权限（工作区范围内读写）
 · 导入的 .py 直接可用；发布给他人打包 zip 即可

@@ -117,22 +117,29 @@ object XedExtensionConverter {
             // 5) 生成 plugin.py
             val py = buildPluginPy(id, mJson, entry.type, lifecycleHooks, hostApiCalls, strings, assetList, methodSigs)
             File(pluginDir, "plugin.py").writeText(py)
-            // 6) meta.json
+            // 6) meta.json（标准结构: schema/entry/source）
             val meta = JSONObject().apply {
+                put("schema", 1)
                 put("name", mJson.optString("name", id))
                 put("id", id)
                 put("version", mJson.optString("version", "1.0"))
                 put("author", mJson.optString("author", "unknown"))
                 put("description", mJson.optString("description", "").ifBlank { "由 Xed-Editor 扩展转换生成" } + "（Xed 转换）")
                 put("source", "xed")
+                put("entry", "plugin.py")
                 put("original_id", id)
+                put("xed_entry_class", entry.type)
             }
             File(pluginDir, "meta.json").writeText(meta.toString(2))
             // 7) 转换报告
             File(pluginDir, "CONVERT_INFO.md").writeText(
                 buildReport(id, entry.type, lifecycleHooks, methodSigs, hostApiCalls, strings, assetList),
             )
-            return Result(true, pluginDir, "转换成功: $id（${lifecycleHooks.size} 个生命周期钩子 / ${strings.size} 条字符串 / ${assetList.size} 个资源）")
+            // 8) AI 全自动转换 prompt（贴给 AI 即可生成完整 plugin.py，实现逻辑层的"自动"转换）
+            File(pluginDir, "AI_CONVERT_PROMPT.txt").writeText(
+                buildAiPrompt(id, entry.type, lifecycleHooks, methodSigs, hostApiCalls, strings, assetList),
+            )
+            return Result(true, pluginDir, "转换成功: $id（${lifecycleHooks.size} 个生命周期钩子 / ${strings.size} 条字符串 / ${assetList.size} 个资源；含 AI 转换 prompt）")
         } catch (e: Exception) {
             AppLog.e("XedExtensionConverter failed", e)
             return Result(false, null, "转换异常: ${e.message}")
@@ -242,6 +249,61 @@ ${strings.take(200).joinToString("\n")}
    - 全部工具: ext.tools() 列出
 3. 保存后在扩展页点「运行」验证
 """.trim()
+
+    /**
+     * AI 全自动转换 prompt：包含提取到的全部结构化信息 + 塔菲插件规范，
+     * 粘贴给任意 AI（或塔菲 AI 深度分析）即可直接产出完整可运行的 plugin.py，
+     * 把"逻辑层"的手动补齐变成 AI 自动生成 + 人工微调。
+     */
+    private fun buildAiPrompt(
+        id: String,
+        entryType: String,
+        lifecycle: List<String>,
+        methodSigs: List<String>,
+        apiCalls: Set<String>,
+        strings: Set<String>,
+        assets: List<String>,
+    ): String = """
+你是资深 Android 逆向与 Python 工程师。请把下面这个 Xed-Editor 扩展（JVM 字节码扩展）
+转换为塔菲逆核的 Python 插件，直接输出完整的 plugin.py 文件内容（不要输出解释，只要代码）。
+
+== 源扩展信息（由塔菲 dexlib2 自动提取）==
+扩展 ID: $id
+入口类: $entryType
+生命周期钩子（已实现）: ${lifecycle.joinToString(", ").ifBlank { "（无）" }}
+入口类方法签名:
+${methodSigs.joinToString("\n") { "  $it" }.ifBlank { "  （无）" }}
+对宿主 ExtensionAPI 的调用面（功能意图线索）:
+${apiCalls.joinToString("\n") { "  $it" }.ifBlank { "  （未检测到宿主调用）" }}
+字符串常量样本（配置/命令/路径线索）:
+${strings.take(60).joinToString("\n") { "  ${it.replace("\n", " ").take(120)}" }.ifBlank { "  （无）" }}
+随包资源文件:
+${assets.joinToString("\n") { "  $it" }.ifBlank { "  （无）" }}
+
+== 塔菲插件规范（必须遵守）==
+文件必须定义:
+1. meta = {"name": "...", "version": "1.0", "author": "...", "description": "...", "source": "xed-converted"}
+2. def run(ext): 入口函数；ext 是塔菲宿主 API（taffy_ext），返回 str/dict/list 会显示在输出区
+
+taffy_ext API（全部可用）:
+  ext.log(*args)                 日志输出
+  ext.workspace()                工作区路径（可能为空串）
+  ext.plugin_dir()               本插件目录
+  ext.files(sub="")              列工作区文件
+  ext.read(path)                 读工作区文本文件
+  ext.write(path, data)          写工作区文件
+  ext.mcp(tool, **kwargs)        调用塔菲任意 MCP 工具（终端/rizin/eDBG/抓包/工作区/APK 编辑...）
+  ext.tools()                    列出全部 MCP 工具 [ {"name","description"} ]
+  ext.env(key, default=None)     读取宿主环境变量
+
+== 转换要求 ==
+1. 保留原扩展的功能意图：根据"方法签名+宿主调用面+字符串样本"推断每个生命周期钩子应做什么，
+   在 run(ext) 中以注释保留对应分段（# [onLoad] / # [onInstalled] ...），并给出合理的 Python 实现
+2. 无法从字节码静态还原的部分（网络协议细节、私有算法）写成清晰的 TODO + 现实可跑的占位实现，
+   不要让插件运行报错
+3. 所有宿主交互只走 ext API；不得 import 不存在的模块
+4. 兼容 Python 3.14；输出必须是单个 plugin.py 的完整内容
+""".trim() + "\n"
 
     // ─────────────────────────── zip 工具 ───────────────────────────
 

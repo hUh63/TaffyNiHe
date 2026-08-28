@@ -31,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -178,7 +179,7 @@ meta = {
 
 
 def run(ext):
-    """插件入口。ext 即 taffy_ext —— 塔菲宿主能力全在这里。"""
+    # 插件入口。ext 即 taffy_ext —— 塔菲宿主能力全在这里。
     ext.log("hello from $clean!")
     ext.log("工作区:", ext.workspace())
     ext.log("工作区文件:", ext.files()[:10])

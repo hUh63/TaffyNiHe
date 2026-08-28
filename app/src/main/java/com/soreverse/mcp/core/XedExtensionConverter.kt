@@ -189,7 +189,7 @@ $pyStrings
 
 
 def run(ext):
-    """Xed 转换插件入口。ext 为塔菲扩展 API（taffy_ext）。"""
+    # Xed 转换插件入口。ext 为塔菲扩展 API（taffy_ext）。
     ext.log("Xed 转换插件已启用:", meta["name"], "v" + meta["version"])
     ext.log("入口类:", XED_INFO["entry_class"])
     ext.log("宿主 API 调用面:", ", ".join(XED_INFO["host_api_calls"]) or "(无)")

@@ -105,7 +105,7 @@ internal fun SettingsEditorPage(t: UiText) {
             val text = withContext(Dispatchers.IO) {
                 runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
             }
-            if (text != null) { setCode(text); currentFile = null }
+            if (text != null) { code = text; tf = TextFieldValue(text); currentFile = null }
         }
     }
 
@@ -152,7 +152,8 @@ internal fun SettingsEditorPage(t: UiText) {
             val text = withContext(Dispatchers.IO) { runCatching { File(path).readText() }.getOrNull() }
             if (text != null) {
                 snapshotIfChanged(path)
-                setCode(text)
+                code = text
+                tf = TextFieldValue(text)
                 currentFilePath = path
                 currentFile = File(path).name
                 mode = when (File(path).extension.lowercase()) {

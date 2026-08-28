@@ -51,6 +51,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 
+/** 官方插件市场源（GitHub raw；任何提供 index.json 的仓库均可作源）。 */
+private const val DEFAULT_MARKET_URL = "https://raw.githubusercontent.com/hUh63/TaffyNiHe/main/plugins/index.json"
+
 /**
  * 设置 → 扩展系统：塔菲 Python 插件的完整生态（借鉴 Xed-Editor 扩展系统 + 本土化）。
  *
@@ -70,7 +73,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     val dim = Color(0xFF8E8E93)
 
     val pluginsRoot = remember { File(context.filesDir, "plugins").apply { mkdirs() } }
-    var tab by remember { mutableStateOf(0) }   // 0=插件 1=教程
+    var tab by remember { mutableStateOf(0) }   // 0=插件 1=教程 2=市场
     var plugins by remember { mutableStateOf<List<File>>(emptyList()) }
     var output by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
@@ -79,7 +82,72 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     var deleteTarget by remember { mutableStateOf<File?>(null) }
     var newId by remember { mutableStateOf("") }
     var newName by remember { mutableStateOf("") }
+    // ── 市场状态 ──
+    val marketPrefs = remember { context.getSharedPreferences("so_reverse_mcp", android.content.Context.MODE_PRIVATE) }
+    var marketSource by remember {
+        mutableStateOf(marketPrefs.getString("extension_market_url", DEFAULT_MARKET_URL) ?: DEFAULT_MARKET_URL)
+    }
+    var marketItems by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var marketLoading by remember { mutableStateOf(false) }
+    var marketMsg by remember { mutableStateOf("") }
     val scroll = rememberScrollState()
+
+    fun fetchMarket(url: String = marketSource.trim()) {
+        if (url.isBlank()) { marketMsg = if (zh) "请填写市场源地址" else "Market URL required"; return }
+        marketLoading = true
+        marketMsg = ""
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 10000; conn.readTimeout = 15000
+                    conn.setRequestProperty("User-Agent", "TaffyNiHe-extensions")
+                    conn.inputStream.bufferedReader().use { it.readText() }
+                }
+            }
+            marketLoading = false
+            r.onSuccess { text ->
+                runCatching {
+                    val arr = JSONArray(text)
+                    val list = mutableListOf<JSONObject>()
+                    for (i in 0 until arr.length()) list.add(arr.getJSONObject(i))
+                    marketItems = list
+                    marketMsg = if (zh) "已拉取 ${list.size} 个插件" else "${list.size} plugins"
+                    marketPrefs.edit().putString("extension_market_url", url).apply()
+                }.onFailure { marketMsg = (if (zh) "清单解析失败: " else "Bad index: ") + it.message }
+            }.onFailure { marketMsg = (if (zh) "拉取失败（检查网络/地址，需可访问 GitHub raw）: " else "Fetch failed: ") + it.message }
+        }
+    }
+
+    fun installFromMarket(o: JSONObject) {
+        val id = o.optString("id", "").ifBlank { o.optString("name", "plugin").replace(Regex("[^A-Za-z0-9_.-]"), "_") }
+        val fileUrl = o.optString("file", "")
+        if (fileUrl.isBlank()) { marketMsg = "插件缺少 file 字段"; return }
+        marketLoading = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = java.net.URL(fileUrl).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 10000; conn.readTimeout = 30000
+                    conn.setRequestProperty("User-Agent", "TaffyNiHe-extensions")
+                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    val dir = File(pluginsRoot, id).apply { mkdirs() }
+                    File(dir, "plugin.py").writeText(text)
+                    val meta = JSONObject()
+                        .put("name", o.optString("name", id)).put("id", id)
+                        .put("version", o.optString("version", "1.0"))
+                        .put("author", o.optString("author", "market"))
+                        .put("description", o.optString("description", ""))
+                        .put("source", "market")
+                    File(dir, "meta.json").writeText(meta.toString(2))
+                    "ok"
+                }
+            }
+            marketLoading = false
+            r.onSuccess { marketMsg = if (zh) "已安装: $id（在「插件」tab 查看）" else "Installed: $id"; refresh() }
+                .onFailure { marketMsg = (if (zh) "安装失败: " else "Install failed: ") + it.message }
+        }
+    }
 
     fun appendOut(s: String) { output = (output + s).takeLast(30000) }
 
@@ -206,9 +274,50 @@ def run(ext):
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text(if (zh) "插件" else "Plugins") })
             FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text(if (zh) "教程 / API" else "Guide / API") })
+            FilterChip(selected = tab == 2, onClick = { tab = 2; if (marketItems.isEmpty()) fetchMarket() }, label = { Text(if (zh) "市场" else "Market") })
         }
 
-        if (tab == 1) {
+        if (tab == 2) {
+            // ── 市场 ──
+            OutlinedTextField(
+                value = marketSource,
+                onValueChange = { marketSource = it },
+                label = { Text(if (zh) "市场源（index.json，默认官方 GitHub）" else "Market URL (index.json)") },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = fg),
+                colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedTextColor = fg, unfocusedTextColor = fg, cursorColor = AppPalette.blue),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { fetchMarket() }, enabled = !marketLoading, modifier = Modifier.weight(1f)) {
+                    Text(if (marketLoading) "…" else if (zh) "刷新市场" else "Refresh", fontSize = 12.sp)
+                }
+            }
+            if (marketMsg.isNotEmpty()) Text(marketMsg, style = MaterialTheme.typography.bodySmall, color = if (marketMsg.startsWith(if (zh) "拉取失败" else "Fetch failed")) AppPalette.red else AppPalette.green)
+            if (marketItems.isEmpty() && !marketLoading) {
+                Text(
+                    if (zh) "市场为空或未拉取。任何 GitHub 仓库只要提供 index.json（数组：id/name/version/author/description/file）即可作为源——file 指向插件 .py 的可下载地址。" else "Provide an index.json array (id/name/version/author/description/file) on any GitHub repo.",
+                    style = MaterialTheme.typography.bodySmall, color = dim,
+                )
+            }
+            marketItems.forEach { o ->
+                val mid = o.optString("id", o.optString("name"))
+                val installed = File(pluginsRoot, mid).let { File(it, "plugin.py").isFile }
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(o.optString("name", mid), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1)
+                        Text("v${o.optString("version", "1.0")}", style = MaterialTheme.typography.labelSmall, color = dim)
+                    }
+                    if (o.optString("author").isNotBlank()) Text("by ${o.optString("author")}", style = MaterialTheme.typography.labelSmall, color = dim, fontSize = 10.sp)
+                    if (o.optString("description").isNotBlank()) Text(o.optString("description"), style = MaterialTheme.typography.bodySmall, color = dim, fontSize = 11.sp, maxLines = 3)
+                    OutlinedButton(
+                        onClick = { installFromMarket(o) },
+                        enabled = !marketLoading && !installed,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) { Text(if (installed) if (zh) "已安装" else "Installed" else if (zh) "安装" else "Install", fontSize = 11.sp) }
+                }
+            }
+        } else if (tab == 1) {
             // ── 教程 ──
             SelectionContainer {
                 Text(

@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.LspClient
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.PythonRuntime
 import com.soreverse.mcp.core.RootShell
@@ -61,6 +62,27 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+
+/** Shell 内置命令表（补全用，覆盖常用 unix/Android/塔菲语境命令）。 */
+private val SHELL_CMDS: List<Pair<String, String>> = listOf(
+    "ls" to "列目录", "cd" to "切换目录", "pwd" to "当前目录", "cat" to "查看文件", "head" to "前几行",
+    "tail" to "后几行", "grep" to "文本搜索", "find" to "查找文件", "echo" to "输出", "export" to "环境变量",
+    "env" to "环境变量", "ps" to "进程列表", "top" to "进程监控", "kill" to "结束进程", "chmod" to "修改权限",
+    "chown" to "修改属主", "cp" to "复制", "mv" to "移动/改名", "rm" to "删除", "mkdir" to "创建目录",
+    "rmdir" to "删除目录", "touch" to "创建文件", "tar" to "打包解包", "unzip" to "解压 zip", "gzip" to "压缩",
+    "curl" to "HTTP 客户端", "wget" to "下载", "ping" to "连通测试", "netstat" to "网络状态", "ifconfig" to "网卡配置",
+    "ip" to "网络配置", "ss" to "套接字统计", "df" to "磁盘空间", "du" to "目录大小", "free" to "内存",
+    "uname" to "系统信息", "id" to "用户身份", "whoami" to "当前用户", "sed" to "流编辑", "awk" to "文本处理",
+    "sort" to "排序", "uniq" to "去重", "wc" to "计数", "xargs" to "参数传递", "tee" to "分流输出",
+    "sleep" to "等待", "date" to "时间", "ln" to "链接", "stat" to "文件信息", "md5sum" to "MD5",
+    "sha256sum" to "SHA256", "base64" to "Base64 编解码", "strings" to "提取字符串", "xxd" to "十六进制",
+    "od" to "八进制转储", "file" to "文件类型", "dd" to "块拷贝", "sync" to "刷盘", "mount" to "挂载",
+    "umount" to "卸载", "sh" to "shell", "python" to "Python", "python3" to "Python 3", "pip" to "PyPI 包管理",
+    "git" to "版本管理", "taffy" to "塔菲 MCP CLI", "proot" to "用户态 root", "apk" to "Alpine 包管理",
+    "apt" to "Debian 包管理", "am" to "Android 组件", "pm" to "Android 包管理", "dumpsys" to "系统服务",
+    "logcat" to "系统日志", "settings" to "系统设置", "getprop" to "系统属性", "setprop" to "设置属性",
+    "svc" to "服务控制", "input" to "注入输入", "screencap" to "截屏", "screenrecord" to "录屏", "wm" to "窗口管理",
+)
 
 /**
  * 设置 → 编辑器：多模式编辑器 + 控制台（借鉴 Xed-Editor 的多语言编辑理念）。
@@ -83,6 +105,7 @@ internal fun SettingsEditorPage(t: UiText) {
     var code by remember { mutableStateOf("") }
     var tf by remember { mutableStateOf(TextFieldValue("")) }             // 带光标状态（jedi 补全用）
     var completions by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var completionVia by remember { mutableStateOf("") }
     var showCompletions by remember { mutableStateOf(false) }
     var completing by remember { mutableStateOf(false) }
     var lastInputAt by remember { mutableStateOf(0L) }                    // 防抖自动补全
@@ -184,9 +207,23 @@ internal fun SettingsEditorPage(t: UiText) {
     }
 
     fun requestCompletion(kind: String) {
-        if (mode != CodeHighlighter.Lang.PYTHON) return
+        when (mode) {
+            CodeHighlighter.Lang.PYTHON -> requestPythonSmart(kind)
+            CodeHighlighter.Lang.SHELL -> if (kind == "complete") showCompletionsFor(shellCompletions(), if (zh) "补全 (shell 命令表)" else "Completion (shell commands)")
+            CodeHighlighter.Lang.JSON -> if (kind == "complete") showCompletionsFor(jsonKeyCompletions(), if (zh) "补全 (文档已有键)" else "Completion (keys in doc)")
+            else -> {}
+        }
+    }
+
+    private fun showCompletionsFor(items: List<JSONObject>, via: String) {
+        completions = items
+        completionVia = via
+        showCompletions = items.isNotEmpty()
+    }
+
+    /** Python 代码智能：长驻 jedi-language-server（LSP）优先，失败回退 jedi 直连。 */
+    fun requestPythonSmart(kind: String) {
         val script = PythonRuntime.supportScript(context, "completion.py")
-        if (script == null) { appendOut("\n[补全服务不可用：内置 Python 未就绪]\n"); return }
         if (kind == "complete" && tf.selection.start > 0) {
             val prev = tf.text[tf.selection.start - 1]
             if (prev == '\n' || prev == '\t' || prev == ' ' || prev == '(') { showCompletions = false; return }
@@ -194,36 +231,91 @@ internal fun SettingsEditorPage(t: UiText) {
         val (ln, col) = cursorLineCol()
         completing = true
         scope.launch {
-            val payload = JSONObject().put("code", code).put("line", ln).put("col", col).put("kind", kind)
-            val r = withContext(Dispatchers.IO) {
-                PythonRuntime.run(context, payload.toString(), args = listOf(script), timeoutSec = 30)
-            }
-            completing = false
             val items = mutableListOf<JSONObject>()
-            // 稳健解析：completion.py 只输出一个 JSON 数组
-            runCatching {
-                val out = r.output.trim()
-                val start = out.indexOf('[')
-                val end = out.lastIndexOf(']')
-                if (start >= 0 && end > start) {
-                    val arr = JSONArray(out.substring(start, end + 1))
-                    for (i in 0 until arr.length()) items.add(arr.getJSONObject(i))
+            var via = "jedi"
+            // 1) LSP 优先
+            val lspOk = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (!LspClient.ensureStarted(context)) return@runCatching false
+                    LspClient.didChange(code)
+                    when (kind) {
+                        "complete" -> {
+                            via = "LSP"
+                            LspClient.completion(ln - 1, col - 1).forEach {
+                                items.add(JSONObject().put("name", it.label).put("type", it.kind)
+                                    .put("doc", if (it.detail.isNotBlank()) "${it.detail} · ${it.doc}" else it.doc))
+                            }
+                            true
+                        }
+                        "hover" -> {
+                            via = "LSP"
+                            LspClient.hover(ln - 1, col - 1)?.let {
+                                items.add(JSONObject().put("name", "hover").put("type", "LSP").put("doc", it))
+                            }
+                            true
+                        }
+                        else -> false // defs 走 jedi 直连
+                    }
+                }.getOrDefault(false)
+            }
+            // 2) jedi 直连兜底 / defs
+            if (!lspOk || kind == "defs") {
+                val script2 = script
+                if (script2 == null) {
+                    completing = false
+                    appendOut("\n[代码智能不可用：内置 Python 未就绪]\n")
+                    return@launch
+                }
+                via = if (kind == "defs") "jedi" else "jedi (LSP 回退)"
+                val payload = JSONObject().put("code", code).put("line", ln).put("col", col).put("kind", kind)
+                val r = withContext(Dispatchers.IO) {
+                    PythonRuntime.run(context, payload.toString(), args = listOf(script2), timeoutSec = 30)
+                }
+                runCatching {
+                    val out = r.output.trim()
+                    val start = out.indexOf('[')
+                    val end = out.lastIndexOf(']')
+                    if (start >= 0 && end > start) {
+                        val arr = JSONArray(out.substring(start, end + 1))
+                        for (i in 0 until arr.length()) items.add(arr.getJSONObject(i))
+                    }
                 }
             }
+            completing = false
             when (kind) {
                 "complete" -> {
                     completions = items.filter { it.optString("name") != "__error__" }
+                    completionVia = "补全 ($via)"
                     showCompletions = completions.isNotEmpty()
                     val err = items.firstOrNull { it.optString("name") == "__error__" }
                     if (err != null) appendOut("\n[jedi] ${err.optString("doc")}\n")
                 }
                 else -> {
-                    appendOut("\n── 代码智能 ($kind) ──\n")
+                    appendOut("\n── 代码智能 ($via) ──\n")
                     if (items.isEmpty()) appendOut("(无结果)\n")
                     items.forEach { c -> appendOut("${c.optString("name")} [${c.optString("type")}] ${c.optString("doc").lineSequence().firstOrNull().orEmpty()}\n") }
                 }
             }
         }
+    }
+
+    /** Shell 内置命令表补全（无需外部进程）。 */
+    fun shellCompletions(): List<JSONObject> {
+        val before = tf.text.substring(0, tf.selection.start.coerceIn(0, tf.text.length))
+        val word = Regex("[A-Za-z0-9_.\\-]+$").find(before)?.value.orEmpty()
+        return SHELL_CMDS.filter { it.first.startsWith(word) && it.first != word }
+            .take(30)
+            .map { JSONObject().put("name", it.first).put("type", "cmd").put("doc", it.second) }
+    }
+
+    /** JSON 键补全（收集文档中已有 key）。 */
+    fun jsonKeyCompletions(): List<JSONObject> {
+        val s = tf.selection.start.coerceIn(0, tf.text.length)
+        val before = tf.text.substring(0, s)
+        val word = Regex("([A-Za-z0-9_\\-.]+)\"?$").find(before)?.groupValues?.get(1).orEmpty()
+        val keys = Regex("\"([A-Za-z0-9_\\-.]+)\"\\s*:").findAll(tf.text).map { it.groupValues[1] }.distinct().toList()
+        return keys.filter { it.startsWith(word) && it != word }.take(30)
+            .map { JSONObject().put("name", it).put("type", "key").put("doc", if (zh) "文档中已有的键" else "existing key") }
     }
 
     fun insertCompletion(name: String) {
@@ -458,7 +550,7 @@ internal fun SettingsEditorPage(t: UiText) {
             ) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        (if (zh) "补全 (jedi)" else "Completion (jedi)") + if (completing) " · 分析中…" else "",
+                        (completionVia.ifBlank { if (zh) "补全 (jedi)" else "Completion (jedi)" }) + if (completing) " · 分析中…" else "",
                         style = MaterialTheme.typography.labelSmall,
                         color = AppPalette.teal,
                         modifier = Modifier.weight(1f),

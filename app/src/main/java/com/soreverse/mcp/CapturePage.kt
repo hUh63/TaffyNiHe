@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -100,10 +101,17 @@ internal fun CapturePage(t: UiText) {
     var capturing by remember { mutableStateOf(false) }
     var captureEntries by remember { mutableStateOf<List<com.soreverse.mcp.core.HttpCaptureServer.Entry>>(emptyList()) }
     var tab by remember { mutableStateOf("http") }
+    // 列表过滤（借鉴 ProxyPin #705 精确过滤诉求）
+    var listFilter by remember { mutableStateOf("") }
+    var methodFilter by remember { mutableStateOf("全部") }
     LaunchedEffect(Unit) {
         captureServer.addListener {
             captureEntries = captureServer.snapshot()
         }
+    }
+    val filteredEntries = captureEntries.filter { e ->
+        (methodFilter == "全部" || (methodFilter == "HTTPS" && e.isHttps) || (methodFilter == "HTTP" && !e.isHttps) || e.method == methodFilter) &&
+            (listFilter.isBlank() || e.url.contains(listFilter, ignoreCase = true) || e.host.contains(listFilter, ignoreCase = true) || e.status.contains(listFilter, ignoreCase = true))
     }
     fun toggleCapture() {
         if (capturing) {
@@ -159,10 +167,21 @@ internal fun CapturePage(t: UiText) {
         Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // ── tab 选择：HTTP 抓包 / 采集工具 ──
+        // ── tab 选择：HTTP 抓包 / 采集工具 / 教程 ──
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilterChip(selected = tab == "http", onClick = { tab = "http" }, label = { Text(if (zh) "HTTP 抓包" else "HTTP capture", fontSize = 11.sp) })
             FilterChip(selected = tab == "tools", onClick = { tab = "tools" }, label = { Text(if (zh) "采集工具" else "Tools", fontSize = 11.sp) })
+            FilterChip(selected = tab == "guide", onClick = { tab = "guide" }, label = { Text(if (zh) "教程" else "Guide", fontSize = 11.sp) })
+        }
+        if (tab == "guide") {
+            SelectionContainer {
+                Text(
+                    CAPTURE_GUIDE,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(Color(0xFF0B0F14)).padding(12.dp),
+                )
+            }
         }
         if (tab == "http") {
             // ── HTTP 抓包（本地代理，无需 Root）──
@@ -193,18 +212,45 @@ internal fun CapturePage(t: UiText) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            // 抓包列表
+            // 抓包列表（过滤 + 导出）
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    (if (zh) "抓包记录" else "Captures") + " · " + captureEntries.size,
+                    (if (zh) "抓包记录" else "Captures") + " · " + filteredEntries.size + "/" + captureEntries.size,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
+                TextButton(onClick = {
+                    val json = org.json.JSONArray().apply {
+                        filteredEntries.forEach { e ->
+                            put(org.json.JSONObject()
+                                .put("time", e.time).put("method", e.method).put("url", e.url)
+                                .put("host", e.host).put("path", e.path).put("status", e.status)
+                                .put("bytes", e.bytes).put("elapsedMs", e.elapsedMs).put("https", e.isHttps))
+                        }
+                    }
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(json.toString(2)))
+                    Toast.makeText(context, if (zh) "已复制 ${filteredEntries.size} 条（JSON）" else "Copied ${filteredEntries.size} entries (JSON)", Toast.LENGTH_SHORT).show()
+                }) { Text(if (zh) "导出 JSON" else "Export JSON", fontSize = 11.sp) }
                 TextButton(onClick = { captureServer.clear(); captureEntries = emptyList() }) { Text(if (zh) "清除" else "Clear", fontSize = 11.sp) }
             }
-            if (captureEntries.isEmpty()) {
+            // 过滤行：关键字 + 协议/方法 chips
+            OutlinedTextField(
+                value = listFilter,
+                onValueChange = { listFilter = it },
+                placeholder = { Text(if (zh) "过滤: 域名 / 路径 / 状态码…" else "Filter: host / path / status…", fontSize = 11.sp) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("全部", "HTTPS", "HTTP", "GET", "POST", "CONNECT").forEach { m ->
+                    FilterChip(selected = methodFilter == m, onClick = { methodFilter = m }, label = { Text(m, fontSize = 9.sp) })
+                }
+            }
+            if (filteredEntries.isEmpty()) {
                 Text(
                     if (zh) "暂无抓包记录\n启动代理并设置 WIFI 代理后，应用流量会出现在这里" else "No captures yet\nStart the proxy and set WIFI proxy; app traffic appears here",
                     modifier = Modifier.padding(16.dp),
@@ -213,8 +259,8 @@ internal fun CapturePage(t: UiText) {
                 )
             } else {
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(captureEntries.size) { i ->
-                        val e = captureEntries[captureEntries.size - 1 - i]
+                    items(filteredEntries.size) { i ->
+                        val e = filteredEntries[filteredEntries.size - 1 - i]
                         Row(
                             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
@@ -424,3 +470,79 @@ private fun StatusPill(label: String, ok: Boolean, modifier: Modifier = Modifier
         )
     }
 }
+
+/** 内置完整教程（离线可用，无需去官网）——原理/证书专题/流程/过滤/FAQ/能力边界。 */
+private const val CAPTURE_GUIDE = """═══ 塔菲抓包 · 完整教程 ═══
+
+【1. 工作原理（先懂这个再抓包）】
+塔菲抓包 = 本地 TCP 代理（127.0.0.1:8888）。
+把设备 WiFi 代理指向它后，应用流量先经过塔菲：
+  · HTTP  明文 → 记录完整 URL、状态码、大小、耗时
+  · HTTPS 加密 → 记录域名（CONNECT 隧道）、大小、耗时
+塔菲默认记录元数据（不解密内容）。这与 ProxyPin
+开启 MITM 解密不同——不解密就没有证书烦恼，但也
+看不到 HTTPS 请求体。
+
+【2. HTTPS 证书专题（抓包第一大坑）】
+为什么别人能看 HTTPS 内容而塔菲只显示域名？
+  · 解密 HTTPS 需要 MITM：代理自签 CA 证书，
+    并让应用信任它。
+  · Android 7.0 起应用默认【不信任用户证书】，
+    只认系统证书 —— 这是所有抓包工具共同的坎
+    （ProxyPin 上游一半 issues 都是它）。
+想在 Android 上解密 HTTPS，只有这些路：
+  ① Root 后把 CA 装进系统证书目录
+     /system/etc/security/cacerts/
+     （Magisk 模块：MoveCertificate / ProxyPinCA 等）
+  ② 目标 app 的 targetSdk < 24（已少见）
+  ③ 修改 apk 的 networkSecurityConfig 信任用户证书
+     （塔菲的 APK 编辑工具可改 manifest/重签）
+  无 Root + 高版本 Android + 新版 app：
+     目前无解，只能拿元数据（域名/大小/频率）。
+  排查提示：装了 Shamiko/隐藏模块的系统，Magisk
+  模块挂载可能失效（上游 #200/#741），先关隐藏再试。
+
+【3. 使用流程】
+  ① 「HTTP 抓包」tab → 开始抓包
+  ② 设置 → WLAN → 修改网络 → 代理 → 手动
+     主机 127.0.0.1  端口 8888
+  ③ 打开目标 app 操作，记录实时出现在列表
+  ④ 用过滤框输入域名/路径/状态码快速定位
+     （方法/协议 chips：HTTPS/HTTP/GET/POST/CONNECT）
+  ⑤ 「导出 JSON」复制给 AI/MCP 继续分析
+  ⑥ 用完【停止抓包】并【清除 WiFi 代理】，
+     否则塔菲关闭后设备会断网（代理指向已死的端口）！
+
+【4. 过滤技巧】
+  · 过滤框是子串匹配（域名/路径/状态码均可）
+  · 「CONNECT」= 全部 HTTPS 隧道
+  · 定位 API：输入 "api" 或 "/v2/" 这类路径片段
+  · 定位某 app：输入它的主域名（如 "douyin"）
+
+【5. 采集工具 tab（Root/Shizuku）】
+  · 连接列表/流量统计/DNS：系统级视角
+  · tcpdump：链路层抓包（pcap，Wireshark 可开），
+    能看到 TLS SNI（域名），无需证书
+
+【6. 与 ProxyPin 的差异（能力边界）】
+  ✅ 塔菲: 零 root 元数据抓包 + tcpdump + 导出 JSON
+     + 与 MCP/AI 联动（可直接让 AI 分析流量结构）
+  ❌ 塔菲: 暂无 HTTPS MITM 解密 / 请求重放 / 重写脚本
+  需要"看 HTTPS 明文请求体"时：先按第 2 节把证书
+  装成系统证书的思路解决信任问题，再选工具。
+  逆向场景下更推荐：塔菲 eDBG/动态沙箱直接看行为。
+
+【7. 常见问题】
+  Q: 开了抓包 App 全断网？
+     A: 代理没配对（127.0.0.1:8888）或塔菲被杀。
+        清除 WiFi 代理即恢复。
+  Q: 某 App 完全没有记录？
+     A: 它可能不走系统代理（硬编码直连/自建通道）。
+        用「采集工具」的 tcpdump 通道抓链路层。
+  Q: 应用分身/双开抓不到？
+     A: 分身在独立用户空间，本地代理方式天然抓不到
+        （上游 #636 同款问题），需 VpnService 方案。
+  Q: 长时间抓包会崩吗？
+     A: 塔菲列表环形缓冲上限 500 条，自动淘汰最旧，
+        不会像 ProxyPin 那样长跑 OOM（上游 #456）。
+"""

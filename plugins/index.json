@@ -1,0 +1,26 @@
+[
+  {
+    "id": "workspace_stats",
+    "name": "工作区统计",
+    "version": "1.0",
+    "author": "taffy-official",
+    "description": "统计工作区文件数量/类型分布/总大小",
+    "file": "https://raw.githubusercontent.com/hUh63/TaffyNiHe/main/plugins/workspace_stats.py"
+  },
+  {
+    "id": "renumber",
+    "name": "行号标注",
+    "version": "1.0",
+    "author": "taffy-official",
+    "description": "给工作区文本文件每行加行号，输出到报告文件",
+    "file": "https://raw.githubusercontent.com/hUh63/TaffyNiHe/main/plugins/renumber.py"
+  },
+  {
+    "id": "mcp_tools_list",
+    "name": "MCP 工具速查",
+    "version": "1.0",
+    "author": "taffy-official",
+    "description": "列出塔菲全部 MCP 工具（写插件的必备参考）",
+    "file": "https://raw.githubusercontent.com/hUh63/TaffyNiHe/main/plugins/mcp_tools_list.py"
+  }
+]

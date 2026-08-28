@@ -217,6 +217,15 @@ Android 逆向工具箱（SO/APK 分析、动态调试、抓包、补丁）。
  taffy_manifest_edit（改权限/debuggable）→ taffy_apk_sign。
  Flutter 应用用 Blutter 输出类/方法结构。
 
+【Frida 免 root 内置打包（装上即 hook）】
+ taffy_apk_decode → taffy_apk_frida_gadget(action=place,
+   gadget=<frida-gadget.so 路径或下载直链>, script=<hook.js>)
+   → taffy_apk_frida_gadget(action=patch_entry, dir=...)
+   → taffy_apk_rebuild(build) → taffy_apk_sign。
+ 原理: gadget/配置/脚本伪装成 so 放进 lib/<abi>/，入口类
+ 注入 System.loadLibrary("frida-gadget")，安装即自动加载。
+ gadget 下载: github.com/frida/frida/releases 选对应 abi。
+
 【动态分析】
  taffy_sandbox 启动目标 App → taffy_edbg_attach →
  下断点（onLoad/目标偏移）→ 读寄存器/内存 →

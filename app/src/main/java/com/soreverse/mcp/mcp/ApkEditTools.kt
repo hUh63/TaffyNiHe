@@ -300,5 +300,5 @@ object ApkEditTools {
         }
     }
 
-    val ALL = listOf(manifestEdit, injectSo, setIcon, hashFile, verifyApk)
+    val ALL = listOf(manifestEdit, injectSo, setIcon, hashFile, verifyApk, *com.soreverse.mcp.mcp.ApkFridaTool.ALL.toTypedArray())
 }

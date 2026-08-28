@@ -69,19 +69,19 @@ class HttpCaptureServer(
                 var hdr = 2
                 if (len == 126L) {
                     if (avail < 4) break
-                    len = ((buf[pos + 2].toInt() and 0xFF) shl 8) or (buf[pos + 3].toInt() and 0xFF)
+                    len = (((buf[pos + 2].toInt() and 0xFF) shl 8) or (buf[pos + 3].toInt() and 0xFF)).toLong()
                     hdr = 4
                 } else if (len == 127L) {
                     if (avail < 10) break
                     len = 0
-                    for (i in 0..7) len = (len shl 8) or (buf[pos + 2 + i].toInt() and 0xFF)
+                    for (i in 0..7) len = (len shl 8) or (buf[pos + 2 + i].toLong() and 0xFF)
                     hdr = 10
                 }
-                if (len > 4 shl 20) { // 单帧上限 4MB，超出视为攻击/异常，丢弃缓冲
+                if (len > (4 shl 20)) { // 单帧上限 4MB，超出视为攻击/异常，丢弃缓冲
                     buf = ByteArray(0); return
                 }
                 val maskLen = if (maskBit) 4 else 0
-                val total = hdr + maskLen + len
+                val total: Int = hdr + maskLen + len.toInt()
                 if (avail < total) break
                 val payload = buf.copyOfRange(pos + hdr + maskLen, pos + total)
                 if (maskBit) {
@@ -102,8 +102,7 @@ class HttpCaptureServer(
                 }
                 sink("[$tag] $text")
                 pos += total
-            }
-            if (pos > 0) buf = buf.copyOfRange(pos, buf.size)
+            }            if (pos > 0) buf = buf.copyOfRange(pos, buf.size)
         }
     }
 

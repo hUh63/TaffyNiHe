@@ -94,6 +94,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Python -> if (t.zh) "编辑器" else "Editor"
     SettingsDest.Git -> if (t.zh) "Git 仓库" else "Git Repository"
     SettingsDest.Extensions -> if (t.zh) "扩展系统" else "Extensions"
+    SettingsDest.Help -> if (t.zh) "帮助" else "Help"
 }
 
 @Composable
@@ -236,6 +237,8 @@ internal fun SettingsHub(
 
                 Text(if (t.zh) "诊断与关于" else "Diagnostics & about", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
+                    NavRow(if (t.zh) "帮助" else "Help", if (t.zh) "功能教程 / 实现原理 / MCP Skill" else "Guide / internals / MCP skill", Icons.Default.Description, onClick = { onDest(SettingsDest.Help) })
+                    GroupDivider()
                     NavRow(if (t.zh) "权限管理" else "Permissions", if (t.zh) "Root / Shizuku / Dhizuku" else "Root / Shizuku / Dhizuku", Icons.Default.Security, onClick = { onDest(SettingsDest.Permissions) })
                     GroupDivider()
                     NavRow(if (t.zh) "版本更新" else "Software update", if (t.zh) "GitHub Releases / 自动检查" else "GitHub Releases / automatic checks", Icons.Default.Info, trailing = availableRelease?.tag.orEmpty(), onClick = { onDest(SettingsDest.Updates) })
@@ -306,6 +309,7 @@ internal fun SettingsHub(
             SettingsDest.Terminal -> SettingsTerminalPage(t)
             SettingsDest.Git -> SettingsGitPage(t)
             SettingsDest.Extensions -> SettingsExtensionsPage(t, onDest)
+            SettingsDest.Help -> SettingsHelpPage(t)
             SettingsDest.Sandbox -> SettingsSandboxPage(t)
             SettingsDest.Python -> SettingsEditorPage(t)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)

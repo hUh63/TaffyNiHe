@@ -404,11 +404,11 @@ internal fun SettingsEditorPage(t: UiText) {
         showCompletions = false
     }
 
-    // 输入后 800ms 防抖自动补全（仅 Python 模式）
+    // 输入后 500ms 防抖自动补全（全模式：Python→LSP/jedi，Shell→命令表，JSON→已有键）
     LaunchedEffect(lastInputAt) {
         if (lastInputAt == 0L) return@LaunchedEffect
-        delay(800)
-        if (mode == CodeHighlighter.Lang.PYTHON && !preview) requestCompletion("complete")
+        delay(500)
+        if (!preview) requestCompletion("complete")
     }
 
     // 扩展页/外部跳转打开指定文件
@@ -607,7 +607,9 @@ internal fun SettingsEditorPage(t: UiText) {
         }
 
         // ── 编辑区 ──
-        Box(Modifier.fillMaxWidth().height(260.dp)) {
+        // ── 编辑区（补全面板为底部浮层，不推挤布局）──
+        Box(Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth().height(260.dp)) {
             if (preview) {
                 // 高亮只读预览
                 SelectionContainer {
@@ -623,7 +625,7 @@ internal fun SettingsEditorPage(t: UiText) {
                     value = tf,
                     onValueChange = {
                         tf = it; code = it.text
-                        if (mode == CodeHighlighter.Lang.PYTHON) lastInputAt = System.currentTimeMillis()
+                        lastInputAt = System.currentTimeMillis()   // 全模式自动补全（按模式分流）
                     },
                     modifier = Modifier.fillMaxSize(),
                     placeholder = { Text(
@@ -643,40 +645,41 @@ internal fun SettingsEditorPage(t: UiText) {
             }
         }
 
-        // ── jedi 补全面板（Python 模式）──
-        if (showCompletions && mode == CodeHighlighter.Lang.PYTHON) {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 190.dp)
-                    .background(Color(0xFF0E141C), RoundedCornerShape(12.dp)),
-            ) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        (completionVia.ifBlank { if (zh) "补全 (jedi)" else "Completion (jedi)" }) + if (completing) " · 分析中…" else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AppPalette.teal,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "✕",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { showCompletions = false }.padding(4.dp),
-                    )
-                }
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    completions.forEach { c ->
-                        val name = c.optString("name")
-                        val type = c.optString("type")
-                        val doc = c.optString("doc").lineSequence().firstOrNull().orEmpty()
-                        Column(
-                            Modifier.fillMaxWidth().clickable { insertCompletion(name) }
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp), color = fg, modifier = Modifier.weight(1f), maxLines = 1)
-                                Text(type, style = MaterialTheme.typography.labelSmall, color = AppPalette.blue, fontSize = 9.sp)
-                            }
-                            if (doc.isNotBlank()) {
-                                Text(doc, style = MaterialTheme.typography.labelSmall, color = Color(0xFF607D8B), fontSize = 9.sp, maxLines = 1)
+            // 补全面板：覆盖在编辑区底部的浮层（不推挤布局），条件放宽到全部模式
+            if (showCompletions && (mode != CodeHighlighter.Lang.TEXT)) {
+                Column(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = 190.dp)
+                        .background(Color(0xF20E141C), RoundedCornerShape(12.dp)),
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            (completionVia.ifBlank { if (zh) "补全 (jedi)" else "Completion (jedi)" }) + if (completing) " · 分析中…" else "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AppPalette.teal,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "✕",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable { showCompletions = false }.padding(4.dp),
+                        )
+                    }
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                        completions.forEach { c ->
+                            val name = c.optString("name")
+                            val type = c.optString("type")
+                            val doc = c.optString("doc").lineSequence().firstOrNull().orEmpty()
+                            Column(
+                                Modifier.fillMaxWidth().clickable { insertCompletion(name) }
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp), color = fg, modifier = Modifier.weight(1f), maxLines = 1)
+                                    Text(type, style = MaterialTheme.typography.labelSmall, color = AppPalette.blue, fontSize = 9.sp)
+                                }
+                                if (doc.isNotBlank()) {
+                                    Text(doc, style = MaterialTheme.typography.labelSmall, color = Color(0xFF607D8B), fontSize = 9.sp, maxLines = 1)
+                                }
                             }
                         }
                     }

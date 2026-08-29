@@ -12,7 +12,7 @@ import java.net.URL
  */
 object EditorAiHelper {
 
-    data class AiConfig(val provider: String, val endpoint: String, val apiKey: String, val model: String, val temperature: Double)
+    data class AiConfig(val provider: String, val endpoint: String, val apiKey: String, val model: String, val temperature: Float)
 
     fun config(settings: SettingsStore): AiConfig =
         AiConfig(

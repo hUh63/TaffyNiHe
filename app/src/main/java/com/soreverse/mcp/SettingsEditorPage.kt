@@ -740,7 +740,10 @@ internal fun SettingsEditorPage(t: UiText) {
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp, color = fg),
                     cursorBrush = SolidColor(AppPalette.teal),
                     visualTransformation = VisualTransformation { text ->
-                        CodeHighlighter.highlight(text.text, mode)
+                        androidx.compose.ui.text.input.TransformedText(
+                            CodeHighlighter.highlight(text.text, mode),
+                            androidx.compose.ui.text.input.OffsetMapping.Identity,
+                        )
                     },
                     decorationBox = { inner ->
                         Box {

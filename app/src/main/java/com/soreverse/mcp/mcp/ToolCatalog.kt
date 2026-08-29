@@ -1052,8 +1052,14 @@ object ToolCatalog {
         SoStandaloneTools.hexdump,
         // 塔菲逆核: 设备信息/系统/应用/通讯/网络/实用工具(参考mcp-server)
         *DeviceTools.ALL.toTypedArray(),
-        // 塔菲逆核: APK 细粒度编辑(参考"我的工具"APK)
-        *ApkEditTools.ALL.toTypedArray(),
+        // 塔菲逆核: APK 细粒度编辑(参考"我的工具"APK) + Frida 内置打包
+        *run {
+            // 单个工具组的 object 初始化失败不应拖垮整个工具目录(防 ExceptionInInitializerError 全局崩)
+            runCatching { ApkEditTools.ALL.toTypedArray() }.getOrElse {
+                com.soreverse.mcp.core.AppLog.e("ToolCatalog: ApkEditTools init failed", it)
+                emptyArray()
+            }
+        },
         // 塔菲逆核: Logcat 日志采集(参考NexusBridge LogFox)
         *LogcatTools.ALL.toTypedArray(),
         // 塔菲逆核: 抓包/网络流量采集(Root/Shizuku 特权通道 + tcpdump)

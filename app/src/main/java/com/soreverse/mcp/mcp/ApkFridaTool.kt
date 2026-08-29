@@ -244,5 +244,32 @@ Java.perform(function () {
         }
     }
 
-    val ALL = listOf(place, patchEntry)
+    /**
+     * 延迟聚合：place/patchEntry 的 ToolHandler 构造移出 <clinit>，
+     * 即使初始化异常也不会以 ExceptionInInitializerError 拖垮工具目录加载。
+     */
+    val ALL: List<ToolHandler> by lazy {
+        listOf(
+            runCatching { place }.getOrElse { e ->
+                com.soreverse.mcp.core.AppLog.e("ApkFridaTool: place init failed", e)
+                object : ToolHandler {
+                    override val meta = ToolMeta("taffy_apk_frida_gadget", "Frida 内置打包加载失败,请重启应用", "Frida gadget tool failed to load", "build", ToolClass.EXTRA, heavy = false) {
+                        objectSchema(props { })
+                    }
+                    override fun handle(ctx: ToolContext, args: JSONObject): JSONObject =
+                        err("INIT_FAILED", "Frida 工具初始化失败: ${e.message}", "tool", "taffy_apk_frida_gadget")
+                }
+            },
+            runCatching { patchEntry }.getOrElse { e ->
+                com.soreverse.mcp.core.AppLog.e("ApkFridaTool: patchEntry init failed", e)
+                object : ToolHandler {
+                    override val meta = ToolMeta("taffy_apk_frida_gadget", "Frida 内置打包加载失败,请重启应用", "Frida gadget tool failed to load", "build", ToolClass.EXTRA, heavy = false) {
+                        objectSchema(props { })
+                    }
+                    override fun handle(ctx: ToolContext, args: JSONObject): JSONObject =
+                        err("INIT_FAILED", "Frida 工具初始化失败: ${e.message}", "tool", "taffy_apk_frida_gadget")
+                }
+            },
+        )
+    }
 }

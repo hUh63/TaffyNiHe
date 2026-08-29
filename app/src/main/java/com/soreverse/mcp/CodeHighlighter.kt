@@ -10,12 +10,31 @@ import androidx.compose.ui.unit.sp
 
 /**
  * 轻量语法高亮（借鉴 Xed-Editor 的语法高亮能力，零依赖实现）。
- * 支持 Python / Shell / JSON / 文本 四类；逐字符状态机处理字符串/注释，
- * 关键字与数字用单词匹配。为控制性能最多高亮 400 行，超出部分用默认色。
+ * 内置语言扩展: Python / Shell / JSON / Smali / C / Java / XML / Markdown / 文本。
+ * 逐字符状态机处理字符串/注释，关键字与数字用单词匹配。最多高亮 400 行。
  */
 object CodeHighlighter {
 
-    enum class Lang { PYTHON, SHELL, JSON, TEXT }
+    enum class Lang(val ext: String) {
+        PYTHON("py"), SHELL("sh"), JSON("json"),
+        SMALI("smali"), C("c"), JAVA("java"), XML("xml"), MD("md"),
+        TEXT("txt");
+
+        companion object {
+            /** 按文件扩展名推断语言（扩展机制的自动识别入口）。 */
+            fun fromExt(ext: String): Lang = when (ext.lowercase()) {
+                "py", "pyw" -> PYTHON
+                "sh", "bash", "zsh" -> SHELL
+                "json" -> JSON
+                "smali" -> SMALI
+                "c", "h", "cpp", "cc", "hpp", "cxx" -> C
+                "java", "kt", "kts" -> JAVA
+                "xml", "html", "svg" -> XML
+                "md", "markdown" -> MD
+                else -> TEXT
+            }
+        }
+    }
 
     // 配色（深色主题）
     private val KW = Color(0xFFC586C0)      // 关键字
@@ -46,6 +65,31 @@ object CodeHighlighter {
         "touch", "chmod", "chown", "tar", "zip", "unzip", "curl", "wget", "ps", "kill", "sleep",
         "source", "alias", "unset", "set", "test", "expr", "head", "tail", "sort", "uniq", "wc",
     )
+    private val SMALI_KEYWORDS = setOf(
+        ".method", ".end method", ".field", ".end field", ".class", ".super", ".source", ".locals",
+        ".registers", ".prologue", ".param", ".annotation", ".end annotation", ".line", ".directive",
+        "invoke-static", "invoke-virtual", "invoke-direct", "invoke-super", "invoke-interface",
+        "return", "return-void", "return-object", "goto", "if-eq", "if-ne", "if-lt", "if-ge",
+        "if-gt", "if-le", "if-eqz", "if-nez", "if-ltz", "if-gez", "if-gtz", "if-lez",
+        "const", "const/4", "const/16", "const/high16", "const-string", "const-wide", "move", "move-object",
+        "new-instance", "new-array", "iget", "iget-object", "iput", "iput-object", "sget", "sput",
+        "check-cast", "instance-of", "array-length", "aget", "aput", "monitor-enter", "monitor-exit",
+        "throw", "packed-switch", "sparse-switch", "nop", "p0", "p1", "p2", "p3", "p4", "p5", "p6",
+        "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10",
+    )
+    private val C_KEYWORDS = setOf(
+        "int", "void", "char", "long", "short", "float", "double", "unsigned", "signed", "const",
+        "static", "struct", "union", "enum", "typedef", "sizeof", "return", "if", "else", "while",
+        "for", "do", "switch", "case", "default", "break", "continue", "goto", "extern", "inline",
+        "volatile", "register", "auto", "#include", "#define", "#ifdef", "#ifndef", "#endif", "#pragma",
+    )
+    private val JAVA_KEYWORDS = setOf(
+        "public", "private", "protected", "static", "final", "class", "interface", "extends",
+        "implements", "abstract", "void", "int", "long", "boolean", "char", "float", "double",
+        "return", "if", "else", "for", "while", "do", "switch", "case", "default", "break",
+        "continue", "new", "this", "super", "import", "package", "try", "catch", "finally",
+        "throw", "throws", "synchronized", "volatile", "transient", "native", "enum", "null", "true", "false",
+    )
 
     private const val MAX_HIGHLIGHT_LINES = 400
 
@@ -71,21 +115,75 @@ object CodeHighlighter {
     private fun highlightLine(builder: androidx.compose.ui.text.AnnotatedString.Builder, line: String, lang: Lang) {
         val py = lang == Lang.PYTHON
         val sh = lang == Lang.SHELL
+        val smali = lang == Lang.SMALI
+        val c = lang == Lang.C
+        val java = lang == Lang.JAVA
         val json = lang == Lang.JSON
+        val xml = lang == Lang.XML
+        val md = lang == Lang.MD
         if (lang == Lang.TEXT) {
             builder.withStyle(mono(DEF)) { builder.append(line) }
+            return
+        }
+        // Markdown: 标题/列表/引用/代码围栏 整行处理
+        if (md) {
+            val t = line.trimStart()
+            val style = when {
+                t.startsWith("#") -> FNC
+                t.startsWith("```") -> KW
+                t.startsWith("- ") || t.startsWith("* ") || Regex("^\\d+\\. ").containsMatchIn(t) -> KEY
+                t.startsWith(">") -> STR
+                else -> DEF
+            }
+            builder.withStyle(mono(style)) { builder.append(line) }
+            return
+        }
+        // XML: <tag 属性="值"> 结构着色
+        if (xml) {
+            var i2 = 0
+            val n2 = line.length
+            while (i2 < n2) {
+                val ch = line[i2]
+                when {
+                    ch == '<' -> {
+                        val close = line.indexOf('>', i2)
+                        val end = if (close >= 0) close + 1 else n2
+                        builder.withStyle(mono(KW)) { builder.append(line.substring(i2, end)) }
+                        i2 = end
+                    }
+                    ch.isDigit() -> {
+                        var j = i2 + 1
+                        while (j < n2 && line[j].isDigit()) j++
+                        builder.withStyle(mono(NUM)) { builder.append(line.substring(i2, j)) }
+                        i2 = j
+                    }
+                    else -> {
+                        builder.withStyle(mono(DEF)) { builder.append(ch.toString()) }
+                        i2++
+                    }
+                }
+            }
+            return
+        }
+        // 行注释前缀: # (python/shell/smali) / // (c/java)
+        if ((py || sh || smali) && line.trimStart().startsWith("#")) {
+            builder.withStyle(mono(COM)) { builder.append(line) }
+            return
+        }
+        if ((c || java) && line.trimStart().startsWith("//")) {
+            builder.withStyle(mono(COM)) { builder.append(line) }
             return
         }
         var i = 0
         val n = line.length
         while (i < n) {
-            val c = line[i]
-            // 注释
-            if (py && c == '#') { builder.withStyle(mono(COM)) { builder.append(line.substring(i)) }; return }
-            if (sh && c == '#') { builder.withStyle(mono(COM)) { builder.append(line.substring(i)) }; return }
+            val ch = line[i]
+            // 行内注释
+            if ((py || sh || smali) && ch == '#') { builder.withStyle(mono(COM)) { builder.append(line.substring(i)) }; return }
+            if ((c || java) && ch == '/' && i + 1 < n && line[i + 1] == '/') { builder.withStyle(mono(COM)) { builder.append(line.substring(i)) }; return }
             // 字符串
-            if (c == '"' || c == '\'') {
-                val quote = c
+            if (ch == '"' || ch == '\'') {
+                val quote = ch
                 var j = i + 1
                 while (j < n && line[j] != quote) {
                     if (line[j] == '\\') j++
@@ -97,7 +195,7 @@ object CodeHighlighter {
                 continue
             }
             // JSON 键: "key": 
-            if (json && c == '"') {
+            if (json && ch == '"') {
                 var j = i + 1
                 while (j < n && line[j] != '"') j++
                 if (j < n) {
@@ -111,7 +209,7 @@ object CodeHighlighter {
                 }
             }
             // 数字
-            if (c.isDigit() || (c == '-' && i + 1 < n && line[i + 1].isDigit())) {
+            if (ch.isDigit() || (ch == '-' && i + 1 < n && line[i + 1].isDigit())) {
                 var j = i + 1
                 while (j < n && (line[j].isDigit() || line[j] == '.' || line[j] == 'x' || line[j] in 'a'..'f' || line[j] in 'A'..'F' || line[j] == 'e' || line[j] == '+' || line[j] == '-')) j++
                 builder.withStyle(mono(NUM)) { builder.append(line.substring(i, j)) }
@@ -119,15 +217,19 @@ object CodeHighlighter {
                 continue
             }
             // 标识符（关键字/内置函数）
-            if (c.isLetter() || c == '_') {
+            if (ch.isLetter() || ch == '_' || ch == '#' || ch == '.') {
                 var j = i + 1
-                while (j < n && (line[j].isLetterOrDigit() || line[j] == '_')) j++
+                while (j < n && (line[j].isLetterOrDigit() || line[j] == '_' || line[j] == '-' || line[j] == '/')) j++
                 val word = line.substring(i, j)
                 val style = when {
                     py && word in PY_KEYWORDS -> KW
                     py && word in PY_BUILTINS -> FNC
                     sh && word in SH_KEYWORDS -> KW
                     sh && word in SH_BUILTINS -> FNC
+                    smali && word in SMALI_KEYWORDS -> KW
+                    smali && (word.startsWith("invoke-") || word.startsWith("const") || word.startsWith(".method")) -> KW
+                    c && word in C_KEYWORDS -> KW
+                    java && word in JAVA_KEYWORDS -> KW
                     else -> DEF
                 }
                 builder.withStyle(mono(style)) { builder.append(word) }
@@ -135,7 +237,7 @@ object CodeHighlighter {
                 continue
             }
             // 其他字符
-            builder.withStyle(mono(DEF)) { builder.append(c.toString()) }
+            builder.withStyle(mono(DEF)) { builder.append(ch.toString()) }
             i++
         }
     }

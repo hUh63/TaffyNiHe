@@ -173,7 +173,7 @@ internal fun EdbgPage(t: UiText) {
     // 进入页面自动 probe
     androidx.compose.runtime.LaunchedEffect(Unit) { probe() }
 
-    Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // ── 环境状态卡片 ──
         val envJson = env
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -327,7 +327,7 @@ internal fun EdbgPage(t: UiText) {
                     output.ifBlank { if (zh) "（eDBG 输出显示在这里。启动后先等待断点命中，再发调试命令）" else "(eDBG output appears here. Wait for the breakpoint, then send commands.)" },
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth().fillMaxSize()
+                    modifier = Modifier.fillMaxWidth().height(200.dp)
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), MaterialTheme.shapes.medium)
                         .padding(10.dp),
                 )

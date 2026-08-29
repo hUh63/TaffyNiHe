@@ -3,9 +3,11 @@ package com.soreverse.mcp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -46,10 +49,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.LspClient
@@ -95,6 +100,20 @@ private data class EditorTab(
     val untitled: Boolean = false,
 )
 
+/** Python 本地即时补全词表（关键字 + 内置 + 常用模块成员，零延迟先显示）。 */
+private val PYTHON_WORDS = listOf(
+    "def", "class", "import", "from", "as", "return", "if", "elif", "else", "for", "while",
+    "break", "continue", "pass", "try", "except", "finally", "raise", "with", "lambda", "yield",
+    "global", "nonlocal", "assert", "del", "in", "is", "not", "and", "or", "None", "True", "False",
+    "print", "len", "range", "enumerate", "zip", "map", "filter", "sorted", "reversed", "sum",
+    "min", "max", "abs", "round", "int", "float", "str", "bytes", "bool", "list", "dict", "set",
+    "tuple", "open", "input", "isinstance", "getattr", "setattr", "hasattr", "type", "repr",
+    "format", "join", "split", "strip", "replace", "startswith", "endswith", "encode", "decode",
+    "append", "extend", "insert", "pop", "remove", "keys", "values", "items", "get", "update",
+    "os", "sys", "json", "re", "time", "struct", "hashlib", "base64", "socket", "subprocess",
+    "threading", "pathlib", "ctypes", "traceback", "argparse", "logging",
+)
+
 /**
  * 设置 → 编辑器：多模式编辑器 + 控制台（借鉴 Xed-Editor 的多语言编辑理念）。
  *
@@ -120,7 +139,6 @@ internal fun SettingsEditorPage(t: UiText) {
     var showCompletions by remember { mutableStateOf(false) }
     var completing by remember { mutableStateOf(false) }
     var lastInputAt by remember { mutableStateOf(0L) }                    // 防抖自动补全
-    var preview by remember { mutableStateOf(false) }   // 高亮预览开关
     var output by remember { mutableStateOf("") }
     var sessionProc by remember { mutableStateOf<Process?>(null) }
     var sessionActive by remember { mutableStateOf(false) }
@@ -190,12 +208,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 tf = TextFieldValue(text)
                 currentFilePath = path
                 currentFile = File(path).name
-                mode = when (File(path).extension.lowercase()) {
-                    "py" -> CodeHighlighter.Lang.PYTHON
-                    "sh" -> CodeHighlighter.Lang.SHELL
-                    "json" -> CodeHighlighter.Lang.JSON
-                    else -> CodeHighlighter.Lang.TEXT
-                }
+                mode = CodeHighlighter.Lang.fromExt(File(path).extension)
             } else {
                 appendOut("\n[无法读取: $path]\n")
             }
@@ -325,6 +338,22 @@ internal fun SettingsEditorPage(t: UiText) {
             if (prev == '\n' || prev == '\t' || prev == ' ' || prev == '(') { showCompletions = false; return }
         }
         val (ln, col) = cursorLineCol()
+        // 本地即时补全先行（零延迟）：词表 + 当前文档符号；LSP/jedi 结果到达后覆盖刷新
+        if (kind == "complete" && tf.selection.start > 0) {
+            val before = tf.text.substring(0, tf.selection.start)
+            val word = Regex("[A-Za-z0-9_]+$").find(before)?.value.orEmpty()
+            if (word.length >= 2) {
+                val docSyms = Regex("\\b([A-Za-z_][A-Za-z0-9_]{2,})\\b").findAll(code).map { it.value }.toSet()
+                val local = (PYTHON_WORDS + docSyms).filter { it.startsWith(word) && it != word }
+                    .sorted().take(24)
+                    .map { JSONObject().put("name", it).put("type", "local").put("doc", if (zh) "本地即时补全" else "instant local") }
+                if (local.isNotEmpty()) {
+                    completions = local
+                    completionVia = if (zh) "补全 (本地词表)" else "Completion (local)"
+                    showCompletions = true
+                }
+            }
+        }
         completing = true
         scope.launch {
             val items = mutableListOf<JSONObject>()
@@ -457,7 +486,7 @@ internal fun SettingsEditorPage(t: UiText) {
     LaunchedEffect(lastInputAt) {
         if (lastInputAt == 0L) return@LaunchedEffect
         delay(500)
-        if (!preview) requestCompletion("complete")
+        requestCompletion("complete")
     }
 
     // 扩展页/外部跳转打开指定文件
@@ -570,6 +599,25 @@ internal fun SettingsEditorPage(t: UiText) {
         }
     }
 
+    // ── AI 助手（可选：复用 AI 深度分析的端点配置；未配置则按钮置灰）──
+    val aiReady = remember { runCatching { EditorAiHelper.isReady(EditorAiHelper.config(SettingsStore(context))) }.getOrDefault(false) }
+    var aiBusy by remember { mutableStateOf(false) }
+
+    /** 🤖 编辑器 AI 助手：对当前代码提问（解释/找问题/补全建议），回答输出到控制台。 */
+    fun requestAiAssist(question: String = "解释这段代码的功能、潜在问题，并给出改进建议（含代码）。") {
+        if (code.isBlank()) { appendOut("\n[AI] 代码为空，先写点内容\n"); return }
+        aiBusy = true
+        appendOut("\n── 🤖 AI 助手 ──\n[发送中] $question\n")
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { EditorAiHelper.ask(EditorAiHelper.config(SettingsStore(context)), code, question, mode.name.lowercase()) }
+            }
+            aiBusy = false
+            r.onSuccess { appendOut("$it\n") }
+                .onFailure { appendOut("[AI 请求失败] ${it.message}\n（检查 AI 深度分析页的端点/Key/模型配置与网络）\n") }
+        }
+    }
+
     fun saveFile() {
         if (code.isBlank()) return
         scope.launch {
@@ -582,7 +630,7 @@ internal fun SettingsEditorPage(t: UiText) {
                     if (ok) "已保存到工作区: $target" else "写回失败（无权限？用 root/Termux 或改为另存）"
                 } else {
                     val dir = File(context.filesDir, "editor_files").apply { mkdirs() }
-                    val ext = when (mode) { CodeHighlighter.Lang.PYTHON -> "py"; CodeHighlighter.Lang.SHELL -> "sh"; CodeHighlighter.Lang.JSON -> "json"; else -> "txt" }
+                    val ext = mode.ext
                     val name = currentFile ?: "file_${System.currentTimeMillis()}.$ext"
                     val f = File(dir, name)
                     f.writeText(code)
@@ -603,29 +651,34 @@ internal fun SettingsEditorPage(t: UiText) {
                 setCode(text)
                 currentFile = name
                 // 按扩展名推断模式
-                mode = when (name.substringAfterLast('.', "")) {
-                    "py" -> CodeHighlighter.Lang.PYTHON
-                    "sh" -> CodeHighlighter.Lang.SHELL
-                    "json" -> CodeHighlighter.Lang.JSON
-                    else -> CodeHighlighter.Lang.TEXT
-                }
+                mode = CodeHighlighter.Lang.fromExt(name.substringAfterLast('.', ""))
             }
         }
     }
 
     LaunchedEffect(output) { runCatching { consoleScroll.scrollTo(consoleScroll.maxValue) } }
 
-    val highlighted = remember(code, mode, preview) { CodeHighlighter.highlight(code, mode) }
+    val pageScroll = rememberScrollState()
 
-    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // ── 模式选择 ──
+    // 整页可滑动（编辑区/控制台/工作区文件小屏也能全部看到）+ 键盘弹出时补全面板不被遮挡
+    Column(
+        Modifier.fillMaxSize().verticalScroll(pageScroll).imePadding().padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // ── 模式选择（内置语言扩展：Python/Shell/JSON/Smali/C/Java/XML/Markdown/文本）──
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(
-                CodeHighlighter.Lang.PYTHON to "Python",
-                CodeHighlighter.Lang.SHELL to "Shell",
-                CodeHighlighter.Lang.JSON to "JSON",
-                CodeHighlighter.Lang.TEXT to if (zh) "文本" else "Text",
-            ).forEach { (m, label) ->
+            CodeHighlighter.Lang.entries.forEach { m ->
+                val label = when (m) {
+                    CodeHighlighter.Lang.PYTHON -> "Python"
+                    CodeHighlighter.Lang.SHELL -> "Shell"
+                    CodeHighlighter.Lang.JSON -> "JSON"
+                    CodeHighlighter.Lang.SMALI -> "Smali"
+                    CodeHighlighter.Lang.C -> "C/C++"
+                    CodeHighlighter.Lang.JAVA -> "Java/Kt"
+                    CodeHighlighter.Lang.XML -> "XML"
+                    CodeHighlighter.Lang.MD -> "Markdown"
+                    CodeHighlighter.Lang.TEXT -> if (zh) "文本" else "Text"
+                }
                 FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(label, fontSize = 11.sp) })
             }
         }
@@ -655,44 +708,46 @@ internal fun SettingsEditorPage(t: UiText) {
             }
         }
 
-        // ── 编辑区 ──
-        // ── 编辑区（补全面板为底部浮层，不推挤布局）──
+        // ── 编辑区（实时高亮编辑：BasicTextField + VisualTransformation，输入即高亮）──
         Box(Modifier.fillMaxWidth()) {
-            Box(Modifier.fillMaxWidth().height(260.dp)) {
-            if (preview) {
-                // 高亮只读预览
-                SelectionContainer {
-                    Text(
-                        highlighted,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp),
-                        color = fg,
-                        modifier = Modifier.fillMaxSize().background(bg, RoundedCornerShape(14.dp)).verticalScroll(rememberScrollState()).padding(10.dp),
-                    )
-                }
-            } else {
-                OutlinedTextField(
+            Box(
+                Modifier.fillMaxWidth().heightIn(min = 260.dp, max = 460.dp)
+                    .background(bg, RoundedCornerShape(14.dp))
+                    .border(1.dp, Color(0xFF1E2A36), RoundedCornerShape(14.dp))
+                    .padding(4.dp),
+            ) {
+                BasicTextField(
                     value = tf,
                     onValueChange = {
                         tf = it; code = it.text
                         lastInputAt = System.currentTimeMillis()   // 全模式自动补全（按模式分流）
                     },
                     modifier = Modifier.fillMaxSize(),
-                    placeholder = { Text(
-                        when (mode) {
-                            CodeHighlighter.Lang.PYTHON -> if (zh) "# Python 代码（变量跨运行保留）" else "# Python code (state kept)"
-                            CodeHighlighter.Lang.SHELL -> "# Shell 脚本"
-                            CodeHighlighter.Lang.JSON -> "{ \"key\": \"value\" }"
-                            else -> if (zh) "纯文本" else "plain text"
-                        }, color = Color(0xFF607D8B), fontFamily = FontFamily.Monospace) },
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp, color = fg),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = bg, unfocusedContainerColor = bg,
-                        focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f), unfocusedBorderColor = Color(0xFF1E2A36),
-                    ),
-                    shape = RoundedCornerShape(14.dp),
+                    cursorBrush = SolidColor(AppPalette.teal),
+                    visualTransformation = VisualTransformation { text ->
+                        CodeHighlighter.highlight(text.text, mode)
+                    },
+                    decorationBox = { inner ->
+                        Box {
+                            if (code.isEmpty()) {
+                                Text(
+                                    when (mode) {
+                                        CodeHighlighter.Lang.PYTHON -> if (zh) "# Python 代码（变量跨运行保留）" else "# Python code (state kept)"
+                                        CodeHighlighter.Lang.SHELL -> "# Shell 脚本"
+                                        CodeHighlighter.Lang.JSON -> "{ \"key\": \"value\" }"
+                                        else -> if (zh) "纯文本" else "plain text"
+                                    },
+                                    color = Color(0xFF607D8B), fontFamily = FontFamily.Monospace,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                    modifier = Modifier.padding(6.dp),
+                                )
+                            }
+                            inner()
+                        }
+                    },
                 )
             }
-        }
 
             // 补全面板：覆盖在编辑区底部的浮层（不推挤布局），条件放宽到全部模式
             if (showCompletions && (mode != CodeHighlighter.Lang.TEXT)) {
@@ -742,9 +797,10 @@ internal fun SettingsEditorPage(t: UiText) {
                 when (mode) { CodeHighlighter.Lang.JSON -> if (zh) "校验" else "Validate"; CodeHighlighter.Lang.TEXT -> if (zh) "统计" else "Stats"; else -> if (zh) "运行" else "Run" },
                 { runCode() }, Modifier.weight(1f).height(40.dp), leading = Icons.Default.PlayArrow,
             )
-            IconButton(onClick = { preview = !preview }, enabled = mode != CodeHighlighter.Lang.TEXT) {
-                Icon(Icons.Default.Visibility, null, tint = if (preview) AppPalette.teal else MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            IconButton(
+                onClick = { requestAiAssist() },
+                enabled = aiReady && !aiBusy,
+            ) { Text(if (aiBusy) "…" else "🤖", fontSize = 15.sp) }
             if (mode == CodeHighlighter.Lang.PYTHON) {
                 // jedi 代码智能：补全 / 悬停文档 / 跳转定义
                 FilterChip(

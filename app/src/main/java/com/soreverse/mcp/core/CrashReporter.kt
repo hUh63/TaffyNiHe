@@ -110,6 +110,14 @@ object CrashReporter {
         appendLine("=========")
         appendLine(throwable.stackTraceToString())
         appendLine()
+        // 根因摘要：ExceptionInInitializerError 等包装异常的关键是 cause 链最深处
+        appendLine("Root cause")
+        appendLine("==========")
+        var root: Throwable = throwable
+        while (root.cause != null && root.cause !== root) root = root.cause!!
+        appendLine("${root.javaClass.name}: ${root.message ?: "(no message)"}")
+        root.stackTrace.take(14).forEach { appendLine("    at $it") }
+        appendLine()
         appendLine("Recent application logs")
         appendLine("=======================")
         val logs = AppLog.snapshot()

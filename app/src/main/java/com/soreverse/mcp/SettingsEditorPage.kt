@@ -57,10 +57,12 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.EditorAiHelper
 import com.soreverse.mcp.core.LspClient
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.PythonRuntime
 import com.soreverse.mcp.core.RootShell
+import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.WorkspacePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -595,6 +597,18 @@ internal fun SettingsEditorPage(t: UiText) {
             }
             CodeHighlighter.Lang.TEXT -> {
                 appendOut("\n[文本模式] ${code.lines().size} 行 / ${code.length} 字符\n")
+            }
+            else -> {
+                // Smali（可交给 taffy_apk_rebuild 的 smali 汇编）/ C/C++ / Java / XML / Markdown：暂无本地运行器
+                appendOut(
+                    when (mode) {
+                        CodeHighlighter.Lang.SMALI -> "\n[Smali] 语法检查请用 taffy_apk_rebuild(build) 的 smali 汇编；运行请在终端/工作区完成\n"
+                        CodeHighlighter.Lang.C -> "\n[C/C++] 无本地编译器——可在终端（Linux 环境 rootfs 内 gcc/clang）或插件中编译\n"
+                        CodeHighlighter.Lang.JAVA -> "\n[Java/Kt] 无本地编译器——可在终端（rootfs 内 javac/kotlinc）编译\n"
+                        CodeHighlighter.Lang.XML -> "\n[XML] ${code.lines().size} 行（Manifest 修改请用 taffy_apk_manifest_edit）\n"
+                        else -> "\n[Markdown] ${code.lines().size} 行 / ${code.length} 字符\n"
+                    }
+                )
             }
         }
     }

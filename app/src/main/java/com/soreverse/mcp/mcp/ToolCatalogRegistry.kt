@@ -1,17 +1,20 @@
 package com.soreverse.mcp.mcp
 
 class ToolCatalogRegistry(handlers: List<ToolHandler>) {
-    val handlers: List<ToolHandler> = handlers.toList()
-    val byName: Map<String, ToolHandler>
-    val names: List<String>
-    val heavyNames: Set<String>
-
-    init {
-        names = this.handlers.map { it.meta.name }
-        require(names.distinct().size == names.size) { "Tool names must be unique" }
-        byName = this.handlers.associateBy { it.meta.name }
-        heavyNames = this.handlers.filter { it.meta.heavy }.mapTo(linkedSetOf()) { it.meta.name }
+    // 防崩: 工具名重复时不抛异常（<clinit> 抛出会以 EIIE 拖垮整个应用），
+    // 而是丢弃后续重复项并告警，保证目录可构建。
+    private val unique: LinkedHashMap<String, ToolHandler> = linkedMapOf<String, ToolHandler>().apply {
+        val dups = mutableListOf<String>()
+        handlers.forEach { h ->
+            val n = h.meta.name
+            if (containsKey(n)) dups.add(n) else put(n, h)
+        }
+        if (dups.isNotEmpty()) com.soreverse.mcp.core.AppLog.e("ToolCatalogRegistry: 重复工具名已去重: $dups")
     }
+    val handlers: List<ToolHandler> = unique.values.toList()
+    val byName: Map<String, ToolHandler> = unique
+    val names: List<String> = unique.keys.toList()
+    val heavyNames: Set<String> = unique.values.filter { it.meta.heavy }.mapTo(linkedSetOf()) { it.meta.name }
 
     fun leanNames(popularity: Map<String, Long>? = null, promotionSlots: Int = 5): List<String> {
         val base = handlers

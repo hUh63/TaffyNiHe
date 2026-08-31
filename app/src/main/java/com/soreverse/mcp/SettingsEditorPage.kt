@@ -683,7 +683,6 @@ internal fun SettingsEditorPage(t: UiText) {
                     CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(name.substringAfterLast('.', ""))
                 }
             }
-            }
         }
     }
 

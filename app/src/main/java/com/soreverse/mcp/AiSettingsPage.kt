@@ -37,6 +37,23 @@ import kotlinx.serialization.json.buildJsonObject
 
 internal data class RequestField(val key: String, val value: String)
 
+/** 服务商预设端点（openrouter/xai 走 openai 协议）。 */
+private fun endpointFor(chip: String): String = when (chip) {
+    "anthropic" -> "https://api.anthropic.com"
+    "gemini" -> "https://generativelanguage.googleapis.com"
+    "openrouter" -> "https://openrouter.ai/api/v1"
+    "xai" -> "https://api.x.ai/v1"
+    else -> "https://api.openai.com/v1"
+}
+
+private fun officialForPreset(preset: String): String = when {
+    preset.contains("anthropic.com") -> "api.anthropic.com"
+    preset.contains("googleapis.com") -> "generativelanguage.googleapis.com"
+    preset.contains("openrouter.ai") -> "openrouter.ai"
+    preset.contains("x.ai") -> "api.x.ai"
+    else -> "api.openai.com"
+}
+
 internal fun parseRequestFields(raw: String): List<RequestField> {
     val json = runCatching { Json.parseToJsonElement(raw.ifBlank { "{}" }) as JsonObject }.getOrNull() ?: return emptyList()
     return json.map { (key, value) ->

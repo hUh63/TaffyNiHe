@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * 编辑器语法包（语言插件）机制：
- * 语法规则以 JSON 描述（关键字/内置名/注释符/扩展名），存放在 filesDir/editor_syntax/*.json。
+ * 语法规则以 JSON 描述（关键字/内置名/注释符/扩展名），存放在 filesDir 下的 editor_syntax 目录（每包一个 .json 文件）。
  * 新语言无需改代码——安装语法包 JSON 即可扩展编辑器高亮与语言识别。
  * 内置 4 个示范包: Rust / Go / Lua / SQL（首次启动自动安装到扩展目录，可删可改）。
  *
@@ -17,7 +17,7 @@ import java.io.File
  *   "keywords": ["fn","let",...],
  *   "builtins": ["println","Vec",...],          // 可选
  *   "lineComment": "//",                         // 可选
- *   "blockComment": ["/*", "*/"],                // 可选
+ *   "blockComment": [起始标记, 结束标记],         // 可选，如 C 风格块注释的两个定界符
  *   "caseInsensitive": false                     // 可选，SQL 这类大小写不敏感语言用
  * }
  */

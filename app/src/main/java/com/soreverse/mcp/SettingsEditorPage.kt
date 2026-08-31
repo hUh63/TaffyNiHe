@@ -134,6 +134,14 @@ internal fun SettingsEditorPage(t: UiText) {
     val marker = "__TAFFY_END__"
 
     var mode by remember { mutableStateOf(CodeHighlighter.Lang.PYTHON) }
+    // ── 语法包（编辑器语言插件）：进入页面初始化，安装内置示范包 + 加载扩展目录 ──
+    var packVersion by remember { mutableStateOf(0) }
+    var showPackManager by remember { mutableStateOf(false) }
+    remember(packVersion) {
+        runCatching { com.soreverse.mcp.core.EditorSyntaxPacks.init(context) }
+        CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.packs.firstOrNull()
+        true
+    }
     var code by remember { mutableStateOf("") }
     var tf by remember { mutableStateOf(TextFieldValue("")) }             // 带光标状态（jedi 补全用）
     var completions by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
@@ -210,7 +218,11 @@ internal fun SettingsEditorPage(t: UiText) {
                 tf = TextFieldValue(text)
                 currentFilePath = path
                 currentFile = File(path).name
-                mode = CodeHighlighter.Lang.fromExt(File(path).extension)
+                val detected = CodeHighlighter.Lang.fromExt(File(path).extension)
+                mode = detected
+                if (detected == CodeHighlighter.Lang.EXT) {
+                    CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(File(path).extension)
+                }
             } else {
                 appendOut("\n[无法读取: $path]\n")
             }
@@ -664,8 +676,13 @@ internal fun SettingsEditorPage(t: UiText) {
             if (text != null) {
                 setCode(text)
                 currentFile = name
-                // 按扩展名推断模式
-                mode = CodeHighlighter.Lang.fromExt(name.substringAfterLast('.', ""))
+                // 按扩展名推断模式（内置语言 / 语法包扩展语言）
+                val detected = CodeHighlighter.Lang.fromExt(name.substringAfterLast('.', ""))
+                mode = detected
+                if (detected == CodeHighlighter.Lang.EXT) {
+                    CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(name.substringAfterLast('.', ""))
+                }
+            }
             }
         }
     }
@@ -679,7 +696,7 @@ internal fun SettingsEditorPage(t: UiText) {
         Modifier.fillMaxSize().verticalScroll(pageScroll).imePadding().padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // ── 模式选择（内置语言扩展：Python/Shell/JSON/Smali/C/Java/XML/Markdown/文本）──
+        // ── 模式选择（内置语言 + 语法包扩展语言：Python/Shell/JSON/Smali/C/Java/XML/Markdown/Rust/Go/Lua/SQL…）──
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CodeHighlighter.Lang.entries.forEach { m ->
                 val label = when (m) {
@@ -691,10 +708,26 @@ internal fun SettingsEditorPage(t: UiText) {
                     CodeHighlighter.Lang.JAVA -> "Java/Kt"
                     CodeHighlighter.Lang.XML -> "XML"
                     CodeHighlighter.Lang.MD -> "Markdown"
+                    CodeHighlighter.Lang.EXT -> {
+                        val pack = CodeHighlighter.activePack
+                        if (pack != null) "✦ ${pack.name}" else if (zh) "扩展" else "Ext"
+                    }
                     CodeHighlighter.Lang.TEXT -> if (zh) "文本" else "Text"
                 }
-                FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(label, fontSize = 11.sp) })
+                FilterChip(selected = mode == m, onClick = {
+                    mode = m
+                    if (m == CodeHighlighter.Lang.EXT) {
+                        val ext = File(currentFilePath).extension
+                        CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(ext)
+                            ?: com.soreverse.mcp.core.EditorSyntaxPacks.packs.firstOrNull()
+                    }
+                }, label = { Text(label, fontSize = 11.sp) })
             }
+            FilterChip(
+                selected = false,
+                onClick = { showPackManager = true },
+                label = { Text(if (zh) "📦 语法包" else "📦 Packs", fontSize = 11.sp) },
+            )
         }
 
         // ── 编辑器（高亮预览切换）──
@@ -971,6 +1004,76 @@ internal fun SettingsEditorPage(t: UiText) {
                     }
                 }
             }
+        }
+
+        // ── 语法包管理（语言插件：导入/删除/恢复内置）──
+        if (showPackManager) {
+            var packJson by remember { mutableStateOf("") }
+            var packMsg by remember { mutableStateOf("") }
+            val packs = com.soreverse.mcp.core.EditorSyntaxPacks.packs
+            AlertDialog(
+                onDismissRequest = { showPackManager = false },
+                title = { Text(if (zh) "语法包 · 语言插件" else "Syntax Packs", fontSize = 15.sp) },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            if (zh)
+                                "语法包用 JSON 描述一种语言（关键字/内置名/注释符/扩展名）。安装后编辑器即可高亮该语言，并按文件扩展名自动识别——无需改代码即可扩展编辑器语言。内置示范包：Rust / Go / Lua / SQL。"
+                            else
+                                "A syntax pack describes a language in JSON (keywords/builtins/comments/extensions). Installed packs get full highlighting and auto-detection by file extension. Built-ins: Rust / Go / Lua / SQL.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        packs.forEach { p ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("✦ ${p.name}", Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = fg)
+                                Text(p.extensions.joinToString(" "), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(onClick = {
+                                    com.soreverse.mcp.core.EditorSyntaxPacks.remove(context, p.id)
+                                    if (CodeHighlighter.activePack?.id == p.id) CodeHighlighter.activePack = null
+                                    packVersion++
+                                }) { Text(if (zh) "删除" else "Del", color = MaterialTheme.colorScheme.error, fontSize = 11.sp) }
+                            }
+                        }
+                        if (packs.isEmpty()) {
+                            Text(if (zh) "（尚未安装语法包）" else "(no packs installed)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        OutlinedTextField(
+                            value = packJson,
+                            onValueChange = { packJson = it },
+                            label = { Text(if (zh) "粘贴语法包 JSON 导入" else "Paste syntax pack JSON to import") },
+                            minLines = 4,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = fg),
+                            colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (packMsg.isNotBlank()) Text(packMsg, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val r = com.soreverse.mcp.core.EditorSyntaxPacks.save(context, packJson)
+                            packMsg = r.fold(
+                                { "${if (zh) "已安装" else "Installed"}: ${it.name} (${it.extensions.joinToString(", ")})" },
+                                { "${if (zh) "导入失败" else "Failed"}: ${it.message}" },
+                            )
+                            packVersion++
+                        },
+                        enabled = packJson.isNotBlank(),
+                    ) { Text(if (zh) "导入" else "Install") }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = {
+                            com.soreverse.mcp.core.EditorSyntaxPacks.restoreBuiltins(context)
+                            packVersion++
+                            packMsg = if (zh) "已恢复内置包" else "Built-ins restored"
+                        }) { Text(if (zh) "恢复内置" else "Restore") }
+                        TextButton(onClick = { showPackManager = false }) { Text(if (zh) "关闭" else "Close") }
+                    }
+                },
+            )
         }
     }
 }

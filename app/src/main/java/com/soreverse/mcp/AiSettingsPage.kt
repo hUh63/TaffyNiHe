@@ -131,25 +131,36 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
 
     PageScroll {
         GlassGroup(title = if (t.zh) "协议兼容" else "Provider") {
+            // openrouter / xai 是 OpenAI 协议的预设端点（存储层面 provider 仍为 openai）
+            val selectedChip = when {
+                provider == "openai" && endpoint.contains("openrouter.ai") -> "openrouter"
+                provider == "openai" && endpoint.contains("x.ai") -> "xai"
+                else -> provider
+            }
             ChipRow(
                 listOf(
-                    "openai" to "OpenAI",
-                    "anthropic" to "Anthropic",
+                    "openai" to "OpenAI/兼容",
+                    "anthropic" to "Anthropic/兼容",
+                    "gemini" to "Gemini",
+                    "openrouter" to "OpenRouter",
+                    "xai" to "Grok",
                 ),
-                provider,
-            ) {
-                provider = it
-                settings.aiProvider = it
-                if (it == "anthropic" && endpoint.contains("openai.com")) {
-                    endpoint = "https://api.anthropic.com"
-                    settings.aiEndpoint = endpoint
-                } else if (it == "openai" && endpoint.contains("anthropic.com")) {
-                    endpoint = "https://api.openai.com/v1"
+                selectedChip,
+            ) { chip ->
+                val targetProvider = if (chip == "openrouter" || chip == "xai") "openai" else chip
+                provider = targetProvider
+                settings.aiProvider = targetProvider
+                // 仅当当前端点为其他服务商官方端点（或为空）时自动填预设，不覆盖自定义端点
+                val preset = endpointFor(chip)
+                val officials = listOf("api.openai.com", "api.anthropic.com", "generativelanguage.googleapis.com", "openrouter.ai", "api.x.ai")
+                val onOtherOfficial = officials.any { endpoint.contains(it) } && !endpoint.contains(officialForPreset(preset))
+                if (onOtherOfficial || endpoint.isBlank()) {
+                    endpoint = preset
                     settings.aiEndpoint = endpoint
                 }
             }
         }
-        GlassGroup(footer = if (t.zh) "兼容 OpenAI / Anthropic 及多数中转站。自定义 headers/body 用于服务商差异字段。" else "OpenAI/Anthropic compatible. Use custom headers/body for vendor-specific fields.") {
+        GlassGroup(footer = if (t.zh) "OpenAI 兼容: DeepSeek / Moonshot / Kimi / GLM / Groq / OpenRouter / xAI 等；Anthropic 兼容: 多数中转站；Gemini 为 Google 原生协议。自定义 headers/body 用于服务商差异字段。" else "OpenAI-compatible: DeepSeek/Moonshot/Kimi/GLM/Groq/OpenRouter/xAI; Anthropic-compatible gateways; native Gemini. Use custom headers/body for vendor-specific fields.") {
             OutlinedTextField(
                 value = endpoint,
                 onValueChange = { endpoint = it; settings.aiEndpoint = it },

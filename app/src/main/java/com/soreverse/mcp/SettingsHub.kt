@@ -75,7 +75,6 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Probe -> t.externalProbe
     SettingsDest.ToolStats -> if (t.zh) "工具调用审计" else "Tool Call Audit"
     SettingsDest.TunnelStats -> if (t.zh) "隧道稳定性" else "Tunnel Stability"
-    SettingsDest.Instructions -> t.instructions
     SettingsDest.Credits -> if (t.zh) "开源致谢" else "Credits"
     SettingsDest.Disclaimer -> t.disclaimer
     SettingsDest.About -> t.about
@@ -251,8 +250,6 @@ internal fun SettingsHub(
                     GroupDivider()
                     NavRow(if (t.zh) "日志" else "Logs", if (t.zh) "应用运行日志" else "App runtime logs", Icons.Default.Description, onClick = { onLogs() })
                     GroupDivider()
-                    NavRow(t.instructions, if (t.zh) "推荐工作流" else "Workflow", Icons.Default.Description, onClick = { onDest(SettingsDest.Instructions) })
-                    GroupDivider()
                     NavRow(if (t.zh) "开源致谢" else "Credits", if (t.zh) "依赖与参考" else "Dependencies", Icons.Default.Build, onClick = { onDest(SettingsDest.Credits) })
                     GroupDivider()
                     NavRow(t.disclaimer, icon = Icons.Default.Info, onClick = { onDest(SettingsDest.Disclaimer) })
@@ -315,20 +312,6 @@ internal fun SettingsHub(
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }
-            SettingsDest.Instructions -> PageScroll {
-                GlassGroup {
-                    Text(t.instructionsBody, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        if (t.zh)
-                            "详细流程：先在服务页启动 SO MCP；需要电脑访问时开启 Cloudflare Tunnel，或 adb forward tcp:8000 tcp:8000。客户端配置 /mcp 后按 taffy_so_open -> analyze_* -> taffy_read_disasm/search_* 分析；修改前 taffy_session_open，dryRun 预览后再 patch，最后 taffy_build_so 导出。"
-                        else
-                            "Start SO MCP on Service tab; enable Cloudflare Tunnel or adb forward for desktop access; then follow taffy_so_open -> analyze_* -> read/search -> taffy_session_open -> dryRun patch -> taffy_build_so.",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             SettingsDest.Credits -> SettingsCreditsPage(t)
             SettingsDest.Disclaimer -> PageScroll {
                 GlassGroup {

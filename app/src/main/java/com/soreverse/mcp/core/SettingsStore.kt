@@ -670,7 +670,7 @@ class SettingsStore(context: Context) {
     // ---- AI deep analysis ----
     var aiProvider: String
         get() = prefs.getString("aiProvider", "openai") ?: "openai"
-        set(value) = prefs.edit().putString("aiProvider", if (value in setOf("openai", "anthropic")) value else "openai").apply()
+        set(value) = prefs.edit().putString("aiProvider", if (value in setOf("openai", "anthropic", "gemini")) value else "openai").apply()
 
     var aiEndpoint: String
         get() = prefs.getString("aiEndpoint", "https://api.openai.com/v1") ?: "https://api.openai.com/v1"

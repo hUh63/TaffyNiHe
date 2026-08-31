@@ -69,7 +69,7 @@ internal fun SettingsHelpPage(t: UiText) {
         }
         SelectionContainer {
             Text(
-                when (tab) { 0 -> HELP_GUIDE; 1 -> HELP_INTERNALS; else -> MCP_SKILL },
+                when (tab) { 0 -> HELP_GUIDE; 1 -> HELP_INTERNALS; 2 -> MCP_SKILL; else -> WORKFLOW_GUIDE },
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
                 color = fg,
                 modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(14.dp)).padding(12.dp),
@@ -116,6 +116,34 @@ private const val HELP_GUIDE = """═══ 塔菲逆核 · 功能教程 ══�
   脚本自动化: 扩展系统写插件 → ext.mcp(...) 串联全工具
 
 更多细节: 各功能页面内均有专属教程（离线）。
+"""
+
+/** 推荐工作流（原设置页"使用说明"已合并至此）。 */
+private const val WORKFLOW_GUIDE = """═══ 塔菲逆核 · 推荐工作流 ═══
+
+【MCP 基础接入】
+  1. 选择包含 .so / .apk 的工作目录（首页 → 服务目录）
+  2. 启动服务后复制 MCP 链接到 AI 客户端
+  3. 先调用 mt_so_list_available_sos，再用 mt_so_open
+     打开目标，后续工具使用返回的 workspaceId
+
+【SO 深度分析流】
+  启动 SO MCP → Cloudflare Tunnel（公网）
+             或 adb forward tcp:8000 tcp:8000（本机）
+  → 客户端配置 MCP 端点
+  → taffy_so_open → analyze_* → taffy_read_disasm / search_*
+  → 修改前 taffy_session_open → dryRun 预览 → patch
+  → taffy_build_so 导出
+
+【AI 深度分析】
+  设置 → AI 深度分析：填端点 / Key / 模型
+  支持 OpenAI 兼容（DeepSeek/Moonshot/Kimi/GLM/Groq）
+  Anthropic 兼容（中转站）· Gemini 原生 · OpenRouter · Grok
+  回到 AI 深度分析页即可对话式深度逆向（AI 自动调工具）
+
+【远程访问】
+  电脑 → 手机:  隧道页启动 Cloudflare / bore，或 adb forward
+  手机 → 外网:  Linux 环境 / 终端执行内正常联网工作
 """
 
 /** 实现原理（每个功能背后是怎么做的）。 */

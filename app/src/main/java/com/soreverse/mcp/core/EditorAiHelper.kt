@@ -38,7 +38,29 @@ object EditorAiHelper {
 
         return when (c.provider) {
             "anthropic" -> askAnthropic(c, sys, userText)
+            "gemini" -> askGemini(c, sys, userText)
             else -> askOpenAi(c, sys, userText)
+        }
+    }
+
+    private fun askGemini(c: AiConfig, sys: String, user: String): String {
+        val base = c.endpoint.let { if (it.contains("/v1beta")) it else "$it/v1beta" }
+        val modelPath = c.model.removePrefix("models/")
+        val url = "$base/models/$modelPath:generateContent"
+        val body = JSONObject()
+            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", sys))))
+            .put("contents", JSONArray().put(
+                JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", user)))))
+            .put("generationConfig", JSONObject().put("temperature", c.temperature.toDouble()))
+        return post(url, body.toString().toByteArray(), mapOf(
+            "x-goog-api-key" to c.apiKey,
+            "Content-Type" to "application/json",
+        )) { resp ->
+            val candidates = JSONObject(resp).optJSONArray("candidates")
+            val parts = candidates?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+            (0 until (parts?.length() ?: 0)).mapNotNull { i ->
+                parts?.optJSONObject(i)?.optString("text", "")?.takeIf(String::isNotEmpty)
+            }.joinToString("")
         }
     }
 

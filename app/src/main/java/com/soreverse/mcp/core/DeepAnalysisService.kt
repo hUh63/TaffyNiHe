@@ -57,6 +57,7 @@ class DeepAnalysisService(private val appContext: Context) {
     }
 
     private fun fetchModelCatalog(settings: SettingsStore): List<String> {
+        if (settings.aiProvider == "gemini") return fetchGeminiModels(settings)
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
@@ -100,8 +101,38 @@ class DeepAnalysisService(private val appContext: Context) {
         return models.sorted()
     }
 
-    private fun modelCatalogUrl(settings: SettingsStore, cursor: String?): String {
-        val endpoint = settings.aiEndpoint.trimEnd('/')
+    // Gemini 模型目录：GET /v1beta/models?pageSize=200（header x-goog-api-key）
+    private fun fetchGeminiModels(settings: SettingsStore): List<String> {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+        val base = settings.aiEndpoint.trimEnd('/').let { if (it.contains("/v1beta")) it else "$it/v1beta" }
+        val customHeaders = parseStringMap(settings.aiCustomHeadersJson)
+        val request = Request.Builder()
+            .url("$base/models?pageSize=200")
+            .header("x-goog-api-key", settings.aiApiKey)
+            .apply { customHeaders.forEach { (name, value) -> safeHeader(name, value) } }
+            .build()
+        val body = client.newCall(request).execute().use { response ->
+            val text = response.body.string()
+            if (!response.isSuccessful) error("Model listing failed: HTTP ${response.code} ${text.take(300)}")
+            text
+        }
+        val root = OrgJSONObject(body)
+        val arr = root.optJSONArray("models") ?: return emptyList()
+        val models = linkedSetOf<String>()
+        for (i in 0 until arr.length()) {
+            val m = arr.optJSONObject(i) ?: continue
+            val methods = m.optJSONArray("supportedGenerationMethods")
+            val supports = methods == null || (0 until methods.length()).any { methods.optString(it) == "generateContent" }
+            if (!supports) continue
+            m.optString("name").removePrefix("models/").takeIf(String::isNotBlank)?.let { models += it }
+        }
+        return models.sorted()
+    }
+
+    private fun modelCatalogUrl(settings: SettingsStore, cursor: String?): String {        val endpoint = settings.aiEndpoint.trimEnd('/')
         val path = when {
             endpoint.endsWith("/models") -> endpoint
             settings.aiProvider == "anthropic" && endpoint.endsWith("/v1") -> "$endpoint/models"

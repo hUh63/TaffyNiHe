@@ -18,23 +18,34 @@ object CodeHighlighter {
     enum class Lang(val ext: String) {
         PYTHON("py"), SHELL("sh"), JSON("json"),
         SMALI("smali"), C("c"), JAVA("java"), XML("xml"), MD("md"),
+        EXT("ext"),   // 语法包扩展语言（EditorSyntaxPacks 安装的插件语言）
         TEXT("txt");
 
         companion object {
-            /** 按文件扩展名推断语言（扩展机制的自动识别入口）。 */
-            fun fromExt(ext: String): Lang = when (ext.lowercase()) {
-                "py", "pyw" -> PYTHON
-                "sh", "bash", "zsh" -> SHELL
-                "json" -> JSON
-                "smali" -> SMALI
-                "c", "h", "cpp", "cc", "hpp", "cxx" -> C
-                "java", "kt", "kts" -> JAVA
-                "xml", "html", "svg" -> XML
-                "md", "markdown" -> MD
-                else -> TEXT
+            /** 按文件扩展名推断语言（内置语言优先，其次语法包扩展语言）。 */
+            fun fromExt(ext: String): Lang {
+                val e = ext.lowercase()
+                val builtin = when (e) {
+                    "py", "pyw" -> PYTHON
+                    "sh", "bash", "zsh" -> SHELL
+                    "json" -> JSON
+                    "smali" -> SMALI
+                    "c", "h", "cpp", "cc", "hpp", "cxx" -> C
+                    "java", "kt", "kts" -> JAVA
+                    "xml", "html", "svg" -> XML
+                    "md", "markdown" -> MD
+                    "txt" -> TEXT
+                    else -> null
+                }
+                if (builtin != null) return builtin
+                return if (com.soreverse.mcp.core.EditorSyntaxPacks.forExt(e) != null) EXT else TEXT
             }
         }
     }
+
+    /** EXT 模式当前生效的语法包（编辑器页根据文件扩展名或手动选择设置）。 */
+    @Volatile
+    var activePack: com.soreverse.mcp.core.EditorSyntaxPacks.SyntaxPack? = null
 
     // 配色（深色主题）
     private val KW = Color(0xFFC586C0)      // 关键字
@@ -96,6 +107,11 @@ object CodeHighlighter {
     /** 高亮代码为 AnnotatedString。 */
     fun highlight(code: String, lang: Lang): AnnotatedString {
         if (code.isEmpty()) return AnnotatedString("")
+        if (lang == Lang.EXT) {
+            val pack = activePack
+                ?: code.take(2000).let { src -> com.soreverse.mcp.core.EditorSyntaxPacks.packs.firstOrNull { p -> p.keywords.any { k -> src.contains(k) } } }
+            return if (pack != null) highlightWithPack(code, pack) else highlight(code, Lang.TEXT)
+        }
         val lines = code.split("\n")
         val limit = if (lines.size > MAX_HIGHLIGHT_LINES) MAX_HIGHLIGHT_LINES else lines.size
         return buildAnnotatedString {
@@ -107,6 +123,100 @@ object CodeHighlighter {
                 }
                 if (i != lines.size - 1) append("\n")
             }
+        }
+    }
+
+    /** 用语法包高亮（语言插件通用着色器：关键字/内置/字符串/数字/行注释/块注释）。 */
+    fun highlightWithPack(code: String, pack: com.soreverse.mcp.core.EditorSyntaxPacks.SyntaxPack): AnnotatedString {
+        if (code.isEmpty()) return AnnotatedString("")
+        val ci = pack.caseInsensitive
+        val kw = if (ci) pack.keywords.map { it.lowercase() }.toSet() else pack.keywords
+        val bi = if (ci) pack.builtins.map { it.lowercase() }.toSet() else pack.builtins
+        val lines = code.split("\n")
+        val limit = if (lines.size > MAX_HIGHLIGHT_LINES) MAX_HIGHLIGHT_LINES else lines.size
+        return buildAnnotatedString {
+            for (i in 0 until lines.size) {
+                if (i < limit) {
+                    highlightPackLine(this, lines[i], kw, bi, pack, ci)
+                } else {
+                    append(lines[i])
+                }
+                if (i != lines.size - 1) append("\n")
+            }
+        }
+    }
+
+    private fun highlightPackLine(
+        builder: androidx.compose.ui.text.AnnotatedString.Builder,
+        line: String,
+        kw: Set<String>,
+        bi: Set<String>,
+        pack: com.soreverse.mcp.core.EditorSyntaxPacks.SyntaxPack,
+        ci: Boolean,
+    ) {
+        val lc = pack.lineComment
+        val bcs = pack.blockCommentStart
+        val bce = pack.blockCommentEnd
+        val t = line.trimStart()
+        if (lc != null && t.startsWith(lc)) {
+            builder.withStyle(mono(COM)) { builder.append(line) }
+            return
+        }
+        var i = 0
+        val n = line.length
+        while (i < n) {
+            val ch = line[i]
+            // 行内注释
+            if (lc != null && line.startsWith(lc, i)) {
+                builder.withStyle(mono(COM)) { builder.append(line.substring(i)) }
+                return
+            }
+            // 块注释（行内配对；跨行块注释仅着色起始行）
+            if (bcs != null && line.startsWith(bcs, i)) {
+                val end = if (bce != null) line.indexOf(bce, i + bcs.length) else -1
+                val stop = if (end >= 0) end + bce.length else n
+                builder.withStyle(mono(COM)) { builder.append(line.substring(i, stop)) }
+                i = stop
+                continue
+            }
+            // 字符串
+            if (ch == '"' || ch == '\'') {
+                val quote = ch
+                var j = i + 1
+                while (j < n && line[j] != quote) {
+                    if (line[j] == '\\') j++
+                    j++
+                }
+                val end = if (j < n) j + 1 else n
+                builder.withStyle(mono(STR)) { builder.append(line.substring(i, end)) }
+                i = end
+                continue
+            }
+            // 数字
+            if (ch.isDigit() || (ch == '-' && i + 1 < n && line[i + 1].isDigit())) {
+                var j = i + 1
+                while (j < n && (line[j].isDigit() || line[j] == '.' || line[j] == 'x' || line[j] in 'a'..'f' || line[j] in 'A'..'F' || line[j] == 'e')) j++
+                builder.withStyle(mono(NUM)) { builder.append(line.substring(i, j)) }
+                i = j
+                continue
+            }
+            // 标识符
+            if (ch.isLetter() || ch == '_' || ch == '@') {
+                var j = i + 1
+                while (j < n && (line[j].isLetterOrDigit() || line[j] == '_')) j++
+                val word = line.substring(i, j)
+                val probe = if (ci) word.lowercase() else word
+                val style = when {
+                    probe in kw -> KW
+                    probe in bi -> FNC
+                    else -> DEF
+                }
+                builder.withStyle(mono(style)) { builder.append(word) }
+                i = j
+                continue
+            }
+            builder.withStyle(mono(DEF)) { builder.append(ch.toString()) }
+            i++
         }
     }
 

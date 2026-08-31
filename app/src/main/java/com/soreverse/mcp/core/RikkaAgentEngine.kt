@@ -140,7 +140,11 @@ internal class RikkaAgentEngine(
     }
 
     private fun stream(messages: List<RikkaMessage>, tools: List<RikkaTool>): Flow<List<RikkaPart>> =
-        if (provider == "anthropic") streamAnthropic(messages, tools) else streamOpenAi(messages, tools)
+        when (provider) {
+            "anthropic" -> streamAnthropic(messages, tools)
+            "gemini" -> streamGemini(messages, tools)
+            else -> streamOpenAi(messages, tools)
+        }
 
     private fun streamOpenAi(messages: List<RikkaMessage>, tools: List<RikkaTool>): Flow<List<RikkaPart>> = callbackFlow {
         val body = buildOpenAiBody(messages, tools)
@@ -253,8 +257,57 @@ internal class RikkaAgentEngine(
         awaitClose { source.cancel() }
     }.buffer(Channel.UNLIMITED)
 
-    private fun eventSourceFailure(t: Throwable?, response: Response?): Throwable {
-        if (response == null) {
+    // ── Google Gemini 原生协议（streamGenerateContent?alt=sse）──
+    // SSE data 行 = 与 generateContent 相同结构的增量：candidates[0].content.parts[]（text / thought / functionCall 完整对象）
+    private fun streamGemini(messages: List<RikkaMessage>, tools: List<RikkaTool>): Flow<List<RikkaPart>> = callbackFlow {
+        val request = requestBuilder(geminiUrl("streamGenerateContent") + "?alt=sse")
+            .safeHeader("x-goog-api-key", apiKey)
+            .applyCustomHeaders()
+            .post(buildGeminiBody(messages, tools).toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        // functionCall part 无 id，用递增序号生成稳定 id 供多轮工具回填
+        var callSeq = 0
+        val source = EventSources.createFactory(client).newEventSource(request, object : EventSourceListener() {
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                runCatching {
+                    val root = json.parseToJsonElement(data).jsonObject
+                    root["error"]?.let { error(it.toString()) }
+                    val candidate = root["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@runCatching
+                    val content = candidate["content"]?.jsonObject ?: return@runCatching
+                    val parts = buildList {
+                        content["parts"]?.jsonArray?.forEach { partEl ->
+                            val part = partEl.jsonObject
+                            when {
+                                part["thought"]?.jsonPrimitive?.contentOrNull == "true" ->
+                                    part["text"]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotEmpty)?.let { add(RikkaPart.Reasoning(it)) }
+                                part["text"]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotEmpty) != null ->
+                                    add(RikkaPart.Text(part["text"]!!.jsonPrimitive.content))
+                                part["functionCall"] != null -> {
+                                    val fn = part["functionCall"]!!.jsonObject
+                                    val name = fn["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                                    val args = fn["args"]?.jsonObject?.toString().orEmpty()
+                                    val idx = callSeq++
+                                    add(RikkaPart.Tool(id = "gemini_call_$idx", name = name, arguments = args, index = idx))
+                                }
+                            }
+                        }
+                    }
+                    if (parts.isNotEmpty()) trySend(parts)
+                }.onFailure { close(it) }
+            }
+
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                close(eventSourceFailure(t, response))
+            }
+
+            override fun onClosed(eventSource: EventSource) {
+                close()
+            }
+        })
+        awaitClose { source.cancel() }
+    }.buffer(Channel.UNLIMITED)
+
+    private fun eventSourceFailure(t: Throwable?, response: Response?): Throwable {        if (response == null) {
             return t ?: IllegalStateException("SSE connection failed without an HTTP response")
         }
         val body = response.body
@@ -384,4 +437,82 @@ internal class RikkaAgentEngine(
 
     private fun openAiUrl(): String = endpoint.trimEnd('/').let { if (it.endsWith("/chat/completions")) it else "$it/chat/completions" }
     private fun anthropicUrl(): String = endpoint.trimEnd('/').let { if (it.endsWith("/messages")) it else if (it.endsWith("/v1")) "$it/messages" else "$it/v1/messages" }
+
+    // ── Gemini body/url ──
+    private fun geminiUrl(action: String): String {
+        val base = endpoint.trimEnd('/').let { if (it.contains("/v1beta") || it.contains("/v1alpha")) it else "$it/v1beta" }
+        val modelPath = model.removePrefix("models/")
+        return "$base/models/$modelPath:$action"
+    }
+
+    private fun buildGeminiBody(messages: List<RikkaMessage>, tools: List<RikkaTool>) = buildJsonObject {
+        messages.firstOrNull { it.role == "system" }?.let { system ->
+            put("systemInstruction", buildJsonObject {
+                putJsonArray("parts") {
+                    add(buildJsonObject { put("text", system.parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }) })
+                }
+            })
+        }
+        putJsonArray("contents") {
+            messages.filter { it.role != "system" }.forEach { message ->
+                add(buildJsonObject {
+                    // Gemini 角色: user / model
+                    put("role", if (message.role == "assistant") "model" else "user")
+                    putJsonArray("parts") {
+                        val toolCalls = message.parts.filterIsInstance<RikkaPart.Tool>()
+                        message.parts.forEach { part ->
+                            when (part) {
+                                is RikkaPart.Text -> if (part.text.isNotEmpty()) add(buildJsonObject { put("text", part.text) })
+                                is RikkaPart.Reasoning -> Unit
+                                is RikkaPart.Tool ->
+                                    if (message.role == "assistant" && part.result == null) {
+                                        // model 发起的 functionCall
+                                        add(buildJsonObject {
+                                            put("functionCall", buildJsonObject {
+                                                put("name", part.name)
+                                                put("args", runCatching { json.parseToJsonElement(part.arguments.ifBlank { "{}" }) }.getOrElse { JsonObject(emptyMap()) })
+                                            })
+                                        })
+                                    } else if (part.result != null) {
+                                        // user 回填的 functionResponse
+                                        add(buildJsonObject {
+                                            put("functionResponse", buildJsonObject {
+                                                put("name", part.name)
+                                                put("response", buildJsonObject {
+                                                    put("result", part.result.orEmpty().take(65_536))
+                                                })
+                                            })
+                                        })
+                                    }
+                            }
+                        }
+                        // toolCalls 非空但 parts 循环里 result!=null 的分支已覆盖；无 parts 时保证非空
+                        if (message.parts.none { it is RikkaPart.Text || it is RikkaPart.Tool }) {
+                            add(buildJsonObject { put("text", " ") })
+                        }
+                    }
+                })
+            }
+        }
+        put("generationConfig", buildJsonObject {
+            put("temperature", temperature)
+            put("maxOutputTokens", 65_536)
+        })
+        if (tools.isNotEmpty()) {
+            putJsonArray("tools") {
+                add(buildJsonObject {
+                    putJsonArray("functionDeclarations") {
+                        tools.forEach { tool ->
+                            add(buildJsonObject {
+                                put("name", tool.name)
+                                put("description", tool.description)
+                                put("parameters", runCatching { json.parseToJsonElement(tool.schema.toString()) }.getOrElse { JsonObject(emptyMap()) })
+                            })
+                        }
+                    }
+                })
+            }
+        }
+        customBody.forEach { (key, value) -> put(key, value) }
+    }
 }

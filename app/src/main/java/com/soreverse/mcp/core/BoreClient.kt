@@ -181,12 +181,11 @@ class BoreClient(
     }
 
     private fun handshake(controlIn: InputStream, controlOut: OutputStream, controlSocket: Socket): Int {
-        // bore 协议: Hello 的值是期望的远程公网端口，0 = 让服务器自动分配
-        // 注意: 不是本地端口！本地端口仅用于收到连接后转发
-        val hello = "{\"Hello\":0}\u0000".toByteArray(StandardCharsets.UTF_8)
+        // bore 官方协议(shared.rs): Hello 的参数是要转发的本地端口（服务器仅记录，端口由服务器分配）
+        val hello = "{\"Hello\":$localPort}\u0000".toByteArray(StandardCharsets.UTF_8)
         controlOut.write(hello)
         controlOut.flush()
-        fireEvent("${now()} → 发送 Hello(0=自动分配端口)")
+        fireEvent("${now()} → 发送 Hello(localPort=$localPort, 端口由服务器分配)")
         // 握手阶段设 10 秒超时
         controlSocket?.soTimeout = 10000
         val resp = readFrame(controlIn)
@@ -204,11 +203,30 @@ class BoreClient(
                 listener?.onError("Server requires authentication but no secret provided")
                 return -1
             }
-            fireEvent("${now()} 🔐 服务器要求认证")
-            val authMsg = "{\"Authenticate\":\"${escapeJson(secret)}\"}\u0000".toByteArray(StandardCharsets.UTF_8)
+            fireEvent("${now()} 🔐 服务器要求认证 (HMAC-SHA256)")
+            // bore auth.rs: hmac(challenge: Uuid, secret) = hex(HMAC-SHA256(key=secret.bytes, msg=challenge.uuid_raw_16_bytes))
+            val challengeStr = parseStringValue(respStr, "Challenge") ?: ""
+            if (challengeStr.isBlank()) {
+                fireEvent("${now()} ✗ Challenge 消息解析失败: $respStr")
+                return -1
+            }
+            val authHex = runCatching {
+                val uuid = java.util.UUID.fromString(challengeStr.trim())
+                val raw = java.nio.ByteBuffer.allocate(16)
+                    .putLong(uuid.mostSignificantBits)
+                    .putLong(uuid.leastSignificantBits)
+                    .array()
+                val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+                mac.init(javax.crypto.spec.SecretKeySpec(secret!!.toByteArray(StandardCharsets.UTF_8), "HmacSHA256"))
+                mac.doFinal(raw).joinToString("") { "%02x".format(it) }
+            }.getOrElse {
+                fireEvent("${now()} ✗ HMAC 计算失败: ${it.message}")
+                return -1
+            }
+            val authMsg = "{\"Authenticate\":\"$authHex\"}\u0000".toByteArray(StandardCharsets.UTF_8)
             controlOut.write(authMsg)
             controlOut.flush()
-            fireEvent("${now()} → 发送认证响应")
+            fireEvent("${now()} → 发送认证响应 (HMAC)")
             // 认证后读取 Hello 响应
             val afterAuth = readFrame(controlIn)
             if (afterAuth == null) {

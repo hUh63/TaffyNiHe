@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -220,11 +221,11 @@ internal fun EdbgPage(t: UiText) {
             }
             if (classSource.isNotBlank()) {
                 SelectionContainer {
-                    Text(classSource, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp), modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()))
+                    Text(classSource, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp), modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).verticalScroll(rememberScrollState()))
                 }
                 TextButton(onClick = { classSource = "" }) { Text(if (zh) "返回类列表" else "Back to list") }
             } else {
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(Modifier.fillMaxWidth().height(260.dp)) {
                     items(classList) { cls ->
                         Text(
                             cls,

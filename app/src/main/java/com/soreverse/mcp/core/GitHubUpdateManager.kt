@@ -127,28 +127,79 @@ class GitHubUpdateManager(private val context: Context) {
         }
     }
 
-    suspend fun check(): Result<UpdateCheckResult> = withContext(Dispatchers.IO) {
-        // NOTE(塔菲逆核): 二改版本禁用在线更新检测。原版指向作者仓库 bilieebiliee1-design/SOMCP,
-        // 二改后既不该给作者刷流量, 也不该被官方 release 覆盖。直接返回"当前即最新"。
-        // 如需指向自己的仓库, 改 REPOSITORY_URL / LATEST_RELEASE_URL 并删除下面这行即可恢复原逻辑。
-        return@withContext Result.success(UpdateCheckResult.Current)
-        @Suppress("UNREACHABLE_CODE")
+    suspend fun check(channel: UpdateChannel = UpdateChannel.STABLE): Result<UpdateCheckResult> = withContext(Dispatchers.IO) {
+        // 上游 1.0.21 借鉴: 更新频道（正式版 / 测试版）。检查目标为塔菲逆核自己的仓库
+        // (hUh63/TaffyNiHe)，不再指向原版作者仓库，避免被官方 release 覆盖。
         try {
-            val request = Request.Builder()
-                .url(LATEST_RELEASE_URL)
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("User-Agent", "SOMCP/${BuildConfig.VERSION_NAME}")
-                .build()
-            val result = client.newCall(request).await().use { response ->
-                if (response.code == 404) return@use UpdateCheckResult.Current
-                if (!response.isSuccessful) error("GitHub HTTP ${response.code} ${response.message}")
-                val root = JSONObject(response.body.string())
+            val result = when (channel) {
+                UpdateChannel.STABLE -> checkStable()
+                UpdateChannel.BETA -> checkBeta()
+            }
+            Result.success(result)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Result.failure(error)
+        }
+    }
+
+    private suspend fun checkStable(): UpdateCheckResult {
+        val request = Request.Builder()
+            .url(LATEST_RELEASE_URL)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "TaffyNiHe/${BuildConfig.VERSION_NAME}")
+            .build()
+        return client.newCall(request).await().use { response ->
+            if (response.code == 404) return@use UpdateCheckResult.Current
+            if (!response.isSuccessful) error("GitHub HTTP ${response.code} ${response.message}")
+            val root = JSONObject(response.body.string())
+            val tag = root.optString("tag_name")
+            if (!isNewer(tag, BuildConfig.VERSION_NAME)) return@use UpdateCheckResult.Current
+            val assets = root.optJSONArray("assets") ?: error("Release has no assets")
+            val apk = selectApk((0 until assets.length()).map { assets.getJSONObject(it) })
+                ?: error("Release has no APK for ${Build.SUPPORTED_ABIS.joinToString()}")
+            val checksum = (0 until assets.length())
+                .map { assets.getJSONObject(it) }
+                .firstOrNull {
+                    val name = it.optString("name")
+                    name == "${apk.optString("name")}.sha256" || name == "SHA256SUMS"
+                }
+            UpdateCheckResult.Available(
+                GitHubRelease(
+                    tag = tag,
+                    name = root.optString("name").ifBlank { tag },
+                    notes = root.optString("body"),
+                    pageUrl = root.optString("html_url"),
+                    apkName = apk.getString("name"),
+                    apkUrl = apk.getString("browser_download_url"),
+                    apkSize = apk.optLong("size"),
+                    checksumUrl = checksum?.optString("browser_download_url")?.takeIf(String::isNotBlank),
+                ),
+            )
+        }
+    }
+
+    /** Beta 频道：取最近 30 个 release 中第一个 prerelease（非 draft）。 */
+    private suspend fun checkBeta(): UpdateCheckResult {
+        val request = Request.Builder()
+            .url("$RELEASES_URL?per_page=30")
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "TaffyNiHe/${BuildConfig.VERSION_NAME}")
+            .build()
+        return client.newCall(request).await().use { response ->
+            if (!response.isSuccessful) error("GitHub HTTP ${response.code} ${response.message}")
+            val array = JSONArray(response.body.string())
+            val candidate = (0 until array.length())
+                .map { array.getJSONObject(it) }
+                .firstOrNull { it.optBoolean("prerelease") && !it.optBoolean("draft") }
+            candidate?.let { root ->
                 val tag = root.optString("tag_name")
                 if (!isNewer(tag, BuildConfig.VERSION_NAME)) return@use UpdateCheckResult.Current
-                val assets = root.optJSONArray("assets") ?: error("Release has no assets")
+                val assets = root.optJSONArray("assets") ?: return@use UpdateCheckResult.Current
                 val apk = selectApk((0 until assets.length()).map { assets.getJSONObject(it) })
-                    ?: error("Release has no APK for ${Build.SUPPORTED_ABIS.joinToString()}")
+                    ?: return@use UpdateCheckResult.Current
                 val checksum = (0 until assets.length())
                     .map { assets.getJSONObject(it) }
                     .firstOrNull {
@@ -167,12 +218,7 @@ class GitHubUpdateManager(private val context: Context) {
                         checksumUrl = checksum?.optString("browser_download_url")?.takeIf(String::isNotBlank),
                     ),
                 )
-            }
-            Result.success(result)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            Result.failure(error)
+            } ?: UpdateCheckResult.Current
         }
     }
 
@@ -459,8 +505,12 @@ class GitHubUpdateManager(private val context: Context) {
     private fun File.readTextOrNull(): String? = runCatching { takeIf(File::isFile)?.readText() }.getOrNull()
 
     companion object {
-        const val REPOSITORY_URL = "https://github.com/bilieebiliee1-design/SOMCP"
-        private const val LATEST_RELEASE_URL = "https://api.github.com/repos/bilieebiliee1-design/SOMCP/releases/latest"
+        const val REPOSITORY_URL = "https://github.com/hUh63/TaffyNiHe"
+        private const val LATEST_RELEASE_URL = "https://api.github.com/repos/hUh63/TaffyNiHe/releases/latest"
+        private const val RELEASES_URL = "https://api.github.com/repos/hUh63/TaffyNiHe/releases"
         private const val CHECKSUM_MIRROR_ATTEMPTS = 4
     }
 }
+
+/** 更新频道：正式版（stable）/ 测试版（beta，即 prerelease）。上游 1.0.21 借鉴。 */
+enum class UpdateChannel { STABLE, BETA }

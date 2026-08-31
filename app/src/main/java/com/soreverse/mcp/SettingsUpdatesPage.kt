@@ -1,7 +1,9 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Icon
@@ -44,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.GitHubRelease
 import com.soreverse.mcp.core.GitHubUpdateManager
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.UpdateChannel
 import com.soreverse.mcp.core.UpdateCheckResult
 import com.soreverse.mcp.core.UpdateDownloadEvent
 import kotlinx.coroutines.Job
@@ -82,6 +86,8 @@ internal fun SettingsUpdatesPage(
     var verifyNote by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    // 更新频道（上游 1.0.21 借鉴）：stable / beta
+    var channel by remember { mutableStateOf(settings.updateChannel) }
 
     LaunchedEffect(release?.tag) {
         downloadedFile = release?.let(manager::cachedDownload)
@@ -157,23 +163,31 @@ internal fun SettingsUpdatesPage(
         }
     }
 
-    fun downloadLatest() {
+    /** 检查更新（按频道）：正式版走 /releases/latest，测试版取最新 prerelease。 */
+    fun checkUpdates(target: String) {
         if (checking || downloading) return
         checking = true
         error = ""
-        status = if (t.zh) "正在获取最新版本信息…" else "Fetching latest release…"
+        status = if (t.zh) "正在检查更新…" else "Checking for updates…"
+        val updateChannel = if (target == "beta") UpdateChannel.BETA else UpdateChannel.STABLE
         scope.launch {
-            manager.fetchLatestRelease()
-                .onSuccess { latestRelease ->
-                    release = latestRelease
-                    onRelease(latestRelease)
-                    status = ""
+            manager.check(updateChannel)
+                .onSuccess { result ->
                     checking = false
-                    // 获取到 release 后立即开始下载（塔菲原有逻辑）
-                    startDownload(latestRelease, null)
+                    status = ""
+                    when (result) {
+                        is UpdateCheckResult.Available -> {
+                            release = result.release
+                            onRelease(result.release)
+                        }
+                        UpdateCheckResult.Current -> {
+                            release = null
+                            onRelease(null)
+                        }
+                    }
                 }
                 .onFailure {
-                    error = it.message ?: if (t.zh) "获取版本信息失败" else "Failed to fetch release info"
+                    error = it.message ?: if (t.zh) "检查更新失败" else "Failed to check for updates"
                     status = ""
                     checking = false
                 }
@@ -181,24 +195,55 @@ internal fun SettingsUpdatesPage(
     }
 
     // ── Hero 状态派生（UI 层文案，不影响逻辑）──
-    val accent = MaterialTheme.colorScheme.primary
+    val isBeta = channel == "beta"
+    val accent = if (isBeta) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
     val available = release != null
-    val heroIcon: ImageVector = if (available) Icons.Default.RocketLaunch else Icons.Default.Verified
+    val tagLower = release?.tag?.lowercase().orEmpty()
+    val heroIcon: ImageVector = when {
+        isBeta -> Icons.Default.Science
+        available -> Icons.Default.RocketLaunch
+        else -> Icons.Default.Verified
+    }
     val headline = when {
         downloading -> if (t.zh) "正在下载更新…" else "Downloading update…"
         checking -> if (t.zh) "正在检查更新…" else "Checking for updates…"
-        available -> if (t.zh) "发现新版本" else "New update available"
+        available -> if (isBeta) (if (t.zh) "发现新测试版" else "New beta available") else (if (t.zh) "发现新版本" else "New update available")
+        isBeta -> if (t.zh) "已是最新测试版" else "You're on the latest beta"
         else -> if (t.zh) "已是最新版本" else "You're up to date"
     }
     val subtitle = when {
         downloading -> if (t.zh) "测速与下载在后台进行，可随时取消" else "Probing and downloading run in background; cancel anytime"
         checking -> if (t.zh) "正在查询 GitHub Releases…" else "Querying GitHub Releases…"
-        available -> release?.name?.ifBlank { if (t.zh) "体验最新功能与架构优化" else "Experience the latest features" } ?: ""
+        available -> release?.name?.ifBlank { if (t.zh) "体验最新的实验性功能与架构优化" else "Experience the latest features" } ?: ""
+        isBeta -> if (t.zh) "您正在使用最新测试版构建，无需进行更新操作。" else "You are on the latest beta build; no update is needed."
         else -> if (t.zh) "您当前已更新至最新版本，无需进行更新操作。" else "You are already on the latest version."
+    }
+    val versionBadge = when {
+        isBeta -> if (t.zh) "测试版" else "BETA"
+        listOf("beta", "alpha", "rc", "pre", "snapshot").any { it in tagLower } -> "BETA"
+        else -> null
     }
     val versionText = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
     PageScroll {
+        // 频道切换 pill（正式版 / 测试版，上游 1.0.21 借鉴）
+        ChannelSegmentsPill(
+            selected = channel,
+            onSelect = { newChannel ->
+                if (newChannel == channel) return@ChannelSegmentsPill
+                downloadJob?.cancel()
+                downloadJob = null
+                downloading = false
+                downloadPhase = ""
+                verifyNote = ""
+                downloadedFile = null
+                status = ""
+                channel = newChannel
+                settings.updateChannel = newChannel
+                checkUpdates(newChannel)
+            },
+            zh = t.zh,
+        )
         // Hero: 发光圆环图标 + 动态状态标题（上游 v1.0.21 设计）
         UpdateHero(
             icon = heroIcon,
@@ -215,12 +260,18 @@ internal fun SettingsUpdatesPage(
         GlassGroup {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    if (t.zh) "GitHub 正式发行版" else "Official GitHub releases",
+                    if (isBeta) (if (t.zh) "GitHub 测试发行版" else "Official GitHub pre-releases") else (if (t.zh) "GitHub 正式发行版" else "Official GitHub releases"),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    if (t.zh) "只检查 hUh63/TaffyNiHe 的正式 Release。普通构建、提交、分支和标签均不会被视为更新。" else "Only stable releases from hUh63/TaffyNiHe are checked. Builds, commits, branches and tags do not count as updates.",
+                    if (isBeta) {
+                        if (t.zh) "只检查 hUh63/TaffyNiHe 的测试 Release（prerelease）。普通构建、提交、分支和标签均不会被视为更新。"
+                        else "Only pre-releases from hUh63/TaffyNiHe are checked. Builds, commits, branches and tags do not count as updates."
+                    } else {
+                        if (t.zh) "只检查 hUh63/TaffyNiHe 的正式 Release。普通构建、提交、分支和标签均不会被视为更新。"
+                        else "Only stable releases from hUh63/TaffyNiHe are checked. Builds, commits, branches and tags do not count as updates."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -232,10 +283,10 @@ internal fun SettingsUpdatesPage(
             }
             GroupDivider()
             NavRow(
-                if (checking) (if (t.zh) "正在获取…" else "Fetching…") else (if (t.zh) "立即检查更新" else "Check now"),
+                if (checking) (if (t.zh) "正在检查…" else "Checking…") else (if (t.zh) "立即检查更新" else "Check now"),
                 status,
                 Icons.Default.Info,
-                onClick = ::downloadLatest,
+                onClick = { checkUpdates(channel) },
             )
         }
         if (error.isNotBlank()) {
@@ -428,6 +479,61 @@ private fun UpdateVersionCard(versionText: String, accent: Color, zh: Boolean) {
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White,
             )
+        }
+    }
+}
+
+/** 频道切换分段 pill：正式版 / 测试版（上游 v1.0.21 设计）。 */
+@Composable
+private fun ChannelSegmentsPill(selected: String, onSelect: (String) -> Unit, zh: Boolean) {
+    val shape = RoundedCornerShape(999.dp)
+    data class Opt(val key: String, val icon: ImageVector, val label: String)
+    val options = listOf(
+        Opt("stable", Icons.Default.Verified, if (zh) "正式版" else "Stable"),
+        Opt("beta", Icons.Default.Science, if (zh) "测试版" else "Beta"),
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)), shape)
+            .padding(3.dp),
+    ) {
+        options.forEach { opt ->
+            val active = selected == opt.key
+            val tint = when (opt.key) {
+                "beta" -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.primary
+            }
+            val bgAlpha = if (active) 0.22f else 0f
+            val borderAlpha = if (active) 0.55f else 0f
+            val contentColor = if (active) tint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(shape)
+                    .background(tint.copy(alpha = bgAlpha))
+                    .border(BorderStroke(1.dp, tint.copy(alpha = borderAlpha)), shape)
+                    .clickable { if (!active) onSelect(opt.key) }
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    opt.icon,
+                    null,
+                    tint = contentColor,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.size(5.dp))
+                Text(
+                    opt.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = contentColor,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                )
+            }
         }
     }
 }

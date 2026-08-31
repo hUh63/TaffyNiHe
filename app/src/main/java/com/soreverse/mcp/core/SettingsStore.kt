@@ -437,6 +437,11 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("autoCheckUpdates", true)
         set(value) = prefs.edit().putBoolean("autoCheckUpdates", value).apply()
 
+    /** 更新频道：stable（正式版）/ beta（测试版，prerelease）。上游 1.0.21 借鉴。 */
+    var updateChannel: String
+        get() = prefs.getString("updateChannel", "stable") ?: "stable"
+        set(value) = prefs.edit().putString("updateChannel", if (value == "beta") "beta" else "stable").apply()
+
     // ---- Cloudflare Tunnel ----
     var tunnelMode: String
         get() = prefs.getString("tunnelMode", "off") ?: "off"

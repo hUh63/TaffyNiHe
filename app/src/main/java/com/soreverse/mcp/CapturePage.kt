@@ -219,12 +219,19 @@ internal fun CapturePage(t: UiText) {
             FilterChip(selected = tab == "guide", onClick = { tab = "guide" }, label = { Text(if (zh) "教程" else "Guide", fontSize = 11.sp) })
         }
         if (tab == "guide") {
+            // 教程长文本可滚动（weight 占满剩余空间，防止撑爆/截断）
             SelectionContainer {
                 Text(
                     CAPTURE_GUIDE,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(Color(0xFF0B0F14)).padding(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(Color(0xFF0B0F14))
+                        .padding(12.dp),
                 )
             }
         }
@@ -290,7 +297,12 @@ internal fun CapturePage(t: UiText) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.small,
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // 过滤 chips：FlowRow 换行，防小屏溢出
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 listOf("全部", "HTTPS", "HTTP", "GET", "POST", "CONNECT").forEach { m ->
                     FilterChip(selected = methodFilter == m, onClick = { methodFilter = m }, label = { Text(m, fontSize = 9.sp) })
                 }

@@ -187,6 +187,9 @@ private fun parseLogLine(line: String): LogLine? {
     return LogLine(time, pid, tid, level, tag, message, line)
 }
 
+/** 暂停状态的页面级持久（跨"离开→重进"保持，修复重进自动恢复采集）。 */
+private var persistedPaused = false
+
 /**
  * Logcat 查看器（对标 LogFox 的 GUI 交互）：
  * 实时日志流 + 级别过滤 + 多 tag 过滤 + 关键字高亮 + 级别着色 + 暂停/清空。
@@ -199,7 +202,8 @@ internal fun LogcatViewerPage(t: UiText) {
     val logs = remember { mutableStateListOf<LogLine>() }
 
     var running by remember { mutableStateOf(false) }
-    var paused by remember { mutableStateOf(false) }
+    // 暂停状态跨"离开页面→重进"保持（页面级单例）；persistedPaused=true 时重进不自动采集
+    var paused by remember { mutableStateOf(persistedPaused) }
     var tagFilter by remember { mutableStateOf("") }
     var keyword by remember { mutableStateOf("") }
     var levelSet by remember { mutableStateOf(setOf("V", "D", "I", "W", "E", "F")) }
@@ -404,6 +408,7 @@ internal fun LogcatViewerPage(t: UiText) {
         readerJob.set(null)
         running = true
         paused = false
+        persistedPaused = false
         channelError = ""
         // 按采集模式选择通道。关键: 无特权通道时普通进程在 Android 8.0+ 读不到系统日志,
         // 必须明确告知用户而不是静默显示空列表(LogFox 通过 Shizuku/ADB/Root 提权才能看全系统日志)。
@@ -631,10 +636,12 @@ internal fun LogcatViewerPage(t: UiText) {
         onDispose { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(listener) }
     }
 
-    // 页面进入自动开始采集
+    // 页面进入自动开始采集（暂停状态跨页面保持：persistedPaused=true 时不自动启动，
+    // 保持"已暂停/待机"状态，由用户手动继续——修复"明明暂停了，重进页面又自动打开"）
     // 必须放 IO 线程: startPrivilegedStream 内 UserService 绑定会阻塞等待(await 2s),
     // 主线程执行会导致 Input dispatching timeout (ANR)
     LaunchedEffect(Unit) {
+        if (persistedPaused) return@LaunchedEffect
         // 设置「后台采集」开启时，页面退出后由 LogcatTools 后台进程继续采集；
         // 进入页面时接管前台实时显示
         withContext(Dispatchers.IO) { start() }
@@ -1445,7 +1452,12 @@ internal fun LogcatViewerPage(t: UiText) {
                             modifier = Modifier.size(18.dp),
                         )
                     }
-                    IconButton(onClick = { paused = !paused }, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = {
+                        paused = !paused
+                        persistedPaused = paused
+                        // 重进页面后处于待机态时点"继续"→ 重新开始采集
+                        if (!paused && !running) scope.launch(Dispatchers.IO) { start() }
+                    }, modifier = Modifier.size(32.dp)) {
                         Icon(
                             if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
                             contentDescription = if (zh) "暂停/恢复" else "Pause/Resume",

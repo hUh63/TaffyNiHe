@@ -111,28 +111,67 @@ object EditorSyntaxPacks {
         )
     }
 
-    // ── 内置示范语法包（raw string：反斜杠不转义，JSON 一律用裸引号）──
-    private fun jarr(items: List<String>): String = JSONArray(items).toString()
+    // ── 内置示范语法包（JSONObject 程序化构建，规避 raw string 模板词法问题）──
+    private fun pack(
+        id: String, name: String, extensions: List<String>,
+        keywords: List<String>, builtins: List<String> = emptyList(),
+        lineComment: String? = null, blockComment: List<String>? = null,
+        caseInsensitive: Boolean = false,
+    ): String {
+        val o = JSONObject()
+        o.put("id", id)
+        o.put("name", name)
+        o.put("extensions", JSONArray(extensions))
+        o.put("keywords", JSONArray(keywords))
+        if (builtins.isNotEmpty()) o.put("builtins", JSONArray(builtins))
+        if (!lineComment.isNullOrBlank()) o.put("lineComment", lineComment)
+        if (blockComment != null && blockComment.size == 2) o.put("blockComment", JSONArray(blockComment))
+        o.put("caseInsensitive", caseInsensitive)
+        return o.toString()
+    }
 
-    private val RUST = """{"id":"rust","name":"Rust","extensions":${jarr(listOf("rs"))},
-"keywords":${jarr(listOf("fn","let","mut","const","static","struct","enum","impl","trait","pub","use","mod","crate","self","super","match","if","else","loop","while","for","in","break","continue","return","where","as","dyn","ref","move","async","await","unsafe","type","extern"))},
-"builtins":${jarr(listOf("println","print","format","vec","Some","None","Ok","Err","String","Vec","i8","i16","i32","i64","u8","u16","u32","u64","usize","isize","f32","f64","bool","char","str","Box","Rc","Arc","Option","Result","HashMap","HashSet"))},
-"lineComment":"//","blockComment":["/*","*/"]}"""
+    private val RUST = pack(
+        "rust", "Rust", listOf("rs"),
+        listOf("fn", "let", "mut", "const", "static", "struct", "enum", "impl", "trait", "pub", "use", "mod", "crate", "self", "super",
+            "match", "if", "else", "loop", "while", "for", "in", "break", "continue", "return", "where", "as", "dyn", "ref", "move",
+            "async", "await", "unsafe", "type", "extern"),
+        listOf("println", "print", "format", "vec", "Some", "None", "Ok", "Err", "String", "Vec", "i8", "i16", "i32", "i64", "u8",
+            "u16", "u32", "u64", "usize", "isize", "f32", "f64", "bool", "char", "str", "Box", "Rc", "Arc", "Option", "Result",
+            "HashMap", "HashSet"),
+        "//", listOf("/*", "*/"),
+    )
 
-    private val GO = """{"id":"go","name":"Go","extensions":${jarr(listOf("go"))},
-"keywords":${jarr(listOf("func","package","import","var","const","type","struct","interface","map","chan","go","defer","select","switch","case","default","break","continue","return","if","else","for","range","fallthrough","goto"))},
-"builtins":${jarr(listOf("fmt","make","new","len","cap","append","copy","delete","panic","recover","print","println","string","int","int8","int16","int32","int64","uint","float32","float64","bool","byte","rune","error","nil","true","false","Printf","Println","Sprintf","Errorf"))},
-"lineComment":"//","blockComment":["/*","*/"]}"""
+    private val GO = pack(
+        "go", "Go", listOf("go"),
+        listOf("func", "package", "import", "var", "const", "type", "struct", "interface", "map", "chan", "go", "defer", "select",
+            "switch", "case", "default", "break", "continue", "return", "if", "else", "for", "range", "fallthrough", "goto"),
+        listOf("fmt", "make", "new", "len", "cap", "append", "copy", "delete", "panic", "recover", "print", "println", "string",
+            "int", "int8", "int16", "int32", "int64", "uint", "float32", "float64", "bool", "byte", "rune", "error", "nil",
+            "true", "false", "Printf", "Println", "Sprintf", "Errorf"),
+        "//", listOf("/*", "*/"),
+    )
 
-    private val LUA = """{"id":"lua","name":"Lua","extensions":${jarr(listOf("lua"))},
-"keywords":${jarr(listOf("and","break","do","else","elseif","end","false","for","function","goto","if","in","local","nil","not","or","repeat","return","then","true","until","while"))},
-"builtins":${jarr(listOf("print","pairs","ipairs","require","tostring","tonumber","type","pcall","xpcall","error","assert","setmetatable","getmetatable","rawget","rawset","select","unpack","string","table","math","io","os","coroutine","self"))},
-"lineComment":"--"}"""
+    private val LUA = pack(
+        "lua", "Lua", listOf("lua"),
+        listOf("and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil",
+            "not", "or", "repeat", "return", "then", "true", "until", "while"),
+        listOf("print", "pairs", "ipairs", "require", "tostring", "tonumber", "type", "pcall", "xpcall", "error", "assert",
+            "setmetatable", "getmetatable", "rawget", "rawset", "select", "unpack", "string", "table", "math", "io", "os",
+            "coroutine", "self"),
+        "--",
+    )
 
-    private val SQL = """{"id":"sql","name":"SQL","extensions":${jarr(listOf("sql"))},
-"keywords":${jarr(listOf("select","from","where","insert","into","values","update","set","delete","create","table","drop","alter","index","join","left","right","inner","outer","on","group","by","order","having","limit","offset","as","and","or","not","null","primary","key","foreign","references","unique","default","check","view","distinct","union","all","case","when","then","else","end","commit","rollback","begin","transaction","asc","desc"))},
-"builtins":${jarr(listOf("count","sum","avg","min","max","round","now","coalesce","ifnull","substr","length","upper","lower","abs","random","sqlite_master"))},
-"lineComment":"--","caseInsensitive":true}"""
+    private val SQL = pack(
+        "sql", "SQL", listOf("sql"),
+        listOf("select", "from", "where", "insert", "into", "values", "update", "set", "delete", "create", "table", "drop",
+            "alter", "index", "join", "left", "right", "inner", "outer", "on", "group", "by", "order", "having", "limit",
+            "offset", "as", "and", "or", "not", "null", "primary", "key", "foreign", "references", "unique", "default",
+            "check", "view", "distinct", "union", "all", "case", "when", "then", "else", "end", "commit", "rollback",
+            "begin", "transaction", "asc", "desc"),
+        listOf("count", "sum", "avg", "min", "max", "round", "now", "coalesce", "ifnull", "substr", "length", "upper", "lower",
+            "abs", "random", "sqlite_master"),
+        "--", caseInsensitive = true,
+    )
 
     private val BUILTIN_PACKS = linkedMapOf(
         "rust.json" to RUST,

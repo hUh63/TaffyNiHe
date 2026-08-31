@@ -172,12 +172,17 @@ object CodeHighlighter {
                 return
             }
             // 块注释（行内配对；跨行块注释仅着色起始行）
-            if (bcs != null && line.startsWith(bcs, i)) {
-                val end = if (bce != null) line.indexOf(bce, i + bcs.length) else -1
+            if (bcs != null && bce != null) {
+                val end = line.indexOf(bce, i + bcs.length)
                 val stop = if (end >= 0) end + bce.length else n
                 builder.withStyle(mono(COM)) { builder.append(line.substring(i, stop)) }
                 i = stop
                 continue
+            }
+            if (bcs != null) {
+                // 有起始定界符但无结束符：保守按注释处理到行尾
+                builder.withStyle(mono(COM)) { builder.append(line.substring(i)) }
+                return
             }
             // 字符串
             if (ch == '"' || ch == '\'') {

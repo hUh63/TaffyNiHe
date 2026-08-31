@@ -58,7 +58,7 @@ object EditorSyntaxPacks {
             dir(context).listFiles { f -> f.isFile && f.extension == "json" }
                 ?.mapNotNull { f -> runCatching { parse(JSONObject(f.readText())) }.getOrNull() }
                 ?.sortedBy { it.name.lowercase() }
-        }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList()).orEmpty()
     }
 
     /** 导入语法包（粘贴 JSON）。校验必需字段后写入扩展目录。 */

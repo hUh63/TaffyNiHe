@@ -1,14 +1,28 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -16,7 +30,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.GitHubRelease
 import com.soreverse.mcp.core.GitHubUpdateManager
@@ -27,6 +50,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 
+/**
+ * 更新页（UI 同步上游 SOMCP v1.0.21 设计：Hero 状态头卡 + 当前版本卡 + 更新日志）。
+ * 检查 / 下载 / 测速 / 校验 / 安装逻辑沿用塔菲原有实现，行为不变（无 Beta 频道）。
+ */
 @Composable
 internal fun SettingsUpdatesPage(
     t: UiText,
@@ -142,7 +169,7 @@ internal fun SettingsUpdatesPage(
                     onRelease(latestRelease)
                     status = ""
                     checking = false
-                    // 获取到 release 后立即开始下载
+                    // 获取到 release 后立即开始下载（塔菲原有逻辑）
                     startDownload(latestRelease, null)
                 }
                 .onFailure {
@@ -153,16 +180,50 @@ internal fun SettingsUpdatesPage(
         }
     }
 
+    // ── Hero 状态派生（UI 层文案，不影响逻辑）──
+    val accent = MaterialTheme.colorScheme.primary
+    val available = release != null
+    val heroIcon: ImageVector = if (available) Icons.Default.RocketLaunch else Icons.Default.Verified
+    val headline = when {
+        downloading -> if (t.zh) "正在下载更新…" else "Downloading update…"
+        checking -> if (t.zh) "正在检查更新…" else "Checking for updates…"
+        available -> if (t.zh) "发现新版本" else "New update available"
+        else -> if (t.zh) "已是最新版本" else "You're up to date"
+    }
+    val subtitle = when {
+        downloading -> if (t.zh) "测速与下载在后台进行，可随时取消" else "Probing and downloading run in background; cancel anytime"
+        checking -> if (t.zh) "正在查询 GitHub Releases…" else "Querying GitHub Releases…"
+        available -> release?.name?.ifBlank { if (t.zh) "体验最新功能与架构优化" else "Experience the latest features" } ?: ""
+        else -> if (t.zh) "您当前已更新至最新版本，无需进行更新操作。" else "You are already on the latest version."
+    }
+    val versionText = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+
     PageScroll {
+        // Hero: 发光圆环图标 + 动态状态标题（上游 v1.0.21 设计）
+        UpdateHero(
+            icon = heroIcon,
+            headline = headline,
+            subtitle = subtitle,
+            tint = accent,
+        )
+        // 当前版本 "power card"（上游设计）
+        UpdateVersionCard(
+            versionText = versionText,
+            accent = accent,
+            zh = t.zh,
+        )
         GlassGroup {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (t.zh) "GitHub 正式发行版" else "Official GitHub releases", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
                 Text(
-                    if (t.zh) "当前版本已内置全部功能，不联网检查更新。" else "This build ships with all features and does not check for updates online.",
+                    if (t.zh) "GitHub 正式发行版" else "Official GitHub releases",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (t.zh) "只检查 hUh63/TaffyNiHe 的正式 Release。普通构建、提交、分支和标签均不会被视为更新。" else "Only stable releases from hUh63/TaffyNiHe are checked. Builds, commits, branches and tags do not count as updates.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text("${if (t.zh) "当前版本" else "Current version"}: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodyMedium)
             }
             GroupDivider()
             ToggleRow(if (t.zh) "启动时自动检查" else "Check automatically at startup", autoCheck) {
@@ -171,7 +232,7 @@ internal fun SettingsUpdatesPage(
             }
             GroupDivider()
             NavRow(
-                if (checking) (if (t.zh) "正在获取…" else "Fetching…") else (if (t.zh) "立即下载SOMCP" else "Download SOMCP now"),
+                if (checking) (if (t.zh) "正在获取…" else "Fetching…") else (if (t.zh) "立即检查更新" else "Check now"),
                 status,
                 Icons.Default.Info,
                 onClick = ::downloadLatest,
@@ -179,7 +240,7 @@ internal fun SettingsUpdatesPage(
         }
         if (error.isNotBlank()) {
             Surface(
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -187,11 +248,53 @@ internal fun SettingsUpdatesPage(
             }
         }
         release?.let { update ->
-            GlassGroup {
+            GlassGroup(title = if (t.zh) "更新日志" else "Changelog") {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(update.name, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-                    Text(update.tag, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                    if (update.notes.isNotBlank()) MarkdownMessageContent(update.notes, selectable = true)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            update.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(accent.copy(alpha = 0.16f))
+                                .border(
+                                    androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.3f)),
+                                    RoundedCornerShape(999.dp),
+                                )
+                                .padding(horizontal = 9.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                update.tag,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = accent,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    if (update.notes.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                            Text(
+                                if (t.zh) "更新内容" else "What's new",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        MarkdownMessageContent(
+                            update.notes,
+                            selectable = true,
+                        )
+                    }
                     if (downloading) {
                         UpdateDownloadStatus(
                             downloadPhase, progress, probeCompleted, probeTotal, probeAvailable, selectedSource, probeResults, t.zh,
@@ -228,6 +331,103 @@ internal fun SettingsUpdatesPage(
                     if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+        }
+    }
+}
+
+/** Hero 状态头卡：发光圆环图标 + 大标题 + 副文案（上游 v1.0.21 设计）。 */
+@Composable
+private fun UpdateHero(icon: ImageVector, headline: String, subtitle: String, tint: Color) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(bottom = 20.dp),
+        ) {
+            // 发光晕
+            Box(
+                Modifier
+                    .size(104.dp)
+                    .background(tint.copy(alpha = 0.30f), CircleShape)
+                    .blur(30.dp),
+            )
+            // 图标底座
+            Box(
+                Modifier
+                    .size(84.dp)
+                    .clip(CircleShape)
+                    .background(Brush.verticalGradient(listOf(Color(0xFF1D2027), Color(0xFF14161C))))
+                    .border(androidx.compose.foundation.BorderStroke(1.dp, tint.copy(alpha = 0.35f)), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    null,
+                    tint = tint,
+                    modifier = Modifier.size(42.dp),
+                )
+            }
+        }
+        Text(
+            headline,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** 当前版本卡：终端图标 + 版本号（等宽字体）（上游设计）。 */
+@Composable
+private fun UpdateVersionCard(versionText: String, accent: Color, zh: Boolean) {
+    val shape = RoundedCornerShape(26.dp)
+    val bg = Brush.verticalGradient(listOf(Color(0xFF1E2026), Color(0xFF15171D)))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(bg)
+            .border(androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), shape)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(accent.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.Terminal,
+                null,
+                tint = accent,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                if (zh) "当前版本" else "Current version",
+                style = MaterialTheme.typography.labelMedium,
+                color = Color(0xFF9AA0AF),
+            )
+            Text(
+                versionText,
+                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
         }
     }
 }

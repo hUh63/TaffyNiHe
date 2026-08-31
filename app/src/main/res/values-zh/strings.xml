@@ -60,4 +60,9 @@
     <string name="backup_decrypt_failed">解密失败：密码错误或文件损坏</string>
     <string name="backup_encrypt_warning">⚠️ 忘记加密密码将无法恢复备份数据，没有任何方式可以找回密码。</string>
     <string name="backup_encrypt_warning_title">重要提醒</string>
+    <string name="backup_include_secrets_subtitle">密钥将写入备份文件，必须启用密码加密</string>
+    <string name="backup_encrypt_toggle_subtitle">使用密码保护备份文件</string>
+    <string name="backup_history">备份历史</string>
+    <string name="backup_history_empty">暂无备份记录</string>
+    <string name="backup_restore_action">恢复</string>
 </resources>

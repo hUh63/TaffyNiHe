@@ -1067,12 +1067,41 @@ class SettingsStore(context: Context) {
     /** Export all settings as a formatted JSON string. */
     fun toJsonString(maskSecrets: Boolean = true): String = snapshot(maskSecrets).toString(2)
 
+    // ── 备份历史（最近成功导出的记录，最新在前，最多 20 条）──
+
+    /** 读取备份历史记录。 */
+    fun backupHistory(): List<BackupHistoryEntry> {
+        val raw = prefs.getString("backupHistory", "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val arr = org.json.JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    add(BackupHistoryEntry(timestamp = obj.optLong("t", 0L), sizeBytes = obj.optLong("s", 0L)))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 记录一次成功备份（导出或导入），保留最近 20 条。 */
+    fun recordBackup(timestamp: Long, sizeBytes: Long) {
+        val next = buildList {
+            add(BackupHistoryEntry(timestamp, sizeBytes))
+            addAll(backupHistory().take(MAX_BACKUP_HISTORY - 1))
+        }
+        val arr = org.json.JSONArray()
+        next.forEach { arr.put(org.json.JSONObject().put("t", it.timestamp).put("s", it.sizeBytes)) }
+        prefs.edit().putString("backupHistory", arr.toString()).apply()
+    }
+
     /** Import settings from a JSON string. Returns the applyPatch result. */
     fun fromJsonString(json: String, allowSecrets: Boolean = false): org.json.JSONObject {
         return applyPatch(org.json.JSONObject(json), allowSecrets = allowSecrets, allowSecurityFields = allowSecrets)
     }
 
     companion object {
+        private const val MAX_BACKUP_HISTORY = 20
         const val DEFAULT_AI_SYSTEM_PROMPT =
             """You are SOMCP Deep Reverse Agent for Android native .so analysis.
 Always call MCP tools to gather evidence before concluding. Prefer this workflow:
@@ -1091,3 +1120,6 @@ Rules:
     }
 }
 
+
+/** 一次成功备份的记录（导出或导入）。 */
+data class BackupHistoryEntry(val timestamp: Long, val sizeBytes: Long)

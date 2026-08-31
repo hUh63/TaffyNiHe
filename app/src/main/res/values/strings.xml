@@ -60,4 +60,9 @@ Group: [Taffy]</string>
     <string name="backup_decrypt_failed">Decryption failed: wrong password or corrupted file</string>
     <string name="backup_encrypt_warning">⚠️ If you forget the encryption password, the backup data CANNOT be recovered. There is no password reset.</string>
     <string name="backup_encrypt_warning_title">Important</string>
+    <string name="backup_include_secrets_subtitle">Secrets are written into the backup and MUST be encrypted</string>
+    <string name="backup_encrypt_toggle_subtitle">Protect the backup file with a password</string>
+    <string name="backup_history">Backup history</string>
+    <string name="backup_history_empty">No backup records yet</string>
+    <string name="backup_restore_action">Restore</string>
 </resources>

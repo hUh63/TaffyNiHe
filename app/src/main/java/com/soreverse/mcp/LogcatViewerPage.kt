@@ -401,6 +401,72 @@ internal fun LogcatViewerPage(t: UiText) {
         }
     }
 
+    /** 启动日志读取协程（通道切换时对旧进程 destroy，新进程重新拉起读取循环）。 */
+    fun spawnReader(proc: Process) {
+        val job = scope.launch(Dispatchers.IO) {
+            try {
+                BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                    var line = reader.readLine()
+                    var gotAny = false
+                    // !pollMode: 降级轮询置位后立即停止实时流写入（配合 cancel 中断阻塞 readLine），
+                    // 杜绝实时流与轮询两路数据同时写 logs 造成的日志重叠
+                    while (line != null && running && !pollMode) {
+                        gotAny = true
+                        if (!paused) {
+                            parseLogLine(line)?.let { parsed ->
+                                synchronized(logs) {
+                                    logs.add(parsed)
+                                    while (logs.size > 2000) {
+                                        logs.removeAt(0); dropped++
+                                    }
+                                }
+                                // 崩溃/ANR 行收集到崩溃标签页
+                                val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
+                                if (crashKeys.any { line.contains(it, ignoreCase = true) }) {
+                                    synchronized(crashLogs) { crashLogs.add(parsed) }
+                                }
+                                notifyCrash(parsed)
+                            }
+                        }
+                        if (recording) {
+                            runCatching { recordWriter?.write(line + "\n") }
+                        }
+                        line = reader.readLine()
+                    }
+                    // 无任何数据且仍在运行：实时流立即结束（pipe 异常）
+                    // → 降级为轮询模式（用一次性 logcat -d，通道自测已证明可用）
+                    if (!gotAny && running && channelError.isBlank() && !pollMode) {
+                        com.soreverse.mcp.core.AppLog.w("Logcat reader got no data, fallback to polling")
+                        pollMode = true
+                        channelInfo = if (zh) "Shizuku 通道（轮询模式）" else "Shizuku channel (polling)"
+                        startPolling(synchronized(logs) { logs.lastOrNull()?.raw })
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: java.io.IOException) {
+                // destroy()/stop() 会关闭流导致 readLine 抛 InterruptedIOException，
+                // 这是正常停止路径，静默忽略；仅非正常退出才记录
+                // 轮询降级时 destroy 实时流也会触发此异常，此时 pollMode 已 true，同样静默
+                if (running && !pollMode) {
+                    com.soreverse.mcp.core.AppLog.e("Logcat reader ended: ${e.message}")
+                    // 非正常退出时显示原因到界面（如 UserService 通道流中断）
+                    if (channelError.isBlank()) {
+                        channelError = "日志读取中断: ${e.message}"
+                    }
+                }
+            } catch (e: Exception) {
+                if (running) {
+                    com.soreverse.mcp.core.AppLog.e("Logcat reader failed: ${e.message}")
+                    if (channelError.isBlank()) {
+                        channelError = "日志读取失败: ${e.message}"
+                    }
+                }
+            }
+        }
+        readerJob.set(job)
+    }
+
     fun start() {
         if (running) return
         // 清理上一次可能残留的读取协程（防止新实时流与旧协程并存导致重叠）
@@ -483,71 +549,6 @@ internal fun LogcatViewerPage(t: UiText) {
         }
     }
 
-    /** 启动日志读取协程（通道切换时对旧进程 destroy，新进程重新拉起读取循环）。 */
-    fun spawnReader(proc: Process) {
-        val job = scope.launch(Dispatchers.IO) {
-            try {
-                BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
-                    var line = reader.readLine()
-                    var gotAny = false
-                    // !pollMode: 降级轮询置位后立即停止实时流写入（配合 cancel 中断阻塞 readLine），
-                    // 杜绝实时流与轮询两路数据同时写 logs 造成的日志重叠
-                    while (line != null && running && !pollMode) {
-                        gotAny = true
-                        if (!paused) {
-                            parseLogLine(line)?.let { parsed ->
-                                synchronized(logs) {
-                                    logs.add(parsed)
-                                    while (logs.size > 2000) {
-                                        logs.removeAt(0); dropped++
-                                    }
-                                }
-                                // 崩溃/ANR 行收集到崩溃标签页
-                                val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
-                                if (crashKeys.any { line.contains(it, ignoreCase = true) }) {
-                                    synchronized(crashLogs) { crashLogs.add(parsed) }
-                                }
-                                notifyCrash(parsed)
-                            }
-                        }
-                        if (recording) {
-                            runCatching { recordWriter?.write(line + "\n") }
-                        }
-                        line = reader.readLine()
-                    }
-                    // 无任何数据且仍在运行：实时流立即结束（pipe 异常）
-                    // → 降级为轮询模式（用一次性 logcat -d，通道自测已证明可用）
-                    if (!gotAny && running && channelError.isBlank() && !pollMode) {
-                        com.soreverse.mcp.core.AppLog.w("Logcat reader got no data, fallback to polling")
-                        pollMode = true
-                        channelInfo = if (zh) "Shizuku 通道（轮询模式）" else "Shizuku channel (polling)"
-                        startPolling(synchronized(logs) { logs.lastOrNull()?.raw })
-                    }
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: java.io.IOException) {
-                // destroy()/stop() 会关闭流导致 readLine 抛 InterruptedIOException，
-                // 这是正常停止路径，静默忽略；仅非正常退出才记录
-                // 轮询降级时 destroy 实时流也会触发此异常，此时 pollMode 已 true，同样静默
-                if (running && !pollMode) {
-                    com.soreverse.mcp.core.AppLog.e("Logcat reader ended: ${e.message}")
-                    // 非正常退出时显示原因到界面（如 UserService 通道流中断）
-                    if (channelError.isBlank()) {
-                        channelError = "日志读取中断: ${e.message}"
-                    }
-                }
-            } catch (e: Exception) {
-                if (running) {
-                    com.soreverse.mcp.core.AppLog.e("Logcat reader failed: ${e.message}")
-                    if (channelError.isBlank()) {
-                        channelError = "日志读取失败: ${e.message}"
-                    }
-                }
-            }
-        }
-        readerJob.set(job)
-    }
 
     fun stop() {
         running = false

@@ -985,7 +985,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         .padding(vertical = 4.dp),
                 ) {
                     Column(Modifier.fillMaxWidth()) {
-                        fun wsTreeEntry(rel: String, name: String, isDir: Boolean, depth: Int) {
+                        @Composable fun wsTreeEntry(rel: String, name: String, isDir: Boolean, depth: Int) {
                             val childRel = if (rel.isEmpty()) name else "$rel/$name"
                             val expanded = childRel in wsTreeExpanded
                             Row(

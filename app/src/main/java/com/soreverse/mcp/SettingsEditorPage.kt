@@ -59,6 +59,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import com.soreverse.mcp.core.EditorAiHelper
 import com.soreverse.mcp.core.LspClient
 import com.soreverse.mcp.core.PermissionManager
@@ -561,6 +562,30 @@ internal fun SettingsEditorPage(t: UiText) {
         writeToSession(cmd)
     }
 
+    /** 控制台 shell 直发（非 Python 模式）：Root/Shizuku 走特权，否则普通进程降级。 */
+    fun shellExec(cmd: String) {
+        if (cmd.isBlank()) return
+        replInput = ""
+        appendOut("\n$ $cmd\n")
+        busy = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                if (PermissionManager.isRootAvailable() || PermissionManager.isShizukuGranted()) {
+                    RootShell.exec(cmd, timeoutSec = 30)
+                } else {
+                    runCatching {
+                        val p = ProcessBuilder("/system/bin/sh", "-c", cmd).redirectErrorStream(true).start()
+                        val out = p.inputStream.readBytes().decodeToString()
+                        p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+                        RootShell.Result(p.exitValue(), out, "")
+                    }.getOrElse { RootShell.Result(-1, "", it.message ?: "执行失败") }
+                }
+            }
+            appendOut(r.stdout.ifEmpty { "(无输出, exit=${r.code})" } + "\n")
+            busy = false
+        }
+    }
+
     // ── 运行（按模式）──
     fun runCode() {
         if (code.isBlank()) return
@@ -916,93 +941,190 @@ internal fun SettingsEditorPage(t: UiText) {
                 }
             }
         }
-        // ── 工作区文件（借鉴 Xed-Editor 项目管理：目录导航→编辑→写回）──
-        if (wsFiles.isNotEmpty() || wsDir.isNotEmpty()) {
-            Text(
-                (if (zh) "工作区（点目录进入，点文件编辑，保存写回并自动留备份）" else "Workspace (tap dir to enter, tap file to edit; save writes back + backup)"),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // 面包屑：当前位置 + 返回上级
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (wsDir.isNotEmpty()) {
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            wsDir = wsDir.substringBeforeLast('/', "").also { refreshRecent() }
-                        },
-                        label = { Text("← ..", fontSize = 10.sp) },
-                    )
-                }
+        // ── 工作区文件树（经典文件树：目录展开/收起 + 文件点击编辑；整个面板可收起）──
+        var wsPanelExpanded by remember { mutableStateOf(true) }
+        var wsTreeExpanded by remember { mutableStateOf(setOf("")) }   // 已展开目录（相对路径，""=根）
+        fun wsListDir(rel: String): List<Pair<String, Boolean>> = runCatching {
+            val ws = WorkspacePolicy.workDirPath(context) ?: return@runCatching emptyList()
+            val dir = File(ws, rel)
+            if (!dir.isDirectory) emptyList() else {
+                val dirs = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
+                    ?.map { it.name to true }.orEmpty()
+                val files = dir.listFiles { f -> f.isFile && !f.name.startsWith(".") }
+                    ?.sortedByDescending { it.lastModified() }?.map { it.name to false }.orEmpty()
+                (dirs.sorted() + files).take(30)
+            }
+        }.getOrDefault(emptyList())
+
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                    .clickable { wsPanelExpanded = !wsPanelExpanded }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Text(
-                    "/" + wsDir,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    if (wsPanelExpanded) "▾" else "▸",
+                    fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    if (zh) "工作区文件树（点目录展开，点文件编辑，保存写回并自动留备份）" else "Workspace tree (expand dirs, tap file to edit; save writes back + backup)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                     maxLines = 1,
                 )
             }
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                wsFiles.forEach { entry ->
-                    val isDir = entry.startsWith("📁/")
-                    val name = if (isDir) entry.removePrefix("📁/") else entry
-                    FilterChip(
-                        selected = !isDir && currentFile == name,
-                        onClick = {
-                            val ws = WorkspacePolicy.workDirPath(context)
-                            if (ws != null) {
+            if (wsPanelExpanded) {
+                Box(
+                    Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp),
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        fun wsTreeEntry(rel: String, name: String, isDir: Boolean, depth: Int) {
+                            val childRel = if (rel.isEmpty()) name else "$rel/$name"
+                            val expanded = childRel in wsTreeExpanded
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable {
+                                        if (isDir) {
+                                            wsTreeExpanded = if (expanded) wsTreeExpanded - childRel else wsTreeExpanded + childRel
+                                        } else {
+                                            val ws = WorkspacePolicy.workDirPath(context)
+                                            if (ws != null) {
+                                                val target = File(ws, childRel).absolutePath
+                                                ensureTab(name, target)
+                                                loadWsFile(target)
+                                            }
+                                        }
+                                    }
+                                    .padding(start = (depth * 14 + 10).dp, top = 5.dp, bottom = 5.dp, end = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
                                 if (isDir) {
-                                    wsDir = if (wsDir.isEmpty()) name else "$wsDir/$name"
-                                    refreshRecent()
+                                    Text(
+                                        if (expanded) "▾" else "▸",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text("📁", fontSize = 12.sp)
                                 } else {
-                                    val target = File(ws, if (wsDir.isEmpty()) name else "$wsDir/$name").absolutePath
-                                    ensureTab(name, target)
-                                    loadWsFile(target)
+                                    Text(" ", fontSize = 10.sp)
+                                    Text("📄", fontSize = 12.sp)
+                                }
+                                Text(
+                                    name,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (isDir) MaterialTheme.colorScheme.primary else fg,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (isDir && expanded) {
+                                val children = wsListDir(childRel)
+                                if (children.isEmpty()) {
+                                    Text(
+                                        if (zh) "（空目录）" else "(empty)",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = ((depth + 1) * 14 + 30).dp, top = 2.dp, bottom = 2.dp),
+                                    )
+                                } else {
+                                    children.forEach { (n, d) -> wsTreeEntry(childRel, n, d, depth + 1) }
                                 }
                             }
-                        },
-                        label = { Text(if (isDir) "\uD83D\uDCC1 $name" else name, fontSize = 10.sp, maxLines = 1) },
-                    )
-                }
-                if (wsFiles.isEmpty() && wsDir.isNotEmpty()) {
-                    Text(if (zh) "（空目录）" else "(empty dir)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        wsListDir("").forEach { (n, d) -> wsTreeEntry("", n, d, 0) }
+                        if (wsListDir("").isEmpty()) {
+                            Text(
+                                if (zh) "（工作区为空）" else "(workspace empty)",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(10.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        // ── 控制台 ──
-        Column(Modifier.fillMaxWidth().height(200.dp)) {
-            Text(
-                (if (zh) "控制台" else "Console") + if (sessionActive) " · Python REPL" else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Box(
-                Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp)
-                    .background(bg, RoundedCornerShape(14.dp)).verticalScroll(consoleScroll),
-            ) {
+        // ── 控制台（经典终端：黑底 + 提示符 + 输入行内嵌底部，全模式可用）──
+        Column(
+            Modifier.fillMaxWidth().height(260.dp)
+                .background(bg, RoundedCornerShape(14.dp))
+                .padding(8.dp),
+        ) {
+            // 标题行：控制台名 + 提示 + 清屏
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    output.ifEmpty { if (zh) "（输出显示在这里）" else "(output here)" },
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp),
-                    color = fg,
-                    modifier = Modifier.fillMaxWidth().padding(10.dp),
+                    (if (zh) "console" else "console") + when {
+                        sessionActive -> " · python"
+                        mode == CodeHighlighter.Lang.PYTHON -> " · python"
+                        else -> " · shell"
+                    },
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = Color(0xFF7A8699),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (zh) "清屏" else "clear",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF7A8699),
+                    modifier = Modifier.clickable { output = "" }.padding(horizontal = 4.dp),
                 )
             }
-            // REPL 输入行（仅 Python 模式）
-            if (mode == CodeHighlighter.Lang.PYTHON) {
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = replInput,
-                        onValueChange = { replInput = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text(if (zh) ">>> 表达式（Enter 前先点 ▶）" else ">>> expression", color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace) },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = fg),
-                        colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f), unfocusedBorderColor = Color(0xFF1E2A36)),
-                        shape = RoundedCornerShape(12.dp),
-                    )
-                    IconButton(onClick = { sendRepl(replInput) }, enabled = sessionActive) {
-                        Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
-                    }
+            // 输出区
+            Box(
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(consoleScroll),
+            ) {
+                Text(
+                    output.ifEmpty { if (zh) "（输出显示在这里——运行代码或输入命令）" else "(output appears here — run code or type a command)" },
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp),
+                    color = fg,
+                    modifier = Modifier.fillMaxWidth().padding(6.dp),
+                )
+            }
+            // 输入行（内嵌框底，经典终端样式：提示符 + 输入 + 发送）
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    if (mode == CodeHighlighter.Lang.PYTHON && sessionActive) ">>>" else "$",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                    color = AppPalette.teal,
+                )
+                OutlinedTextField(
+                    value = replInput,
+                    onValueChange = { replInput = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = {
+                        Text(
+                            if (mode == CodeHighlighter.Lang.PYTHON && sessionActive) (if (zh) "Python 表达式（▶ 运行代码）" else "python expression") else (if (zh) "shell 命令（id / ls / pm list packages…）" else "shell command"),
+                            color = Color(0xFF90A4AE),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = fg),
+                    colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f), unfocusedBorderColor = Color(0xFF1E2A36)),
+                    shape = RoundedCornerShape(10.dp),
+                )
+                IconButton(
+                    onClick = {
+                        if (mode == CodeHighlighter.Lang.PYTHON && sessionActive) sendRepl(replInput) else shellExec(replInput)
+                    },
+                    enabled = replInput.isNotBlank() && !busy,
+                ) {
+                    Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }

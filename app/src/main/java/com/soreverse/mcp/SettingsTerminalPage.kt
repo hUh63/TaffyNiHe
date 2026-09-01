@@ -242,36 +242,54 @@ internal fun SettingsTerminalPage(t: UiText) {
         runCatching { outputScroll.scrollTo(outputScroll.maxValue) }
     }
 
-    // 快捷命令（按通道自适应 + 工作区联动）
+    // 快捷命令（精简版：只留真实可用的基础命令，按通道自适应）
     val wsPath = remember { runCatching { WorkspacePolicy.workDirPath(context) }.getOrNull() }
     val quick = remember(sessionChannel, wsPath) {
-        val base = if (sessionChannel.startsWith("python")) {
+        if (sessionChannel.startsWith("python")) {
             mutableListOf(
-                "print('hi')" to "Py Hello",
-                "import os; os.getcwd()" to "CWD",
+                "dir()" to "dir()",
+                "import os; os.getcwd()" to "pwd",
                 "import platform; platform.platform()" to "平台",
+                "exit()" to "退出",
             )
         } else {
             mutableListOf(
-                "uname -a" to "uname", "pwd" to "pwd", "ls -la" to "ls", "df -h /" to "磁盘",
-                "ps -A | head" to "进程", "apk update" to "apk update", "id" to "id", "echo \$HOME" to "HOME",
+                "ls -la" to "ls",
+                "pwd" to "pwd",
+                "id" to "id",
+                "uname -a" to "uname",
+                "df -h /" to "磁盘",
+                "ps -A | head -20" to "进程",
+                "clear" to "clear",
             )
-        }
-        // 工作区入口：查看（ls）与编辑提示（vi/cat 视环境支持）
-        if (!wsPath.isNullOrBlank()) {
-            if (sessionChannel.startsWith("python")) {
-                base.add(0, "import os; os.chdir(r'$wsPath'); os.listdir('.')[:20]" to (if (zh) "工作区" else "Workspace"))
-            } else {
-                base.add(0, "cd '$wsPath' && ls -la" to (if (zh) "工作区" else "Workspace"))
-                base.add(1, "cd '$wsPath' && ls -la | head" to (if (zh) "工作区浏览" else "WS list"))
+        }.also {
+            if (!wsPath.isNullOrBlank()) {
+                it.add(0, ("cd '$wsPath' && ls -la" to (if (zh) "工作区" else "Workspace")))
             }
         }
-        // taffy CLI 入口（终端控制塔菲 MCP 工具）；python 会话是函数调用语法
-        val isPy = sessionChannel.startsWith("python")
-        base.add(0, (if (isPy) "taffy('tools')" else "taffy tools") to "taffy 工具")
-        base.add(1, (if (isPy) "taffy('taffy_linux', action='shell', distro='alpine', command='uname -a')" else "taffy --help") to "taffy 示例")
-        base
     }
+
+    // 终端触屏按键（经典终端软键，全部真实实现）
+    fun terminalKey(action: String) {
+        when (action) {
+            "clear" -> sessionOutput = ""                       // 清屏（本地清空输出区）
+            "interrupt" -> { stopSession(); startSession() }    // 中断：重启会话（管道会话无法发 SIGINT，重启等效中断卡住的命令）
+            "up" -> if (history.isNotEmpty()) {                 // 上一条历史
+                histIdx = (histIdx + 1).coerceAtMost(history.size - 1)
+                input = history[histIdx]
+            }
+            "down" -> if (histIdx >= 0) {                       // 下一条历史
+                histIdx--
+                input = if (histIdx >= 0) history[histIdx] else ""
+            }
+        }
+    }
+    val termKeys = listOf(
+        "clear" to (if (zh) "清屏" else "Clear"),
+        "interrupt" to (if (zh) "中断" else "Interrupt"),
+        "up" to "↑",
+        "down" to "↓",
+    )
 
     Column(Modifier.fillMaxSize().imePadding().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // ── 会话控制条 ──
@@ -310,6 +328,18 @@ internal fun SettingsTerminalPage(t: UiText) {
                 color = fg,
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
             )
+        }
+
+        // ── 终端按键行（经典软键：清屏 / 中断 / 历史）──
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            termKeys.forEach { (k, label) ->
+                FilterChip(
+                    selected = false,
+                    onClick = { terminalKey(k) },
+                    enabled = true,
+                    label = { Text(label, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                )
+            }
         }
 
         // ── 快捷命令 ──

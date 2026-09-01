@@ -410,56 +410,81 @@ internal fun LogcatViewerPage(t: UiText) {
         paused = false
         persistedPaused = false
         channelError = ""
-        // 按采集模式选择通道。关键: 无特权通道时普通进程在 Android 8.0+ 读不到系统日志,
-        // 必须明确告知用户而不是静默显示空列表(LogFox 通过 Shizuku/ADB/Root 提权才能看全系统日志)。
-        val priv = PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
-        // READ_LOGS（adb 授予）可让普通进程读全系统日志，无需 Root/Shizuku
+        // ── 立即显示：先起本地流（普通进程 / READ_LOGS），特权通道后台升级后无缝切换 ──
+        // 旧实现同步等待 startPrivilegedStream（UserService 绑定 await 2s）导致进页面 2 秒无日志。
         val hasReadLogs = PermissionManager.hasReadLogs(context)
-        val proc = when {
-            priv != null -> priv
-            hasReadLogs -> ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-            mode == "root" -> {
-                channelError = if (PermissionManager.isRootAvailable()) "Root 通道启动失败，已降级普通进程" else "Root 不可用"
-                ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-            }
-            mode == "shizuku" -> {
-                channelError = if (PermissionManager.isShizukuGranted()) {
-                    "Shizuku 通道启动失败: ${PermissionManager.lastShizukuServiceError()}"
-                } else "Shizuku 未授权"
-                ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-            }
-            else -> {
-                // auto / adb 模式: 无特权通道时降级普通进程并提示
-                if (!PermissionManager.isRootAvailable() && !PermissionManager.isShizukuGranted() && !PermissionManager.isDhizukuAvailable()) {
-                    channelError = "无 Root/Shizuku 权限，普通进程读不到系统日志（Android 8.0+）。可用 adb 授权: adb shell pm grant com.taffynihe android.permission.READ_LOGS"
-                } else if (channelError.isBlank()) {
-                    val diag = PermissionManager.lastShizukuServiceError()
-                    channelError = if (diag.isNotBlank()) "特权通道不可用: $diag" else "特权通道不可用，已降级普通进程"
-                }
-                ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
-            }
-        }
+        val firstProc = ProcessBuilder("logcat", "-v", "time").redirectErrorStream(true).start()
+        appLogMode = false
         channelInfo = when {
-            priv != null -> when {
-                PermissionManager.isRootAvailable() -> if (zh) "Root 通道" else "Root channel"
-                PermissionManager.isShizukuGranted() -> "Shizuku 通道"
-                PermissionManager.isDhizukuAvailable() -> "Dhizuku 通道"
-                else -> if (zh) "特权通道" else "Privileged channel"
-            }
             hasReadLogs -> "READ_LOGS"
             else -> if (zh) "普通进程" else "Normal process"
         }
-        // 无任何系统权限时降级为应用日志：Android 11+ 普通进程连本应用 logcat 都读不到，
-        // 显示 AppLog（本软件运行日志）让用户至少能看到自己的日志
-        appLogMode = priv == null && !hasReadLogs
-        if (appLogMode) {
-            synchronized(appLogLines) {
-                appLogLines.clear()
-                appLogLines.addAll(AppLog.snapshot())
-            }
-            channelInfo = if (zh) "应用日志（无系统权限）" else "App logs (no system permission)"
+        if (!hasReadLogs) {
+            channelError = if (zh) "正在提升权限以读取全系统日志（普通进程暂只能读部分日志）…" else "Elevating privileges for full system logs…"
         }
-        process = proc
+        process = firstProc
+        spawnReader(firstProc)
+
+        // ── 特权通道升级 ──
+        // auto/adb 模式：后台绑定特权流，成功即无缝切换（Root > Shizuku > Dhizuku）
+        // root/shizuku 手动模式：保持同步等待（用户显式要求该通道）
+        if (mode == "root" || mode == "shizuku") {
+            val priv = PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
+            if (priv != null && running) {
+                runCatching { firstProc.destroy() }
+                process = priv
+                channelError = ""
+                channelInfo = when {
+                    PermissionManager.isRootAvailable() -> if (zh) "Root 通道" else "Root channel"
+                    PermissionManager.isShizukuGranted() -> "Shizuku 通道"
+                    else -> if (zh) "特权通道" else "Privileged channel"
+                }
+                spawnReader(priv)
+            } else {
+                channelError = when (mode) {
+                    "root" -> if (PermissionManager.isRootAvailable()) "Root 通道启动失败，已降级普通进程" else "Root 不可用"
+                    else -> if (PermissionManager.isShizukuGranted()) "Shizuku 通道启动失败: ${PermissionManager.lastShizukuServiceError()}" else "Shizuku 未授权"
+                }
+            }
+        } else {
+            scope.launch(Dispatchers.IO) {
+                val priv = PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
+                if (priv == null) {
+                    // 特权不可用：普通流继续；无任何系统权限时降级为应用日志
+                    if (!hasReadLogs) {
+                        if (!PermissionManager.isRootAvailable() && !PermissionManager.isShizukuGranted() && !PermissionManager.isDhizukuAvailable()) {
+                            channelError = "无 Root/Shizuku 权限，普通进程读不到系统日志（Android 8.0+）。可用 adb 授权: adb shell pm grant com.taffynihe android.permission.READ_LOGS"
+                        } else if (channelError.isBlank() || channelError.startsWith("正在提升")) {
+                            val diag = PermissionManager.lastShizukuServiceError()
+                            channelError = if (diag.isNotBlank()) "特权通道不可用: $diag" else "特权通道不可用，已降级普通进程"
+                        }
+                        appLogMode = true
+                        synchronized(appLogLines) {
+                            appLogLines.clear()
+                            appLogLines.addAll(AppLog.snapshot())
+                        }
+                        channelInfo = if (zh) "应用日志（无系统权限）" else "App logs (no system permission)"
+                    }
+                    return@launch
+                }
+                // 特权就绪且仍在运行：无缝切换到特权流
+                if (!running || pollMode) return@launch
+                runCatching { firstProc.destroy() }
+                process = priv
+                channelError = ""
+                channelInfo = when {
+                    PermissionManager.isRootAvailable() -> if (zh) "Root 通道" else "Root channel"
+                    PermissionManager.isShizukuGranted() -> "Shizuku 通道"
+                    PermissionManager.isDhizukuAvailable() -> "Dhizuku 通道"
+                    else -> if (zh) "特权通道" else "Privileged channel"
+                }
+                spawnReader(priv)
+            }
+        }
+    }
+
+    /** 启动日志读取协程（通道切换时对旧进程 destroy，新进程重新拉起读取循环）。 */
+    fun spawnReader(proc: Process) {
         val job = scope.launch(Dispatchers.IO) {
             try {
                 BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->

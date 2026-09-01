@@ -945,17 +945,19 @@ internal fun SettingsEditorPage(t: UiText) {
         // ── 工作区文件树（经典文件树：目录展开/收起 + 文件点击编辑；整个面板可收起）──
         var wsPanelExpanded by remember { mutableStateOf(true) }
         var wsTreeExpanded by remember { mutableStateOf(setOf("")) }   // 已展开目录（相对路径，""=根）
-        fun wsListDir(rel: String): List<Pair<String, Boolean>> = runCatching {
-            val ws = WorkspacePolicy.workDirPath(context) ?: return@runCatching emptyList()
-            val dir = File(ws, rel)
-            if (!dir.isDirectory) emptyList() else {
-                val dirs = dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
-                    ?.map { it.name to true }.orEmpty()
-                val files = dir.listFiles { f -> f.isFile && !f.name.startsWith(".") }
-                    ?.sortedByDescending { it.lastModified() }?.map { it.name to false }.orEmpty()
-                (dirs.sorted() + files).take(30)
-            }
-        }.getOrDefault(emptyList())
+        fun wsListDir(rel: String): List<Pair<String, Boolean>> {
+            return runCatching {
+                val ws = WorkspacePolicy.workDirPath(context) ?: return emptyList<Pair<String, Boolean>>()
+                val dir = File(ws, rel)
+                if (!dir.isDirectory) return emptyList<Pair<String, Boolean>>()
+                val out = mutableListOf<Pair<String, Boolean>>()
+                dir.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
+                    ?.map { it.name }?.sorted()?.forEach { out.add(it to true) }
+                dir.listFiles { f -> f.isFile && !f.name.startsWith(".") }
+                    ?.sortedByDescending { it.lastModified() }?.forEach { out.add(it.name to false) }
+                out.take(30)
+            }.getOrDefault(emptyList())
+        }
 
         Column(Modifier.fillMaxWidth()) {
             Row(

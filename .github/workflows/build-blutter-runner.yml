@@ -1,0 +1,120 @@
+name: Build Blutter Runner (Dart 3.13.x / Flutter 3.47.x)
+
+# 手动构建 Blutter runner：为 Dart 3.13.0/3.13.1（Flutter 3.47.x）产出 libblutter_*.so，
+# 并把 3.12.2 旧 runner 一并重编（generate_manifest 会重建 manifest/jniLibs，必须全量）。
+# 产物：更新 runners.json + jniLibs 的 so，直接 commit 回 main。
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: '构建说明（可选）'
+        required: false
+        default: 'Add Dart 3.13.0/3.13.1 (Flutter 3.47.x) runner support'
+
+concurrency:
+  group: build-blutter-runner
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v5
+
+      - name: 安装工具链 (NDK 29 / cmake / ninja)
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "ndk;29.0.14206865" "platforms;android-26" >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+
+      - name: 构建 ICU 76.1 (arm64 android)
+        run: |
+          bash tools/blutter-matrix/build_icu_android.sh "$PWD/build/blutter-matrix/icu-out" "$ANDROID_NDK_ROOT" 4
+
+      - name: 构建 capstone 4.0.2 (arm64 android 静态库)
+        run: |
+          git clone --depth 1 -b 4.0.2 https://github.com/capstone-engine/capstone.git build/blutter-matrix/capstone-src
+          cmake -S build/blutter-matrix/capstone-src -B build/blutter-matrix/capstone-build \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+            -DCAPSTONE_BUILD_SHARED=OFF -DCAPSTONE_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/blutter-matrix/capstone-build --parallel 4
+          mkdir -p build/blutter-matrix/capstone-root/lib build/blutter-matrix/capstone-root/include
+          cp build/blutter-matrix/capstone-build/libcapstone.a build/blutter-matrix/capstone-root/lib/
+          cp -r build/blutter-matrix/capstone-src/include/. build/blutter-matrix/capstone-root/include/
+
+      - name: 生成版本矩阵（含 Flutter 3.47.x 新条目）
+        run: |
+          python3 tools/blutter-matrix/generate_matrix.py \
+            --config tools/blutter-matrix/matrix-config.json \
+            --output build/blutter-matrix/index.json
+
+      - name: 解析 Dart 版本与快照 (framework → engine → dart → snapshot)
+        run: |
+          python3 tools/blutter-matrix/resolve_revisions.py \
+            --input build/blutter-matrix/index.json \
+            --output build/blutter-matrix/resolved.json \
+            --workers 8
+
+      - name: 生成构建计划并按 curated 筛选 (3.12.2 + 3.13.0 + 3.13.1)
+        run: |
+          python3 tools/blutter-matrix/prepare_build_plan.py \
+            --input build/blutter-matrix/resolved.json \
+            --output build/blutter-matrix/build-plan-full.json
+          python3 tools/blutter-matrix/select_curated.py \
+            --plan build/blutter-matrix/build-plan-full.json \
+            --config tools/blutter-matrix/curated-versions.json \
+            --output build/blutter-matrix/build-plan-curated.json
+
+      - name: 构建 runners (Dart 3.12.2 / 3.13.0 / 3.13.1)
+        run: |
+          python3 tools/blutter-matrix/build_all.py \
+            --plan build/blutter-matrix/build-plan-curated.json \
+            --root build/blutter-matrix \
+            --android-ndk "$ANDROID_NDK_ROOT" \
+            --icu-root build/blutter-matrix/icu-out \
+            --capstone-root build/blutter-matrix/capstone-root \
+            --workers 1
+
+      - name: 合并产物进 runners.json + jniLibs
+        run: |
+          python3 tools/blutter-matrix/generate_manifest.py \
+            --plan build/blutter-matrix/build-plan-curated.json \
+            --root build/blutter-matrix \
+            --manifest app/src/main/assets/blutter/runners.json \
+            --jni-root app/src/main/jniLibs
+
+      - name: 校验 manifest 与 so 一致性
+        run: |
+          python3 tools/blutter-matrix/verify_manifest.py \
+            --manifest app/src/main/assets/blutter/runners.json \
+            --jni-root app/src/main/jniLibs
+
+      - name: 上传构建产物 (artifact 备份)
+        uses: actions/upload-artifact@v4
+        with:
+          name: blutter-runners
+          path: |
+            app/src/main/jniLibs/arm64-v8a/libblutter_*.so
+            app/src/main/assets/blutter/runners.json
+          retention-days: 30
+
+      - name: 提交 runners.json 与新 so 到 main
+        run: |
+          git config user.name "taffy-bot"
+          git config user.email "taffy@local"
+          git add app/src/main/assets/blutter/runners.json app/src/main/jniLibs/arm64-v8a/
+          if git diff --cached --quiet; then
+            echo "无变更（runner 已是最新）"
+          else
+            git commit -m "feat(blutter): add Dart 3.13.0/3.13.1 (Flutter 3.47.x) runner support"
+            git push origin HEAD:main
+          fi

@@ -46,7 +46,12 @@ jobs:
             https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-src.tgz
           echo "dfacb46bfe4747410472ce3e1144bf28a102feeaa4e3875bac9b4c6cf30f4f3e  icu4c-76_1-src.tgz" | sha256sum -c -
           cd "$GITHUB_WORKSPACE"
-          bash tools/blutter-matrix/build_icu_android.sh "$PWD/build/blutter-matrix/icu-build" "$ANDROID_NDK_ROOT" 4
+          bash tools/blutter-matrix/build_icu_android.sh "$PWD/build/blutter-matrix/icu-build" "$ANDROID_NDK_ROOT" 4 || {
+            echo "=== ICU 失败调试：查找 genccode/pkgdata 实际位置 ==="
+            find build/blutter-matrix/icu-build/host -maxdepth 4 -type f \( -name "genccode*" -o -name "pkgdata*" \) 2>/dev/null | head -10
+            ls -la build/blutter-matrix/icu-build/host/install/bin/ 2>/dev/null | head -25
+            exit 1
+          }
           ls build/blutter-matrix/arm64-v8a/icu/lib | head -4
 
       - name: 构建 capstone 4.0.2 (arm64 android 静态库)

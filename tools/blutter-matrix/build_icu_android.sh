@@ -56,6 +56,11 @@ if [ ! -x "$host/install/bin/genccode" ] || [ ! -x "$host/install/bin/pkgdata" ]
   make -j"$jobs"
   make install
 fi
+test -x "$host/install/bin/genccode" || {
+  # ICU 76+ make install 把 genccode 装到 sbin（非 bin），兼容性兜底
+  cp -f "$host"/install/sbin/genccode "$host/install/bin/" 2>/dev/null || true
+  cp -f "$host"/install/sbin/pkgdata "$host/install/bin/" 2>/dev/null || true
+}
 test -x "$host/install/bin/genccode"
 test -x "$host/install/bin/pkgdata"
 

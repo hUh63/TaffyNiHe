@@ -27,6 +27,9 @@ jobs:
       - name: 检出代码 (Checkout)
         uses: actions/checkout@v5
 
+      - name: 配置 Android SDK (setup-android)
+        uses: android-actions/setup-android@v3
+
       - name: 安装工具链 (NDK 29 / cmake / ninja)
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true

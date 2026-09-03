@@ -38,9 +38,16 @@ jobs:
           sudo apt-get install -y cmake ninja-build
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
-      - name: 构建 ICU 76.1 (arm64 android)
+      - name: 下载并构建 ICU 76.1 (arm64 android)
         run: |
-          bash tools/blutter-matrix/build_icu_android.sh "$PWD/build/blutter-matrix/icu-out" "$ANDROID_NDK_ROOT" 4
+          mkdir -p build/blutter-matrix/icu-build
+          cd build/blutter-matrix/icu-build
+          curl -fsSL -o icu4c-76_1-src.tgz \
+            https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-src.tgz
+          echo "dfacb46bfe4747410472ce3e1144bf28a102feeaa4e3875bac9b4c6cf30f4f3e  icu4c-76_1-src.tgz" | sha256sum -c -
+          cd "$GITHUB_WORKSPACE"
+          bash tools/blutter-matrix/build_icu_android.sh "$PWD/build/blutter-matrix/icu-build" "$ANDROID_NDK_ROOT" 4
+          ls build/blutter-matrix/arm64-v8a/icu/lib | head -4
 
       - name: 构建 capstone 4.0.2 (arm64 android 静态库)
         run: |

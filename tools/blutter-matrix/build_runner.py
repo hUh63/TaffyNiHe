@@ -77,6 +77,11 @@ def main():
     parser.add_argument("--icu-root", default=os.environ.get("ANDROID_ICU_ROOT", ""))
     parser.add_argument("--capstone-root", default=os.environ.get("ANDROID_CAPSTONE_ROOT", ""))
     args = parser.parse_args()
+    # CMake imported target 要求绝对路径；把相对 --capstone-root/--icu-root 归一化
+    if args.capstone_root:
+        args.capstone_root = str(pathlib.Path(args.capstone_root).resolve())
+    if args.icu_root:
+        args.icu_root = str(pathlib.Path(args.icu_root).resolve())
     plan = json.loads(pathlib.Path(args.plan).read_text(encoding="utf-8"))
     runner = next((item for item in plan["runners"] if item["runnerId"] == args.runner_id), None)
     if runner is None:

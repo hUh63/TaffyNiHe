@@ -124,7 +124,9 @@ def main():
             icu_include = icu_root / "include"
             icu_lib = icu_root / "lib"
             run([args.cmake, "-S", str(dart), "-B", str(dart_build), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", "-DANDROID_ABI=arm64-v8a", "-DANDROID_PLATFORM=android-26", "-DTARGET_OS=android", "-DTARGET_ARCH=arm64", f"-DCOMPRESSED_PTRS={int(runner['compressedPointers'])}", f"-DICU_ROOT={icu_root}", f"-DCMAKE_PREFIX_PATH={packages};{icu_root}", f"-DCMAKE_FIND_ROOT_PATH={args.android_ndk};{icu_root};{packages}", "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH", "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH", "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH", f"-DICU_INCLUDE_DIR={icu_include}", f"-DICU_INCLUDE_DIRS={icu_include}", f"-DICU_LIBRARY={icu_lib / 'libicuuc.a'}", f"-DICU_LIBRARIES={icu_lib / 'libicuuc.a'}", f"-DICU_UC_LIBRARY={icu_lib / 'libicuuc.a'}", f"-DICU_DATA_LIBRARY={icu_lib / 'libicudata.a'}", "-DCMAKE_BUILD_TYPE=Release"], dart, log)
-            run([args.cmake, "--build", str(dart_build), "--target", "install", "--parallel"], dart, log)
+            run([args.cmake, "--build", str(dart_build), "--parallel"], dart, log)
+            # Dart SDK 生成的 install 规则硬编码 /usr/local（CI 无权限），显式用 --prefix 落到 packages
+            run([args.cmake, "--install", str(dart_build), "--prefix", str(packages)], dart, log)
             dart_package = packages / "lib" / "cmake" / f"dartvm{runner['dartVersion']}_android_arm64"
             dart_package_name = f"dartvm{runner['dartVersion']}_android_arm64"
             compatibility = [f"-D{item}=ON" for item in dart_compatibility_definitions(dart)]

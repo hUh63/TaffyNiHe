@@ -52,7 +52,7 @@ def main():
             fail(f"missing snapshot aliases for {runner_id}")
         if runner.get("protocolVersion", 1) != 1:
             fail(f"unsupported runner protocol for {runner_id}")
-        if runner.get("upstreamCommit") and runner["upstreamCommit"] != "4a60ac648bf448c5a7596437243bcd0b9376fdf0":
+        if runner.get("upstreamCommit") and runner["upstreamCommit"] != "c1caafecd233ea17c3f4b6b5ff8847d59478b979":
             fail(f"unexpected Blutter commit for {runner_id}")
         if "blutter_run_fd" not in runner.get("exports", ["blutter_run_fd"]):
             fail(f"runner export missing for {runner_id}")

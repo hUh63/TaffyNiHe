@@ -184,13 +184,15 @@ internal object FlutterArtifactInspector {
     private fun virtualToFileOffset(value: Long, loads: List<LoadSegment>): Long = loads.firstOrNull { value >= it.virtualAddress && value - it.virtualAddress < it.fileSize }?.let { it.fileOffset + value - it.virtualAddress } ?: value
 
     private fun snapshotEvidence(bytes: ByteArray, symbols: List<Symbol>): SnapshotEvidence {
-        val symbol = symbols.firstOrNull { it.name == "_kDartVmSnapshotData" } ?: return SnapshotEvidence(null, emptyList(), listOf("libapp.so does not expose _kDartVmSnapshotData in its dynamic symbol table"))
+        // Dart 3.13 (Flutter 3.47) 起 VM isolate 移除：_kDartVmSnapshotData 改为单一 _kDartSnapshotData
+        val symName = if (symbols.any { it.name == "_kDartVmSnapshotData" }) "_kDartVmSnapshotData" else "_kDartSnapshotData"
+        val symbol = symbols.firstOrNull { it.name == symName } ?: return SnapshotEvidence(null, emptyList(), listOf("libapp.so does not expose $symName in its dynamic symbol table"))
         val start = symbol.fileOffset.toInt() + 20
-        if (start < 0 || start + 32 > bytes.size) return SnapshotEvidence(null, emptyList(), listOf("_kDartVmSnapshotData is outside the file-backed range"))
+        if (start < 0 || start + 32 > bytes.size) return SnapshotEvidence(null, emptyList(), listOf("$symName is outside the file-backed range"))
         val hash = bytes.copyOfRange(start, start + 32).toString(Charsets.US_ASCII).takeIf { it.matches(Regex("[ -~]{32}")) }
         val flagsBytes = bytes.copyOfRange(start + 32, minOf(bytes.size, start + 288))
         val flags = flagsBytes.toString(Charsets.US_ASCII).substringBefore('\u0000').trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-        return SnapshotEvidence(hash, flags, listOf("_kDartVmSnapshotData", "snapshot hash and flags read using Blutter extract_dart_info compatibility rules"))
+        return SnapshotEvidence(hash, flags, listOf(symName, "snapshot hash and flags read using Blutter extract_dart_info compatibility rules"))
     }
 
     private fun engineEvidence(bytes: ByteArray, rodata: ByteArray): EngineEvidence {

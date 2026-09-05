@@ -6,7 +6,7 @@
   "engineRepository": "https://github.com/flutter/engine.git",
   "dartRepository": "https://github.com/dart-lang/sdk.git",
   "blutterRepository": "https://github.com/worawit/blutter.git",
-  "blutterCommit": "4a60ac648bf448c5a7596437243bcd0b9376fdf0",
+  "blutterCommit": "c1caafecd233ea17c3f4b6b5ff8847d59478b979",
   "channels": [
     "stable"
   ],

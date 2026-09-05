@@ -17,6 +17,9 @@ def main():
     native_directory = pathlib.Path(args.jni_root) / "arm64-v8a"
     native_directory.mkdir(parents=True, exist_ok=True)
     for stale in native_directory.glob("libblutter_*.so"):
+        # libblutter_bridge.so 是塔菲自己的桥接库（非 runner），不得清除
+        if stale.name == "libblutter_bridge.so":
+            continue
         stale.unlink()
     runners = []
     for candidate in plan["runners"]:

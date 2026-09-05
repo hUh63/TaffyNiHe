@@ -1,0 +1,125 @@
+diff --git a/blutter/src/CodeAnalyzer_arm64.cpp b/blutter/src/CodeAnalyzer_arm64.cpp
+index c67a5b1..8ba1f7e 100644
+--- a/blutter/src/CodeAnalyzer_arm64.cpp
++++ b/blutter/src/CodeAnalyzer_arm64.cpp
+@@ -6,6 +6,12 @@
+ #include <source_location>
+ #include <unordered_set>
+ 
++// ---- Dart 3.13 兼容（塔菲逆核）：Closure context/delayed_type_arguments AOT 偏移已移除，
++// 相应识别模式置为永假以保持可编译；功能弱化但不影响其余分析路径 ----
++static constexpr dart::compiler::target::word AOT_Closure_context_offset = 0;
++static constexpr dart::compiler::target::word AOT_Closure_delayed_type_arguments_offset = 0;
++
++
+ #ifndef NO_CODE_ANALYSIS
+ 
+ // auto revert ASM iterator to the current when pattern does not match or an exception occurs
+@@ -2537,7 +2543,7 @@ std::unique_ptr<InitAsyncInstr> FunctionAnalyzer::processInitAsyncInstr(AsmItera
+ 		if (fn && fn->IsStub()) {
+ 			const auto stub = fn->AsStub();
+ 			auto il = fnInfo->LastIL();
+-			if (stub->kind == DartStub::InitAsyncStub && il->Kind() == ILInstr::LoadValue) {
++			if (stub->kind == DartStub::InitAsyncVMStub && il->Kind() == ILInstr::LoadValue) {
+ 				auto ilLoad = reinterpret_cast<LoadValueInstr*>(il);
+ 				INSN_ASSERT(ilLoad->dstReg == A64::Register::R0);
+ 				auto& item = ilLoad->GetValue();
+@@ -2760,7 +2766,7 @@ std::unique_ptr<TestTypeInstr> FunctionAnalyzer::processInstanceofNoTypeArgument
+ 				INSN_ASSERT(typeName == "int" || typeName == "int?");
+ 			}
+ 			else { // typeCheckCid == dart::kNumberCid || typeCheckCid == 0 (object)
+-				INSN_ASSERT(typeName == vtype->ToString() || dartStub->kind == DartStub::DefaultTypeTestStub || dartStub->kind == DartStub::DefaultNullableTypeTestStub);
++				INSN_ASSERT(typeName == vtype->ToString() || dartStub->kind == DartStub::DefaultTypeTestVMStub || dartStub->kind == DartStub::DefaultNullableTypeTestVMStub);
+ 			}
+ 			setAsmTextDataCall(insn.address(), (uint64_t)insn.ops(0).imm);
+ 			++insn;
+@@ -2870,7 +2876,7 @@ std::unique_ptr<BoxInt64Instr> FunctionAnalyzer::processBoxInt64Instr(AsmIterato
+ 	// 0x21c5e8: sbfiz  x0, x2, #1, #0x1f
+ 	// 0x21c5ec: cmp  x2, x0, asr #1
+ 	// 0x21c5f0: b.eq  #0x21c5fc
+-	// 0x21c5f4: bl  #0x2e5500  # AllocateMintSharedWithoutFPURegsStub
++	// 0x21c5f4: bl  #0x2e5500  # AllocateMintSharedWithoutFPURegsVMStub
+ 	// 0x21c5f8: stur  x2, [x0, #7]
+ 	//   x0 is result object (can be Smi or Mint). x2 is source integer.
+ 	if (insn.id() == ARM64_INS_SBFIZ && insn.ops(2).imm == dart::kSmiTagSize && insn.ops(3).imm == 31) {
+@@ -2890,7 +2896,7 @@ std::unique_ptr<BoxInt64Instr> FunctionAnalyzer::processBoxInt64Instr(AsmIterato
+ 			const auto assertAllocateMintStub = [&](DartFnBase* stub) {
+ 				INSN_ASSERT(stub->IsStub());
+ 				const auto stubKind = reinterpret_cast<DartStub*>(stub)->kind;
+-				INSN_ASSERT(stubKind == DartStub::AllocateMintSharedWithoutFPURegsStub || stubKind == DartStub::AllocateMintSharedWithFPURegsStub);
++				INSN_ASSERT(stubKind == DartStub::AllocateMintSharedWithoutFPURegsVMStub || stubKind == DartStub::AllocateMintSharedWithFPURegsVMStub);
+ 			};
+ 
+ 			// since Dart 3.5, some function might omit EnterFrame at early of function but do it before calling (BL) here
+@@ -3009,7 +3015,7 @@ std::unique_ptr<ILInstr> FunctionAnalyzer::processLoadFieldTableInstr(AsmIterato
+ 		// 0x21cb90: b.ne  #0x21cba0
+ 		// 0x21cb94: add  x2, x27, #9, lsl #12  (PP+0x9a18 - Field <_MyHomePageState@782102494.factor>: static late (offset: 0xb98))
+ 		// 0x21cb98: ldr  x2, [x2, #0xa18]
+-		// 0x21cb9c: bl  #0x2e36cc  # InitLateStaticFieldStub
++		// 0x21cb9c: bl  #0x2e36cc  # InitLateStaticFieldVMStub
+ 		//   --
+ 		// 0x4503c0: ldr  x1, [x26, #0x68](Thread::field_table_values)
+ 		// 0x4503c4: str  x0, [x1, #0x1250]  ; Set static field
+@@ -3079,7 +3085,7 @@ std::unique_ptr<ILInstr> FunctionAnalyzer::processLoadFieldTableInstr(AsmIterato
+ 						auto dartFn = app.GetFunction(insn.ops(0).imm);
+ 						ASSERT(dartFn->IsStub());
+ 						const auto stubKind = reinterpret_cast<DartStub*>(dartFn)->kind;
+-						INSN_ASSERT(stubKind == DartStub::InitLateStaticFieldStub || stubKind == DartStub::InitLateFinalStaticFieldStub);
++						INSN_ASSERT(stubKind == DartStub::InitLateStaticFieldVMStub || stubKind == DartStub::InitLateFinalStaticFieldVMStub);
+ 						setAsmTextDataCall(insn.address(), (uint64_t)insn.ops(0).imm);
+ 						++insn;
+ 					}
+@@ -3121,7 +3127,7 @@ std::unique_ptr<ILInstr> FunctionAnalyzer::processLoadFieldTableInstr(AsmIterato
+ 					INSN_ASSERT(insn2.id() == ARM64_INS_BL && insn2.ops(0).type == ARM64_OP_IMM);
+ 					auto fn = app.GetFunction(insn2.ops(0).imm);
+ 					auto stub = fn->AsStub();
+-					INSN_ASSERT(stub->kind == DartStub::LateInitializationErrorSharedWithoutFPURegsStub || stub->kind == DartStub::LateInitializationErrorSharedWithFPURegsStub);
++					INSN_ASSERT(stub->kind == DartStub::LateInitializationErrorSharedWithoutFPURegsVMStub || stub->kind == DartStub::LateInitializationErrorSharedWithFPURegsVMStub);
+ 					setAsmTextDataCall(insn2.address(), (uint64_t)insn.ops(0).imm);
+ 					insn2.Next();
+ 					// load static field but throw an exception if it is not initialized
+@@ -3241,7 +3247,7 @@ std::unique_ptr<WriteBarrierInstr> FunctionAnalyzer::processWriteBarrierInstr(As
+ 	// 0x2a7678: and  x16, x17, x16, lsr #2
+ 	// 0x2a767c: tst  x16, x28, lsr #32
+ 	// 0x2a7680: b.eq  #0x2a7688
+-	// 0x2a7684: bl  #0x44bdf0  # ArrayWriteBarrierStub
++	// 0x2a7684: bl  #0x44bdf0  # ArrayWriteBarrierVMStub
+ 	//const auto objReg = A64::FromDartReg(dart::kWriteBarrierObjectReg);
+ 	//const auto valReg = A64::FromDartReg(dart::kWriteBarrierValueReg);
+ 	A64::Register objReg;
+@@ -3308,8 +3314,8 @@ std::unique_ptr<WriteBarrierInstr> FunctionAnalyzer::processWriteBarrierInstr(As
+ 		auto stub = app.GetFunction(insn.ops(0).imm);
+ 		INSN_ASSERT(stub->IsStub());
+ 		const auto stubKind = reinterpret_cast<DartStub*>(stub)->kind;
+-		INSN_ASSERT(stubKind == DartStub::WriteBarrierWrappersStub || stubKind == DartStub::ArrayWriteBarrierStub);
+-		isArray = stubKind == DartStub::ArrayWriteBarrierStub;
++		INSN_ASSERT(stubKind == DartStub::WriteBarrierWrappersVMStub || stubKind == DartStub::ArrayWriteBarrierVMStub);
++		isArray = stubKind == DartStub::ArrayWriteBarrierVMStub;
+ 		setAsmTextDataCall(insn.address(), (uint64_t)insn.ops(0).imm);
+ 		++insn;
+ 	}
+@@ -3409,7 +3415,7 @@ std::unique_ptr<ILInstr> FunctionAnalyzer::processLoadStore(AsmIterator& insn)
+ 			// 0x2a7678: and  x16, x17, x16, lsr #2
+ 			// 0x2a767c: tst  x16, x28, lsr #32
+ 			// 0x2a7680: b.eq  #0x2a7688
+-			// 0x2a7684: bl  #0x44bdf0  # ArrayWriteBarrierStub
++			// 0x2a7684: bl  #0x44bdf0  # ArrayWriteBarrierVMStub
+ 			// - register as index
+ 			// 0x16ce18: add  x25, x1, x3, lsl #2
+ 			// 0x16ce1c: add  x25, x25, #0xf
+diff --git a/blutter/src/DartStub.h b/blutter/src/DartStub.h
+index f932cbc..ce1b40c 100644
+--- a/blutter/src/DartStub.h
++++ b/blutter/src/DartStub.h
+@@ -10,9 +10,11 @@ class DartStub : public DartFnBase
+ {
+ public:
+ 	enum Kind : int32_t {
++#ifdef OBJECT_STORE_STUB_CODE_LIST
+ #define DO(member, name) name ## Stub,
+ 		OBJECT_STORE_STUB_CODE_LIST(DO)
+ #undef DO
++#endif
+ 		BuildNonGenericMethodExtractorStub,
+ 		BuildGenericMethodExtractorStub,
+ #define DO(name) name ## VMStub,

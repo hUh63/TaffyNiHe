@@ -118,6 +118,10 @@ def main():
             overlay = pathlib.Path(__file__).resolve().parent / "android-runner"
             run(["git", "apply", "--check", str(overlay / "dart-app-accessors.patch")], blutter, log)
             run(["git", "apply", str(overlay / "dart-app-accessors.patch")], blutter, log)
+            # Dart 3.13.x 兼容补丁：OBJECT_STORE_STUB_CODE_LIST 宏移除 + stub 合并为 VM 版 + Closure 偏移移除
+            if str(runner.get("dartVersion") or "").startswith("3.13"):
+                run(["git", "apply", "--check", str(overlay / "dart313-compat.patch")], blutter, log)
+                run(["git", "apply", str(overlay / "dart313-compat.patch")], blutter, log)
             prepare_dart_project(dart, blutter, runner, log)
             packages = root / "packages" / args.runner_id
             if not (overlay / "CMakeLists.txt").is_file():

@@ -1,7 +1,14 @@
 diff --git a/blutter/src/DartApp.h b/blutter/src/DartApp.h
-index 59f7017..bb75511 100644
+index a61081d..12862e4 100644
 --- a/blutter/src/DartApp.h
 +++ b/blutter/src/DartApp.h
-@@ -29,0 +30,2 @@ public:
+@@ -83,5 +83,9 @@ private:
+ 	friend class DartAnalyzer;
+ 	friend class DartDumper;
+ 	friend class FridaWriter;
++
++public:
 +	const std::vector<DartLibrary*>& Libraries() const { return libs; }
 +	const std::vector<DartClass*>& Classes() const { return classes; }
+ };
+ 

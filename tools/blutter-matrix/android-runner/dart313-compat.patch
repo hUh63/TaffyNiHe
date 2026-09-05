@@ -107,6 +107,32 @@ index c67a5b1..8ba1f7e 100644
  			// - register as index
  			// 0x16ce18: add  x25, x1, x3, lsl #2
  			// 0x16ce1c: add  x25, x25, #0xf
+diff --git a/blutter/src/DartApp.cpp b/blutter/src/DartApp.cpp
+index 25ad347..d3667f8 100644
+--- a/blutter/src/DartApp.cpp
++++ b/blutter/src/DartApp.cpp
+@@ -301,6 +301,7 @@ void DartApp::loadStubs(dart::ObjectStore* store)
+ 
+ 	// Note: some stub might contain multiple of duplicated stubs
+ 	// these stubs are called "_iso_stub_" in runtime/vm/stub_code.cc
++#ifdef OBJECT_STORE_STUB_CODE_LIST
+ #define DO(member, name) \
+ 	ptr = store->member(); \
+ 	code = ptr; \
+@@ -317,10 +318,13 @@ void DartApp::loadStubs(dart::ObjectStore* store)
+ 	
+ 	code = store->throw_stub();
+ 	throwStubAddr = code.EntryPoint();
++#endif
+ 
+ 	// load VM stub code
+ 	// the dart entry point "static void main()" is a LazyCompileVMStub which call "main" stub (a real main)
++#if defined(OBJECT_STORE_STUB_CODE_LIST)
+ 	ASSERT(dart::StubCode::HasBeenInitialized());
++#endif
+ #define DO(name) {\
+ 		const auto& code = dart::StubCode::name(); \
+ 		ep_addr = code.EntryPoint() - base(); \
 diff --git a/blutter/src/DartStub.h b/blutter/src/DartStub.h
 index f932cbc..ce1b40c 100644
 --- a/blutter/src/DartStub.h

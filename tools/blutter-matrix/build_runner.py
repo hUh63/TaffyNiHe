@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 
-UPSTREAM_COMMIT = "528acbe83ba35a3a53fb97b231cb5f968c7068d1"
+UPSTREAM_COMMIT = "c1caafecd233ea17c3f4b6b5ff8847d59478b979"
 
 
 def run(command, cwd, log):

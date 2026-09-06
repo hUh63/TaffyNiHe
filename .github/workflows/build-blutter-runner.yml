@@ -91,9 +91,9 @@ jobs:
             --config tools/blutter-matrix/curated-versions.json \
             --output build/blutter-matrix/build-plan-curated.json
 
-      - name: 构建 runners (Dart 3.12.2 / 3.13.0 / 3.13.1)
-        # Dart 3.13 需要 blutter 上游重写快照加载（Dart_InitializeParams 移除 vm_snapshot 字段），
-        # 当前必然失败——用 || true 容忍部分失败，generate_manifest 会跳过失败 runner 只装成功的
+      - name: 构建 runners (Dart 3.11.5 / 3.12.2 / 3.13.0 / 3.13.1)
+        # 部分失败容忍（|| true）：generate_manifest 只装成功的 runner；
+        # 但 verify_manifest 要求全部成功，失败会在下一步诊断日志中直接暴露原因
         run: |
           python3 tools/blutter-matrix/build_all.py \
             --plan build/blutter-matrix/build-plan-curated.json \
@@ -102,6 +102,28 @@ jobs:
             --icu-root build/blutter-matrix/arm64-v8a/icu \
             --capstone-root build/blutter-matrix/capstone-root \
             --workers 1 || true
+
+      - name: 失败诊断（借鉴上游 #86：直接输出失败 runner 的 build.log 尾部）
+        if: always()
+        run: |
+          failed_any=0
+          for bj in build/blutter-matrix/runners/*/build.json; do
+            [ -f "$bj" ] || continue
+            status=$(python3 -c "import json;print(json.load(open('$bj')).get('status',''))" 2>/dev/null || echo unknown)
+            reason=$(python3 -c "import json;print(json.load(open('$bj')).get('reason',''))" 2>/dev/null || echo '')
+            echo "runner: $bj  status=$status  reason=$reason"
+            if [ "$status" != "success" ]; then
+              failed_any=1
+              log="$(dirname "$bj")/build.log"
+              if [ -f "$log" ]; then
+                echo "----- $(basename "$(dirname "$bj")") build.log (tail 100) -----"
+                tail -n 100 "$log" || true
+              else
+                echo "(无 build.log)"
+              fi
+            fi
+          done
+          [ "$failed_any" -eq 0 ] || echo "::warning::存在失败的 runner，详见上方日志尾部"
 
       - name: 上传构建日志（失败诊断用）
         if: always()

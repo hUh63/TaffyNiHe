@@ -2,6 +2,7 @@ package com.soreverse.mcp.engine
 
 import android.net.Uri
 import com.soreverse.mcp.core.AppLog
+import com.soreverse.mcp.core.MemoryPressure
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
@@ -129,12 +130,13 @@ internal fun EngineRuntime.analyzeApk(path: String, entryLimit: Int = 500): JSON
         return@guarded err("SELF_ANALYSIS_FORBIDDEN", "塔菲逆核不能分析自身 APK（签名匹配），请选择其他 APK", "path", path)
     }
     if (local.isFile && local.length() > ApkAnalyzer.MAX_INPUT_BYTES) return@guarded err("APK_LIMIT_EXCEEDED", "APK exceeds ${ApkAnalyzer.MAX_INPUT_BYTES / 1024 / 1024} MiB input limit", "path", path)
-    // 上游 1.0.20 借鉴: MemoryGuard——APK 读入前估算堆余量
-    if (local.isFile) {
-        com.soreverse.mcp.core.MemoryGuard.ensureAnalysisMemory(local.length(), "apk_analyze(${local.name})")
-    }
     val bytes = try {
-        if (local.isFile) local.readBytes() else (workDir ?: return@guarded err("WORK_DIRECTORY_NOT_SELECTED", "APK path is not a local file and no work directory is selected", "path", path)).readFile(path, ApkAnalyzer.MAX_INPUT_BYTES)
+        if (local.isFile) {
+            MemoryPressure.guardAllocation(context, local.length(), "APK")?.let {
+                return@guarded err("MEMORY_PRESSURE", it, "path", path)
+            }
+            local.readBytes()
+        } else (workDir ?: return@guarded err("WORK_DIRECTORY_NOT_SELECTED", "APK path is not a local file and no work directory is selected", "path", path)).readFile(path, ApkAnalyzer.MAX_INPUT_BYTES)
     } catch (error: ApkAnalysisLimitException) {
         return@guarded err("APK_LIMIT_EXCEEDED", error.message ?: "APK exceeds analysis limits", "path", path)
     }
@@ -208,48 +210,22 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     }
     val key = sourceKey(src).ifBlank { keyFallback }
     workspaceBySourceKey[key]?.let { existingId -> workspaces[existingId]?.let { return it } }
-    // 上游 1.0.20 借鉴: MemoryGuard——本地文件读取前估算堆余量, 不足提前拒绝而非 OOM 崩溃
-    if (src.source == "build_output" || src.source == "local_file") {
-        runCatching { File(src.path).length() }.getOrDefault(0L).takeIf { it > 0 }?.let { fileSize ->
-            com.soreverse.mcp.core.MemoryGuard.ensureAnalysisMemory(fileSize, "so_open(${src.name})")
+    val original = when (src.source) {
+        "build_output", "local_file" -> {
+            val f = File(src.path)
+            MemoryPressure.guardAllocation(context, f.length(), "SO 文件")?.let { error(it) }
+            runCatching { f.readBytes() }.getOrElse { error("SO path not found: $path") }
         }
+        else -> (workDir ?: error("No work directory selected")).readSource(src)
     }
-    val original = when (src.source) { "build_output", "local_file" -> runCatching { File(src.path).readBytes() }.getOrElse { error("SO path not found: $path") }; else -> (workDir ?: error("No work directory selected")).readSource(src) }
     require(original.size >= 4 && original[0] == 0x7f.toByte() && original[1] == 'E'.code.toByte() && original[2] == 'L'.code.toByte() && original[3] == 'F'.code.toByte()) { "NOT_ELF_INPUT: ${src.path} is not an ELF SO file. Use apk_analyze or an APK MCP tool." }
     val prepared = prepareAnalysisInput(original)
     val ws = Workspace("so-ws-${UUID.randomUUID()}", src, prepared.data, prepared.elf, temporary, sha256(original), prepared.source, prepared.facts)
     workspaces[ws.id] = ws
     workspaceBySourceKey[key] = ws.id
-    // 对标 SOMCP Issue #63（启动后渐进 OOM）：workspaces 无上限时，AI 反复
-    // so_open 不 close 会持续累积完整 SO 字节 + ELF 解析对象直至堆耗尽。
-    // 这里按总字节 + 数量双阈值自动淘汰最旧工作区（temporary 优先）。
-    evictWorkspacesIfNeeded()
     AppLog.i("Opened ${src.path} as ${ws.id}")
     return ws
 }
-
-/** 工作区自动淘汰：data 总字节或数量超限时关闭最旧（temporary 优先）。 */
-internal fun EngineRuntime.evictWorkspacesIfNeeded() {
-    if (workspaces.size <= MAX_WORKSPACES && totalWorkspaceBytes() <= MAX_WORKSPACE_BYTES) return
-    var evicted = 0
-    // temporary 优先淘汰（compareByDescending: true 排前），同类型按最旧
-    val victims = workspaces.values.sortedWith(
-        compareByDescending<Workspace> { it.temporary }.thenBy { it.createdAt }
-    )
-    for (ws in victims) {
-        if (workspaces.size <= MAX_WORKSPACES && totalWorkspaceBytes() <= MAX_WORKSPACE_BYTES) break
-        if (workspaces.remove(ws.id) != null) {
-            evicted++
-            AppLog.i("Workspace evicted (limit): ${ws.id} (${ws.source.name}, temporary=${ws.temporary}, ${ws.data.size / 1024}KB)")
-        }
-    }
-    if (evicted > 0) {
-        workspaceBySourceKey.entries.removeIf { it.value !in workspaces.keys }
-    }
-}
-
-private fun EngineRuntime.totalWorkspaceBytes(): Long =
-    workspaces.values.sumOf { it.data.size.toLong() }
 
 internal data class AnalysisInput(
     val data: ByteArray,

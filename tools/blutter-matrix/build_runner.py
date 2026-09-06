@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 
-UPSTREAM_COMMIT = "c1caafecd233ea17c3f4b6b5ff8847d59478b979"
+UPSTREAM_COMMIT = "528acbe83ba35a3a53fb97b231cb5f968c7068d1"
 
 
 def run(command, cwd, log):
@@ -77,11 +77,6 @@ def main():
     parser.add_argument("--icu-root", default=os.environ.get("ANDROID_ICU_ROOT", ""))
     parser.add_argument("--capstone-root", default=os.environ.get("ANDROID_CAPSTONE_ROOT", ""))
     args = parser.parse_args()
-    # CMake imported target 要求绝对路径；把相对 --capstone-root/--icu-root 归一化
-    if args.capstone_root:
-        args.capstone_root = str(pathlib.Path(args.capstone_root).resolve())
-    if args.icu_root:
-        args.icu_root = str(pathlib.Path(args.icu_root).resolve())
     plan = json.loads(pathlib.Path(args.plan).read_text(encoding="utf-8"))
     runner = next((item for item in plan["runners"] if item["runnerId"] == args.runner_id), None)
     if runner is None:
@@ -118,6 +113,10 @@ def main():
             overlay = pathlib.Path(__file__).resolve().parent / "android-runner"
             run(["git", "apply", "--check", str(overlay / "dart-app-accessors.patch")], blutter, log)
             run(["git", "apply", str(overlay / "dart-app-accessors.patch")], blutter, log)
+            # blutter #217 修复（blutterCommit c1caafec 的 fork 点早于该修复）：
+            # Dart 3.11+ leaf runtime call 前可能发 caller frame 非缩放加载（ldur [x29,#-8]），跳过而非断言
+            run(["git", "apply", "--check", str(overlay / "blutter-217-leafruntime.patch")], blutter, log)
+            run(["git", "apply", str(overlay / "blutter-217-leafruntime.patch")], blutter, log)
             prepare_dart_project(dart, blutter, runner, log)
             packages = root / "packages" / args.runner_id
             if not (overlay / "CMakeLists.txt").is_file():
@@ -128,14 +127,12 @@ def main():
             icu_root = pathlib.Path(args.icu_root).resolve()
             icu_include = icu_root / "include"
             icu_lib = icu_root / "lib"
-            run([args.cmake, "-S", str(dart), "-B", str(dart_build), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", "-DANDROID_ABI=arm64-v8a", "-DANDROID_PLATFORM=android-26", "-DTARGET_OS=android", "-DTARGET_ARCH=arm64", f"-DCOMPRESSED_PTRS={int(runner['compressedPointers'])}", f"-DICU_ROOT={icu_root}", f"-DCMAKE_PREFIX_PATH={packages};{icu_root}", f"-DCMAKE_FIND_ROOT_PATH={args.android_ndk};{icu_root};{packages}", "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH", "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH", "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH", f"-DICU_INCLUDE_DIR={icu_include}", f"-DICU_INCLUDE_DIRS={icu_include}", f"-DICU_LIBRARY={icu_lib / 'libicuuc.a'}", f"-DICU_LIBRARIES={icu_lib / 'libicuuc.a'}", f"-DICU_UC_LIBRARY={icu_lib / 'libicuuc.a'}", f"-DICU_DATA_LIBRARY={icu_lib / 'libicudata.a'}", "-DCMAKE_BUILD_TYPE=Release"], dart, log)
-            run([args.cmake, "--build", str(dart_build), "--parallel"], dart, log)
-            # Dart SDK 生成的 install 规则硬编码 /usr/local（CI 无权限），显式用 --prefix 落到 packages
-            run([args.cmake, "--install", str(dart_build), "--prefix", str(packages)], dart, log)
+            run([args.cmake, "-S", str(dart), "-B", str(dart_build), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", "-DANDROID_ABI=arm64-v8a", "-DANDROID_PLATFORM=android-26", "-DTARGET_OS=android", "-DTARGET_ARCH=arm64", f"-DCOMPRESSED_PTRS={int(runner['compressedPointers'])}", f"-DICU_ROOT={icu_root}", f"-DCMAKE_PREFIX_PATH={icu_root}", f"-DICU_INCLUDE_DIR={icu_include}", f"-DICU_INCLUDE_DIRS={icu_include}", f"-DICU_LIBRARY={icu_lib / 'libicuuc.a'}", f"-DICU_LIBRARIES={icu_lib / 'libicuuc.a'}", f"-DICU_UC_LIBRARY={icu_lib / 'libicuuc.a'}", f"-DICU_DATA_LIBRARY={icu_lib / 'libicudata.a'}", f"-DCMAKE_INSTALL_PREFIX={packages}", "-DCMAKE_BUILD_TYPE=Release"], dart, log)
+            run([args.cmake, "--build", str(dart_build), "--target", "install", "--parallel"], dart, log)
             dart_package = packages / "lib" / "cmake" / f"dartvm{runner['dartVersion']}_android_arm64"
             dart_package_name = f"dartvm{runner['dartVersion']}_android_arm64"
             compatibility = [f"-D{item}=ON" for item in dart_compatibility_definitions(dart)]
-            run([args.cmake, "-S", str(overlay), "-B", str(runner_build), "-G", "Ninja", f"-DBLUTTER_SOURCE={blutter / 'blutter'}", f"-DDARTLIB={dart_package_name}", f"-D{dart_package_name}_DIR={dart_package}", f"-DCMAKE_PREFIX_PATH={packages}", f"-DCMAKE_FIND_ROOT_PATH={args.android_ndk};{packages}", "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH", "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH", "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH", f"-DCAPSTONE_ROOT={args.capstone_root}", f"-DRUNNER_LIBRARY={runner['libraryName']}", f"-DRUNNER_ID={runner['runnerId']}", f"-DBLUTTER_COMMIT={runner['blutterCommit']}", f"-DCOMPRESSED_POINTERS={int(runner['compressedPointers'])}", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", "-DANDROID_ABI=arm64-v8a", "-DANDROID_PLATFORM=android-26", "-DCMAKE_BUILD_TYPE=Release", *compatibility], overlay, log)
+            run([args.cmake, "-S", str(overlay), "-B", str(runner_build), "-G", "Ninja", f"-DBLUTTER_SOURCE={blutter / 'blutter'}", f"-DDARTLIB={dart_package_name}", f"-D{dart_package_name}_DIR={dart_package}", f"-DCMAKE_PREFIX_PATH={packages}", f"-DCAPSTONE_ROOT={args.capstone_root}", f"-DRUNNER_LIBRARY={runner['libraryName']}", f"-DRUNNER_ID={runner['runnerId']}", f"-DBLUTTER_COMMIT={runner['blutterCommit']}", f"-DCOMPRESSED_POINTERS={int(runner['compressedPointers'])}", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", "-DANDROID_ABI=arm64-v8a", "-DANDROID_PLATFORM=android-26", "-DCMAKE_BUILD_TYPE=Release", *compatibility], overlay, log)
             run([args.cmake, "--build", str(runner_build), "--parallel"], overlay, log)
             candidates = list(runner_build.rglob(f"lib{runner['libraryName']}.so"))
             if len(candidates) != 1:

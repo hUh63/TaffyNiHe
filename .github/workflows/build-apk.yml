@@ -111,6 +111,24 @@ jobs:
           echo "签名材料校验通过: jks=$([ -f release/so-reverse-mcp-release.jks ] && echo 'OK' || echo '缺失') properties=OK"
           ls -l release/so-reverse-mcp-release.jks
 
+      - name: 注入最新 frida-server (Inject frida-server)
+        # frida-server 体积 ~50MB 不适合进 git（blob API/git 大对象通道不稳），
+        # 改为构建时从官方 release 下载解压覆盖 jniLibs——升级只改此版本号。
+        run: |
+          FRIDA_VERSION="17.17.0"
+          SO_PATH="app/src/main/jniLibs/arm64-v8a/libfrida_server.so"
+          URL="https://github.com/frida/frida/releases/download/${FRIDA_VERSION}/frida-server-${FRIDA_VERSION}-android-arm64.xz"
+          echo "下载 frida-server ${FRIDA_VERSION} ..."
+          curl -sL --retry 3 --max-time 500 "${URL}" -o /tmp/frida.xz || { echo "::error::frida-server 下载失败"; exit 1; }
+          export FRIDA_SO_PATH="${SO_PATH}"
+          python3 - <<'PY'
+          import lzma, os
+          data = lzma.open('/tmp/frida.xz').read()
+          open(os.environ['FRIDA_SO_PATH'], 'wb').write(data)
+          print(f"frida-server 已注入: {len(data)/1048576:.1f} MB")
+          PY
+          ls -l "${SO_PATH}"
+
       - name: 构建 arm64-v8a APK (Build APK)
         run: |
           BUILD_TYPE="${{ steps.build_type.outputs.type }}"

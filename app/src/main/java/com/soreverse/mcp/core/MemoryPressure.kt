@@ -39,7 +39,7 @@ object MemoryPressure {
      */
     fun guardAllocation(context: Context, sizeBytes: Long, what: String): String? {
         if (systemLowMemory(context)) {
-            return "系统内存不足（low memory），已停止加载$what以避免崩溃。请关闭部分后台应用后重试"
+            return "系统内存不足（low memory），已停止加载${what}以避免崩溃。请关闭部分后台应用后重试"
         }
         if (sizeBytes > 0L) {
             val rt = Runtime.getRuntime()
@@ -50,7 +50,7 @@ object MemoryPressure {
             if (sizeBytes > headroom * 0.8) {
                 val mb = sizeBytes / 1024 / 1024
                 val room = headroom / 1024 / 1024
-                return "加载$what约需 ${mb}MiB，超过当前堆余量（可用约 ${room}MiB / 上限 ${max / 1024 / 1024}MiB），已停止以防 OOM"
+                return "加载${what}约需 ${mb}MiB，超过当前堆余量（可用约 ${room}MiB / 上限 ${max / 1024 / 1024}MiB），已停止以防 OOM"
             }
         }
         return null

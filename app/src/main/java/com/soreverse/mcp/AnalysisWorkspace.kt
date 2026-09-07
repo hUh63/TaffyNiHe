@@ -163,7 +163,7 @@ internal fun AnalysisWorkspace(
                     modifier = Modifier.fillMaxWidth().height(28.dp),
                     shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                ) { ToolConsole(state, zh) }
+                ) { ToolConsole(state, zh, onAiAnalyze) }
                 Spacer(Modifier.size(4.dp))
             }
             Surface(
@@ -371,7 +371,7 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
 }
 
 @Composable
-private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
+private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String) -> Unit) {
     val tools = state.tools; val scope = rememberCoroutineScope(); val ctx = LocalContext.current
     val curDef = toolDefs.firstOrNull { it.key == state.activeTool }
     val tl = curDef?.let { if (zh) it.labelZh else it.labelEn } ?: ""

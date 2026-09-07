@@ -494,12 +494,30 @@ private fun SoReverseApp() {
                                         tab = MainTab.Settings
                                     },
                                 )
-                                MainTab.Tools -> AnalysisWorkspace(
-                                    t = t,
-                                    state = workspaceState,
-                                    context = context,
-                                    onOpenTask = { tab = MainTab.Tasks },
-                                )
+                                MainTab.Tools -> {
+                                    // AI 深度分析对话全屏层：工具页发起 AI 分析后进入聊天（状态由 analyzeState 持有）
+                                    if (analyzeState.showDeepReport) {
+                                        DeepAiChatScreen(
+                                            t = t,
+                                            settings = settings,
+                                            state = analyzeState,
+                                            scope = appScope,
+                                            deepService = deepService,
+                                            backProgress = backProgress,
+                                            onLeaveDeepReport = { requestDeepLeave { analyzeState.showDeepReport = false } },
+                                        )
+                                    } else {
+                                        AnalysisWorkspace(
+                                            t = t,
+                                            state = workspaceState,
+                                            context = context,
+                                            onOpenTask = { tab = MainTab.Tasks },
+                                            onAiAnalyze = { path ->
+                                                launchDeepAnalysis(context, path, "", settings, analyzeState, appScope, deepService, t.zh)
+                                            },
+                                        )
+                                    }
+                                }
                                 MainTab.Tasks -> TasksPage(
                                     t = t,
                                     state = workspaceState,

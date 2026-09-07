@@ -105,6 +105,8 @@ internal fun AnalysisWorkspace(
     state: WorkspaceState,
     context: android.content.Context,
     onOpenTask: () -> Unit,
+    /** AI 深度分析入口（对当前任务主文件发起，MainActivity 挂载聊天页）。 */
+    onAiAnalyze: (String) -> Unit,
 ) {
     val zh = t.zh
     val tools = state.tools
@@ -433,6 +435,15 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean) {
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", tools.decompileTarget.ifBlank { "main" }) }.getOrNull() }
                     tools.addTab(tl, "CFG", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                // AI 深度分析：跳转 AI 对话页（MainActivity 挂载 DeepAiChatScreen 进行对话）
+                SmBtn(if (zh) "AI 深度" else "AI Deep", bm, bp, {
+                    val taskPath = state.currentTask()?.mainPath
+                    if (taskPath.isNullOrBlank()) {
+                        tools.addTab(tl, if (zh) "AI" else "AI", if (zh) "请先从文件/任务入口选择工作区后再发起 AI 深度分析" else "pick a workspace first")
+                    } else {
+                        onAiAnalyze(taskPath)
+                    }
+                }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "emulate" -> {
                 SmBtn(if (zh) "模拟" else "Emu", bm, bp, { val sym = tools.emulateSymbol.trim(); if (sym.isEmpty()) return@SmBtn

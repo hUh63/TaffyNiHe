@@ -27,6 +27,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.ui.geometry.Offset
@@ -431,17 +433,27 @@ private fun SoReverseApp() {
                     containerColor = Color.Transparent,
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     bottomBar = {
-                        AppBottomNav(
-                            current = tab,
-                            zh = t.zh,
-                            onSelect = { target ->
-                                if (target != tab) {
-                                    settingsDest = SettingsDest.Root
-                                    toolCategory = null
-                                    tab = target
-                                }
-                            },
-                        )
+                        // 借鉴上游 SOMCP v1.0.21: 设置子页面与工具功能页自动隐藏底部导航栏
+                        // （沉浸全屏工作区，返回上级时恢复；隐藏/恢复带滑动动画）
+                        val inSubPage = (tab == MainTab.Settings && settingsDest != SettingsDest.Root) ||
+                            (tab == MainTab.Tools && toolCategory != null)
+                        AnimatedVisibility(
+                            visible = !inSubPage,
+                            enter = slideInVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeIn(),
+                            exit = slideOutVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeOut(),
+                        ) {
+                            AppBottomNav(
+                                current = tab,
+                                zh = t.zh,
+                                onSelect = { target ->
+                                    if (target != tab) {
+                                        settingsDest = SettingsDest.Root
+                                        toolCategory = null
+                                        tab = target
+                                    }
+                                },
+                            )
+                        }
                     },
                 ) { padding ->
                     Box(

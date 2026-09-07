@@ -297,10 +297,11 @@ internal fun CommandHubScreen(
                 )
             }
             if (running) Icon(Icons.Filled.ContentCopy, null, tint = MaterialTheme.colorScheme.primary)
-            // 上游 1.0.20 借鉴: SAF 选择器保护——部分设备(定制 ROM/无 DocumentsUI)会抛 ActivityNotFoundException
             else Icon(Icons.Filled.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable {
-                runCatching { pickTree.launch(null) }.onFailure {
-                    Toast.makeText(context, if (t.zh) "系统文件选择器不可用" else "File picker unavailable", Toast.LENGTH_SHORT).show()
+                // 无 SAF 提供方设备（部分国产 ROM）会抛 ActivityNotFoundException——捕获并提示手动路径
+                try { pickTree.launch(null) }
+                catch (e: android.content.ActivityNotFoundException) {
+                    Toast.makeText(context, if (t.zh) "系统未提供文件选择器（SAF），请先启动服务后在分析页用文件路径打开" else "No SAF picker on this device; open files by path from the analyze tab", Toast.LENGTH_LONG).show()
                 }
             })
         }

@@ -312,7 +312,15 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     TextButton(
-                        onClick = { picker.launch(arrayOf("application/octet-stream", "application/zip", "application/vnd.android.package-archive", "*/*")) },
+                        onClick = {
+                            // 借鉴上游 #78（上游未修复，塔菲做得更好）：部分国产 ROM 无 SAF 文件提供方，
+                            // picker.launch 会抛 ActivityNotFoundException——捕获后引导使用下方手动路径输入
+                            try {
+                                picker.launch(arrayOf("application/octet-stream", "application/zip", "application/vnd.android.package-archive", "*/*"))
+                            } catch (e: android.content.ActivityNotFoundException) {
+                                manualError = if (zh) "系统未提供文件选择器（SAF），请在下方直接输入文件路径" else "No file picker (SAF) on this device; type the path below"
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                     ) {

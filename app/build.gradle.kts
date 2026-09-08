@@ -194,6 +194,12 @@ dependencies {
         exclude(group = "com.github.zhkl0228", module = "capstone")
         exclude(group = "com.github.zhkl0228", module = "keystone")
     }
+    // 上游 SOMCP PR #90 同坑修复：exclude unidbg-api 会把其传递依赖
+    // com.github.zhkl0228:unicorn(提供 unicorn.Unicorn/UnicornConst/UnicornException) 一并删掉，
+    // patched jar 的 UnicornBackend/AbstractARM64Emulator 等 10 个类引用 unicorn.*，
+    // 缺依赖时 BackendFactory 回退 UnicornBackend 后 session_open 抛 CNFE unicorn_Unicorn（全 ABI）。
+    // 显式补回该 artifact（不会重新引入 unidbg-api，避免与 patched jar 冲突）。
+    implementation("com.github.zhkl0228:unicorn:1.0.15")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
 }

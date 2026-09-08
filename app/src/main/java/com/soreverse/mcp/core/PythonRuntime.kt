@@ -119,8 +119,14 @@ object PythonRuntime {
         if (!f.isFile || mark.readTextOrNull() != SUPPORT_VERSION) {
             runCatching {
                 dir.mkdirs()
-                context.assets.open("editor/$name").use { input ->
-                    f.outputStream().use { out -> input.copyTo(out) }
+                // 主源 assets/editor/；缺失时回退 assets/terminal/（taffy_cli.py 与终端 CLI 共用一份，修复扩展系统"[运行器不可用]"）
+                val input = try {
+                    context.assets.open("editor/$name")
+                } catch (e: Exception) {
+                    context.assets.open("terminal/$name")
+                }
+                input.use { stream ->
+                    f.outputStream().use { out -> stream.copyTo(out) }
                 }
                 mark.writeText(SUPPORT_VERSION)
             }

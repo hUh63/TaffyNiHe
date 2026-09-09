@@ -97,9 +97,18 @@ private const val HELP_GUIDE = """═══ 塔菲逆核 · 功能教程 ══�
 【逆向分析】
   Rizin      静态分析：函数/字符串/反汇编/ESIL/反编译
              命令速查页有 afl/pdf/izz/axt 等常用命令
+  Blutter    Flutter/Dart 产物离线分析（4 套内置 Runner
+             覆盖 Dart 3.11.5~3.13.1 / Flutter 3.41~3.47）
+  模拟执行   Unidbg 模拟 so 的 JNI/符号调用（emulate_call）
+  Frida      动态插桩：内置 server / 脚本编辑（JS 高亮）/
+             免 root gadget 重打包
   eDBG       eBPF 动态调试：断点/寄存器/内存/反编译
   抓包       本地代理元数据抓包+WS 帧+重放（详情见抓包页教程）
   动态沙箱   安装/启动目标 App、查看运行日志与崩溃
+
+【AI 对话 · 快捷入口】
+  分析页选中工作区 → 点「AI 深度」→ 进入 AI 对话页
+  （自动带工作区上下文，AI 自动调 MCP 工具出结论）
 
 【开发环境】
   Linux 环境 Alpine/Ubuntu rootfs（无 root 走 proot）
@@ -141,6 +150,19 @@ private const val WORKFLOW_GUIDE = """═══ 塔菲逆核 · 推荐工作流 
   Anthropic 兼容（中转站）· Gemini 原生 · OpenRouter · Grok
   回到 AI 深度分析页即可对话式深度逆向（AI 自动调工具）
 
+【Flutter(Dart) 分析】
+  taffy_so_open 打开 Flutter SO → 塔菲按 snapshot hash
+  + ABI + 压缩指针自动匹配内置 Blutter Runner
+  （Dart 3.11.5 / 3.12.2 / 3.13.0 / 3.13.1，覆盖
+  Flutter 3.41~3.47）→ 离线输出类/方法/反编译结构。
+  未命中版本会明确返回不支持，不会错误解析。
+
+【AI 对话分析】
+  SO 分析页选工作区 → 点「AI 深度」→ 进入 AI 对话页
+  （自动携带工作区上下文与历史消息）→ AI 自动调
+  MCP 工具（反汇编/搜索/hexdump），结论带偏移证据；
+  追问直接在输入框继续，多轮上下文自动拼接。
+
 【远程访问】
   电脑 → 手机:  隧道页启动 Cloudflare / bore，或 adb forward
   手机 → 外网:  Linux 环境 / 终端执行内正常联网工作
@@ -161,7 +183,17 @@ private const val HELP_INTERNALS = """═══ 塔菲逆核 · 实现原理 ═
   符号/ESIL 模拟，rizin-ghidra 插件出反编译。
   Standalone 模式: 纯 Java 解析 ELF（ElfParser，
   section/dynsym/字符串），不依赖 native。
-  Blutter: Flutter/Dart 产物离线分析（内置快照解析）。
+  Blutter: Flutter/Dart 产物离线分析。APK 内置 4 套
+  runner（Dart 3.11.5/3.12.2/3.13.0/3.13.1，各对应
+  libblutter_*.so + runners.json 内置清单），按
+  snapshot hash + ABI + 压缩指针自动匹配；Dart 3.13
+  单快照（vm/isolate 合一）格式已支持。
+
+【模拟执行】
+  Unidbg 0.9.9（patched jar）+ libunicorn 原生后端：
+  emulate_call 模拟 so 的 JNI/符号调用（trace 开关
+  出调用链），emulate_dump 抓内存镜像；unicorn
+  传递依赖已显式补回，BackendFactory 回退链完整。
 
 【eDBG 动态调试】
   eBPF uprobe/tracepoint 挂接目标进程，用户态
@@ -184,6 +216,13 @@ private const val HELP_INTERNALS = """═══ 塔菲逆核 · 实现原理 ═
   site-packages: jedi/pygls/jedi-language-server）。
   LSP: 长驻 jedi-language-server 子进程 + 自实现
   JSON-RPC/Content-Length 客户端（LspClient）。
+
+【Frida 动态插桩】
+  内置 frida-server 17.17.0（root 启动监听 27042，
+  libfrida_server.so 随包；CI 构建时从官方 release
+  注入保持最新）。免 root 走 gadget 重打包（见
+  MCP Skill）。分析页 Frida 面板编辑脚本（JS 高亮），
+  taffy_frida_control 管理生命周期。
 
 【扩展系统】
   插件 = plugin.py + meta.json；runner 注入 taffy_ext

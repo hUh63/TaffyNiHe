@@ -357,7 +357,7 @@ object ArchiveTools {
                         // 安全加固（Zip Slip）：拒绝绝对路径与含 .. 的条目名，落盘前 canonicalPath 校验
                         val safeName = entry.name.trimStart('/')
                         val zipSafe = !safeName.contains("..") && !safeName.contains(':') &&
-                            File(outputDir, safeName).canonicalPath.startsWith(File(outputDir).canonicalPath + File.separator)
+                            File(outputDir, safeName).canonicalPath.startsWith(outputDir.canonicalPath + File.separator)
                         if (!zipSafe) { skipped++; zis.closeEntry(); entry = zis.nextEntry; continue }
                         if (!entry.isDirectory && (filterRegex == null || filterRegex.matches(safeName))) {
                             val outFile = File(outputDir, safeName)
@@ -385,7 +385,7 @@ object ArchiveTools {
                         // 安全加固（Tar Slip + 资源上限）：拒绝绝对路径/.. 条目；条目大小上限 256MB 防 OOM
                         val tarName = hdr.name.trimStart('/')
                         val tarSafe = !tarName.contains("..") && !tarName.contains(':') &&
-                            File(outputDir, tarName).canonicalPath.startsWith(File(outputDir).canonicalPath + File.separator)
+                            File(outputDir, tarName).canonicalPath.startsWith(outputDir.canonicalPath + File.separator)
                         if (!tarSafe) {
                             val skipAll = hdr.size
                             var skippedBytes = 0L

@@ -205,9 +205,22 @@ object PermissionManager {
 
     private fun execDhizuku(command: String, timeoutSec: Long): RootShell.Result = runCatching {
         val proc = Dhizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-        val out = proc.inputStream.bufferedReader().readText()
-        val err = proc.errorStream.bufferedReader().readText()
-        val code = proc.waitFor()
+        // 安全修复：stdout/stderr 并行读取（避免管道缓冲区写满互相等待的死锁）+ waitFor 超时强杀
+        val outFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+            runCatching { proc.inputStream.bufferedReader().use { it.readText() } }.getOrDefault("")
+        }
+        val errFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+            runCatching { proc.errorStream.bufferedReader().use { it.readText() } }.getOrDefault("")
+        }
+        val finished = proc.waitFor(timeoutSec.coerceAtLeast(1), java.util.concurrent.TimeUnit.SECONDS)
+        if (!finished) {
+            proc.destroy()
+            val partial = runCatching { outFuture.getNow("") }.getOrDefault("")
+            return@runCatching RootShell.Result(-1, partial.trim(), "Dhizuku exec timeout(${timeoutSec}s)")
+        }
+        val code = proc.exitValue()
+        val out = runCatching { outFuture.get(2, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault("")
+        val err = runCatching { errFuture.get(2, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault("")
         RootShell.Result(code, out.trim(), err.trim())
     }.getOrElse { RootShell.Result(-1, "", it.message ?: "Dhizuku exec failed") }
 

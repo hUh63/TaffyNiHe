@@ -68,6 +68,11 @@ class McpHttpServer(private val context: Context, private val port: Int, private
     @Volatile private var heavyPermits = 1
     private var heavyGate: Semaphore = Semaphore(1)
 
+    /** 工具执行线程池：配合调用级超时使用；daemon 线程不阻止进程退出。 */
+    private val toolExecutor = java.util.concurrent.Executors.newCachedThreadPool { r ->
+        Thread(r).apply { isDaemon = true; name = "mcp-tool-worker" }
+    }
+
     // v2.1.0: Session management for Streamable HTTP transport
     private val sessions = ConcurrentHashMap<String, Long>() // sessionId -> createdAt
     private val SESSION_TIMEOUT_MS = 30 * 60 * 1000L // 30 minutes
@@ -631,12 +636,12 @@ $historyRows
         // （超时后底层线程被 interrupt 标记，IO 收尾可能仍在后台进行，结果丢弃）
         val future = toolExecutor.submit(java.util.concurrent.Callable { callToolPayload(name, args) })
         val timeoutSec = settings.toolCallTimeoutSec.coerceIn(30, 7200)
-        try {
+        return try {
             future.get(timeoutSec.toLong(), TimeUnit.SECONDS)
         } catch (e: java.util.concurrent.TimeoutException) {
             future.cancel(true)
             AppLog.w("Tool $name timed out after ${timeoutSec}s; detached")
-            err("TOOL_TIMEOUT", "Tool '$name' exceeded ${timeoutSec}s and was detached. It may still be running in the background; check stats/logs for its outcome.", "tool", name, "timeoutSec", timeoutSec)
+            err("TOOL_TIMEOUT", "Tool '$name' exceeded ${timeoutSec}s and was detached. It may still be running in the background; check stats/logs for its outcome.", "tool", name, "timeoutSec" to timeoutSec)
         } catch (e: java.util.concurrent.ExecutionException) {
             val cause = e.cause ?: e
             AppLog.e("Tool $name threw an unexpected error", cause)

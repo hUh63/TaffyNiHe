@@ -39,7 +39,7 @@ object LogcatTools {
         }
         val proc = ProcessBuilder(cmd).redirectErrorStream(true).start()
         // 安全加固：限量读取 + 超时终止，防止大输出 OOM 与永久阻塞
-        val out = proc.inputStream.bufferedReader().use { r -> r.readNBytes(2_000_000) }.decodeToString()
+        val out = proc.inputStream.use { it.readNBytes(2_000_000) }.decodeToString()
         val finished = proc.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)
         if (!finished) proc.destroy()
         return if (finished) out else out + "\n[logcat 超时截断]"

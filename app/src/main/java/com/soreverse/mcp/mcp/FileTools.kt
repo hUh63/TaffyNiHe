@@ -157,7 +157,7 @@ object FileTools {
                 // 安全加固：text 模式全量读入前检查大小（base64/hex 模式已有 maxBytes，此处对齐）
                 val maxTextBytes = a.intValue("maxBytes", 2_000_000).coerceIn(1, 64_000_000)
                 if (file.length() > maxTextBytes) {
-                    return err("FILE_TOO_LARGE", "文件 ${file.length()} 字节超过 text 模式上限 $maxTextBytes（可用 base64 模式分段读取）", "path", path)
+                    return@EngineToolHandler err("FILE_TOO_LARGE", "文件 ${file.length()} 字节超过 text 模式上限 $maxTextBytes（可用 base64 模式分段读取）", "path", path)
                 }
                 val lines = file.readLines(Charset.forName(encoding))
                 val totalLines = lines.size
@@ -312,7 +312,7 @@ object FileTools {
 
         // 安全加固：replace 需全文载入，超限拒绝
         if (file.length() > 64_000_000L) {
-            return err("FILE_TOO_LARGE", "文件 ${file.length()} 字节超过 replace 上限 64MB", "path", path)
+            return@EngineToolHandler err("FILE_TOO_LARGE", "文件 ${file.length()} 字节超过 replace 上限 64MB", "path", path)
         }
         val text = file.readText(Charset.forName(encoding))
 
@@ -444,13 +444,13 @@ object FileTools {
         val maxDiffBytes = 16_000_000L
         val linesA = if (a.has("pathA") && a.str("pathA").isNotBlank()) {
             val fa = File(a.str("pathA"))
-            if (fa.length() > maxDiffBytes) return err("FILE_TOO_LARGE", "pathA 超过 diff 上限 16MB", "path", a.str("pathA"))
+            if (fa.length() > maxDiffBytes) return@EngineToolHandler err("FILE_TOO_LARGE", "pathA 超过 diff 上限 16MB", "path", a.str("pathA"))
             fa.readLines(Charset.forName(encoding))
         } else a.str("textA").lines()
 
         val linesB = if (a.has("pathB") && a.str("pathB").isNotBlank()) {
             val fb = File(a.str("pathB"))
-            if (fb.length() > maxDiffBytes) return err("FILE_TOO_LARGE", "pathB 超过 diff 上限 16MB", "path", a.str("pathB"))
+            if (fb.length() > maxDiffBytes) return@EngineToolHandler err("FILE_TOO_LARGE", "pathB 超过 diff 上限 16MB", "path", a.str("pathB"))
             fb.readLines(Charset.forName(encoding))
         } else a.str("textB").lines()
 

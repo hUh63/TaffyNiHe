@@ -54,6 +54,10 @@ object ApkEditTools {
             val manifest = File(dirPath, "AndroidManifest.xml")
             if (!manifest.exists()) return err("FILE_NOT_FOUND", "AndroidManifest.xml 不存在: ${manifest.absolutePath}", "dir", dirPath)
 
+            // 安全加固：manifest 编辑前大小校验（正常 manifest 远小于此）
+            if (manifest.length() > 4_000_000L) {
+                return err("FILE_TOO_LARGE", "AndroidManifest.xml 过大（${manifest.length()} 字节，上限 4MB）", "dir", dirPath)
+            }
             var xml = manifest.readText()
             return runCatching {
                 when (action) {

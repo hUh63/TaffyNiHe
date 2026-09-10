@@ -155,6 +155,11 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("language", "system") ?: "system"
         set(value) = prefs.edit().putString("language", value).apply()
 
+    /** MCP 工具调用级超时（秒）——超时后调用方收到 TOOL_TIMEOUT，底层线程被中断标记（IO 可能仍收尾）。 */
+    var toolCallTimeoutSec: Int
+        get() = prefs.getString("toolCallTimeoutSec", "600")?.toIntOrNull() ?: 600
+        set(value) = prefs.edit().putString("toolCallTimeoutSec", value.coerceIn(30, 7200).toString()).apply()
+
     var themeMode: String
         get() = prefs.getString("themeMode", "system") ?: "system"
         set(value) = prefs.edit().putString("themeMode", if (value in setOf("system", "light", "dark")) value else "system").apply()

@@ -627,11 +627,20 @@ $historyRows
         // 的参数引用塔菲自身 APK 或内置 SO 时拒绝, 防止 MCP 客户端/桥接工具
         // 读改运行中应用的文件或破坏自身完整性校验。
         SelfArtifactGuard.findSelfArg(context, args)?.let { return SelfArtifactGuard.forbidden(it, name) }
-        return try {
-            callToolPayload(name, args)
-        } catch (t: Throwable) {
-            AppLog.e("Tool $name threw an unexpected error", t)
-            err("TOOL_ERROR", "Tool '$name' failed unexpectedly: ${t.message}", "tool", name)
+        // 服务级调用超时：卡死的工具不再永久占用 heavy 闸与工作线程
+        // （超时后底层线程被 interrupt 标记，IO 收尾可能仍在后台进行，结果丢弃）
+        val future = toolExecutor.submit(java.util.concurrent.Callable { callToolPayload(name, args) })
+        val timeoutSec = settings.toolCallTimeoutSec.coerceIn(30, 7200)
+        try {
+            future.get(timeoutSec.toLong(), TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            future.cancel(true)
+            AppLog.w("Tool $name timed out after ${timeoutSec}s; detached")
+            err("TOOL_TIMEOUT", "Tool '$name' exceeded ${timeoutSec}s and was detached. It may still be running in the background; check stats/logs for its outcome.", "tool", name, "timeoutSec", timeoutSec)
+        } catch (e: java.util.concurrent.ExecutionException) {
+            val cause = e.cause ?: e
+            AppLog.e("Tool $name threw an unexpected error", cause)
+            err("TOOL_ERROR", "Tool '$name' failed unexpectedly: ${cause.message}", "tool", name)
         } finally {
             if (heavy) acquiredGate.release()
         }

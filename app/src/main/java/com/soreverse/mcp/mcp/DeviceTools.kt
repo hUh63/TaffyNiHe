@@ -639,10 +639,21 @@ object DeviceTools {
                 val file = File(path)
                 file.parentFile?.mkdirs()
                 var total = 0L
+                val maxDownload = 512L * 1024 * 1024
                 conn.inputStream.use { input ->
                     file.outputStream().use { out ->
                         val buf = ByteArray(8192)
-                        while (true) { val n = input.read(buf); if (n < 0) break; out.write(buf, 0, n); total += n }
+                        while (true) {
+                            val n = input.read(buf); if (n < 0) break
+                            total += n
+                            // 安全加固：下载磁盘配额，防写满存储
+                            if (total > maxDownload) {
+                                out.close()
+                                file.delete()
+                                return err("DOWNLOAD_TOO_LARGE", "下载超过 512MB 配额已中止", "url", urlStr)
+                            }
+                            out.write(buf, 0, n)
+                        }
                     }
                 }
                 conn.disconnect()

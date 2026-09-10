@@ -272,7 +272,9 @@ object AdvancedTools {
                             val entry = zf.getEntry(entryName)
                                 ?: return err("ENTRY_NOT_FOUND", "ZIP 条目不存在: $entryName", "entry", entryName)
                             zf.getInputStream(entry).use { stream ->
-                                val allBytes = stream.readBytes()
+                                val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
+                                    if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
+                                    val allBytes = guarded
                                 val end = if (maxLen > 0) minOf(offset + maxLen, allBytes.size) else allBytes.size
                                 val slice = if (offset < allBytes.size) allBytes.sliceArray(offset until end) else ByteArray(0)
                                 val hex = slice.joinToString(" ") { "%02X".format(it) }
@@ -299,7 +301,9 @@ object AdvancedTools {
                             val entry = zf.getEntry(entryName)
                                 ?: return err("ENTRY_NOT_FOUND", "ZIP 条目不存在: $entryName", "entry", entryName)
                             zf.getInputStream(entry).use { stream ->
-                                val allBytes = stream.readBytes()
+                                val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
+                                    if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
+                                    val allBytes = guarded
                                 val expectedBytes = expectedHex.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
                                 val actualBytes = if (offset < allBytes.size) allBytes.sliceArray(offset until minOf(offset + expectedBytes.size, allBytes.size)) else ByteArray(0)
                                 val match = actualBytes.contentEquals(expectedBytes)
@@ -328,7 +332,9 @@ object AdvancedTools {
                             // CAS 校验
                             if (expectedHex.isNotBlank()) {
                                 zf.getInputStream(entry).use { stream ->
-                                    val allBytes = stream.readBytes()
+                                    val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
+                                    if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
+                                    val allBytes = guarded
                                     val expectedBytes = expectedHex.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
                                     val actualBytes = if (offset < allBytes.size) allBytes.sliceArray(offset until minOf(offset + expectedBytes.size, allBytes.size)) else ByteArray(0)
                                     if (!actualBytes.contentEquals(expectedBytes)) {
@@ -345,7 +351,9 @@ object AdvancedTools {
                             // 写入: 重建 ZIP
                             val origSize = entry.size
                             zf.getInputStream(entry).use { stream ->
-                                val origBytes = stream.readBytes()
+                                val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
+                                    if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
+                                    val origBytes = guarded
                                 val newBytes = origBytes.copyOf()
                                 if (offset + writeBytes.size > newBytes.size) {
                                     return err("OUT_OF_BOUNDS",

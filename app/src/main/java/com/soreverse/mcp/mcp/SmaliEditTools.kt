@@ -33,6 +33,15 @@ object SmaliEditTools {
     /** APK/输入大小上限(512MB), 防大 APK 全局替换 OOM */
     private const val MAX_INPUT_BYTES = 512L * 1024L * 1024L
 
+    /** 安全加固：装载前大小守卫（超限返回 err，null 表示放行）。 */
+    private fun sizeGuard(f: java.io.File?): JSONObject? {
+        if (f == null || !f.isFile) return null
+        if (f.length() > MAX_INPUT_BYTES) {
+            return err("FILE_TOO_LARGE", "文件 ${f.length()} 字节超过处理上限 512MB: ${f.name}")
+        }
+        return null
+    }
+
 
     /** Smali 增量编辑 */
     val smaliEdit: ToolHandler = object : ToolHandler {
@@ -141,6 +150,7 @@ object SmaliEditTools {
                 val smaliFile = File(outDir, className.replace('.', '/') + ".smali")
                 if (!smaliFile.isFile) return err("SMALI_NOT_FOUND", "类 $className 的 smali 文件未找到(可能内部类)", "className", className)
 
+                sizeGuard(smaliFile)?.let { return it }
                 val smaliText = smaliFile.readText()
                 outDir.deleteRecursively()
 
@@ -192,6 +202,7 @@ object SmaliEditTools {
                 if (!success) return err("SMALI_ASSEMBLE_FAILED", "smali 重编失败(检查语法), 类: $className", "className", className)
 
                 // 5. 写回 APK: 重建 ZIP, 替换目标 DEX
+                sizeGuard(newDex)?.let { return it }
                 val newDexBytes = newDex.readBytes()
                 newDex.delete()
                 tempDex.delete()
@@ -302,6 +313,7 @@ object SmaliEditTools {
                     outDir.deleteRecursively()
                     return err("SMALI_NOT_FOUND", "类 $className 的 smali 未找到(可能内部类)", "className", className)
                 }
+                sizeGuard(smaliFile)?.let { return it }
                 val smaliText = smaliFile.readText()
                 val patched = patchMethodInstruction(smaliText, method, from, to, occurrence)
                 if (patched == null) {
@@ -322,6 +334,7 @@ object SmaliEditTools {
                 if (!success) return err("SMALI_ASSEMBLE_FAILED", "指令补丁后 smali 重编失败(检查 to 指令语法), 类: $className", "to", to)
 
                 // 4. 写回 APK
+                sizeGuard(newDex)?.let { return it }
                 val newDexBytes = newDex.readBytes()
                 newDex.delete()
                 tempDex.delete()
@@ -401,6 +414,7 @@ object SmaliEditTools {
                         val allSmali = if (scope == "global") outDir.walkTopDown().filter { it.isFile && it.extension == "smali" }.toList()
                             else targets.map { File(outDir, it) }.filter { it.isFile }
                         for (smaliFile in allSmali) {
+                            sizeGuard(smaliFile)?.let { return it }
                             val text = smaliFile.readText()
                             val patched = if (scope == "method") {
                                 replaceMethodStringLiteral(text, method, oldString, newString, occurrence)
@@ -424,6 +438,7 @@ object SmaliEditTools {
                             newDex.delete(); tempDex.delete()
                             return err("SMALI_ASSEMBLE_FAILED", "字符串替换后 smali 重编失败, dex: ${dexEntry.name}", "newString", newString)
                         }
+                        sizeGuard(newDex)?.let { return it }
                         results[dexEntry.name] = newDex.readBytes()
                         newDex.delete()
                         dexTouched++

@@ -38,7 +38,11 @@ object LogcatTools {
             if (r.stderr.isNotBlank()) return r.stderr + "\n" + r.stdout
         }
         val proc = ProcessBuilder(cmd).redirectErrorStream(true).start()
-        return proc.inputStream.bufferedReader().readText()
+        // 安全加固：限量读取 + 超时终止，防止大输出 OOM 与永久阻塞
+        val out = proc.inputStream.bufferedReader().use { r -> r.readNBytes(2_000_000) }.decodeToString()
+        val finished = proc.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)
+        if (!finished) proc.destroy()
+        return if (finished) out else out + "\n[logcat 超时截断]"
     }
 
     /** 后台采集进程引用 */
@@ -292,7 +296,7 @@ object LogcatTools {
                     "stop" -> {
                         captureProcess?.destroy()
                         captureProcess = null
-                        val lineCount = captureFile?.readLines()?.size ?: 0
+                        val lineCount = captureFile?.takeIf { it.exists() }?.inputStream()?.bufferedReader()?.useLines { seq -> seq.count() } ?: 0
                         val durationSec = if (captureStartedAt > 0) (System.currentTimeMillis() - captureStartedAt) / 1000 else 0
                         captureStartedAt = 0
                         ok(JSONObject()
@@ -305,7 +309,7 @@ object LogcatTools {
 
                     "status" -> {
                         val running = captureProcess != null && captureProcess!!.isAlive
-                        val lineCount = captureFile?.takeIf { it.exists() }?.readLines()?.size ?: 0
+                        val lineCount = captureFile?.takeIf { it.exists() }?.inputStream()?.bufferedReader()?.useLines { seq -> seq.count() } ?: 0
                         val durationSec = if (captureStartedAt > 0) (System.currentTimeMillis() - captureStartedAt) / 1000 else 0
                         ok(JSONObject()
                             .put("action", "status")
@@ -325,7 +329,10 @@ object LogcatTools {
                         val maxLines = args.intValue("lines", 500).coerceAtMost(5000)
                         val keyword = args.str("keyword")
                         val regex = args.str("regex")
-                        val allLines = file.readLines()
+                        // 安全加固：限量读取（capture 文件可能持续增长）——固定容量尾队列保留最新 5 万行
+                        val tail = java.util.ArrayDeque<String>(50_000)
+                        file.inputStream().bufferedReader().useLines { seq -> seq.forEach { l -> if (tail.size >= 50_000) tail.removeFirst(); tail.addLast(l) } }
+                        val allLines = tail.toList()
                         val filtered = allLines.filter { l ->
                             val kwOk = keyword.isBlank() || l.contains(keyword, ignoreCase = true)
                             val reOk = regex.isBlank() || runCatching {

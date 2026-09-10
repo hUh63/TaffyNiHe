@@ -154,6 +154,11 @@ object FileTools {
                 val encoding = a.str("encoding", "UTF-8").ifBlank { "UTF-8" }
                 val offset = (a.intValue("offset", 1) - 1).coerceAtLeast(0)
                 val limit = a.intValue("limit", 500).coerceIn(1, 10000)
+                // 安全加固：text 模式全量读入前检查大小（base64/hex 模式已有 maxBytes，此处对齐）
+                val maxTextBytes = a.intValue("maxBytes", 2_000_000).coerceIn(1, 64_000_000)
+                if (file.length() > maxTextBytes) {
+                    return err("FILE_TOO_LARGE", "文件 ${file.length()} 字节超过 text 模式上限 $maxTextBytes（可用 base64 模式分段读取）", "path", path)
+                }
                 val lines = file.readLines(Charset.forName(encoding))
                 val totalLines = lines.size
                 val page = lines.drop(offset).take(limit)
@@ -305,6 +310,10 @@ object FileTools {
         val ignoreCase = a.bool("ignoreCase", false)
         val backup = a.bool("backup", true)
 
+        // 安全加固：replace 需全文载入，超限拒绝
+        if (file.length() > 64_000_000L) {
+            return err("FILE_TOO_LARGE", "文件 ${file.length()} 字节超过 replace 上限 64MB", "path", path)
+        }
         val text = file.readText(Charset.forName(encoding))
 
         val resultText = if (a.bool("regex", false)) {
@@ -431,12 +440,18 @@ object FileTools {
         val encoding = a.str("encoding", "UTF-8").ifBlank { "UTF-8" }
         val contextLines = a.intValue("contextLines", 3).coerceIn(0, 50)
 
+        // 安全加固：diff 两侧文件均有大小上限
+        val maxDiffBytes = 16_000_000L
         val linesA = if (a.has("pathA") && a.str("pathA").isNotBlank()) {
-            File(a.str("pathA")).readLines(Charset.forName(encoding))
+            val fa = File(a.str("pathA"))
+            if (fa.length() > maxDiffBytes) return err("FILE_TOO_LARGE", "pathA 超过 diff 上限 16MB", "path", a.str("pathA"))
+            fa.readLines(Charset.forName(encoding))
         } else a.str("textA").lines()
 
         val linesB = if (a.has("pathB") && a.str("pathB").isNotBlank()) {
-            File(a.str("pathB")).readLines(Charset.forName(encoding))
+            val fb = File(a.str("pathB"))
+            if (fb.length() > maxDiffBytes) return err("FILE_TOO_LARGE", "pathB 超过 diff 上限 16MB", "path", a.str("pathB"))
+            fb.readLines(Charset.forName(encoding))
         } else a.str("textB").lines()
 
         val labelA = if (a.has("pathA")) a.str("pathA") else "textA"

@@ -34,8 +34,11 @@ object CaptureTools {
         }
         return runCatching {
             val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
-            val out = p.inputStream.bufferedReader().readText()
-            p.waitFor() to out
+            // 安全加固：限量读取 + 超时终止，防止卡死 MCP 工作线程
+            val out = p.inputStream.bufferedReader().use { r -> r.readNBytes(2_000_000) }.decodeToString()
+            val finished = p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) p.destroy()
+            if (finished) p.exitValue() to out else (-1 to (out + "\n[执行超时(15s) 已终止]"))
         }.getOrDefault(-1 to "exec failed")
     }
 
@@ -90,11 +93,18 @@ object CaptureTools {
                     val iface = args.str("interface", "any")
                     val filter = args.str("filter")
                     // 命令注入防护：iface/filter 拼入 tcpdump 命令行，必须校验安全字符
-                    if (!com.soreverse.mcp.core.RootShell.isSafeArg(iface)) {
-                        return err("BAD_INTERFACE", "interface 含非法字符（仅允许字母数字._/- 和空格）", "interface", iface)
+                    if (!Regex("^[a-zA-Z0-9._]+$").matches(iface)) {
+                        return err("BAD_INTERFACE", "interface 格式非法（仅允许字母数字._，如 any/wlan0/eth0）", "interface", iface)
                     }
-                    if (filter.isNotBlank() && !com.soreverse.mcp.core.RootShell.isSafeArg(filter)) {
-                        return err("BAD_FILTER", "filter 含非法字符（仅允许字母数字._/- 和空格，不支持 shell 元字符）", "filter", filter)
+                    if (filter.isNotBlank()) {
+                        if (!com.soreverse.mcp.core.RootShell.isSafeArg(filter)) {
+                            return err("BAD_FILTER", "filter 含非法字符（不支持 shell 元字符）", "filter", filter)
+                        }
+                        // 参数注入防护：BPF 过滤表达式按空格分词后，任何以 - 开头的 token（tcpdump 选项）都拒绝
+                        val badToken = filter.split(' ').firstOrNull { it.startsWith("-") }
+                        if (badToken != null) {
+                            return err("BAD_FILTER", "filter 不允许包含选项参数（发现: $badToken）", "filter", filter)
+                        }
                     }
                     val name = "taffy_capture_${System.currentTimeMillis()}.pcap"
                     val path = "/data/local/tmp/$name"

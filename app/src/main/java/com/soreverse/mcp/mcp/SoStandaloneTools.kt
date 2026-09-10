@@ -49,6 +49,10 @@ object SoStandaloneTools {
             if (!input.isFile) return err("FILE_NOT_FOUND", "文件不存在: $inputPath", "path", inputPath)
 
             return runCatching {
+                                java.nio.file.Files.size(input.toPath()).let { sz ->
+                    if (sz > 512L * 1024 * 1024) return err("FILE_TOO_LARGE", "文件 $sz 字节超过处理上限 512MB")
+                    com.soreverse.mcp.core.MemoryPressure.guardAllocation(ctx.context, sz, "SO 文件")?.let { g -> return err("MEMORY_PRESSURE", g) }
+                }
                 val data = Files.readAllBytes(input.toPath())
                 val offset = args.str("offset").ifBlank { null }
                 val count = args.intValue("count", 64).coerceIn(1, 5000)
@@ -128,6 +132,10 @@ object SoStandaloneTools {
             if (!input.isFile) return err("FILE_NOT_FOUND", "文件不存在: $inputPath", "path", inputPath)
 
             return runCatching {
+                                java.nio.file.Files.size(input.toPath()).let { sz ->
+                    if (sz > 512L * 1024 * 1024) return err("FILE_TOO_LARGE", "文件 $sz 字节超过处理上限 512MB")
+                    com.soreverse.mcp.core.MemoryPressure.guardAllocation(ctx.context, sz, "SO 文件")?.let { g -> return err("MEMORY_PRESSURE", g) }
+                }
                 val data = Files.readAllBytes(input.toPath())
                 val parser = com.soreverse.mcp.engine.ElfParser(data)
                 val elf = parser.parse()
@@ -186,6 +194,10 @@ object SoStandaloneTools {
             if (!input.isFile) return err("FILE_NOT_FOUND", "文件不存在: $inputPath", "path", inputPath)
 
             return runCatching {
+                                java.nio.file.Files.size(input.toPath()).let { sz ->
+                    if (sz > 512L * 1024 * 1024) return err("FILE_TOO_LARGE", "文件 $sz 字节超过处理上限 512MB")
+                    com.soreverse.mcp.core.MemoryPressure.guardAllocation(ctx.context, sz, "SO 文件")?.let { g -> return err("MEMORY_PRESSURE", g) }
+                }
                 val data = Files.readAllBytes(input.toPath())
                 val offset = args.intValue("offset", 0).coerceIn(0, data.size)
                 val length = args.intValue("length", 256).coerceIn(1, 65536)

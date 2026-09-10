@@ -23,6 +23,8 @@ import java.util.zip.GZIPOutputStream
  */
 object ArchiveTools {
 
+    private const val MAX_TAR_ENTRY_BYTES = 256L * 1024 * 1024
+
     // ── 工具函数 ──
 
     private fun detectFormat(path: String): String {
@@ -352,8 +354,13 @@ object ArchiveTools {
                 ZipInputStream(FileInputStream(file)).use { zis ->
                     var entry = zis.nextEntry
                     while (entry != null) {
-                        if (!entry.isDirectory && (filterRegex == null || filterRegex.matches(entry.name))) {
-                            val outFile = File(outputDir, entry.name)
+                        // 安全加固（Zip Slip）：拒绝绝对路径与含 .. 的条目名，落盘前 canonicalPath 校验
+                        val safeName = entry.name.trimStart('/')
+                        val zipSafe = !safeName.contains("..") && !safeName.contains(':') &&
+                            File(outputDir, safeName).canonicalPath.startsWith(File(outputDir).canonicalPath + File.separator)
+                        if (!zipSafe) { skipped++; zis.closeEntry(); entry = zis.nextEntry; continue }
+                        if (!entry.isDirectory && (filterRegex == null || filterRegex.matches(safeName))) {
+                            val outFile = File(outputDir, safeName)
                             outFile.parentFile?.mkdirs()
                             if (!outFile.exists() || overwrite) {
                                 FileOutputStream(outFile).use { fos -> zis.copyTo(fos) }
@@ -361,7 +368,7 @@ object ArchiveTools {
                                 extracted++
                             } else skipped++
                         } else if (entry.isDirectory) {
-                            File(outputDir, entry.name).mkdirs()
+                            File(outputDir, safeName).mkdirs()
                         } else skipped++
                         zis.closeEntry()
                         entry = zis.nextEntry
@@ -375,6 +382,20 @@ object ArchiveTools {
                 input.buffered().use { bis ->
                     while (true) {
                         val hdr = TarHeader.read(bis) ?: break
+                        // 安全加固（Tar Slip + 资源上限）：拒绝绝对路径/.. 条目；条目大小上限 256MB 防 OOM
+                        val tarName = hdr.name.trimStart('/')
+                        val tarSafe = !tarName.contains("..") && !tarName.contains(':') &&
+                            File(outputDir, tarName).canonicalPath.startsWith(File(outputDir).canonicalPath + File.separator)
+                        if (!tarSafe) {
+                            val skipAll = hdr.size
+                            var skippedBytes = 0L
+                            while (skippedBytes < skipAll) { val n = bis.skip(minOf(skipAll - skippedBytes, 1 shl 20)); if (n <= 0) break; skippedBytes += n }
+                            val tp = (TarHeader.BLOCK_SIZE - (hdr.size % TarHeader.BLOCK_SIZE)) % TarHeader.BLOCK_SIZE
+                            var tpLeft = tp
+                            while (tpLeft > 0) { val n = bis.skip(tpLeft); if (n <= 0) break; tpLeft -= n }
+                            continue
+                        }
+                        if (hdr.size > MAX_TAR_ENTRY_BYTES) throw IllegalStateException("tar 条目过大: $tarName (${hdr.size} bytes)")
                         val data = ByteArray(hdr.size.toInt())
                         var totalRead = 0
                         while (totalRead < hdr.size) {
@@ -387,7 +408,7 @@ object ArchiveTools {
                         var padRemaining = pad
                         while (padRemaining > 0) { val s = bis.skip(padRemaining); if (s <= 0) break; padRemaining -= s }
 
-                        val name = hdr.name
+                        val name = tarName
                         if (filterRegex == null || filterRegex.matches(name)) {
                             val outFile = File(outputDir, name)
                             if (hdr.typeflag == '5'.code.toByte() || name.endsWith("/")) {

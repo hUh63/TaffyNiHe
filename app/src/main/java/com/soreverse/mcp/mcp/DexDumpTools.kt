@@ -2,6 +2,7 @@ package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.BinaryManager
 import com.soreverse.mcp.core.PermissionManager
+import com.soreverse.mcp.core.RootShell
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -19,6 +20,18 @@ import org.json.JSONObject
  * 环境要求：ARM64 + Root + eBPF（内核 BPF 可用）。
  */
 object DexDumpTools {
+
+    // 安全加固：包名/路径/库名白名单，防 root shell 命令注入（参数直接拼特权命令串）
+    private val PKG_RE = Regex("^[A-Za-z0-9._]+$")
+    private val LIB_RE = Regex("^[A-Za-z0-9._-]+[.]so$")
+
+    private fun validPkg(p: String): Boolean = PKG_RE.matches(p)
+    private fun validLib(l: String): Boolean = LIB_RE.matches(l)
+    private fun validDir(d: String): Boolean = d.isNotBlank() && RootShell.isSafeArg(d) && !d.contains("..")
+    private fun badPkg() = err("INVALID_ARGUMENT", "package 格式非法（仅允许字母数字与点）")
+    private fun badDir() = err("INVALID_ARGUMENT", "路径包含非法字符")
+    private fun badLib() = err("INVALID_ARGUMENT", "lib 格式非法（应为 xxx.so）")
+
 
     private const val BIN = "/data/local/tmp/eBPFDexDumper"
     private const val OUT_DIR = "/data/local/tmp/dex_out"
@@ -77,7 +90,9 @@ object DexDumpTools {
                         if (!BinaryManager.isDeployed(BinaryManager.DEXDUMP)) return err("NOT_INSTALLED", "未部署，先 install", "action", "dump")
                         val pkg = args.str("package")
                         if (pkg.isBlank()) return err("INVALID_ARGUMENT", "需要 package 参数", "action", "dump")
+                        if (!validPkg(pkg)) return badPkg()
                         val out = args.str("output", OUT_DIR)
+                        if (!validDir(out)) return badDir()
                         val timeout = args.intValue("timeoutSec", 30).coerceIn(5, 300)
                         val r = PermissionManager.exec(
                             "$BIN dump -n $pkg -o $out 2>&1 | tail -c 6000",
@@ -95,6 +110,7 @@ object DexDumpTools {
                         if (!PermissionManager.isRootAvailable()) return err("NO_ROOT", "需要 Root 权限", "action", "fix")
                         if (!BinaryManager.isDeployed(BinaryManager.DEXDUMP)) return err("NOT_INSTALLED", "未部署，先 install", "action", "fix")
                         val dir = args.str("dir", OUT_DIR)
+                        if (!validDir(dir)) return badDir()
                         val r = PermissionManager.exec("$BIN fix -d $dir 2>&1 | tail -c 6000", timeoutSec = 120)
                         ok(JSONObject().put("action", "fix").put("dir", dir).put("exitCode", r.code).put("output", r.stdout.ifBlank { r.stderr }))
                     }
@@ -104,7 +120,9 @@ object DexDumpTools {
                         if (!BinaryManager.isDeployed(BinaryManager.DEXDUMP)) return err("NOT_INSTALLED", "未部署，先 install", "action", "dumpso")
                         val pkg = args.str("package")
                         if (pkg.isBlank()) return err("INVALID_ARGUMENT", "需要 package 参数", "action", "dumpso")
+                        if (!validPkg(pkg)) return badPkg()
                         val lib = args.str("lib")
+                        if (lib.isNotBlank() && !validLib(lib)) return badLib()
                         val libArg = if (lib.isNotBlank()) " --lib $lib" else ""
                         val r = PermissionManager.exec("$BIN dumpso -n $pkg$libArg 2>&1 | tail -c 6000", timeoutSec = 60)
                         ok(JSONObject().put("action", "dumpso").put("package", pkg).put("exitCode", r.code).put("output", r.stdout.ifBlank { r.stderr }))
@@ -119,6 +137,7 @@ object DexDumpTools {
 
                     "read" -> {
                         val dir = args.str("dir", OUT_DIR)
+                        if (!validDir(dir)) return badDir()
                         val files = PermissionManager.exec("find $dir -type f 2>/dev/null | head -50", timeoutSec = 10)
                         val dexList = PermissionManager.exec("ls -la $dir/final 2>/dev/null || ls -la $dir", timeoutSec = 10)
                         ok(JSONObject()

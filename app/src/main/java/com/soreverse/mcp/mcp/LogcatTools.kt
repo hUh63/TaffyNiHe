@@ -28,6 +28,11 @@ object LogcatTools {
             PermissionManager.isDhizukuAvailable() ||
             PermissionManager.hasReadLogs()
         if (hasPriv) {
+            // 安全加固：特权通道按字符串拼接经 shell 解释，逐元素拒绝 shell 元字符
+            val dangerous = Regex("[;&|`$<>\\n]")
+            if (cmd.any { dangerous.containsMatchIn(it) }) {
+                return "权限通道拒绝执行含 shell 元字符的命令"
+            }
             val r = PermissionManager.exec(cmd.joinToString(" "), timeoutSec = 20)
             if (r.code == 0 && r.stdout.isNotBlank()) return r.stdout
             if (r.stderr.isNotBlank()) return r.stderr + "\n" + r.stdout
@@ -77,6 +82,11 @@ object LogcatTools {
             // 多 tag：每个 tag 一条 -e 正则（OR 关系）
             val tagList = (tags.split(',').map { it.trim() }.filter { it.isNotBlank() } +
                 listOfNotNull(tag.ifBlank { null })).distinct()
+            // 安全加固：特权通道 exec 是字符串拼接经 shell 解释，tag 必须白名单（字母数字下划线点连字符点号）
+            val tagRe = Regex("^[A-Za-z0-9_.-]{1,64}$")
+            if (tagList.any { !tagRe.matches(it) }) {
+                return err("INVALID_ARGUMENT", "tag 含非法字符（仅允许字母数字与 _ . -）", "action", action)
+            }
             if (tagList.isNotEmpty()) {
                 tagList.forEach { t ->
                     val escaped = Regex.escape(t)

@@ -335,6 +335,11 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         .put("methods", JSONArray(listOf("initialize", "server/discover", "notifications/initialized", "ping", "tools/list", "tools/call", "resources/list", "prompts/list")))
         .put("hint", "POST JSON-RPC to /mcp. GET /mcp with Accept: text/event-stream returns an SSE compatibility hello.")
 
+    /** 状态页 HTML 转义：桥接工具名/描述来自外部 App，防止状态页存储型 XSS。 */
+    private fun escapeHtml(s: String): String = s
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        .replace("\"", "&quot;").replace("'", "&#39;")
+
     private fun browserStatusHtml(): String {
         val uptime = (System.currentTimeMillis() - startedAt) / 1000
         // 全部桥接的合并工具（统一加前缀后的暴露名），而非只取第一个在线桥接
@@ -349,7 +354,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         cats.forEach { (cat, _) -> grouped[cat] = mutableListOf() }
         ToolCatalog.ALL.forEach { e -> grouped[e.meta.category]?.add(e.meta.name to e.meta.en) }
         if (merged.isNotEmpty()) {
-            grouped["apk-bridge"] = merged.map { it.name to (it.description ?: it.name) }.toMutableList()
+            grouped["apk-bridge"] = merged.map { escapeHtml(it.name) to escapeHtml(it.description ?: it.name) }.toMutableList()
         }
 
         val totalTools = ToolCatalog.ALL.size + merged.size
@@ -382,8 +387,9 @@ class McpHttpServer(private val context: Context, private val port: Int, private
             }.sortedByDescending { it.second }
             entries.take(20).forEach { (name, calls, failed) ->
                 val status = if (failed > 0) "has-fail" else "all-ok"
+                val safeName = escapeHtml(name)
                 val failInfo = if (failed > 0) " <span class='fail-badge'>$failed fail</span>" else ""
-                historyRows.append("<div class='row $status'><span class='label'><code>$name</code></span><span class='value'>$calls calls$failInfo</span></div>")
+                historyRows.append("<div class='row $status'><span class='label'><code>$safeName</code></span><span class='value'>$calls calls$failInfo</span></div>")
             }
         } else {
             historyRows.append("<p class='hint'>No tool calls recorded yet.</p>")

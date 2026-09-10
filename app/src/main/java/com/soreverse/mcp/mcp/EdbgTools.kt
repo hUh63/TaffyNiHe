@@ -2,6 +2,7 @@ package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.BinaryManager
 import com.soreverse.mcp.core.PermissionManager
+import com.soreverse.mcp.core.RootShell
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -69,9 +70,12 @@ object EdbgTools {
                         if (sessionRunning) return err("ALREADY_RUNNING", "已有 eDBG 会话(PKG=$sessionPkg)，先 stop", "action", "launch")
                         val pkg = args.str("package")
                         if (pkg.isBlank()) return err("INVALID_ARGUMENT", "需要 package 参数", "action", "launch")
-                        if (!isDeployed()) return err("NOT_INSTALLED", "eDBG 未部署，先执行 install", "action", "launch")
+                        // 安全加固：包名/库名/断点偏移白名单，防 root shell 命令注入
+                        if (!Regex("^[A-Za-z0-9._]+$").matches(pkg)) return err("INVALID_ARGUMENT", "package 格式非法（仅允许字母数字与点）", "action", "launch")
                         val lib = args.str("lib")
                         val brk = args.str("break")
+                        if (lib.isNotBlank() && !Regex("^[A-Za-z0-9._-]+[.]so$").matches(lib)) return err("INVALID_ARGUMENT", "lib 格式非法（应为 xxx.so）", "action", "launch")
+                        if (brk.isNotBlank() && !Regex("^(0x)?[0-9a-fA-F]+$").matches(brk)) return err("INVALID_ARGUMENT", "break 应为十六进制/十进制偏移", "action", "launch")
                         val bArg = if (brk.isNotBlank()) " -b $brk" else " -b 0x0"
                         val lArg = if (lib.isNotBlank()) " -l $lib" else ""
                         // 清理旧会话，建 fifo，后台启动
@@ -97,11 +101,13 @@ object EdbgTools {
                         if (!sessionRunning) return err("NOT_RUNNING", "没有活跃的 eDBG 会话，先 launch", "action", "cmd")
                         val cmd = args.str("cmd")
                         if (cmd.isBlank()) return err("INVALID_ARGUMENT", "需要 cmd 参数", "action", "cmd")
+                        // 安全加固：cmd 经单引号写入 fifo，需转义单引号防止 shell 命令逃逸
+                        val cmdSafe = cmd.replace("'", "'\\''")
                         val timeout = args.intValue("timeoutSec", 2).coerceIn(1, 15)
                         // 发命令到 fifo（写 fifo 会阻塞直到有读取者，用后台写入避免卡死）
                         val before = PermissionManager.exec("wc -c < $OUT 2>/dev/null", timeoutSec = 5).stdout.trim().toLongOrNull() ?: 0
                         val write = PermissionManager.exec(
-                            "(echo '$cmd' > $FIFO) &",
+                            "(echo '$cmdSafe' > $FIFO) &",
                             timeoutSec = 5,
                         )
                         Thread.sleep(timeout * 1000L)

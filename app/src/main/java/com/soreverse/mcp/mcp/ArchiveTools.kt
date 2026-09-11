@@ -25,6 +25,21 @@ object ArchiveTools {
 
     private const val MAX_TAR_ENTRY_BYTES = 256L * 1024 * 1024
 
+    /** 安全加固：zip 条目读取上限（防 zip 炸弹/超大条目 OOM）。 */
+    private fun readZipEntryCapped(zis: java.util.zip.ZipInputStream, limit: Long = MAX_TAR_ENTRY_BYTES): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(64 * 1024)
+        var total = 0L
+        while (true) {
+            val n = zis.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > limit) throw IllegalStateException("zip 条目过大: ${zis.entry?.name} (>${limit / 1024 / 1024}MB)")
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
+
     // ── 工具函数 ──
 
     private fun detectFormat(path: String): String {
@@ -579,7 +594,7 @@ object ArchiveTools {
                 var entry = zis.nextEntry
                 while (entry != null) {
                     if (!entry.isDirectory) {
-                        val ba = zis.readBytes()
+                        val ba = readZipEntryCapped(zis)
                         existing[entry.name] = entry to ba
                     }
                     zis.closeEntry()
@@ -673,7 +688,7 @@ object ArchiveTools {
                                 kept++
                             } else deleted++
                         } else {
-                            val data = zis.readBytes()
+                            val data = readZipEntryCapped(zis)
                             if (!shouldDelete) {
                                 zos.putNextEntry(ZipEntry(entry.name))
                                 zos.write(data)
@@ -735,7 +750,7 @@ object ArchiveTools {
                             zos.putNextEntry(ZipEntry(targetName))
                             zos.closeEntry()
                         } else {
-                            val data = zis.readBytes()
+                            val data = readZipEntryCapped(zis)
                             zos.putNextEntry(ZipEntry(targetName))
                             zos.write(data)
                             zos.closeEntry()

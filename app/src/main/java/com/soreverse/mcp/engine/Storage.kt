@@ -1,5 +1,7 @@
 package com.soreverse.mcp.engine
 
+private const val MAX_SOURCE_BYTES = 512L * 1024 * 1024
+
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
@@ -135,8 +137,9 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
     }
 
     fun readSource(source: SoSource): ByteArray {
+        // 安全加固：统一的堆预算上限（防单次读取 OOM）
+        val heapBudget = (Runtime.getRuntime().maxMemory() / 8L).coerceIn(8L * 1024 * 1024, 64L * 1024 * 1024)
         return if (source.source == "apk") {
-            val heapBudget = (Runtime.getRuntime().maxMemory() / 8L).coerceIn(8L * 1024 * 1024, 64L * 1024 * 1024)
             val declaredLimit = source.size.takeIf { it > 0 }?.plus(1L) ?: heapBudget
             extractZipEntry(
                 source.treeDocumentUri ?: error("Missing APK document uri"),
@@ -146,9 +149,10 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
         } else {
             val uri = source.treeDocumentUri ?: error("Missing document uri")
             if (source.size >= LARGE_FILE_THRESHOLD) {
-                readBytesChannel(uri, minOf(source.size + 1L, heapBudget)) ?: readBytes(uri, heapBudget)
+                // 安全加固：回退路径加硬上限（防无界 OOM），合法大 SO 不受影响
+                readBytesChannel(uri, source.size) ?: readBytes(uri, MAX_SOURCE_BYTES)
             } else {
-                readBytes(uri, heapBudget)
+                readBytes(uri, MAX_SOURCE_BYTES)
             }
         }
     }

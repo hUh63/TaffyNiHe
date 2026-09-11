@@ -257,7 +257,7 @@ object LinuxRootfs {
                 }
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
-                val output = proc.inputStream.readBytes().decodeToString()
+                val output = proc.inputStream.readNBytes(16 * 1024 * 1024).decodeToString()
                 val finished = proc.waitFor(timeoutSec, java.util.concurrent.TimeUnit.SECONDS)
                 if (!finished) {
                     proc.destroy()

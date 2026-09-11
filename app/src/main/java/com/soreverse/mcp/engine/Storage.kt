@@ -146,9 +146,9 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
         } else {
             val uri = source.treeDocumentUri ?: error("Missing document uri")
             if (source.size >= LARGE_FILE_THRESHOLD) {
-                readBytesChannel(uri, source.size) ?: readBytes(uri)
+                readBytesChannel(uri, minOf(source.size + 1L, heapBudget)) ?: readBytes(uri, heapBudget)
             } else {
-                readBytes(uri)
+                readBytes(uri, heapBudget)
             }
         }
     }

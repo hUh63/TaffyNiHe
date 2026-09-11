@@ -11,6 +11,13 @@ import java.util.zip.ZipInputStream
 
 internal class BlutterCoordinator(private val context: Context, private val store: BlutterResultStore = BlutterResultStore(context), private val registry: BlutterRunnerRegistry = BlutterRunnerRegistry(context)) {
     private val embedded = BlutterEmbeddedBackend(context, store)
+
+    /** 安全加固：本地文件读取统一上限（防超大输入 OOM）。 */
+    private fun readCapped(file: File, limit: Long = ApkAnalyzer.MAX_INPUT_BYTES): ByteArray {
+        if (file.length() > limit) error("INPUT_LIMIT_EXCEEDED: ${file.name} exceeds ${limit / 1024 / 1024} MiB")
+        return file.readBytes()
+    }
+
     fun handle(args: JSONObject, workDirectory: WorkDirectory? = null): JSONObject = when (args.str("action", "inspect")) {
         "inspect" -> inspect(args, workDirectory)
         "analyze" -> analyze(args, workDirectory)
@@ -31,7 +38,7 @@ internal class BlutterCoordinator(private val context: Context, private val stor
             if (file.isDirectory) inspectDirectory(file, path, args.str("abi", "auto")) else if (file.isFile) {
                 // 上游 1.0.20 借鉴: MemoryGuard——APK 读入前估算堆余量
                 com.soreverse.mcp.core.MemoryGuard.ensureAnalysisMemory(file.length(), "flutter_inspect(${file.name})")
-                val bytes = file.readBytes()
+                val bytes = readCapped(file)
                 if (!file.extension.equals("apk", true)) return err("UNSUPPORTED_INPUT", "inspect currently accepts an APK or a libapp/libflutter directory", "path", path)
                 val inventory = FlutterArtifactInspector.inspectApk(bytes, path, args.str("abi", "auto"))
                 val selected = inventory.optJSONObject("selected")
@@ -103,9 +110,9 @@ internal class BlutterCoordinator(private val context: Context, private val stor
         if (file.isDirectory) {
             val app = file.resolve("libapp.so").takeIf { it.isFile } ?: file.resolve("App").takeIf { it.isFile } ?: error("FLUTTER_LIBS_NOT_FOUND")
             val flutter = file.resolve("libflutter.so").takeIf { it.isFile } ?: file.resolve("Flutter").takeIf { it.isFile } ?: error("FLUTTER_LIBS_NOT_FOUND")
-            return FlutterLibraries(file.name, "arm64-v8a", app.readBytes(), flutter.readBytes(), app.name, flutter.name)
+            return FlutterLibraries(file.name, "arm64-v8a", readCapped(app), readCapped(flutter), app.name, flutter.name)
         }
-        val bytes = if (file.isFile) file.readBytes() else workDirectory?.readFile(path, ApkAnalyzer.MAX_INPUT_BYTES) ?: error("INPUT_NOT_FOUND")
+        val bytes = if (file.isFile) readCapped(file) else workDirectory?.readFile(path, ApkAnalyzer.MAX_INPUT_BYTES) ?: error("INPUT_NOT_FOUND")
         return FlutterArtifactInspector.extractLibraries(bytes, path, args.str("abi", "arm64-v8a"))
     }
 
@@ -114,7 +121,7 @@ internal class BlutterCoordinator(private val context: Context, private val stor
         val flutter = dir.resolve("libflutter.so").takeIf { it.isFile } ?: dir.resolve("Flutter").takeIf { it.isFile }
         if (app == null || flutter == null) return err("FLUTTER_LIBS_NOT_FOUND", "Directory must contain libapp.so and libflutter.so", "path", path)
         val abi = if (requestedAbi == "auto") "arm64-v8a" else requestedAbi
-        return ok(FlutterArtifactInspector.inspectLibraries(FlutterLibraries(dir.name, abi, app.readBytes(), flutter.readBytes(), app.name, flutter.name)))
+        return ok(FlutterArtifactInspector.inspectLibraries(FlutterLibraries(dir.name, abi, readCapped(app), readCapped(flutter), app.name, flutter.name)))
     }
 
     /**
@@ -133,11 +140,11 @@ internal class BlutterCoordinator(private val context: Context, private val stor
             when {
                 file.isDirectory -> {
                     (file.resolve("libapp.so").takeIf { it.isFile } ?: file.resolve("App").takeIf { it.isFile })
-                        ?.let { it.readBytes() }
+                        ?.let { readCapped(it) }
                         ?: return err("FLUTTER_LIBS_NOT_FOUND", "Directory must contain libapp.so", "path", path)
                 }
                 file.isFile -> {
-                    val bytes = file.readBytes()
+                    val bytes = readCapped(file)
                     if (!file.extension.equals("apk", true)) {
                         // 直接是 so 文件? 可能是 libapp.so 本身
                         if (file.name.contains("libapp") || file.extension.equals("so", true)) bytes

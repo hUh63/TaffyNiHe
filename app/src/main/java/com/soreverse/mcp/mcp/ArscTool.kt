@@ -469,12 +469,15 @@ object ArscTool {
                 java.util.zip.ZipFile(file).use { zf ->
                     val entry = zf.getEntry("resources.arsc")
                         ?: return@EngineToolHandler err("NOT_FOUND", "APK 内未找到 resources.arsc", "path", path)
+                    // 安全加固：防超大 arsc 条目 OOM
+                    if (entry.size > 64L * 1024 * 1024) return@EngineToolHandler err("FILE_TOO_LARGE", "resources.arsc 超过 64MB 上限", "size", entry.size)
                     zf.getInputStream(entry).readAllBytes()
                 }
             }.getOrElse { e ->
                 return@EngineToolHandler err("EXTRACT_FAILED", "从 APK 提取 resources.arsc 失败: ${e.message}", "path", path)
             }
         } else {
+            if (file.length() > 64L * 1024 * 1024) return@EngineToolHandler err("FILE_TOO_LARGE", "arsc 文件超过 64MB 上限", "path", path)
             file.readBytes()
         }
 

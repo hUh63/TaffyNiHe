@@ -219,6 +219,7 @@ object ApkSignKillTool {
 
         /** 在 .so 二进制里搜索签名校验 ASCII 特征 */
         private fun scanNativeSo(so: File): List<String> {
+            if (so.length() > 64L * 1024 * 1024) return emptyList()  // 安全加固：防超大 so OOM
             val bytes = runCatching { so.readBytes() }.getOrNull() ?: return emptyList()
             if (bytes.isEmpty()) return emptyList()
             val ascii = String(bytes, Charsets.ISO_8859_1)

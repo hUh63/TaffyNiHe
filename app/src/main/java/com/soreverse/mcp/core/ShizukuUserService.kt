@@ -71,8 +71,8 @@ class ShizukuUserService() : IShizukuService.Stub() {
         if (command.isNullOrBlank()) return@runBlocking arrayOf("-1", "", "empty command")
         try {
             val process = execProcess(command)
-            val output = async { process.inputStream.readBytes().decodeToString() }
-            val error = async { process.errorStream.readBytes().decodeToString() }
+            val output = async { process.inputStream.readNBytes(16 * 1024 * 1024).decodeToString() }
+            val error = async { process.errorStream.readNBytes(16 * 1024 * 1024).decodeToString() }
             val exitCode = process.waitFor()
             arrayOf(exitCode.toString(), output.await(), error.await())
         } catch (e: Exception) {

@@ -34,7 +34,7 @@ object ArchiveTools {
             val n = zis.read(buf)
             if (n < 0) break
             total += n
-            if (total > limit) throw IllegalStateException("zip 条目过大: ${zis.entry?.name} (>${limit / 1024 / 1024}MB)")
+            if (total > limit) throw IllegalStateException("zip 条目过大 (>${limit / 1024 / 1024}MB 上限)")
             out.write(buf, 0, n)
         }
         return out.toByteArray()

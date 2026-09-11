@@ -1,6 +1,5 @@
 package com.soreverse.mcp.engine
 
-private const val MAX_SOURCE_BYTES = 512L * 1024 * 1024
 
 import android.content.ContentResolver
 import android.content.Context
@@ -16,6 +15,8 @@ import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.ZipInputStream
+
+private const val MAX_SOURCE_BYTES = 512L * 1024 * 1024
 
 data class SoSource(
     val path: String,

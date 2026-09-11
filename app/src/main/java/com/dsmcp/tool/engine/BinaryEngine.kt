@@ -695,7 +695,15 @@ class BinaryEngine(
             ?: return err("WORKSPACE_NOT_FOUND", "Workspace not found: $workspaceId")
         // 安全修复: 加锁防止并发写入时读取到不一致的数据快照。
         val dataToWrite = synchronized(session.lock) { session.data.copyOf() }
-        val name = if (outputName.isNotBlank()) outputName else "${ws.fileNameWithoutExt}_patched.${ws.fileExt}"
+        // 安全修复：outputName 不可信——取 basename 丢弃路径部分并白名单校验，防止 ../ 穿越写任意文件
+        val requested = outputName.trim()
+        val name = if (requested.isNotBlank()) {
+            val base = requested.replace('\\', '/').substringAfterLast('/').trim()
+            if (base.isBlank() || base.contains("..") || !Regex("^[A-Za-z0-9._\\- ]{1,128}$").matches(base)) {
+                return err("INVALID_OUTPUT_NAME", "outputName 非法（仅允许文件名，1-128 位字母数字._- 与空格）", "outputName", outputName)
+            }
+            base
+        } else "${ws.fileNameWithoutExt}_patched.${ws.fileExt}"
         val outFile = File(outputDir, name)
         // Avoid overwriting: append suffix if exists
         var finalName = name

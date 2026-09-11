@@ -32,6 +32,9 @@ object LinuxRootfs {
 
     // ------------------------------------------------------------------ 发现
 
+    /** 安全加固：发行版名白名单——该值用于文件路径与 chroot 命令串，防路径穿越/命令注入。 */
+    private fun validDistroName(d: String): Boolean = d.matches(Regex("^[A-Za-z0-9._-]{1,32}$")) && !d.contains("..")
+
     /** 内置发行版列表（assets 中实际存在的 tar.gz，忽略 proot 目录等非 rootfs 资产）。 */
     fun distros(context: Context): List<Distro> {
         val result = mutableListOf<Distro>()
@@ -117,6 +120,7 @@ object LinuxRootfs {
      */
     @Synchronized
     fun ensureExtracted(context: Context, distro: String): File? {
+        if (!validDistroName(distro)) return null
         val dir = rootfsDir(context, distro)
         val marker = File(dir, ".ready")
         if (marker.isFile) return dir
@@ -163,6 +167,7 @@ object LinuxRootfs {
 
     /** 删除已解压的 rootfs（释放空间）。 */
     fun remove(context: Context, distro: String): Boolean {
+        if (!validDistroName(distro)) return false
         val dir = rootfsDir(context, distro)
         if (!dir.exists()) return false
         dir.deleteRecursively()
@@ -195,6 +200,7 @@ object LinuxRootfs {
         timeoutSec: Long = 60,
         binds: List<Pair<String, String>> = emptyList(),
     ): ExecResult? {
+        if (!validDistroName(distro)) return ExecResult(-1, "非法 distro 名: $distro", "none")
         val rootfs = ensureExtracted(context, distro) ?: return null
         val ch = channel(context) ?: return ExecResult(-1, "无可用通道（无 root 且内置 proot 未就绪）", "none")
         // bind 前置：chroot 通道需要把宿主目录预先 bind 进 rootfs

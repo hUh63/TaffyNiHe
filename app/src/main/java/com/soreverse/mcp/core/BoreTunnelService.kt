@@ -155,7 +155,7 @@ class BoreTunnelService : Service() {
             while (eventLog.size > MAX_EVENTS) eventLog.removeAt(0)
         }
         this@BoreTunnelService.sendBroadcast(
-            Intent(ACTION_TUNNEL_EVENT).putExtra("event", event)
+            Intent(ACTION_TUNNEL_EVENT).putExtra("event", event).setPackage(packageName)
         )
     }
 
@@ -256,6 +256,7 @@ class BoreTunnelService : Service() {
             Intent(ACTION_TUNNEL_STATUS)
                 .putExtra("connected", connected)
                 .putExtra("url", url)
+                .setPackage(packageName)
         )
     }
 }

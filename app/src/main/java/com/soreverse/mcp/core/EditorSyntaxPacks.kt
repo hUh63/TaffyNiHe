@@ -96,6 +96,8 @@ object EditorSyntaxPacks {
         val name = root.optString("name").trim()
         val extArr = root.optJSONArray("extensions")
         val kwArr = root.optJSONArray("keywords")
+        // 安全加固：id 会用作落盘文件名（${id}.json），必须白名单化防路径穿越
+        if (!id.matches(Regex("^[A-Za-z0-9_-]{1,32}$"))) return null
         if (id.isBlank() || name.isBlank() || extArr == null || extArr.length() == 0 || kwArr == null || kwArr.length() == 0) return null
         val block = root.optJSONArray("blockComment")
         return SyntaxPack(

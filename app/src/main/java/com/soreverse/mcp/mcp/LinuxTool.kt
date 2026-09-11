@@ -77,8 +77,12 @@ object LinuxTool {
                 }))
         }
 
+        /** 安全加固：发行版名白名单（该值会拼入 chroot 命令串与文件路径，防注入/穿越）。 */
+        private fun validDistro(d: String): Boolean = d.matches(Regex("^[A-Za-z0-9._-]{1,32}$")) && !d.contains("..")
+
         private fun install(ctx: ToolContext, args: JSONObject): JSONObject {
             val distro = args.str("distro", "alpine").ifBlank { "alpine" }
+            if (!validDistro(distro)) return err("INVALID_ARGUMENT", "distro 格式非法（仅允许字母数字._-）", "distro", distro)
             if (LinuxRootfs.installed(ctx.context, distro)) {
                 return ok(JSONObject()
                     .put("action", "install")
@@ -107,6 +111,7 @@ object LinuxTool {
 
         private fun shell(ctx: ToolContext, args: JSONObject): JSONObject {
             val distro = args.str("distro", "alpine").ifBlank { "alpine" }
+            if (!validDistro(distro)) return err("INVALID_ARGUMENT", "distro 格式非法（仅允许字母数字._-）", "distro", distro)
             val script = args.str("script").ifBlank { "" }
             val command = args.str("command").ifBlank { "" }
             if (script.isBlank() && command.isBlank()) {
@@ -131,6 +136,7 @@ object LinuxTool {
             val distro = args.str("distro", "").ifBlank {
                 return err("INVALID_ARGUMENT", "需要 distro 参数", "distro", "")
             }
+            if (!validDistro(distro)) return err("INVALID_ARGUMENT", "distro 格式非法（仅允许字母数字._-）", "distro", distro)
             if (!LinuxRootfs.installed(ctx.context, distro)) {
                 return ok(JSONObject().put("action", "remove").put("distro", distro).put("status", "not-installed"))
             }

@@ -30,6 +30,8 @@ object BinaryManager {
         val zh: String,
         /** 内置在 APK assets 中的路径（非空则优先使用内置，无需下载）。 */
         val bundledAsset: String? = null,
+        /** 官方 release 资产 SHA-256（GitHub release digest）；非空时下载后必须校验匹配。 */
+        val sha256: String? = null,
     )
 
     val EDBG = ToolBinary(
@@ -44,9 +46,21 @@ object BinaryManager {
         repo = "chinleez/eBPFDexDumper-rs", releaseTag = "v0.2.3", sizeMb = 4.78,
         minKernel = null,
         zh = "eBPFDexDumper（从 ART 运行时抓取真实 DEX）",
+        // 官方 v0.2.3 release 资产 digest（GitHub API 获取），防镜像投毒/劫持
+        sha256 = "f0c4ba15d41a738f261738a6fbb20109e4d06f997102e56a0458b86cc909903f",
     )
 
     val ALL = listOf(EDBG, DEXDUMP)
+
+    /** 计算文件 SHA-256（十六进制小写），失败返回 null。 */
+    private fun sha256Of(file: File): String? = runCatching {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { ins ->
+            val buf = ByteArray(8192)
+            while (true) { val n = ins.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+        }
+        md.digest().joinToString("") { "%02x".format(it) }
+    }.getOrNull()
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -134,6 +148,16 @@ object BinaryManager {
                     if (tmp.length() < 1024 * 1024) {
                         tmp.delete()
                         continue
+                    }
+                    // 安全加固：官方 SHA-256 校验（防镜像投毒——该二进制随后会以 root 部署执行）
+                    val expected = tool.sha256
+                    if (!expected.isNullOrBlank()) {
+                        val actual = sha256Of(tmp)
+                        if (actual == null || !actual.equals(expected, ignoreCase = true)) {
+                            AppLog.w("BinaryManager: ${tool.fileName} sha256 mismatch from $candidate (expected=$expected actual=$actual); rejected")
+                            tmp.delete()
+                            continue
+                        }
                     }
                     tmp.renameTo(target)
                     AppLog.i("BinaryManager: ${tool.fileName} downloaded (${target.length() / 1024 / 1024} MB) from $candidate")

@@ -700,7 +700,7 @@ class BinaryEngine(
         val name = if (requested.isNotBlank()) {
             val base = requested.replace('\\', '/').substringAfterLast('/').trim()
             if (base.isBlank() || base.contains("..") || !Regex("^[A-Za-z0-9._\\- ]{1,128}$").matches(base)) {
-                return err("INVALID_OUTPUT_NAME", "outputName 非法（仅允许文件名，1-128 位字母数字._- 与空格）", "outputName", outputName)
+                return err("INVALID_OUTPUT_NAME", "outputName 非法（仅允许文件名，1-128 位字母数字._- 与空格）", "outputName" to outputName)
             }
             base
         } else "${ws.fileNameWithoutExt}_patched.${ws.fileExt}"

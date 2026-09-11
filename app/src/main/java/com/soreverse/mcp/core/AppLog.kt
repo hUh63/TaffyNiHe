@@ -81,7 +81,7 @@ object AppLog {
         val snapshot = synchronized(listeners) { listeners.toList() }
         if (snapshot.isEmpty()) {
             lastDelivered = null
-            runCatching { app?.sendBroadcast(Intent(ACTION_LOG).putExtra(EXTRA_LINE, line).setPackage(app.packageName)) }
+            runCatching { app?.let { a -> a.sendBroadcast(Intent(ACTION_LOG).putExtra(EXTRA_LINE, line).setPackage(a.packageName)) } }
             return
         }
         if (line != "__CLEAR__" && line == lastDelivered) return

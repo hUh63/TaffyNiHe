@@ -16,6 +16,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 /**
@@ -39,7 +41,8 @@ class ShizukuUserService() : IShizukuService.Stub() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceScopeJob)
 
     private var latestId = 0L
-    private val currentProcesses = HashMap<Long, Process>()
+    // 安全加固：binder 多线程并发访问（execute/processOutput/destroyProcess），用并发容器防损坏
+    private val currentProcesses = ConcurrentHashMap<Long, Process>()
 
     override fun destroy() {
         serviceScope.cancel()
@@ -73,8 +76,13 @@ class ShizukuUserService() : IShizukuService.Stub() {
             val process = execProcess(command)
             val output = async { process.inputStream.readNBytes(16 * 1024 * 1024).decodeToString() }
             val error = async { process.errorStream.readNBytes(16 * 1024 * 1024).decodeToString() }
-            val exitCode = process.waitFor()
-            arrayOf(exitCode.toString(), output.await(), error.await())
+            // 安全加固：waitFor 超时（防悬挂命令永久占用 binder 线程 → 拒绝服务）
+            val finished = process.waitFor(600, TimeUnit.SECONDS)
+            if (!finished) {
+                runCatching { process.destroyForcibly() }
+                return@runBlocking arrayOf("-1", output.await(), "命令执行超时(600s)已终止")
+            }
+            arrayOf(process.exitValue().toString(), output.await(), error.await())
         } catch (e: Exception) {
             arrayOf("-1", "", e.message ?: "exec failed")
         }

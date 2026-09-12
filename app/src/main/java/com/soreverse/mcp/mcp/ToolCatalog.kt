@@ -1087,6 +1087,7 @@ object ToolCatalog {
         *ShellDetectorTool.ALL.toTypedArray(),
         // 塔菲逆核: APK 签名校验绕过(去签名校验, 对标 kstools/ApkSignatureKiller)
         *ApkSignKillTool.ALL.toTypedArray(),
+        *ApkShrinkTool.ALL.toTypedArray(),
         // 塔菲逆核: C/C++ 编译(方案A, 调用设备外部编译器 Termux clang/NDK)
         *CompileTool.ALL.toTypedArray(),
         // 塔菲逆核: 动态分析沙箱(安装→启动→看门狗→日志/崩溃→清理, 无 root 可降级)

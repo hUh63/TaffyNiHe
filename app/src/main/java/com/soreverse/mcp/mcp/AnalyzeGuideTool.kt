@@ -147,6 +147,9 @@ object AnalyzeGuideTool {
                     append(step(10, "taffy_emulate_call / unidbg_*", "workspaceId=$wsPrefix symbolName=<导出函数>", "模拟执行 JNI_OnLoad / Java_* / 关键导出，验证行为")).append("\n\n")
                     append("【第 7 步 · 综合报告】\n")
                     append(step(11, "taffy_analysis_report", "workspaceId=$wsPrefix", "生成引擎侧的综合报告（与本攻略互补）")).append(" 然后你基于以上所有证据，输出最终深度分析报告。\n")
+                    append("\n【第 8 步 · 结论与后续动作】\n")
+                    append("  收集完成后给出结构化结论：① 文件性质与保护强度 ② 关键函数/调用链 ③ 字符串/加密/网络特征 ④ 可疑行为与风险 ⑤ 修改建议。\n")
+                    append("  若需落地修改（APK 场景）可接一键模板：改接口地址用 taffy_patch_template(template=replace_url)；去签名校验用 taffy_patch_template(template=bypass_signature_check, args={\\\"dir\\\":<decode目录>})；重签名用 template=resign_apk。\n")
                     if (includeEvidence) append("\n（本次已通过 includeEvidence=true 返回证据快照，可直接作为分析基础，也可按上述步骤补充取证。）\n")
                 }
             } else {
@@ -172,6 +175,9 @@ object AnalyzeGuideTool {
                     append(step(10, "taffy_emulate_call / unidbg_*", "workspaceId=$wsPrefix symbolName=<export>", "emulate JNI_OnLoad / Java_* / key exports to verify")).append("\n\n")
                     append("[Step 7 · Final report]\n")
                     append(step(11, "taffy_analysis_report", "workspaceId=$wsPrefix", "engine-side full report, complementary to this guide")).append(" Then produce your final deep-analysis report from all evidence above.\n")
+                    append("\n[Step 8 · Conclusions & next actions]\n")
+                    append("  Deliver a structured conclusion: (1) file nature & protection level (2) key functions/call chains (3) strings/crypto/network traits (4) suspicious behavior & risk (5) modification suggestions.\n")
+                    append("  For APK modification, common one-shot templates: replace_url (swap URLs), bypass_signature_check (args={\\\"dir\\\":<decoded dir>}), resign_apk (re-sign).\n")
                     if (includeEvidence) append("\n(Evidence snapshot was returned via includeEvidence=true; use it as a base and enrich with the steps above.)\n")
                 }
             }

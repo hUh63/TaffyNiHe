@@ -85,7 +85,7 @@ object ToolStats {
         val f = statsFile() ?: return
         if (!f.exists()) return
         runCatching {
-            val obj = JSONObject(f.readText())
+            val obj = JSONObject(f.readTextCapped(ReadLimits.META_JSON_BYTES))
             val arr = obj.optJSONArray("tools") ?: return@runCatching
             for (i in 0 until arr.length()) {
                 val t = arr.optJSONObject(i) ?: continue

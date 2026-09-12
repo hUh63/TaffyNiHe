@@ -77,7 +77,7 @@ object CrashReporter {
 
     fun readReport(context: Context, token: String): String? =
         validatedToken(token)?.let { safeToken ->
-            runCatching { reportFile(context, safeToken).readText() }.getOrNull()
+            runCatching { reportFile(context, safeToken).readTextCapped(ReadLimits.META_JSON_BYTES) }.getOrNull()
         }
 
     fun markReady(context: Context, token: String): Boolean =

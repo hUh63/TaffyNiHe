@@ -37,7 +37,7 @@ object DeepReportStore {
     }
 
     private fun readRoot(context: Context): JSONObject = runCatching {
-        JSONObject(File(context.filesDir, FILE_NAME).readText())
+        JSONObject(File(context.filesDir, FILE_NAME).readTextCapped(ReadLimits.META_JSON_BYTES))
     }.getOrDefault(JSONObject())
 
     private fun writeRoot(context: Context, root: JSONObject) {

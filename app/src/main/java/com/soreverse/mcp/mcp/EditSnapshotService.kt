@@ -2,6 +2,8 @@ package com.soreverse.mcp.mcp
 
 import android.content.Context
 import com.soreverse.mcp.core.err
+import com.soreverse.mcp.core.ReadLimits
+import com.soreverse.mcp.core.readTextCapped
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import org.json.JSONArray
@@ -66,7 +68,7 @@ object EditSnapshotService {
         toolDir.listFiles()?.sortedByDescending { it.name }?.forEach { snapDir ->
             val metaFile = File(snapDir, "meta.json")
             if (metaFile.isFile) {
-                val meta = runCatching { JSONObject(metaFile.readText()) }.getOrNull() ?: JSONObject()
+                val meta = runCatching { JSONObject(metaFile.readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrNull() ?: JSONObject()
                 meta.put("snapshotId", snapDir.name)
                 arr.put(meta)
             }
@@ -81,7 +83,7 @@ object EditSnapshotService {
         if (!metaFile.isFile) {
             return JSONObject().put("error", "SNAPSHOT_NOT_FOUND").put("message", "快照不存在: $snapshotId")
         }
-        val meta = runCatching { JSONObject(metaFile.readText()) }.getOrNull() ?: JSONObject()
+        val meta = runCatching { JSONObject(metaFile.readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrNull() ?: JSONObject()
         val origCopy = File(meta.optString("restore"))
         val origPath = meta.optString("path")
         val current = File(origPath)
@@ -104,8 +106,8 @@ object EditSnapshotService {
             // 文本文件(如 smali/json/xml): 附加行级可读 diff
             if (looksLikeText(origCopy) && looksLikeText(current)) {
                 try {
-                    val o = origCopy.readText().lines()
-                    val c = current.readText().lines()
+                    val o = origCopy.readTextCapped(ReadLimits.RESULT_JSON_BYTES).lines()
+                    val c = current.readTextCapped(ReadLimits.RESULT_JSON_BYTES).lines()
                     if (o.size + c.size <= 20000) {
                         val (added, removed) = lineDiff(o, c)
                         val additions = JSONArray(); removed.forEach { additions.put("+" + it) }
@@ -167,7 +169,7 @@ object EditSnapshotService {
         if (!metaFile.isFile) {
             return JSONObject().put("error", "SNAPSHOT_NOT_FOUND").put("message", "快照不存在: $snapshotId")
         }
-        val meta = runCatching { JSONObject(metaFile.readText()) }.getOrNull() ?: JSONObject()
+        val meta = runCatching { JSONObject(metaFile.readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrNull() ?: JSONObject()
         val origCopy = File(meta.optString("restore"))
         if (!origCopy.isFile) {
             return JSONObject().put("error", "ORIG_MISSING").put("message", "快照原始副本缺失")

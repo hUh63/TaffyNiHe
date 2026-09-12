@@ -1,6 +1,8 @@
 package com.soreverse.mcp.engine
 
 import android.content.Context
+import com.soreverse.mcp.core.ReadLimits
+import com.soreverse.mcp.core.readTextCapped
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -45,7 +47,7 @@ internal class BlutterResultStore(context: Context) {
         if (!key.matches(Regex("^[a-f0-9]{32,128}$"))) return null
         val file = File(File(results, key), "result.json")
         if (!file.isFile) return null
-        return runCatching { JSONObject(file.readText()) }.getOrNull()
+        return runCatching { JSONObject(file.readTextCapped(ReadLimits.RESULT_JSON_BYTES)) }.getOrNull()
     }
 
     @Synchronized
@@ -68,7 +70,7 @@ internal class BlutterResultStore(context: Context) {
         if (key.isBlank()) return JSONObject().put("jobId", jobId).put("status", state.optString("status"))
         val file = File(File(results, key), "result.json")
         if (!file.isFile) return null
-        val result = JSONObject(file.readText())
+        val result = JSONObject(file.readTextCapped(ReadLimits.RESULT_JSON_BYTES))
         if (kind == null) return result.put("jobId", jobId)
         require(kind in PAGE_KINDS) { "Unsupported result kind" }
         val page = result.optJSONObject(kind) ?: return result.put("jobId", jobId)
@@ -111,7 +113,7 @@ internal class BlutterResultStore(context: Context) {
         return JSONObject().put("removedJobs", removedJobs).put("removedResults", removedResults).put("cutoff", cutoff)
     }
 
-    private fun readState(jobId: String): JSONObject? = runCatching { requireValidJobId(jobId); File(File(jobs, jobId), "state.json").takeIf { it.isFile }?.let { JSONObject(it.readText()) } }.getOrNull()
+    private fun readState(jobId: String): JSONObject? = runCatching { requireValidJobId(jobId); File(File(jobs, jobId), "state.json").takeIf { it.isFile }?.let { JSONObject(it.readTextCapped(ReadLimits.META_JSON_BYTES)) } }.getOrNull()
     private fun write(file: File, value: JSONObject) {
         file.parentFile?.mkdirs()
         val temp = File(file.parentFile, "${file.name}.${UUID.randomUUID()}.tmp")

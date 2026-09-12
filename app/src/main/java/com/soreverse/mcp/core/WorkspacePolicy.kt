@@ -1,6 +1,7 @@
 package com.soreverse.mcp.core
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -31,6 +32,9 @@ object WorkspacePolicy {
         "outputFile", "sourceFile", "destFile", "smaliDir", "localPath",
         "srcPath", "dstPath", "inFile", "outFile",
     )
+
+    /** 参数递归预检的最大深度，防止超深嵌套造成的栈/CPU 放大。 */
+    private const val MAX_VALIDATE_DEPTH = 6
 
     /** 是否已有任一隧道在运行（Cloudflare 隧道 或 Bore 隧道）。 */
     fun isTunnelActive(context: Context): Boolean {
@@ -124,16 +128,44 @@ object WorkspacePolicy {
      * 对工具参数中所有路径类键做统一预检。
      * @return null 表示全部通过；否则返回可直接返回给调用方的 err JSONObject
      */
-    fun validateArgs(context: Context, args: JSONObject, baseDir: String? = null): JSONObject? {
-        for (key in PATH_KEYS) {
-            if (!args.has(key)) continue
-            val v = args.optString(key)
-            if (v.isBlank()) continue
-            // URI 形式（content:// / file://）由 SAF/FileProvider 授权控制，不属于文件系统工作区策略范围
-            if (v.startsWith("content://") || v.startsWith("file://")) continue
-            val error = validatePath(context, v, baseDir)
-            if (error != null) {
-                return err("PATH_OUTSIDE_WORKSPACE", error, key, v)
+    fun validateArgs(context: Context, args: JSONObject, baseDir: String? = null): JSONObject? =
+        validateContainer(context, args, baseDir, 0)
+
+    /**
+     * 递归预检工具参数中的路径类键。
+     *
+     * 历史实现只遍历顶层 [PATH_KEYS]，路径若被放进嵌套对象/数组即可绕过工作区策略；
+     * 这里递归下探对象与数组，命中同一套键名的字符串同样校验。放行规则与判断逻辑保持
+     * 与顶层完全一致（allowedRoots 不变），因此不改动工具本身需要的参数；仅对键名命中
+     * [PATH_KEYS] 的字符串值校验，其余字段（内容体、标识符、URL、`content://`/`file://` URI）
+     * 与整体结构原样透传。[depth] 设上限，避免恶意超深嵌套造成的栈/CPU 放大。
+     */
+    private fun validateContainer(context: Context, value: Any?, baseDir: String?, depth: Int): JSONObject? {
+        if (depth > MAX_VALIDATE_DEPTH) return null
+        when (value) {
+            is JSONObject -> {
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val child = value.opt(key)
+                    if (key in PATH_KEYS && child is String) {
+                        if (child.isBlank()) continue
+                        // URI 形式（content:// / file://）由 SAF/FileProvider 授权控制，不属于文件系统工作区策略范围
+                        if (child.startsWith("content://") || child.startsWith("file://")) continue
+                        val error = validatePath(context, child, baseDir)
+                        if (error != null) return err("PATH_OUTSIDE_WORKSPACE", error, key, child)
+                    } else if (child is JSONObject || child is JSONArray) {
+                        validateContainer(context, child, baseDir, depth + 1)?.let { return it }
+                    }
+                }
+            }
+            is JSONArray -> {
+                for (i in 0 until value.length()) {
+                    val child = value.opt(i)
+                    if (child is JSONObject || child is JSONArray) {
+                        validateContainer(context, child, baseDir, depth + 1)?.let { return it }
+                    }
+                }
             }
         }
         return null

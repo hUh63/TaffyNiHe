@@ -13,6 +13,8 @@ import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.ReadLimits
+import com.soreverse.mcp.core.readTextCapped
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -379,7 +381,7 @@ object SmaliBatchTool {
             val mf = File(workDir, "manifest.json")
             if (!mf.isFile) return err("NO_MANIFEST", "无 init 清单(manifest.json)。先 action=init 建立基线再 diff", "workDir", workDirPath)
             return runCatching {
-                val manifest = JSONObject(mf.readText())
+                val manifest = JSONObject(mf.readTextCapped(ReadLimits.META_JSON_BYTES))
                 val baseline = HashMap<String, JSONObject>()
                 val arr = manifest.optJSONArray("files") ?: JSONArray()
                 for (i in 0 until arr.length()) {

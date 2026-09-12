@@ -1,6 +1,8 @@
 package com.soreverse.mcp
 
 import android.widget.Toast
+import com.soreverse.mcp.core.ReadLimits
+import com.soreverse.mcp.core.readTextCapped
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -243,7 +245,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         val runner = PythonRuntime.supportScript(context, "plugin_runner.py")
         val cli = PythonRuntime.supportScript(context, "taffy_cli.py")
         if (runner == null || cli == null) { appendOut("[运行器不可用]\n"); return }
-        val entry = runCatching { JSONObject(File(dir, "meta.json").readText()).optString("entry", "plugin.py") }.getOrDefault("plugin.py")
+        val entry = runCatching { JSONObject(File(dir, "meta.json").readTextCapped(ReadLimits.META_JSON_BYTES)).optString("entry", "plugin.py") }.getOrDefault("plugin.py")
         val pluginPy = File(dir, entry)
         if (!pluginPy.isFile) { appendOut("[入口文件不存在: $entry]\n"); return }
         running = true
@@ -409,7 +411,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                 )
             }
             plugins.forEach { dir ->
-                val meta = runCatching { JSONObject(File(dir, "meta.json").readText()) }.getOrElse { JSONObject() }
+                val meta = runCatching { JSONObject(File(dir, "meta.json").readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrElse { JSONObject() }
                 val name = meta.optString("name", dir.name)
                 val version = meta.optString("version", "1.0")
                 val source = meta.optString("source", "taffy")
@@ -436,7 +438,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                         if (promptFile.isFile) {
                             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 OutlinedButton(onClick = {
-                                    clipboard.setText(AnnotatedString(promptFile.readText()))
+                                    clipboard.setText(AnnotatedString(promptFile.readTextCapped(ReadLimits.META_JSON_BYTES)))
                                     Toast.makeText(context, if (zh) "AI 转换 prompt 已复制——粘贴给 AI 即可自动生成完整 plugin.py" else "AI convert prompt copied", Toast.LENGTH_LONG).show()
                                 }, modifier = Modifier.weight(1f)) { Text(if (zh) "🤖 AI 全自动转换" else "🤖 AI convert", fontSize = 10.sp) }
                                 OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "看转换报告" else "Report", fontSize = 10.sp) }

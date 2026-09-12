@@ -64,7 +64,7 @@ object XedExtensionConverter {
             // 2) manifest.json（apk 根或解包根）
             val manifest = findFile(unpacked, "manifest.json")
                 ?: return Result(false, null, "未找到 manifest.json —— 不是标准的 Xed-Editor 扩展")
-            val mJson = runCatching { JSONObject(manifest.readText()) }.getOrElse {
+            val mJson = runCatching { JSONObject(manifest.readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrElse {
                 return Result(false, null, "manifest.json 解析失败: ${it.message}")
             }
             val id = mJson.optString("id", "").ifBlank { input.nameWithoutExtension.replace(Regex("[^A-Za-z0-9_.-]"), "_") }

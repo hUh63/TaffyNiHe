@@ -1,6 +1,8 @@
 package com.soreverse.mcp
 
 import android.content.Context
+import com.soreverse.mcp.core.ReadLimits
+import com.soreverse.mcp.core.readTextCapped
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -66,7 +68,7 @@ internal class WorkspaceState(private val context: Context) {
 
     private fun loadTasks() {
         tasks = runCatching {
-            val root = JSONObject(storeFile.readText())
+            val root = JSONObject(storeFile.readTextCapped(ReadLimits.META_JSON_BYTES))
             val arr = root.optJSONArray("tasks") ?: JSONArray()
             (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let { TaskRecord.fromJson(it) } }
         }.getOrDefault(emptyList()).sortedByDescending { it.updatedAt }

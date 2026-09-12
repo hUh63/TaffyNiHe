@@ -56,7 +56,7 @@ object EditorSyntaxPacks {
     fun load(context: android.content.Context) {
         packs = runCatching {
             dir(context).listFiles { f -> f.isFile && f.extension == "json" }
-                ?.mapNotNull { f -> runCatching { parse(JSONObject(f.readText())) }.getOrNull() }
+                ?.mapNotNull { f -> runCatching { parse(JSONObject(f.readTextCapped(ReadLimits.META_JSON_BYTES))) }.getOrNull() }
                 ?.sortedBy { it.name.lowercase() }
         }.getOrDefault(emptyList()).orEmpty()
     }

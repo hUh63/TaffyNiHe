@@ -1,6 +1,8 @@
 package com.soreverse.mcp.engine
 
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.ReadLimits
+import com.soreverse.mcp.core.readTextCapped
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.toJsonArray
@@ -172,7 +174,7 @@ internal fun EngineRuntime.listAudits(prefix: String = "", limit: Int = 100): JS
             ?.take(bounded)
             ?.forEach { f ->
                 val meta = runCatching {
-                    val obj = JSONObject(f.readText())
+                    val obj = JSONObject(f.readTextCapped(ReadLimits.RESULT_JSON_BYTES))
                     JSONObject()
                         .put("editSessionId", obj.optString("editSessionId"))
                         .put("workspaceId", obj.optString("workspaceId"))
@@ -193,7 +195,7 @@ internal fun EngineRuntime.listAudits(prefix: String = "", limit: Int = 100): JS
 internal fun EngineRuntime.loadAudit(file: String): JSONObject = guarded {
     val f = File(file)
     if (!f.exists() || !f.isFile) return@guarded err("AUDIT_NOT_FOUND", "Audit file not found: $file", "file", file)
-    val obj = runCatching { JSONObject(f.readText()) }.getOrElse { return@guarded err("AUDIT_CORRUPTED", "Audit file is not valid JSON: ${it.message}", "file", file) }
+    val obj = runCatching { JSONObject(f.readTextCapped(ReadLimits.RESULT_JSON_BYTES)) }.getOrElse { return@guarded err("AUDIT_CORRUPTED", "Audit file is not valid JSON: ${it.message}", "file", file) }
     ok(obj.put("path", f.absolutePath))
 }
 

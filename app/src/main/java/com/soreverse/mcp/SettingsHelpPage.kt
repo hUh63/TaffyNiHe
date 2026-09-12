@@ -66,6 +66,17 @@ internal fun SettingsHelpPage(t: UiText) {
                     Toast.makeText(context, if (zh) "MCP Skill 已复制" else "Skill copied", Toast.LENGTH_LONG).show()
                 }.padding(horizontal = 6.dp, vertical = 2.dp),
             )
+            Text(
+                if (zh) "导出工具契约 (Markdown)" else "Export tool contracts (Markdown)",
+                style = MaterialTheme.typography.labelSmall, color = AppPalette.blue,
+                modifier = Modifier.clickable {
+                    val md = buildToolContractsMarkdown(zh)
+                    val f = java.io.File(context.filesDir, "taffy-tools-SKILL.md")
+                    runCatching { f.writeText(md) }
+                    clipboard.setText(AnnotatedString(md))
+                    Toast.makeText(context, if (zh) "已导出并复制: ${f.absolutePath}" else "Exported & copied: ${f.absolutePath}", Toast.LENGTH_LONG).show()
+                }.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
         SelectionContainer {
             Text(

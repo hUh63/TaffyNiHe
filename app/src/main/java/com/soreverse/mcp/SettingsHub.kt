@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
@@ -95,6 +96,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Extensions -> if (t.zh) "扩展系统" else "Extensions"
     SettingsDest.DexExplorer -> if (t.zh) "DEX / APK 浏览器" else "DEX / APK Explorer"
     SettingsDest.ApkEdit -> if (t.zh) "APK Manifest 编辑" else "APK Manifest Editor"
+    SettingsDest.Snapshots -> if (t.zh) "编辑快照 / 回滚" else "Edit Snapshots"
     SettingsDest.Help -> if (t.zh) "帮助" else "Help"
 }
 
@@ -237,6 +239,8 @@ internal fun SettingsHub(
                     GroupDivider()
                     NavRow(if (t.zh) "APK Manifest 编辑" else "APK Manifest Editor", if (t.zh) "图形化编辑包名 / 权限 / 组件" else "Edit package / permissions / components", Icons.Default.Description, onClick = { onDest(SettingsDest.ApkEdit) })
                     GroupDivider()
+                    NavRow(if (t.zh) "编辑快照 / 回滚" else "Edit Snapshots", if (t.zh) "查看差异并回滚写操作" else "Review diffs & roll back", Icons.Default.Restore, onClick = { onDest(SettingsDest.Snapshots) })
+                    GroupDivider()
                     NavRow("Blutter", if (t.zh) "Flutter 3.44 / Dart 3.12.2 / 完全离线" else "Flutter 3.44 / Dart 3.12.2 / fully offline", Icons.Default.Memory, onClick = { onDest(SettingsDest.Blutter) })
                 }
 
@@ -308,6 +312,7 @@ internal fun SettingsHub(
             SettingsDest.Edbg -> EdbgPage(t)
             SettingsDest.DexExplorer -> SettingsDexExplorerPage(t)
             SettingsDest.ApkEdit -> SettingsApkEditPage(t)
+            SettingsDest.Snapshots -> SettingsSnapshotsPage(t)
             SettingsDest.Rizin -> RizinPage(t)
             SettingsDest.Capture -> CapturePage(t)
             SettingsDest.Linux -> SettingsLinuxPage(t)

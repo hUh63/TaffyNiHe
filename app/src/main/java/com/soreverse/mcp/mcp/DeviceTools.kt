@@ -13,6 +13,8 @@ import android.os.StatFs
 import android.provider.Settings
 import com.soreverse.mcp.core.bool
 import com.soreverse.mcp.core.err
+import com.soreverse.mcp.core.readTextCapped
+import com.soreverse.mcp.core.ReadLimits
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
@@ -604,7 +606,7 @@ object DeviceTools {
                 val conn = URL("https://tinyurl.com/api-create.php?url=" + URLEncoder.encode(urlStr, "UTF-8")).openConnection() as HttpURLConnection
                 conn.connectTimeout = 10000
                 conn.readTimeout = 10000
-                val text = conn.inputStream.bufferedReader().use { it.readText().trim() }
+                val text = conn.inputStream.use { it.readTextCapped(ReadLimits.NET_API_BYTES).trim() }
                 conn.disconnect()
                 if (text.startsWith("http")) ok(JSONObject().put("original", urlStr).put("short", text))
                 else err("NETWORK_ERROR", "短链接服务返回异常: $text", "url", urlStr)

@@ -3,6 +3,7 @@ package com.soreverse.mcp
 import android.widget.Toast
 import com.soreverse.mcp.core.ReadLimits
 import com.soreverse.mcp.core.readTextCapped
+import com.soreverse.mcp.core.readBytesCapped
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -116,7 +117,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                     val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
                     conn.connectTimeout = 10000; conn.readTimeout = 15000
                     conn.setRequestProperty("User-Agent", "TaffyNiHe-extensions")
-                    conn.inputStream.bufferedReader().use { it.readText() }
+                    conn.inputStream.use { it.readTextCapped(ReadLimits.NET_API_BYTES) }
                 }
             }
             marketLoading = false
@@ -144,7 +145,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                     val conn = java.net.URL(fileUrl).openConnection() as java.net.HttpURLConnection
                     conn.connectTimeout = 10000; conn.readTimeout = 60000
                     conn.setRequestProperty("User-Agent", "TaffyNiHe-extensions")
-                    val bytes = conn.inputStream.use { it.readBytes() }
+                    val bytes = conn.inputStream.use { it.readBytesCapped(ReadLimits.PLUGIN_PACKAGE_BYTES) }
                     val dir = File(pluginsRoot, id).apply { mkdirs() }
                     val isZip = bytes.size > 2 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()
                     if (isZip) {

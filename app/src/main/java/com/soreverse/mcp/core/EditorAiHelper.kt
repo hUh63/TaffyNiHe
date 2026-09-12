@@ -109,7 +109,7 @@ object EditorAiHelper {
         conn.doOutput = true
         conn.outputStream.use { it.write(body); it.flush() }
         val code = conn.responseCode
-        val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.use { it.readBytes().decodeToString() } ?: ""
+        val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.use { it.readBytesCapped(ReadLimits.NET_API_BYTES).decodeToString() } ?: ""
         if (code !in 200..299) error("HTTP $code: ${text.take(300)}")
         val out = parse(text)
         if (out.isBlank()) error("模型返回为空: ${text.take(300)}")

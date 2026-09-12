@@ -3,6 +3,8 @@ package com.soreverse.mcp.mcp
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
+import com.soreverse.mcp.core.copyToCapped
+import com.soreverse.mcp.core.ReadLimits
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -87,7 +89,7 @@ Java.perform(function () {
                 val conn = URL(gadgetSrc).openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 15000; conn.readTimeout = 120000
                 conn.setRequestProperty("User-Agent", "TaffyNiHe")
-                conn.inputStream.use { input -> gadgetFile.outputStream().use { input.copyTo(it) } }
+                conn.inputStream.use { input -> gadgetFile.outputStream().use { input.copyToCapped(it, ReadLimits.BINARY_DOWNLOAD_BYTES) } }
             }.getOrElse { return err("DOWNLOAD_FAILED", "gadget 下载失败: ${it.message}", "url", gadgetSrc) }
             gadgetSize = gadgetFile.length()
         } else {

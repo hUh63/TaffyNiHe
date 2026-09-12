@@ -666,454 +666,7 @@ private fun describeJson(json: JSONObject, sb: StringBuilder, zh: Boolean, inden
     // 2. items 数组 → 列表
     val items = json.optJSONArray("items")
     if (items != null && items.length() > 0) {
-        if (zh) sb.append("共 ${items.length()} 项:\n") else sb.append("${items.length()} items:\n")
-        // 先检查 items 中的字段名，确定用哪个字段展示
-        val firstItem = items.optJSONObject(0)
-        val hasName = firstItem?.has("name") == true
-        val hasAddr = firstItem?.has("address") == true || firstItem?.has("vaddr") == true || firstItem?.has("addr") == true
-        val hasOrdn = firstItem?.has("ordinal") == true
-        for (i in 0 until items.length()) {
-            val item = items.opt(i)
-            if (item is JSONObject) {
-                val name = item.optString("name", item.optString("symbol", item.optString("function", "")))
-                val addr = item.optString("address", item.optString("vaddr", item.optString("addr", item.optString("offset", ""))))
-                val ordn = if (hasOrdn) item.optString("ordinal", "") else ""
-                val typ = item.optString("type", "")
-                val display = when {
-                    name.isNotBlank() -> name
-                    addr.isNotBlank() -> "@$addr"
-                    ordn.isNotBlank() -> "[$ordn]"
-                    typ.isNotBlank() -> "[$typ]"
-                    else -> (if (zh) "第${i+1}项" else "item $i")
-                }
-                sb.append("$pad• $display")
-                if (addr.isNotBlank() && name.isNotBlank()) sb.append("  @ $addr")
-                if (ordn.isNotBlank()) sb.append("  #$ordn")
-                sb.append("\n")
-            } else if (item is String) {
-                sb.append("$pad• $item\n")
-            } else {
-                val s = item.toString()
-                if (s.isNotBlank() && s != "null") sb.append("$pad• $s\n")
-            }
-        }
-        return
-    }
-
-    // 3. cryptoFindings / findings / scans
-    val cryptoArr = json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings") ?: json.optJSONArray("scans")
-    if (cryptoArr != null && cryptoArr.length() > 0) {
-        if (zh) sb.append("发现 ${cryptoArr.length()} 项加密特征:\n") else sb.append("${cryptoArr.length()} crypto findings:\n")
-        for (i in 0 until cryptoArr.length()) {
-            val c = cryptoArr.optJSONObject(i) ?: continue
-            val name = c.optString("name", c.optString("algorithm", c.optString("type", "")))
-            val count = c.optInt("count", c.optInt("matches", 0))
-            val displayName = if (name.isNotBlank()) name else (if (zh) "特征#${i+1}" else "feature#${i+1}")
-            sb.append("$pad• $displayName")
-            if (count > 0) sb.append(" ×$count")
-            sb.append("\n")
-        }
-        return
-    }
-
-    // 4. 通用键值
-    json.keys().asSequence().filter { it != "ok" }.forEach { k ->
-        val v = json.opt(k)
-        when (v) {
-            is JSONObject -> { sb.append("$pad$k:\n"); describeJson(v, sb, zh, indent + 1) }
-            is JSONArray -> { sb.append("$pad$k: ${v.length()} 项\n") }
-            else -> {
-                val vStr = v?.toString() ?: ""
-                sb.append("$pad${if (k.isNotBlank()) k else "?"}: ${if (vStr.isNotBlank()) vStr else "-"}\n")
-            }
-        }
-    }
-}
-
-/** 用中文/英文描述 overview 对象 */
-private fun describeOverview(ov: JSONObject, json: JSONObject?, sb: StringBuilder, zh: Boolean) {
-    if (zh) {
-        sb.append("文件: ").append(ov.optString("fileName", "-")).append("\n")
-        sb.append("架构: ").append(ov.optString("architecture", "-"))
-        if (ov.has("bits")) sb.append("/${ov.optInt("bits")}bit")
-        sb.append("\n")
-        sb.append("大小: ").append(fmtBytes(ov.optLong("size", 0L))).append("\n")
-        sb.append("类型: ").append(ov.optString("elfType", "-")).append("\n")
-        sb.append("入口点: ").append(ov.optString("entryPoint", "0x0")).append("\n")
-        sb.append("字节序: ").append(ov.optString("endian", "-")).append("\n")
-        val sha256 = ov.optString("sha256", "")
-        if (sha256.isNotBlank()) sb.append("SHA256: $sha256\n")
-        val compiler = ov.optString("compiler", "")
-        if (compiler.isNotBlank()) sb.append("编译器: $compiler\n")
-        val packer = ov.optString("packer", "")
-        if (packer.isNotBlank()) sb.append("加壳工具: $packer\n")
-    } else {
-        sb.append("File: ").append(ov.optString("fileName", "-")).append("\n")
-        sb.append("Arch: ").append(ov.optString("architecture", "-"))
-        if (ov.has("bits")) sb.append("/${ov.optInt("bits")}bit")
-        sb.append("\n")
-        sb.append("Size: ").append(fmtBytes(ov.optLong("size", 0L))).append("\n")
-        sb.append("Type: ").append(ov.optString("elfType", "-")).append("\n")
-        sb.append("Entry: ").append(ov.optString("entryPoint", "0x0")).append("\n")
-        sb.append("Endian: ").append(ov.optString("endian", "-")).append("\n")
-        val sha256 = ov.optString("sha256", "")
-        if (sha256.isNotBlank()) sb.append("SHA256: $sha256\n")
-        val compiler = ov.optString("compiler", "")
-        if (compiler.isNotBlank()) sb.append("Compiler: $compiler\n")
-        val packer = ov.optString("packer", "")
-        if (packer.isNotBlank()) sb.append("Packer: $packer\n")
-    }
-
-    // 结构计数
-    val countLabels = listOf("sectionCount" to (if (zh) "节区" else "Sections"), "functionCount" to (if (zh) "函数" else "Functions"),
-        "symbolCount" to (if (zh) "符号" else "Symbols"), "stringCount" to (if (zh) "字符串" else "Strings"),
-        "importCount" to (if (zh) "导入" else "Imports"), "exportCount" to (if (zh) "导出" else "Exports"))
-    val counts = countLabels.filter { ov.has(it.first) && ov.optInt(it.first, 0) > 0 }
-    if (counts.isNotEmpty()) {
-        if (zh) sb.append("结构分析:\n") else sb.append("Structure:\n")
-        counts.forEach { (k, label) -> sb.append("  $label: ${ov.optInt(k, 0)}\n") }
-    }
-
-    // 安全特性
-    val sec = ov.optJSONArray("securityFeatures")
-    if (sec != null && sec.length() > 0) {
-        if (zh) sb.append("安全特性:\n") else sb.append("Security:\n")
-        for (i in 0 until sec.length()) {
-            val s = sec.optJSONObject(i) ?: continue
-            val label = s.optString("label", s.optString("id", ""))
-            val active = s.optBoolean("active", false)
-            val desc = s.optString("description", "")
-            val displayLabel = if (label.isNotBlank()) label else (if (zh) "特性#${i+1}" else "feature#${i+1}")
-            sb.append("  $displayLabel: ${if (active) (if (zh) "启用" else "Yes") else (if (zh) "未启用" else "No")}\n")
-            if (desc.isNotBlank()) sb.append("    $desc\n")
-        }
-    }
-
-    // 加密特征
-    val crypto = ov.optJSONArray("cryptoFindings") ?: ov.optJSONArray("findings")
-    if (crypto != null && crypto.length() > 0) {
-        if (zh) sb.append("加密特征:\n") else sb.append("Crypto:\n")
-        for (i in 0 until crypto.length()) {
-            val c = crypto.optJSONObject(i) ?: continue
-            val name = c.optString("name", c.optString("algorithm", ""))
-            val count = c.optInt("count", c.optInt("matches", 0))
-            val displayName = if (name.isNotBlank()) name else (if (zh) "特征#${i+1}" else "feature#${i+1}")
-            sb.append("  $displayName")
-            if (count > 0) sb.append(" ×$count")
-            sb.append("\n")
-        }
-    }
-
-    // 顶层加密特征
-    val rootCrypto = json?.optJSONArray("cryptoFindings")
-    if (rootCrypto != null && rootCrypto.length() > 0) {
-        if (zh) sb.append("额外加密特征:\n") else sb.append("Extra Crypto:\n")
-        for (i in 0 until rootCrypto.length()) {
-            val c = rootCrypto.optJSONObject(i) ?: continue
-            val name = c.optString("name", c.optString("algorithm", ""))
-            val count = c.optInt("count", c.optInt("matches", 0))
-            val displayName = if (name.isNotBlank()) name else (if (zh) "特征#${i+1}" else "feature#${i+1}")
-            sb.append("  $displayName")
-            if (count > 0) sb.append(" ×$count")
-            sb.append("\n")
-        }
-    }
-
-    // 其他字段：结构化字段用易懂中文文字描述（参考安全特性风格），避免倾倒原始 JSON
-    describeOverviewExtras(ov, sb, zh)
-}
-
-/**
- * 用易懂中文描述 overview 中未在主要分区展示的字段。
- * 结构化对象/数组（段统计、攻击面、依赖库、熵、逆向难度、FLAGS）逐个用文字解释，
- * 标量字段走 fieldLabelCh 中文映射，避免把原始 JSON 直接倒给用户(那正是"imp 全是问号"的成因)。
- */
-private fun describeOverviewExtras(ov: JSONObject, sb: StringBuilder, zh: Boolean) {
-    val pad = "  "
-    val zhHead = if (zh) "其他信息:\n" else "Others:\n"
-    var wroteHeader = false
-    fun header() { if (!wroteHeader) { sb.append(zhHead); wroteHeader = true } }
-
-    // 依赖库（需要可读：库名 + 含义）
-    val libs = ov.optJSONArray("neededLibraries")
-    if (libs != null && libs.length() > 0) {
-        header()
-        sb.append("${pad}${if (zh) "依赖库" else "Dependencies"} (${libs.length()}):\n")
-        for (i in 0 until libs.length()) {
-            val l = libs.optJSONObject(i) ?: continue
-            val name = l.optString("name", "")
-            val desc = l.optString("description", "")
-            if (name.isNotBlank()) {
-                sb.append("$pad  • $name")
-                if (desc.isNotBlank()) sb.append(" — $desc")
-            } else if (desc.isNotBlank()) {
-                sb.append("$pad  • $desc")
-            } else {
-                val v = l.optString("name", l.opt("text")?.toString() ?: (if (zh) "库#${i+1}" else "lib#${i+1}"))
-                sb.append("$pad  • $v")
-            }
-            sb.append("\n")
-        }
-    }
-
-    // 攻击面（attackItem 已拼好 text，直接用）
-    val attack = ov.optJSONArray("attackSurface")
-    if (attack != null && attack.length() > 0) {
-        header()
-        sb.append("${pad}${if (zh) "攻击面分析" else "Attack Surface"}:\n")
-        for (i in 0 until attack.length()) {
-            val a = attack.optJSONObject(i) ?: continue
-            val text = a.optString("text", "")
-            val title = a.optString("title", "")
-            if (text.isNotBlank()) sb.append("$pad  • $text\n")
-            else if (title.isNotBlank()) sb.append("$pad  • $title\n")
-        }
-    }
-
-    // 逆向难度
-    val diff = ov.optJSONObject("difficulty")
-    if (diff != null) {
-        header()
-        val level = diff.optString("level", "")
-        val score = diff.optString("score", diff.optString("scoreValue", ""))
-        val summary = diff.optString("summary", "")
-        val label = if (level.isNotBlank() && score.isNotBlank()) "$level (评分 $score/10)" else (if (level.isNotBlank()) level else score)
-        sb.append("${pad}${if (zh) "逆向难度" else "Difficulty"}: $label\n")
-        if (summary.isNotBlank()) sb.append("$pad  $summary\n")
-        val factors = diff.optJSONArray("factors")
-        if (factors != null && factors.length() > 0) {
-            sb.append("$pad  ${if (zh) "关键因素" else "Key factors"}:\n")
-            for (i in 0 until factors.length()) {
-                val f = factors.optJSONObject(i) ?: continue
-                val t = f.optString("title", f.optString("text", ""))
-                val d = f.optString("detail", "")
-                sb.append("$pad    - $t")
-                if (d.isNotBlank()) sb.append("：$d")
-                sb.append("\n")
-            }
-        }
-    }
-
-    // 熵分析
-    val entropy = ov.optJSONObject("entropy")
-    if (entropy != null) {
-        header()
-        val head = entropy.opt("head64k")?.toString()
-        val gbl = entropy.opt("globalSample")?.toString()
-        val lv = entropy.optString("level", "")
-        sb.append("${pad}${if (zh) "熵分析" else "Entropy"}:\n")
-        if (gh(head)) sb.append("$pad  ${if (zh) "头部64K" else "Head64K"}: $head\n")
-        if (gh(gbl)) sb.append("$pad  ${if (zh) "全局抽样" else "Global"}: $gbl\n")
-        if (lv.isNotBlank()) sb.append("$pad  ${if (zh) "级别" else "Level"}: $lv\n")
-    }
-
-    // 段分类统计
-    val segClass = ov.optJSONObject("segmentClass")
-    if (segClass != null) {
-        header()
-        val execC = segClass.optInt("execCount", 0)
-        val readC = segClass.optInt("readCount", 0)
-        val writeC = segClass.optInt("writeCount", 0)
-        val otherC = segClass.optInt("otherCount", 0)
-        val execP = segClass.opt("execPct")?.toString()
-        val readP = segClass.opt("readPct")?.toString()
-        val writeP = segClass.opt("writePct")?.toString()
-        sb.append("${pad}${if (zh) "段类型分类" else "Segment classes"}:\n")
-        sb.append("$pad  ${if (zh) "可执行" else "Exec"}: $execC 段${if (gh(execP)) " (${execP}%)" else ""}\n")
-        sb.append("$pad  ${if (zh) "可读" else "Read"}: $readC 段${if (gh(readP)) " (${readP}%)" else ""}\n")
-        sb.append("$pad  ${if (zh) "可写" else "Write"}: $writeC 段${if (gh(writeP)) " (${writeP}%)" else ""}\n")
-        sb.append("$pad  ${if (zh) "其他" else "Other"}: $otherC 段\n")
-    }
-
-    // 段权限
-    val segPerm = ov.optJSONObject("segmentPermissions")
-    if (segPerm != null) {
-        header()
-        val loadable = segPerm.optInt("loadable", 0)
-        val readable = segPerm.optInt("readable", 0)
-        val writable = segPerm.optInt("writable", 0)
-        val executable = segPerm.optInt("executable", 0)
-        sb.append("${pad}${if (zh) "段权限" else "Segment permissions"}:\n")
-        sb.append("$pad  ${if (zh) "可加载" else "Loadable"}: $loadable, ${if (zh) "可读" else "Read"}: $readable, ${if (zh) "可写" else "Write"}: $writable, ${if (zh) "可执行" else "Exec"}: $executable\n")
-    }
-
-    // FLAGS 一键安全开关汇总（relro 是字符串，其余是布尔）
-    val flags = ov.optJSONObject("flags")
-    if (flags != null) {
-        header()
-        val pieces = mutableListOf<String>()
-        fun addBool(key: String, zhLabel: String) {
-            if (flags.has(key)) {
-                val v = flags.opt(key)
-                val on = when (v) {
-                    is Boolean -> v
-                    is String -> v.equals("true", true)
-                    else -> false
-                }
-                if (on) pieces.add(zhLabel)
-            }
-        }
-        val relro = flags.optString("relro", "")
-        if (relro.isNotBlank()) pieces.add("RELRO:$relro")
-        addBool("pie", if (zh) "PIE" else "PIE")
-        addBool("nx", if (zh) "NX" else "NX")
-        addBool("canary", if (zh) "Canary" else "Canary")
-        addBool("fortify", if (zh) "FORTIFY" else "FORTIFY")
-        addBool("cfi", if (zh) "CFI" else "CFI")
-        addBool("antiDebug", if (zh) "反调试" else "anti-debug")
-        addBool("rootDetect", if (zh) "Root检测" else "root-det")
-        addBool("emulatorDetect", if (zh) "模拟器检测" else "emulator")
-        addBool("dynLoad", if (zh) "动态加载" else "dlopen")
-        addBool("sslPinning", if (zh) "SSL固定" else "SSL-pin")
-        addBool("ollvm", if (zh) "OLLVM" else "OLLVM")
-        addBool("strEncrypt", if (zh) "字符串加密" else "str-encrypt")
-        addBool("initArray", if (zh) ".init_array" else ".init_array")
-        addBool("textRel", if (zh) "TEXTREL" else "TEXTREL")
-        sb.append("${pad}${if (zh) "安全标志汇总" else "Flag summary"}:\n")
-        sb.append("$pad  " + (if (pieces.isEmpty()) (if (zh) "无" else "none") else pieces.joinToString(", ")) + "\n")
-    }
-
-    // 其余标量字段（非对象/数组）：中文映射 + 布尔化值
-    val structuredKeys = setOf("neededLibraries", "attackSurface", "difficulty", "entropy",
-        "segmentClass", "segmentPermissions", "flags")
-    val shown = setOf("fileName", "size", "architecture", "bits", "elfType", "entryPoint",
-        "endian", "sha256", "sha1", "md5", "compiler", "packer",
-        "sectionCount", "functionCount", "symbolCount", "stringCount", "importCount",
-        "exportCount", "securityFeatures", "cryptoFindings", "findings", "difficulty", "ok", "items")
-    ov.keys().asSequence()
-        .filter { it !in shown && it !in structuredKeys && !ov.isNull(it) }
-        .filter { ov.opt(it) !is JSONObject && ov.opt(it) !is JSONArray }
-        .forEach { k ->
-            header()
-            val v = ov.opt(k)
-            val label = if (zh) fieldLabelCh(k) else k
-            val vStr = when (v) {
-                is Boolean -> if (v) (if (zh) "是" else "Yes") else (if (zh) "否" else "No")
-                is Number -> if (k == "size") fmtBytes(v.toLong()) else v.toString()
-                else -> v?.toString() ?: "-"
-            }
-            sb.append("$pad$label: $vStr\n")
-        }
-}
-
-/** 判断字符串是否非空 */
-private fun gh(s: String?): Boolean = !s.isNullOrBlank()
-
-/** 组装 overview "其他信息" 的可读文字（供详细模式卡片显示；简洁模式直接写入 StringBuilder） */
-private fun overviewExtrasText(ov: JSONObject, zh: Boolean): String {
-    val sb = StringBuilder()
-    describeOverviewExtras(ov, sb, zh)
-    return sb.toString()
-}
-
-@Composable
-private fun ExtraInfoText(ov: JSONObject, zh: Boolean) {
-    val text = remember(ov, zh) { overviewExtrasText(ov, zh) }
-    if (text.isNotBlank()) {
-        Text(text, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-    }
-}
-
-/** 字段名中文映射 */
-private fun fieldLabelCh(k: String): String = when (k) {
-    "timestamp" -> "时间戳"
-    "compilerVersion" -> "编译器版本"
-    "linkerVersion" -> "链接器版本"
-    "debugInfo" -> "调试信息"
-    "relocations" -> "重定位"
-    "tls" -> "线程局部存储"
-    "notes" -> "注释"
-    "flags" -> "标志"
-    "osAbi" -> "操作系统ABI"
-    "abiVersion" -> "ABI版本"
-    "machine" -> "机器类型"
-    "linkFlags" -> "链接标志"
-    "segmentCount" -> "段数量"
-    "programHeaders" -> "程序头"
-    "sections" -> "节区"
-    "segments" -> "段"
-    "libraries" -> "依赖库"
-    "runpaths" -> "运行路径"
-    "soname" -> "SO名称"
-    "interpreter" -> "解释器"
-    "baseAddr" -> "基址"
-    "buildId" -> "Build ID"
-    "stripped" -> "是否剥离符号"
-    "totallyStripped" -> "符号几乎全无"
-    "hasDebugInfo" -> "含调试信息"
-    "hasJniOnLoad" -> "含JNI_OnLoad"
-    "hasOriginalSectionHeaders" -> "保留节区头"
-    "neededCount" -> "依赖库数"
-    "dynsymCount" -> "动态符号数"
-    "visibilityPct" -> "符号可见比例"
-    "namedFunctionCount" -> "具名函数数"
-    "jniCount" -> "JNI函数数"
-    "elfTypeCode" -> "ELF类型编码"
-    "architectureCode" -> "架构编码"
-    "endianCode" -> "字节序编码"
-    "hasDwarf" -> "含DWARF调试"
-    "hasTextRel" -> "代码段可写"
-    else -> k
-}
-
-// ============================================================
-// 详细模式：结构化数据展示
-// ============================================================
-
-@Composable
-private fun StructuredJsonView(text: String, zh: Boolean) {
-    if (text.isBlank()) return
-    val json = runCatching { JSONObject(text) }.getOrNull()
-    if (json == null) { Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 16.sp); return }
-
-    val ov = json.optJSONObject("overview")
-    if (ov != null) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SectionCard(if (zh) "📦 基础属性" else "📦 Basics") { JsonKeyValues(ov, zh, listOf("fileName","size","architecture","bits","elfType","entryPoint","endian","sha256","sha1","md5","compiler","packer")) }
-            val countKeys = listOf("sectionCount","functionCount","symbolCount","stringCount","importCount","exportCount").filter { ov.has(it) }
-            if (countKeys.isNotEmpty()) { SectionCard(if (zh) "📊 结构与规模" else "📊 Structure") { MetricRowFull(*countKeys.map { k -> (if (zh) k.replace("Count","") else k.replace("Count","")) to ov.optInt(k, 0).toString() }.toTypedArray()) } }
-            val sec = ov.optJSONArray("securityFeatures")
-            if (sec != null && sec.length() > 0) {
-                SectionCard(if (zh) "🔒 安全特性" else "🔒 Security") {
-                    for (i in 0 until sec.length()) {
-                        val s = sec.optJSONObject(i) ?: continue; val label = s.optString("label", s.optString("id", "?"))
-                        val active = s.optBoolean("active", false); val desc = s.optString("description", "")
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface); Text(if (active) (if (zh) "✓ 启用" else "✓ Yes") else (if (zh) "✗ 未启用" else "✗ No"), style = MaterialTheme.typography.bodySmall, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
-                        if (desc.isNotBlank()) Text("  $desc", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                    }
-                }
-            }
-            val crypto = ov.optJSONArray("cryptoFindings")
-            if (crypto != null && crypto.length() > 0) {
-                SectionCard(if (zh) "🔐 加密特征" else "🔐 Crypto") {
-                    for (i in 0 until crypto.length()) {
-                        val c = crypto.optJSONObject(i) ?: continue; val name = c.optString("name", c.optString("algorithm", "?")); val count = c.optInt("count", c.optInt("matches", 0))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface); if (count > 0) Text("×$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
-                    }
-                }
-            }
-            val shown = setOf("fileName","size","architecture","bits","elfType","entryPoint","endian","sha256","sha1","md5","compiler","packer","sectionCount","functionCount","symbolCount","stringCount","importCount","exportCount","securityFeatures","cryptoFindings","findings","difficulty","ok","items")
-            val extra = ov.keys().asSequence().filter { it !in shown && !ov.isNull(it) }.toList()
-            if (extra.isNotEmpty()) { SectionCard(if (zh) "📋 其他信息" else "📋 Others") { ExtraInfoText(ov, zh) } }
-        }
-        val extCrypto = json.optJSONArray("cryptoFindings")
-        if (extCrypto != null && extCrypto.length() > 0) { StructuredCryptoCard(extCrypto, zh) }
-        return
-    }
-    val items = json.optJSONArray("items")
-    if (items != null && items.length() > 0) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(if (zh) "共 ${items.length()} 项" else "${items.length()} items", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            for (i in 0 until items.length()) {
-                val item = items.opt(i)
-                val line = when (item) {
-                    is JSONObject -> { val name = item.optString("name", item.optString("symbol", item.optString("function", item.optString("label", "")))); val addr = item.optString("address", item.optString("vaddr", item.optString("addr", item.optString("offset", "")))); if (name.isNotBlank() && addr.isNotBlank()) "$name  @ $addr" else if (name.isNotBlank()) name else if (addr.isNotBlank()) "@$addr" else item.optString("type", item.optString("id", "?")) }
-                    is org.json.JSONArray -> "[${item.length()}] ${(0 until item.length()).joinToString(", ") { i -> item.opt(i).toString() }.take(120)}"
-                    else -> item.toString()
-                }
-                Text("• $line", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
-            }
-        }
+        ItemsTable(items, zh)
         return
     }
     val cryptoArr = json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings") ?: json.optJSONArray("scans")
@@ -1122,6 +675,62 @@ private fun StructuredJsonView(text: String, zh: Boolean) {
     if (keys.isEmpty()) { Text(json.toString(2), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface); return }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         keys.forEach { k -> val v = json.opt(k); val vStr = when (v) { is JSONObject -> "{${v.length()} fields}\n${v.toString(2).take(500)}"; is org.json.JSONArray -> "[${v.length()} items]\n${(0 until v.length()).joinToString("\n") { i -> "  [$i] ${v.opt(i)}" }.take(500)}"; null -> "—"; else -> v.toString() }; Kv(k, vStr) }
+    }
+}
+
+@Composable
+private fun ItemsTable(items: JSONArray, zh: Boolean) {
+    // 收集标量列(排除嵌套对象/数组), 最多 8 列
+    val columns = remember(items.length()) {
+        val cols = LinkedHashSet<String>()
+        for (i in 0 until minOf(items.length(), 50)) {
+            val o = items.optJSONObject(i) ?: continue
+            val ks = o.keys()
+            while (ks.hasNext() && cols.size < 8) {
+                val k = ks.next()
+                val v = o.opt(k)
+                if (v != null && v !is JSONObject && v !is org.json.JSONArray) cols.add(k)
+            }
+            if (cols.size >= 8) break
+        }
+        cols.toList()
+    }
+    if (columns.isEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (i in 0 until minOf(items.length(), 300)) {
+                val item = items.opt(i)
+                val line = when (item) {
+                    is JSONObject -> item.toString()
+                    is org.json.JSONArray -> "[${item.length()} sub-items]"
+                    else -> item.toString()
+                }
+                Text("• $line", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        return
+    }
+    val colW = 130.dp
+    val rows = minOf(items.length(), 300)
+    Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        Text(if (zh) "共 ${items.length()} 项 · 表格视图" else "${items.length()} items · table", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 2.dp))
+        Row(Modifier.fillMaxWidth()) {
+            columns.forEach { c -> Text(c, modifier = Modifier.width(colW).padding(horizontal = 4.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+        androidx.compose.material3.HorizontalDivider()
+        for (i in 0 until rows) {
+            val o = items.optJSONObject(i)
+            if (o == null) {
+                Text("• ${items.opt(i)}", modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                continue
+            }
+            Row(Modifier.fillMaxWidth()) {
+                columns.forEach { c ->
+                    val v = o.opt(c)
+                    Text(v?.toString() ?: "—", modifier = Modifier.width(colW).padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        if (items.length() > rows) Text(if (zh) "… 仅显示前 $rows 项（共 ${items.length()} 项）" else "… showing first $rows of ${items.length()}", modifier = Modifier.padding(4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -104,11 +104,33 @@ object PatchTemplateTool {
                 "taffy_apk_sign" to JSONObject().put("inputApk", "\${p.apk}"),
             ),
         ),
+        Tpl(
+            "replace_url",
+            "全局替换 URL(整个 APK 所有 DEX 内把某 URL 替换为新值, 如改接口/校验/上报地址)",
+            listOf("path", "oldUrl", "newUrl"),
+            listOf(
+                "taffy_smali_edit" to JSONObject()
+                    .put("action", "replace_string")
+                    .put("scope", "global")
+                    .put("path", "\${p.path}")
+                    .put("oldString", "\${p.oldUrl}")
+                    .put("newString", "\${p.newUrl}"),
+            ),
+        ),
+        Tpl(
+            "bypass_signature_check",
+            "去签名校验: 对 decode 目录扫描并 patch 签名校验方法为\"永远通过\"(后续 rebuild+sign 绕过重打包校验)",
+            listOf("dir"),
+            listOf(
+                "taffy_apk_sign_kill" to JSONObject().put("action", "detect").put("path", "\${p.dir}"),
+                "taffy_apk_sign_kill" to JSONObject().put("action", "patch").put("path", "\${p.dir}"),
+            ),
+        ),
     )
 
     val tool: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_patch_template",
-            "【常用 Patch 模板】把 MT 高频逆向操作封装成一步调用(复用现有工具)。action=list 列出内置模板及所需参数; action=apply 选模板并填参数执行。内置: resign_apk(重签名) / resign_with_check(重签前诊断) / dex_string_global_replace(全局字符串替换) / dex_string_patch_single(单方法字符串替换) / apk_patch_bytes_write(CAS字节写) / apk_add_permission(加权限) / recon_apk(逆向诊断: 壳+签名+原生库体检)。对标 MT 的一键改包常用操作。",
+            "【常用 Patch 模板】把 MT 高频逆向操作封装成一步调用(复用现有工具)。action=list 列出内置模板及所需参数; action=apply 选模板并填参数执行。内置: resign_apk(重签名) / resign_with_check(重签前诊断) / replace_url(改 URL) / bypass_signature_check(去签名校验) / dex_string_global_replace(全局字符串替换) / dex_string_patch_single(单方法字符串替换) / apk_patch_bytes_write(CAS字节写) / apk_add_permission(加权限) / recon_apk(逆向诊断: 壳+签名+原生库体检)。对标 MT 的一键改包常用操作。",
             "Common reverse-engineering patch templates that call existing tools in one step. action=list shows built-in templates + required params; action=apply runs one. Templates: resign_apk / resign_with_check / dex_string_global_replace / dex_string_patch_single / apk_patch_bytes_write / apk_add_permission / recon_apk (shell+signature+native probe one-shot). Mirrors MT-style one-click common patches.",
             "apk", ToolClass.EXTRA, heavy = true,
         ) {

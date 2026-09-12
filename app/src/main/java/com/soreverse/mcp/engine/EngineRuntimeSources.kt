@@ -224,7 +224,31 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     workspaces[ws.id] = ws
     workspaceBySourceKey[key] = ws.id
     AppLog.i("Opened ${src.path} as ${ws.id}")
+    val evicted = evictWorkspacesIfNeeded(ws.id)
+    if (evicted.isNotEmpty()) AppLog.i("Evicted ${evicted.size} workspace(s) to stay within memory budget: ${evicted.joinToString()}")
     return ws
+}
+
+/**
+ * 工作区自动淘汰（对标 SOMCP Issue #63 渐进 OOM）: 当持久工作区数量超 [MAX_WORKSPACES]
+ * 或 data 总字节超 [MAX_WORKSPACE_BYTES] 时, 按 createdAt 从旧到新淘汰（跳过 keepId 与
+ * temporary 工作区), 释放其 data/elf 引用交由 GC。返回被淘汰的 id 列表。
+ */
+internal fun EngineRuntime.evictWorkspacesIfNeeded(keepId: String = ""): List<String> {
+    val evicted = ArrayList<String>()
+    fun withinLimits(): Boolean {
+        val total = workspaces.values.sumOf { it.data.size.toLong() }
+        return workspaces.size <= MAX_WORKSPACES && total <= MAX_WORKSPACE_BYTES
+    }
+    if (withinLimits()) return evicted
+    val candidates = workspaces.values.filter { !it.temporary && it.id != keepId }.sortedBy { it.createdAt }
+    for (w in candidates) {
+        if (withinLimits()) break
+        workspaces.remove(w.id)
+        workspaceBySourceKey.entries.removeIf { it.value == w.id }
+        evicted.add(w.id)
+    }
+    return evicted
 }
 
 internal data class AnalysisInput(

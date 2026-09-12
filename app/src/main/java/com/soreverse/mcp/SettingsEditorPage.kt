@@ -207,7 +207,8 @@ internal fun SettingsEditorPage(t: UiText) {
             if (!f.isFile) return
             val bakDir = File(context.filesDir, "editor_files/backup").apply { mkdirs() }
             val bak = File(bakDir, "${f.name}.${System.currentTimeMillis()}.bak")
-            bak.writeBytes(f.readBytes())
+            if (f.length() > 256L * 1024 * 1024) return   // 超大文件跳过备份，避免整份读入内存
+            f.inputStream().use { ins -> bak.outputStream().use { outs -> ins.copyTo(outs) }}
             // 只保留最近 5 份同名备份
             bakDir.listFiles { it -> it.name.startsWith(f.name) }
                 ?.sortedByDescending { it.lastModified() }?.drop(5)?.forEach { it.delete() }
@@ -217,7 +218,12 @@ internal fun SettingsEditorPage(t: UiText) {
     /** 加载工作区文件（任意路径，写回原文件）。 */
     fun loadWsFile(path: String) {
         scope.launch {
-            val text = withContext(Dispatchers.IO) { runCatching { File(path).readText() }.getOrNull() }
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    val f = File(path)
+                    if (f.length() > 64L * 1024 * 1024) null else f.readText()   // 上限防 OOM
+                }.getOrNull()
+            }
             if (text != null) {
                 snapshotIfChanged(path)
                 code = text
@@ -801,11 +807,21 @@ internal fun SettingsEditorPage(t: UiText) {
                     modifier = Modifier.fillMaxSize(),
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp, color = fg),
                     cursorBrush = SolidColor(AppPalette.teal),
-                    visualTransformation = VisualTransformation { text ->
-                        androidx.compose.ui.text.input.TransformedText(
-                            CodeHighlighter.highlight(text.text, mode),
-                            androidx.compose.ui.text.input.OffsetMapping.Identity,
-                        )
+                    visualTransformation = remember(mode) {
+                        // 高亮结果按"原文"缓存：VisualTransformation 每次布局/光标移动都会调用，
+                        // 缓存可避免逐字符状态机在主线程反复全文重算（大文件编辑卡顿主因）。
+                        val cache = HashMap<String, androidx.compose.ui.text.AnnotatedString>()
+                        VisualTransformation { text ->
+                            val src = text.text
+                            val ann = cache[src] ?: CodeHighlighter.highlight(src, mode).also {
+                                if (cache.size > 32) cache.clear()
+                                cache[src] = it
+                            }
+                            androidx.compose.ui.text.input.TransformedText(
+                                ann,
+                                androidx.compose.ui.text.input.OffsetMapping.Identity,
+                            )
+                        }
                     },
                     decorationBox = { inner ->
                         Box {

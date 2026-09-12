@@ -121,10 +121,12 @@ internal fun ToolStatsSection(t: UiText, settings: SettingsStore) {
     }
     Spacer(Modifier.height(8.dp))
     val toolsArr = snapshot.optJSONArray("tools")
-    val entries = (0 until (toolsArr?.length() ?: 0)).mapNotNull { i ->
-        val obj = toolsArr?.optJSONObject(i) ?: return@mapNotNull null
-        Triple(obj.optString("tool"), obj.optLong("calls"), obj.optLong("failed"))
-    }.sortedByDescending { it.second }
+    val entries = remember(snapshot) {
+        (0 until (toolsArr?.length() ?: 0)).mapNotNull { i ->
+            val obj = toolsArr?.optJSONObject(i) ?: return@mapNotNull null
+            Triple(obj.optString("tool"), obj.optLong("calls"), obj.optLong("failed"))
+        }.sortedByDescending { it.second }
+    }
     if (entries.isEmpty()) {
         Text(if (t.zh) "暂无工具调用记录。" else "No tool calls recorded yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
     } else {

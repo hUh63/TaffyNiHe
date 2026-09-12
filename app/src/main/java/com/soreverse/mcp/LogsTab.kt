@@ -86,7 +86,8 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
         onDispose { AppLog.removeListener(onLine) }
     }
 
-    val visibleLogs = logs
+    val visibleLogs = remember(contentVersion, logFilter, searchText, settings.logMaxLines, t.zh) {
+        logs
         .filter { line ->
             val levelMatch = when (logFilter) {
                 "E" -> " E " in line
@@ -99,6 +100,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
             levelMatch && searchMatch
         }
         .takeLast(settings.logMaxLines)
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain"),
@@ -194,11 +196,13 @@ private fun LogActionButton(label: String, icon: ImageVector, modifier: Modifier
     }
 }
 
+private val LOG_LINE_RE = Regex("^(\\d{2}:\\d{2}:\\d{2}\\.\\d{3})\\s+([IWE])\\s+(.*)$")
+
 private data class LogLineUi(val time: String, val level: String, val message: String)
 
 private fun parseLogLine(line: String, zh: Boolean): LogLineUi {
     val localized = localizeLogLine(line, zh)
-    val match = Regex("^(\\d{2}:\\d{2}:\\d{2}\\.\\d{3})\\s+([IWE])\\s+(.*)$").find(localized)
+    val match = LOG_LINE_RE.find(localized)
     return if (match != null) {
         LogLineUi(match.groupValues[1], match.groupValues[2], match.groupValues[3])
     } else {

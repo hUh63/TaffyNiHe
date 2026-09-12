@@ -143,7 +143,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
             }
             HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
-                items(members) { m ->
+                items(members, key = { it }) { m ->
                     Text(m, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp))
                 }
             }
@@ -152,7 +152,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
             val filtered = remember(classes, query) { if (query.isBlank()) classes else classes.filter { it.contains(query, ignoreCase = true) } }
             Text(if (zh) "共 ${filtered.size} / ${classes.size} 个类" else "${filtered.size} / ${classes.size} classes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             LazyColumn(Modifier.fillMaxSize()) {
-                items(filtered) { c ->
+                items(filtered, key = { it }) { c ->
                     Text(c, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().clickable { openClass(c) }.padding(vertical = 2.dp))
                 }
             }

@@ -517,6 +517,69 @@ object FileTools {
             .put("removed", edits.count { it.type == '-' }))
     }
 
+    // ── taffy_dir_diff ──
+    val dirDiff = EngineToolHandler(
+        ToolMeta("taffy_dir_diff",
+            "【目录差异对比】递归对比两个目录的文件树差异(新增/删除/修改), 支持通配过滤与 SHA-256 内容比对。用于整包/解包目录级比对, 补齐单文件 taffy_file_diff 的不足。",
+            "Recursively compare two directory trees (added/removed/modified), with glob filter and optional SHA-256 content check. Package/dir-level diff to complement single-file taffy_file_diff.",
+            "file", ToolClass.EXTRA,
+        ) {
+            objectSchema(props {
+                "leftDir" str "左目录(基准)绝对路径"
+                "rightDir" str "右目录(对比目标)绝对路径"
+                "hash" bool "按 SHA-256 判内容变化(默认 false, 仅比大小)"
+                "filter" str "文件名通配过滤(如 *.smali *.json)"
+                "limit" int "每类最多返回条数(默认 500)"
+            })
+        }
+    ) { _, a, _ ->
+        val leftPath = a.str("leftDir"); val rightPath = a.str("rightDir")
+        if (leftPath.isBlank() || rightPath.isBlank())
+            return@EngineToolHandler err("INVALID_ARGUMENT", "需要 leftDir 与 rightDir", "leftDir", leftPath)
+        val left = File(leftPath); val right = File(rightPath)
+        if (!left.isDirectory) return@EngineToolHandler err("NOT_DIR", "leftDir 不是目录", "leftDir", leftPath)
+        if (!right.isDirectory) return@EngineToolHandler err("NOT_DIR", "rightDir 不是目录", "rightDir", rightPath)
+        val useHash = a.bool("hash", false)
+        val limit = a.intValue("limit", 500).coerceIn(1, 5000)
+        val filter = a.str("filter")
+        val filterRegex = if (filter.isNotBlank())
+            Regex(filter.replace(".", "\\.").replace("*", ".*").replace("?", "."), RegexOption.IGNORE_CASE) else null
+
+        fun collect(root: File): Map<String, File> {
+            val out = HashMap<String, File>()
+            root.walkTopDown().filter { it.isFile }.forEach { f ->
+                val rel = f.relativeTo(root).path
+                if (filterRegex == null || filterRegex.matches(f.name)) out[rel] = f
+            }
+            return out
+        }
+        val l = collect(left); val r = collect(right)
+        val added = JSONArray(); val removed = JSONArray(); val modified = JSONArray()
+        var unchanged = 0
+        for ((rel, rf) in r.entries.sortedBy { it.key }) {
+            val lf = l[rel]
+            if (lf == null) {
+                if (added.length() < limit) added.put(JSONObject().put("path", rel).put("size", rf.length()))
+            } else {
+                val sizeChanged = lf.length() != rf.length()
+                val changed = if (useHash) EditSnapshotService.sha256(lf) != EditSnapshotService.sha256(rf) else sizeChanged
+                if (changed) {
+                    if (modified.length() < limit) modified.put(JSONObject().put("path", rel)
+                        .put("sizeLeft", lf.length()).put("sizeRight", rf.length()))
+                } else unchanged++
+            }
+        }
+        for (rel in l.keys.filter { !r.containsKey(it) }.sorted()) {
+            if (removed.length() < limit) removed.put(JSONObject().put("path", rel).put("size", l[rel]!!.length()))
+        }
+        ok(JSONObject()
+            .put("leftDir", leftPath).put("rightDir", rightPath)
+            .put("leftFiles", l.size).put("rightFiles", r.size)
+            .put("added", added).put("removed", removed).put("modified", modified)
+            .put("unchangedCount", unchanged)
+            .put("identical", added.length() == 0 && removed.length() == 0 && modified.length() == 0))
+    }
+
     // ── taffy_file_rename ──
     val rename = EngineToolHandler(
         ToolMeta("taffy_file_rename",

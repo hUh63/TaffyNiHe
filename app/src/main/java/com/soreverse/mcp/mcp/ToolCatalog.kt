@@ -1034,6 +1034,7 @@ object ToolCatalog {
         FileTools.search,
         FileTools.replace,
         FileTools.diff,
+        FileTools.dirDiff,
         FileTools.rename,
         FileTools.copy,
         FileTools.delete,

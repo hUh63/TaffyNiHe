@@ -44,13 +44,16 @@ object SmaliBatchTool {
         ) {
             objectSchema(props {
                 "action".oneOf("批处理action",
-                    "init(全量解包到smali目录) | rebuild(重编回DEX并写回APK) | rename_class(重命名类,去混淆) | diff_tree(对比目录改动) | diff(对比差异) | rollback(回滚) | list_snapshots(列快照)",
-                    "init", "rebuild", "rename_class", "diff_tree", "diff", "rollback", "list_snapshots")
+                    "init(全量解包到smali目录) | rebuild(重编回DEX并写回APK) | rename_class(重命名类,去混淆) | rename_method(重命名方法/去混淆) | diff_tree(对比目录改动) | diff(对比差异) | rollback(回滚) | list_snapshots(列快照)",
+                    "init", "rebuild", "rename_class", "rename_method", "diff_tree", "diff", "rollback", "list_snapshots")
                 "path" str "APK 文件路径(init) 或 DEX 文件路径(init 单 dex, 用 isDex 标记)"
                 "isDex" bool "init: true 表示 path 是单个 .dex 而非 APK(可选)"
                 "workDir" str "rebuild/rename_class: 工作目录(init 返回的)"
-                "oldClass" str "rename_class: 要重命名的原始类全名(如 com.example.A)"
+                "oldClass" str "rename_class/rename_method: 原始类全名(如 com.example.A); rename_method 时可省略=全局"
                 "newClass" str "rename_class: 重命名后的类全名(如 com.example.MainActivity)"
+                "oldMethod" str "rename_method: 要重命名的方法名(不含签名)"
+                "newMethod" str "rename_method: 重命名后的方法名"
+                "signature" str "rename_method: 可选, 方法签名(如 (I)V)用于重载消歧(仅约束定义行)"
                 "apiLevel" int "smali/dex api level(默认 34)"
                 "sign" bool "rebuild: 是否自动重签名(默认 false, 签名用内置密钥)"
                 "signOutput" str "sign=true 时输出签名 APK 路径(默认 <原>-signed.apk)"
@@ -64,6 +67,7 @@ object SmaliBatchTool {
                 "init" -> initWork(ctx, args)
                 "rebuild" -> rebuildWork(ctx, args)
                 "rename_class" -> renameClass(ctx, args)
+                "rename_method" -> renameMethod(ctx, args)
                 "diff_tree" -> diffTree(ctx, args)
                 "diff" -> snapshotDiff(ctx, args)
                 "rollback" -> snapshotRollback(ctx, args)
@@ -346,6 +350,76 @@ object SmaliBatchTool {
                     .put("hint", "类引用已重命名并移动文件。用 action=rebuild 重编回 DEX 校验语法/引用一致性后再签名。若重编报错(引用断裂), 用 action=rollback 还原。"))
             }.getOrElse { e ->
                 err("RENAME_CLASS_FAILED", "重命名失败: ${e.message ?: e.javaClass.simpleName}", "oldClass", oldClass)
+            }
+        }
+
+
+        /**
+         * rename_method: 重命名指定方法(可用 oldClass 限定所属类), 全目录同步替换 smali 中的方法定义与调用引用。
+         * 支持重载消歧: 传 signature(如 "(I)V") 时仅重命名签名匹配的方法定义行。
+         * 注意: 引用端无法按签名区分同名重载, 存在同名重载时所有该名引用会被一并替换。
+         */
+        private fun renameMethod(ctx: ToolContext, args: JSONObject): JSONObject {
+            val workDirPath = args.str("workDir")
+            val oldMethod = args.str("oldMethod").trim()
+            val newMethod = args.str("newMethod").trim()
+            val oldClassRaw = args.str("oldClass").trim()
+            val signature = args.str("signature").trim()
+            if (workDirPath.isBlank()) return err("INVALID_ARGUMENT", "缺少 workDir", "workDir", "")
+            if (oldMethod.isBlank() || newMethod.isBlank())
+                return err("INVALID_ARGUMENT", "缺少 oldMethod 或 newMethod", "oldMethod", oldMethod)
+            if (oldMethod == newMethod) return err("NOOP", "oldMethod 与 newMethod 相同", "newMethod", newMethod)
+            val identRe = Regex("[A-Za-z_$][A-Za-z0-9_$]{0,255}")
+            if (!identRe.matches(oldMethod) || !identRe.matches(newMethod))
+                return err("INVALID_ARGUMENT", "方法名非法(仅允许 Dalvik/Java 标识符)", "newMethod", newMethod)
+            val workDir = File(workDirPath)
+            if (!workDir.isDirectory) return err("DIR_NOT_FOUND", "工作目录不存在: $workDirPath", "workDir", workDirPath)
+
+            val slOld = if (oldClassRaw.isNotBlank()) oldClassRaw.replace('.', '/') else ""
+            // 引用: L{类}(内嵌)?;->oldMethod(  =>  ->newMethod(
+            val refRegex = if (slOld.isNotBlank())
+                Regex("(L" + Regex.escape(slOld) + "(?:\\\$[^;]*)?;)->" + Regex.escape(oldMethod) + "\\(")
+            else Regex("->" + Regex.escape(oldMethod) + "\\(")
+            val refRepl = if (slOld.isNotBlank()) "\$1->" + newMethod + "(" else "->" + newMethod + "("
+            // 定义: .method <modifiers> oldMethod( 或 oldMethod<signature>
+            val defTail = if (signature.isNotBlank()) Regex.escape(signature) else "\\("
+            val defRegex = Regex("(?m)^(\\.method\\b[^\\n]*?\\s)" + Regex.escape(oldMethod) + defTail)
+
+            return runCatching {
+                var totalFiles = 0; var totalRefs = 0; var totalDefs = 0
+                val named = workDir.listFiles { f -> f.isDirectory && f.name.endsWith("_smali") }?.toList() ?: emptyList()
+                val dirs = if (named.isNotEmpty()) named else workDir.listFiles { f -> f.isDirectory }?.toList() ?: emptyList()
+                for (smaliDir in dirs) {
+                    smaliDir.walkTopDown().filter { it.isFile && it.extension == "smali" }.forEach { f ->
+                        val text = f.readText()
+                        val refs = refRegex.findAll(text).count()
+                        var replaced = refRegex.replace(text, refRepl)
+                        // 定义行仅当未限定类, 或当前文件正是目标类文件时替换
+                        val relPath = f.relativeTo(workDir).path.replace(File.separatorChar, '/')
+                        val defEligible = slOld.isBlank() || relPath.endsWith("$slOld.smali")
+                        var defs = 0
+                        if (defEligible) {
+                            val before = replaced
+                            replaced = defRegex.replace(replaced, "\$1" + newMethod + "(")
+                            if (before != replaced) defs = 1
+                        }
+                        if (replaced != text) {
+                            f.writeText(replaced)
+                            totalFiles++; totalRefs += refs; totalDefs += defs
+                        }
+                    }
+                }
+                ok(JSONObject()
+                    .put("action", "rename_method")
+                    .put("oldMethod", oldMethod).put("newMethod", newMethod)
+                    .put("scopeClass", if (slOld.isBlank()) "*" else oldClassRaw)
+                    .put("signatureFilter", if (signature.isBlank()) JSONObject.NULL else signature)
+                    .put("filesChanged", totalFiles)
+                    .put("refsChanged", totalRefs)
+                    .put("definitionRewritten", totalDefs > 0)
+                    .put("hint", "方法定义与引用已重命名。用 action=rebuild 重编回 DEX 验证引用一致性后再签名; 出错用 action=rollback 还原。"))
+            }.getOrElse { e ->
+                err("RENAME_METHOD_FAILED", "方法重命名失败: ${e.message ?: e.javaClass.simpleName}", "oldMethod", oldMethod)
             }
         }
 

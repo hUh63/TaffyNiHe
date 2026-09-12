@@ -123,7 +123,70 @@ class ElfParser(private val data: ByteArray) {
             if (sec.name !in setOf(".rodata", ".strtab", ".dynstr")) continue
             extractStrings(sectionBytes(sec), sec.offset, sec.name, strings)
         }
-        return ElfFile(data, bits, little, type, machine, entry, sections, symbols, dynSymbols, relocs, strings)
+        return ElfFile(data, bits, little, type, machine, entry, sections, symbols, dynSymbols, relocs, strings, symbolVersions = parseSymbolVersions(sections, dynSymbols, r))
+    }
+
+    /**
+     * 解析 .gnu.version (SHT_GNU_versym) + .gnu.version_r (verneed) + .gnu.version_d (verdef),
+     * 为每个动态符号关联其版本名（如 GLIBC_2.17）。纯 Kotlin, 不依赖 native。
+     */
+    private fun parseSymbolVersions(sections: List<SectionInfo>, dynSymbols: List<SymbolInfo>, r: Reader): List<SymbolVersionInfo> {
+        val versym = sections.firstOrNull { it.type == 0x6fffffffL } ?: return emptyList()
+        if (dynSymbols.isEmpty()) return emptyList()
+        val idxName = HashMap<Int, String>()
+        // verneed：依赖的版本（如 GLIBC_2.17）
+        sections.firstOrNull { it.type == 0x6ffffffeL }?.let { vn ->
+            val strtab = sections.getOrNull(vn.link)?.let { sectionBytes(it) } ?: ByteArray(0)
+            val end = (vn.offset + vn.size).toInt()
+            var off = vn.offset.toInt()
+            var guard = 0
+            while (off + 16 <= end && off >= 0 && guard++ < 8192) {
+                val cnt = r.u16(off + 2)
+                var aux = off + r.u32(off + 8).toInt()
+                var i = 0
+                while (i < cnt && aux + 16 <= end && aux >= 0) {
+                    idxName[r.u16(aux + 6)] = cstr(strtab, r.u32(aux + 8).toInt())
+                    val next = r.u32(aux + 12).toInt()
+                    if (next == 0) break
+                    aux += next; i++
+                }
+                val nextVn = r.u32(off + 12).toInt()
+                if (nextVn == 0) break
+                off += nextVn
+            }
+        }
+        // verdef：库自定义版本
+        sections.firstOrNull { it.type == 0x6ffffffdL }?.let { vd ->
+            val strtab = sections.getOrNull(vd.link)?.let { sectionBytes(it) } ?: ByteArray(0)
+            val end = (vd.offset + vd.size).toInt()
+            var off = vd.offset.toInt()
+            var guard = 0
+            while (off + 20 <= end && off >= 0 && guard++ < 8192) {
+                val ndx = r.u16(off + 4)
+                val auxOff = off + r.u32(off + 12).toInt()
+                if (auxOff + 8 <= end && auxOff >= 0) idxName[ndx] = cstr(strtab, r.u32(auxOff).toInt())
+                val next = r.u32(off + 16).toInt()
+                if (next == 0) break
+                off += next
+            }
+        }
+        val out = ArrayList<SymbolVersionInfo>()
+        val maxN = if (versym.entsize > 0) (versym.size / versym.entsize).toInt() else (versym.size / 2).toInt()
+        for (i in dynSymbols.indices) {
+            if (i >= maxN) break
+            val eoff = versym.offset.toInt() + i * 2
+            if (eoff < 0 || eoff + 2 > data.size) break
+            val raw = r.u16(eoff)
+            val hidden = (raw and 0x8000) != 0
+            val idx = raw and 0x7fff
+            val vname = when (idx) {
+                0 -> "local"
+                1 -> "global"
+                else -> idxName[idx] ?: "ver$idx"
+            }
+            out.add(SymbolVersionInfo(dynSymbols[i].name, vname, hidden, idx <= 1))
+        }
+        return out
     }
 
     private fun sectionBytes(section: SectionInfo): ByteArray {

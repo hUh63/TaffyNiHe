@@ -93,6 +93,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Python -> if (t.zh) "编辑器" else "Editor"
     SettingsDest.Git -> if (t.zh) "Git 仓库" else "Git Repository"
     SettingsDest.Extensions -> if (t.zh) "扩展系统" else "Extensions"
+    SettingsDest.DexExplorer -> if (t.zh) "DEX / APK 浏览器" else "DEX / APK Explorer"
     SettingsDest.Help -> if (t.zh) "帮助" else "Help"
 }
 
@@ -231,6 +232,8 @@ internal fun SettingsHub(
                     GroupDivider()
                     NavRow(if (t.zh) "APK 签名设置" else "APK Signing", if (t.zh) "APK 签名 / 密钥（构建产物相关）" else "APK signing / keys", Icons.Default.Build, onClick = { onDest(SettingsDest.ApkSign) })
                     GroupDivider()
+                    NavRow(if (t.zh) "DEX / APK 浏览器" else "DEX / APK Explorer", if (t.zh) "可视化浏览类与方法" else "Browse classes & methods", Icons.Default.Storage, onClick = { onDest(SettingsDest.DexExplorer) })
+                    GroupDivider()
                     NavRow("Blutter", if (t.zh) "Flutter 3.44 / Dart 3.12.2 / 完全离线" else "Flutter 3.44 / Dart 3.12.2 / fully offline", Icons.Default.Memory, onClick = { onDest(SettingsDest.Blutter) })
                 }
 
@@ -300,6 +303,7 @@ internal fun SettingsHub(
             SettingsDest.Permissions -> SettingsPermissionsPage(t)
             SettingsDest.LogcatViewer -> LogcatViewerPage(t)
             SettingsDest.Edbg -> EdbgPage(t)
+            SettingsDest.DexExplorer -> SettingsDexExplorerPage(t)
             SettingsDest.Rizin -> RizinPage(t)
             SettingsDest.Capture -> CapturePage(t)
             SettingsDest.Linux -> SettingsLinuxPage(t)

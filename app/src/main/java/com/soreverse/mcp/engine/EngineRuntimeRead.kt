@@ -58,7 +58,8 @@ internal fun EngineRuntime.readElf(workspaceId: String, editSessionId: String, p
             .put("entryPoint", hex(elf.entry))
             .put("programHeaders", JSONArray(elf.programHeaders.map { EngineJson.phJson(it) }))
             .put("sectionHeaders", elf.sections.map { JSONObject().put("name", it.name).put("type", it.type).put("flags", flags(it.flags)).put("addr", hex(it.addr)).put("offset", hex(it.offset)).put("size", it.size) }.toJsonArray())
-            .put("dynamicEntries", JSONArray(elf.dynamicEntries.map { EngineJson.dynJson(it) })))
+            .put("dynamicEntries", JSONArray(elf.dynamicEntries.map { EngineJson.dynJson(it) }))
+            .put("symbolVersions", elf.symbolVersions.map { JSONObject().put("name", it.name).put("version", it.version).put("hidden", it.hidden).put("local", it.local) }.toJsonArray()))
     }
 
 internal fun EngineRuntime.hexdump(workspaceId: String, editSessionId: String, locator: String, byteOffset: Int, maxBytes: Int): JSONObject = guarded {

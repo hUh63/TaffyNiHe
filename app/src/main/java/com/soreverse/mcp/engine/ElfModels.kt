@@ -33,6 +33,17 @@ data class RelocInfo(
     val addend: Long,
 )
 
+/**
+ * 符号版本信息（.gnu.version / .gnu.version_r / .gnu.version_d）。
+ * [version] 为版本名（如 GLIBC_2.17），local/global 为内建索引。
+ */
+data class SymbolVersionInfo(
+    val name: String,
+    val version: String,
+    val hidden: Boolean,
+    val local: Boolean,
+)
+
 data class StringInfo(
     val offset: Long,
     val value: String,
@@ -72,6 +83,7 @@ data class ElfFile(
     val strings: List<StringInfo>,
     val programHeaders: List<ProgramHeaderInfo> = emptyList(),
     val dynamicEntries: List<DynamicEntryInfo> = emptyList(),
+    val symbolVersions: List<SymbolVersionInfo> = emptyList(),
 ) {
     val architecture: String = when (machine) {
         40 -> "arm32"

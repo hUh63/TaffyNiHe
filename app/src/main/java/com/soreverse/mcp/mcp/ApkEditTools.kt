@@ -58,6 +58,8 @@ object ApkEditTools {
             if (manifest.length() > 4_000_000L) {
                 return err("FILE_TOO_LARGE", "AndroidManifest.xml 过大（${manifest.length()} 字节，上限 4MB）", "dir", dirPath)
             }
+            // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback)
+            runCatching { EditSnapshotService.snapshot(ctx.context, "taffy_apk_manifest_edit", manifest.absolutePath) }
             var xml = manifest.readText()
             return runCatching {
                 when (action) {

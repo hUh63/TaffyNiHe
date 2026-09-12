@@ -630,6 +630,10 @@ object ArchiveTools {
                 }
             }
 
+            // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback)
+            com.soreverse.mcp.core.WorkspacePolicy.appContext()?.let { c ->
+                runCatching { EditSnapshotService.snapshot(c, "taffy_archive_edit", file.absolutePath) }
+            }
             tmpFile.renameTo(file)
             ok(JSONObject()
                 .put("path", path)
@@ -701,6 +705,10 @@ object ArchiveTools {
                     }
                 }
             }
+            // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback)
+            com.soreverse.mcp.core.WorkspacePolicy.appContext()?.let { c ->
+                runCatching { EditSnapshotService.snapshot(c, "taffy_archive_edit", file.absolutePath) }
+            }
             tmpFile.renameTo(file)
             ok(JSONObject().put("path", path).put("deleted", deleted).put("kept", kept))
         } catch (e: Exception) {
@@ -763,6 +771,10 @@ object ArchiveTools {
             if (!found) {
                 tmpFile.delete()
                 return@EngineToolHandler err("ENTRY_NOT_FOUND", "未找到条目: $oldName", "oldName", oldName)
+            }
+            // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback)
+            com.soreverse.mcp.core.WorkspacePolicy.appContext()?.let { c ->
+                runCatching { EditSnapshotService.snapshot(c, "taffy_archive_edit", file.absolutePath) }
             }
             tmpFile.renameTo(file)
             ok(JSONObject().put("path", path).put("oldName", oldName).put("newName", newName))

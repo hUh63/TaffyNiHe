@@ -178,7 +178,7 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
             )
             SectionTitleColored(
                 text = if (zh) "🔴 难度加分因素：" else "🔴 Difficulty factors:",
-                color = Color(0xFF495566),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (factors.length() == 0) {
                 Text(
@@ -201,14 +201,14 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
             }
             SectionTitleColored(
                 text = if (zh) "💡 推荐逆向方法与工具：" else "💡 Recommended methods:",
-                color = Color(0xFF495566),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFFF8FAF9))
-                    .border(BorderStroke(1.dp, Color(0xFFE8ECE9)), RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(4.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 for (i in 0 until recommend.length()) {
@@ -221,13 +221,13 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
                         "• ${text.removePrefix("• ").trim()}",
                         fontSize = 12.sp,
                         lineHeight = 22.sp,
-                        color = Color(0xFF444444),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
             SectionTitleColored(
                 text = if (zh) "📋 攻击面与入口点分析：" else "📋 Attack surface:",
-                color = Color(0xFF495566),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Column {
                 for (i in 0 until attack.length()) {
@@ -247,7 +247,7 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
                         text,
                         fontSize = 12.sp,
                         lineHeight = 22.sp,
-                        color = if (id == "dyn_reg" || id == "init_array" || text.contains("⚠")) Color(0xFFD73A49) else Color(0xFF444444),
+                        color = if (id == "dyn_reg" || id == "init_array" || text.contains("⚠")) Color(0xFFD73A49) else MaterialTheme.colorScheme.onSurface,
                         fontWeight = if (id == "dyn_reg" || id == "init_array" || text.contains("⚠")) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
@@ -368,7 +368,7 @@ private fun ReferenceOverviewCard(title: String, content: @Composable ColumnScop
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .background(Color.White)
-            .border(BorderStroke(1.dp, Color(0xFFEDF1F5)), RoundedCornerShape(6.dp))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceContainerHigh), RoundedCornerShape(6.dp))
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -376,10 +376,10 @@ private fun ReferenceOverviewCard(title: String, content: @Composable ColumnScop
             title,
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp,
-            color = Color(0xFF2F3B45),
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(bottom = 4.dp),
         )
-        HorizontalDivider(thickness = 1.dp, color = Color(0xFFEEEEEE))
+        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
         content()
     }
 }
@@ -461,7 +461,7 @@ private fun OverviewMetric(
 @Composable
 private fun StatusToneBadge(text: String, tone: String, selected: Boolean = false) {
     val bg = toneColor(tone)
-    val fg = if (tone == "warn") Color(0xFF1A1A1A) else Color.White
+    val fg = if (tone == "warn") MaterialTheme.colorScheme.onSurface else Color.White
     Text(
         text,
         modifier = Modifier
@@ -537,7 +537,7 @@ private fun SecurityFeatureDetail(label: String, tone: String, description: Stri
 @Composable
 private fun DifficultyHeader(score: String, level: String, cls: String, zh: Boolean) {
     val bg = toneColor(cls)
-    val fg = if (cls == "warn") Color(0xFF1A1A1A) else Color.White
+    val fg = if (cls == "warn") MaterialTheme.colorScheme.onSurface else Color.White
     Row(
         Modifier.padding(bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -554,14 +554,14 @@ private fun DifficultyHeader(score: String, level: String, cls: String, zh: Bool
         }
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (zh) "逆向难度：" else "Difficulty: ", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF222222))
+                Text(if (zh) "逆向难度：" else "Difficulty: ", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                 StatusToneBadge(level, cls)
             }
             Text(
                 if (zh) "评分范围 0-10，分值越高逆向难度越大" else "Score 0–10; higher means harder to reverse",
                 modifier = Modifier.padding(top = 4.dp),
                 fontSize = 12.sp,
-                color = Color(0xFF666666),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -570,8 +570,8 @@ private fun DifficultyHeader(score: String, level: String, cls: String, zh: Bool
 @Composable
 private fun ReferenceReportLine(text: String, divider: Boolean) {
     Column(Modifier.fillMaxWidth()) {
-        Text(text, fontSize = 12.sp, lineHeight = 22.sp, color = Color(0xFF444444), modifier = Modifier.padding(vertical = 2.dp))
-        if (divider) HorizontalDivider(thickness = 0.5.dp, color = Color(0xFFF0F0F0))
+        Text(text, fontSize = 12.sp, lineHeight = 22.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+        if (divider) HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -668,7 +668,7 @@ private fun AttackSurfaceRow(title: String, value: String, detail: String, tone:
 private fun toneColor(tone: String): Color = when (tone) {
     "danger" -> Color(0xFFDC3545)
     "warn" -> Color(0xFFFFC107)
-    "info" -> Color(0xFF0B6BFF)
+    "info" -> MaterialTheme.colorScheme.primary
     else -> Color(0xFF28A745)
 }
 
@@ -698,7 +698,7 @@ private fun EntropySparkline(values: List<Double>) {
                 val color = when {
                     v >= 7.2 -> Color(0xFFDC3545)
                     v >= 6.0 -> Color(0xFFFFC107)
-                    else -> Color(0xFF0B6BFF)
+                    else -> MaterialTheme.colorScheme.primary
                 }
                 Box(
                     Modifier

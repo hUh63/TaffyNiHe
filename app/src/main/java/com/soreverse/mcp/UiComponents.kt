@@ -30,6 +30,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -213,7 +214,7 @@ internal fun PrimaryActionButton(
     Button(
         onClick = onClick,
         shape = shape,
-        colors = ButtonDefaults.buttonColors(containerColor = resolved, contentColor = Color.White),
+        colors = ButtonDefaults.buttonColors(containerColor = resolved, contentColor = contentColorFor(resolved)),
         modifier = modifier.height(50.dp),
     ) {
         if (leading != null) {

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -160,7 +161,7 @@ internal fun AnalysisWorkspace(
         Column(Modifier.fillMaxSize()) {
             if (state.activeTool.isNotBlank()) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth().height(28.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                     shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                 ) { ToolConsole(state, zh, onAiAnalyze) }
@@ -185,10 +186,10 @@ private fun AddrBar(state: WorkspaceState, zh: Boolean) {
             value = tools.disasmAddr,
             onValueChange = { tools.disasmAddr = it },
             singleLine = true,
-            modifier = Modifier.weight(1f).height(28.dp),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
             shape = RoundedCornerShape(4.dp),
-            placeholder = { Text(if (zh) "地址或符号" else "addr or sym", style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            placeholder = { Text(if (zh) "地址或符号" else "addr or sym", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
         )
         // 根据当前工具显示不同的辅助输入
         when (state.activeTool) {
@@ -198,10 +199,10 @@ private fun AddrBar(state: WorkspaceState, zh: Boolean) {
                     value = tools.decompileTarget,
                     onValueChange = { tools.decompileTarget = it },
                     singleLine = true,
-                    modifier = Modifier.weight(1f).height(28.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
                     shape = RoundedCornerShape(4.dp),
-                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
             "emulate" -> {
@@ -210,10 +211,10 @@ private fun AddrBar(state: WorkspaceState, zh: Boolean) {
                     value = tools.emulateSymbol,
                     onValueChange = { tools.emulateSymbol = it },
                     singleLine = true,
-                    modifier = Modifier.weight(1f).height(28.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
                     shape = RoundedCornerShape(4.dp),
-                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
             "editor" -> {
@@ -222,10 +223,10 @@ private fun AddrBar(state: WorkspaceState, zh: Boolean) {
                     value = tools.decompileTarget,
                     onValueChange = { tools.decompileTarget = it },
                     singleLine = true,
-                    modifier = Modifier.weight(1f).height(28.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
                     shape = RoundedCornerShape(4.dp),
-                    placeholder = { Text(if (zh) "对比地址" else "diff addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    placeholder = { Text(if (zh) "对比地址" else "diff addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
         }
@@ -376,8 +377,8 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
     val curDef = toolDefs.firstOrNull { it.key == state.activeTool }
     val tl = curDef?.let { if (zh) it.labelZh else it.labelEn } ?: ""
 
-    Row(Modifier.fillMaxWidth().height(28.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-        val bm = Modifier.height(22.dp); val bp = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        val bm = Modifier.heightIn(min = 40.dp); val bp = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
         when (state.activeTool) {
             "decompile" -> {
                 SmBtn(if (zh) "反编译" else "Dec", bm, bp, {
@@ -585,7 +586,7 @@ private fun SmBtn(label: String, modifier: Modifier, padding: PaddingValues, onC
     Button(onClick = onClick, enabled = enabled && !loading, contentPadding = padding, modifier = modifier, shape = RoundedCornerShape(4.dp),
         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f), disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         if (loading) CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.onPrimary)
-        else Text(label, style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp))
+        else Text(label, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp))
     }
 }
 
@@ -607,11 +608,11 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
                             Row(Modifier.clickable { tools.selectedTabIndex = idx }.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.size(2.dp))
-                                IconButton(onClick = { tools.closeTab(idx) }, modifier = Modifier.size(14.dp)) { Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                IconButton(onClick = { tools.closeTab(idx) }, modifier = Modifier.size(40.dp)) { Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
                         }
                     }
-                    IconButton(onClick = { tools.clearTabs() }, modifier = Modifier.size(14.dp)) { Text("×", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error) }
+                    IconButton(onClick = { tools.clearTabs() }, modifier = Modifier.size(40.dp)) { Text("×", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error) }
                 }
                 Spacer(Modifier.size(4.dp))
                 Surface(onClick = { detailMode = !detailMode }, shape = RoundedCornerShape(4.dp), color = if (detailMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {

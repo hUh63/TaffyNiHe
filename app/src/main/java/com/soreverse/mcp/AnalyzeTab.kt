@@ -101,6 +101,7 @@ internal fun AnalyzeTab(
     var showFileDialog by remember { mutableStateOf(false) }
     var fileDialogPath by remember { mutableStateOf("") }
     var fileDialogError by remember { mutableStateOf("") }
+    var showClearConfirm by remember { mutableStateOf(false) }
     // settings.treeUri 由 SharedPreferences 支撑，不是 Compose 可观察状态，直接作为 LaunchedEffect
     // 的 key 不会在选择目录后可靠触发重组。这里镜像成快照状态，确保一选目录就立刻重新扫描。
     var treeUriKey by remember { mutableStateOf(settings.treeUri?.toString()) }
@@ -315,21 +316,7 @@ internal fun AnalyzeTab(
                     Spacer(Modifier.width(4.dp))
                     IconButton(
                         enabled = !state.scanning && state.analyzingSoPath == null && state.deepAnalyzingPath == null,
-                        onClick = {
-                            scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    val engine = EngineProvider.get(context)
-                                    engine.clearCaches()
-                                    engine.flutterBlutter(org.json.JSONObject().put("action", "prune").put("olderThanMillis", 0))
-                                }
-                                state.workspaces = emptyList()
-                                state.soSources = emptyList()
-                                state.perSoDetail = emptyMap()
-                                state.expandedSoPath = null
-                                state.scannedTreeUri = null
-                                state.message = if (t.zh) "缓存、工作区和已结束的 Blutter 结果已清理" else "Caches, workspaces, and completed Blutter results cleared"
-                            }
-                        },
+                        onClick = { showClearConfirm = true },
                     ) {
                         Icon(Icons.Default.DeleteSweep, if (t.zh) "清理分析资源" else "Clear analysis resources")
                     }
@@ -912,6 +899,32 @@ internal fun AnalyzeTab(
                 }
             }
         }
+    }
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text(if (t.zh) "清理分析资源？" else "Clear analysis resources?") },
+            text = { Text(if (t.zh) "将清空全部已打开的工作区、SO 源码列表与已完成的 Blutter 结果，此操作不可恢复。" else "This clears all open workspaces, SO sources and completed Blutter results. It cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirm = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            val engine = EngineProvider.get(context)
+                            engine.clearCaches()
+                            engine.flutterBlutter(org.json.JSONObject().put("action", "prune").put("olderThanMillis", 0))
+                        }
+                        state.workspaces = emptyList()
+                        state.soSources = emptyList()
+                        state.perSoDetail = emptyMap()
+                        state.expandedSoPath = null
+                        state.scannedTreeUri = null
+                        state.message = if (t.zh) "缓存、工作区和已结束的 Blutter 结果已清理" else "Caches, workspaces, and completed Blutter results cleared"
+                    }
+                }) { Text(if (t.zh) "清理" else "Clear", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text(if (t.zh) "取消" else "Cancel") } },
+        )
     }
     // 选文件对话框：选择文件按钮 + 手动输入路径输入框
     if (showFileDialog) {

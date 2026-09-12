@@ -327,6 +327,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 settings.tunnelHistoryEnabled = it
             }
             if (history.isNotEmpty()) {
+                var confirmClearHistory by remember { mutableStateOf(false) }
                 GroupDivider()
                 history.forEach { url ->
                     val finalUrl = url
@@ -335,11 +336,21 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                     }
                 }
                 GroupDivider()
-                TextButton(onClick = {
-                    settings.tunnelHistoryUrls = ""
-                    history = emptyList()
-                }, modifier = Modifier.padding(horizontal = 14.dp)) {
+                TextButton(onClick = { confirmClearHistory = true }, modifier = Modifier.padding(horizontal = 14.dp)) {
                     Text(if (t.zh) "清除历史" else "Clear history", color = MaterialTheme.colorScheme.error)
+                }
+                if (confirmClearHistory) {
+                    AlertDialog(
+                        onDismissRequest = { confirmClearHistory = false },
+                        title = { Text(if (t.zh) "清除隧道历史？" else "Clear tunnel history?") },
+                        text = { Text(if (t.zh) "将删除全部历史 URL 记录，此操作不可恢复。" else "All saved tunnel URLs will be deleted. This cannot be undone.") },
+                        confirmButton = {
+                            TextButton(onClick = { settings.tunnelHistoryUrls = ""; history = emptyList(); confirmClearHistory = false }) {
+                                Text(if (t.zh) "清除" else "Clear", color = MaterialTheme.colorScheme.error)
+                            }
+                        },
+                        dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text(if (t.zh) "取消" else "Cancel") } },
+                    )
                 }
             }
         }
@@ -368,12 +379,25 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                     }
                 }
                 GroupDivider()
-                TextButton(onClick = {
-                    if (tunnelType == "cloudflare") clearCfTunnelLog(context)
-                    else BoreTunnelService.clearEventLog()
-                    logRefreshKey++
-                }, modifier = Modifier.padding(horizontal = 14.dp)) {
+                var confirmClearLog by remember { mutableStateOf(false) }
+                TextButton(onClick = { confirmClearLog = true }, modifier = Modifier.padding(horizontal = 14.dp)) {
                     Text(if (t.zh) "清除日志" else "Clear log", color = MaterialTheme.colorScheme.error)
+                }
+                if (confirmClearLog) {
+                    AlertDialog(
+                        onDismissRequest = { confirmClearLog = false },
+                        title = { Text(if (t.zh) "清除隧道日志？" else "Clear tunnel log?") },
+                        text = { Text(if (t.zh) "将清空当前隧道运行日志。" else "The current tunnel event log will be cleared.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                if (tunnelType == "cloudflare") clearCfTunnelLog(context)
+                                else BoreTunnelService.clearEventLog()
+                                logRefreshKey++
+                                confirmClearLog = false
+                            }) { Text(if (t.zh) "清除" else "Clear", color = MaterialTheme.colorScheme.error) }
+                        },
+                        dismissButton = { TextButton(onClick = { confirmClearLog = false }) { Text(if (t.zh) "取消" else "Cancel") } },
+                    )
                 }
             }
         }

@@ -12,12 +12,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -30,6 +36,7 @@ internal fun TasksPage(
     val zh = t.zh
     val active = state.tasks.filter { it.status == "active" }
     val done = state.tasks.filter { it.status == "completed" }
+    var pendingClear by remember { mutableStateOf<TaskRecord?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (active.isEmpty() && done.isEmpty()) {
             item {
@@ -50,7 +57,7 @@ internal fun TasksPage(
             item { Text(if (zh) "暂无进行中的任务" else "No active tasks", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         items(active, key = { it.id }) { task ->
-            TaskCard(task = task, zh = zh, onContinue = { onContinueTask(task.id) }, onClear = { state.deleteTask(task.id) })
+            TaskCard(task = task, zh = zh, onContinue = { onContinueTask(task.id) }, onClear = { pendingClear = task })
         }
         item {
             Spacer(Modifier.size(12.dp))
@@ -61,8 +68,22 @@ internal fun TasksPage(
             item { Text(if (zh) "暂无历史任务" else "No history", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         items(done, key = { it.id }) { task ->
-            TaskCard(task = task, zh = zh, onContinue = { onContinueTask(task.id) }, onClear = { state.deleteTask(task.id) })
+            TaskCard(task = task, zh = zh, onContinue = { onContinueTask(task.id) }, onClear = { pendingClear = task })
         }
+    }
+    val target = pendingClear
+    if (target != null) {
+        AlertDialog(
+            onDismissRequest = { pendingClear = null },
+            title = { Text(if (zh) "删除任务记录？" else "Delete task record?") },
+            text = { Text(if (zh) "将删除「${target.title}」的任务记录，此操作不可恢复。" else "This permanently deletes the record of \"${target.title}\".") },
+            confirmButton = {
+                TextButton(onClick = { state.deleteTask(target.id); pendingClear = null }) {
+                    Text(if (zh) "删除" else "Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingClear = null }) { Text(if (zh) "取消" else "Cancel") } },
+        )
     }
 }
 

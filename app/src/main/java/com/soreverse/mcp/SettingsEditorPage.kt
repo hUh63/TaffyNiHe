@@ -130,6 +130,8 @@ private val PYTHON_WORDS = listOf(
  */
 @Composable
 internal fun SettingsEditorPage(t: UiText) {
+    // 语法高亮配色跟随系统主题（浅色/深色两套）
+    CodeHighlighter.useDarkPalette = androidx.compose.foundation.isSystemInDarkTheme()
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val zh = t.zh

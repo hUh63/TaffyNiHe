@@ -103,6 +103,7 @@ internal fun CapturePage(t: UiText) {
     val captureServer = remember { com.soreverse.mcp.core.HttpCaptureServer(proxyPort) }
     var capturing by remember { mutableStateOf(false) }
     var captureEntries by remember { mutableStateOf<List<com.soreverse.mcp.core.HttpCaptureServer.Entry>>(emptyList()) }
+    var pendingClearCapture by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf("http") }
     // 列表过滤（借鉴 ProxyPin #705 精确过滤诉求）
     var listFilter by remember { mutableStateOf("") }
@@ -286,7 +287,7 @@ internal fun CapturePage(t: UiText) {
                     clipboard.setText(androidx.compose.ui.text.AnnotatedString(json.toString(2)))
                     Toast.makeText(context, if (zh) "已复制 ${filteredEntries.size} 条（JSON）" else "Copied ${filteredEntries.size} entries (JSON)", Toast.LENGTH_SHORT).show()
                 }) { Text(if (zh) "导出 JSON" else "Export JSON", fontSize = 11.sp) }
-                TextButton(onClick = { captureServer.clear(); captureEntries = emptyList() }) { Text(if (zh) "清除" else "Clear", fontSize = 11.sp) }
+                TextButton(onClick = { pendingClearCapture = true }) { Text(if (zh) "清除" else "Clear", fontSize = 11.sp) }
             }
             // 过滤行：关键字 + 协议/方法 chips
             OutlinedTextField(
@@ -557,6 +558,19 @@ internal fun CapturePage(t: UiText) {
                 }
             },
             dismissButton = { TextButton(onClick = { detailEntry = null }) { Text(if (zh) "关闭" else "Close") } },
+        )
+    }
+    if (pendingClearCapture) {
+        AlertDialog(
+            onDismissRequest = { pendingClearCapture = false },
+            title = { Text(if (zh) "清除抓包记录？" else "Clear captured entries?") },
+            text = { Text(if (zh) "将清空当前全部抓包记录（共 ${captureEntries.size} 条），此操作不可恢复。" else "Clears all ${captureEntries.size} captured entries. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = { captureServer.clear(); captureEntries = emptyList(); pendingClearCapture = false }) {
+                    Text(if (zh) "清除" else "Clear", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingClearCapture = false }) { Text(if (zh) "取消" else "Cancel") } },
         )
     }
 }

@@ -47,14 +47,20 @@ object CodeHighlighter {
     @Volatile
     var activePack: com.soreverse.mcp.core.EditorSyntaxPacks.SyntaxPack? = null
 
-    // 配色（深色主题）
-    private val KW = Color(0xFFC586C0)      // 关键字
-    private val STR = Color(0xFF6AAB73)     // 字符串
-    private val COM = Color(0xFF6E7681)     // 注释
-    private val NUM = Color(0xFFB5CEA8)     // 数字
-    private val FNC = Color(0xFFDCDCAA)     // 函数名/内置
-    private val DEF = Color(0xFFD6E2F0)     // 默认
-    private val KEY = Color(0xFF9CDCFE)     // JSON 键
+    /**
+     * 语法配色随主题切换：深色用 VSCode-Dark 系，浅色用 One-Light 系。
+     * CodeHighlighter 是纯 object（无 Compose 上下文），由编辑器在渲染前设置本开关。
+     */
+    @Volatile
+    var useDarkPalette: Boolean = true
+
+    private val KW get() = if (useDarkPalette) Color(0xFFC586C0) else Color(0xFFA626A4)   // 关键字
+    private val STR get() = if (useDarkPalette) Color(0xFF6AAB73) else Color(0xFF50A14F)  // 字符串
+    private val COM get() = if (useDarkPalette) Color(0xFF6E7681) else Color(0xFFA0A1A7)  // 注释
+    private val NUM get() = if (useDarkPalette) Color(0xFFB5CEA8) else Color(0xFF986801)  // 数字
+    private val FNC get() = if (useDarkPalette) Color(0xFFDCDCAA) else Color(0xFF4078F2)  // 函数名/内置
+    private val DEF get() = if (useDarkPalette) Color(0xFFD6E2F0) else Color(0xFF383A42)  // 默认
+    private val KEY get() = if (useDarkPalette) Color(0xFF9CDCFE) else Color(0xFF4078F2)  // JSON 键
 
     private val PY_KEYWORDS = setOf(
         "def", "class", "import", "from", "as", "return", "if", "elif", "else", "for", "while",

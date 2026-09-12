@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -96,6 +97,15 @@ private val SHELL_CMDS: List<Pair<String, String>> = listOf(
     "logcat" to "系统日志", "settings" to "系统设置", "getprop" to "系统属性", "setprop" to "设置属性",
     "svc" to "服务控制", "input" to "注入输入", "screencap" to "截屏", "screenrecord" to "录屏", "wm" to "窗口管理",
 )
+
+/** 查找：返回 query 在 text 中所有匹配的起始下标（不重叠）。 */
+private fun findAllOccurrences(text: String, query: String): List<Int> {
+    if (query.isEmpty()) return emptyList()
+    val out = ArrayList<Int>()
+    var i = text.indexOf(query)
+    while (i >= 0) { out.add(i); i = text.indexOf(query, i + query.length) }
+    return out
+}
 
 /** 编辑器多 tab 的标签快照（借鉴 Xed-Editor 多文件编辑）。 */
 private data class EditorTab(
@@ -166,6 +176,10 @@ internal fun SettingsEditorPage(t: UiText) {
     var wsFiles by remember { mutableStateOf<List<String>>(emptyList()) } // 工作区当前目录条目（📁/ 前缀=子目录）
     var wsDir by remember { mutableStateOf("") }                          // 工作区浏览当前相对目录（""=根）
     val consoleScroll = rememberScrollState()
+    // ── 查找/替换 ──
+    var showFind by remember { mutableStateOf(false) }
+    var findQuery by remember { mutableStateOf("") }
+    var replaceQuery by remember { mutableStateOf("") }
 
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -245,6 +259,33 @@ internal fun SettingsEditorPage(t: UiText) {
     fun setCode(text: String) {
         code = text
         tf = TextFieldValue(text, selection = TextRange(text.length))
+    }
+
+    // ── 查找/替换：在 tf 上做光标跳转与替换，复用底层 TextFieldValue ──
+    fun jumpToMatch(dir: Int) {
+        val starts = findAllOccurrences(tf.text, findQuery)
+        if (starts.isEmpty()) return
+        val cur = tf.selection.start
+        val target = if (dir >= 0) starts.firstOrNull { it > cur } ?: starts.first()
+        else starts.lastOrNull { it < cur } ?: starts.last()
+        tf = TextFieldValue(tf.text, selection = TextRange(target, target + findQuery.length))
+    }
+
+    fun replaceCurrentMatch() {
+        val text = tf.text
+        val starts = findAllOccurrences(text, findQuery)
+        if (starts.isEmpty()) return
+        val cur = tf.selection
+        val at = starts.firstOrNull { it == cur.start && it + findQuery.length == cur.end } ?: starts.first()
+        val newText = text.substring(0, at) + replaceQuery + text.substring(at + findQuery.length)
+        tf = TextFieldValue(newText, selection = TextRange(at + replaceQuery.length))
+        code = newText
+    }
+
+    fun replaceAllMatches() {
+        if (findQuery.isEmpty()) return
+        val newText = tf.text.replace(findQuery, replaceQuery)
+        setCode(newText)
     }
 
     // ── 多 tab（借鉴 Xed-Editor 多文件编辑：快照切换 / dirty 标记 / 关闭）──
@@ -923,6 +964,9 @@ internal fun SettingsEditorPage(t: UiText) {
                     enabled = !completing,
                 )
             }
+            IconButton(onClick = { showFind = !showFind }) {
+                Icon(Icons.Default.Search, null, tint = if (showFind) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             IconButton(onClick = { saveFile() }, enabled = code.isNotBlank()) { Icon(Icons.Default.Save, null, tint = MaterialTheme.colorScheme.primary) }
             IconButton(onClick = { loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*")) }) { Icon(Icons.Default.FileOpen, null, tint = MaterialTheme.colorScheme.primary) }
             IconButton(onClick = {
@@ -946,6 +990,43 @@ internal fun SettingsEditorPage(t: UiText) {
                 Icon(Icons.Default.Restore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { output = "" }, enabled = output.isNotBlank()) { Icon(Icons.Default.Clear, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+
+        // ── 查找/替换栏 ──
+        if (showFind) {
+            val matchStarts = remember(findQuery, code) { findAllOccurrences(code, findQuery) }
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF11181F), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = findQuery, onValueChange = { findQuery = it },
+                        modifier = Modifier.weight(1f), singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                        label = { Text(if (zh) "查找" else "Find", fontSize = 10.sp) },
+                    )
+                    Text(
+                        if (findQuery.isEmpty()) "" else "${matchStarts.size} ${if (zh) "处" else ""}",
+                        style = MaterialTheme.typography.labelSmall, color = AppPalette.teal,
+                    )
+                    IconButton(onClick = { jumpToMatch(-1) }, enabled = matchStarts.isNotEmpty()) { Text("↑", color = fg) }
+                    IconButton(onClick = { jumpToMatch(1) }, enabled = matchStarts.isNotEmpty()) { Text("↓", color = fg) }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = replaceQuery, onValueChange = { replaceQuery = it },
+                        modifier = Modifier.weight(1f), singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                        label = { Text(if (zh) "替换为" else "Replace with", fontSize = 10.sp) },
+                    )
+                    TextButton(onClick = { replaceCurrentMatch() }, enabled = matchStarts.isNotEmpty()) { Text(if (zh) "替换" else "Replace", fontSize = 11.sp) }
+                    TextButton(onClick = { replaceAllMatches() }, enabled = matchStarts.isNotEmpty()) { Text(if (zh) "全部" else "All", fontSize = 11.sp) }
+                    TextButton(onClick = { showFind = false }) { Text(if (zh) "关闭" else "Close", fontSize = 11.sp) }
+                }
+            }
         }
 
         // ── 最近文件 ──

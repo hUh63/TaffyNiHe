@@ -9,10 +9,11 @@ class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("so_reverse_mcp", Context.MODE_PRIVATE)
 
     init {
-        if (!prefs.getBoolean("apkAutoProbeDefaultMigrated", false)) {
+        // APK MCP 持续自动探测默认开启（用户可在"桥接"页关闭）。
+        if (!prefs.getBoolean("apkAutoProbeDefaultOnV2", false)) {
             prefs.edit()
-                .putBoolean("apkMcpAutoProbe", false)
-                .putBoolean("apkAutoProbeDefaultMigrated", true)
+                .putBoolean("apkMcpAutoProbe", true)
+                .putBoolean("apkAutoProbeDefaultOnV2", true)
                 .apply()
         }
         // Pre-populate default bridge URLs (MT Manager :8787, NP Manager :8788)
@@ -654,7 +655,7 @@ class SettingsStore(context: Context) {
         }
 
     var apkMcpAutoProbe: Boolean
-        get() = prefs.getBoolean("apkMcpAutoProbe", false)
+        get() = prefs.getBoolean("apkMcpAutoProbe", true)
         set(value) = prefs.edit().putBoolean("apkMcpAutoProbe", value).apply()
 
     var apkMcpMergeTools: Boolean

@@ -59,7 +59,19 @@ class UnidbgEmulator(private val context: Context) {
                     System.setProperty("jna.library.path", nativeDir)
                     listOf("capstone", "keystone", "unicorn", "jnidispatch", "disassembler", "demumble").forEach { NativeLibrary.addSearchPath(it, nativeDir) }
                 }
-                listOf("capstone", "keystone", "unicorn", "jnidispatch", "disassembler", "demumble").forEach { System.loadLibrary(it) }
+                listOf("capstone", "keystone", "unicorn", "jnidispatch", "disassembler", "demumble").forEach { name ->
+                    // 修复：unicorn 由 unidbg 真实后端(Unicorn2Factory / NativeLoader)在创建 emulator 时
+                    // 自行加载。这里的 System.loadLibrary 是另一条路径，在部分设备/打包方式下会失败；
+                    // 若因它失败就把整体判定为不可用，会把本可用的引擎误报为 EMULATOR_UNAVAILABLE /
+                    // emulation.available=false（实测 session_open/call 均正常，却显示不可用）。
+                    runCatching { System.loadLibrary(name) }.onFailure { e ->
+                        if (name == "unicorn") {
+                            AppLog.i("System.loadLibrary(unicorn) not usable here (${e.message}); deferring to unidbg native loader")
+                        } else {
+                            throw e
+                        }
+                    }
+                }
                 nativeSelfTestStage = "keystone-open"
                 val assembler = Keystone(KeystoneArchitecture.Arm64, KeystoneMode.LittleEndian)
                 nativeSelfTestStage = "keystone-assemble"

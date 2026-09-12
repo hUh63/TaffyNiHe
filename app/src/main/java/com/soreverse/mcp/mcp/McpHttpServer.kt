@@ -793,7 +793,7 @@ $historyRows
             JSONObject().put("ok", false).put("error", JSONObject().put("code", "TOOL_NOT_FOUND").put("message", name))
         }
         val elapsedMicros = (System.nanoTime() - started) / 1000
-        val isOk = payload.optBoolean("ok", true)
+        val isOk = payload.optBoolean("ok", true) && !payload.has("error")
         val errMsg = payload.optJSONObject("error")?.optString("message").orEmpty()
         ToolStats.record(name, isOk, elapsedMicros, errMsg)
         AppLog.i("Tool call $name -> ok=$isOk (${elapsedMicros / 1000.0}ms)")

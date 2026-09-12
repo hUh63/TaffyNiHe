@@ -209,17 +209,17 @@ object SmaliEditTools {
 
                 val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
                 ZipFile(apk).use { zf ->
-                    val zos = java.util.zip.ZipOutputStream(tempApk.outputStream())
-                    zf.entries().toList().forEach { e ->
-                        zos.putNextEntry(java.util.zip.ZipEntry(e.name))
-                        if (e.name == dexEntryName) {
-                            zos.write(newDexBytes)
-                        } else {
-                            zf.getInputStream(e).use { it.copyTo(zos) }
+                    java.util.zip.ZipOutputStream(tempApk.outputStream()).use { zos ->
+                        zf.entries().toList().forEach { e ->
+                            zos.putNextEntry(java.util.zip.ZipEntry(e.name))
+                            if (e.name == dexEntryName) {
+                                zos.write(newDexBytes)
+                            } else {
+                                zf.getInputStream(e).use { it.copyTo(zos) }
+                            }
+                            zos.closeEntry()
                         }
-                        zos.closeEntry()
                     }
-                    zos.close()
                 }
 
                 // 备份原 APK + 替换
@@ -461,14 +461,14 @@ object SmaliEditTools {
             if (!backup.isFile) EditSnapshotService.snapshot(ctx.context, "taffy_smali_edit", apk.absolutePath)
             val tempApk = File.createTempFile("apk_rstr_", ".apk", apk.parentFile)
             java.util.zip.ZipFile(apk).use { zf ->
-                val zos = java.util.zip.ZipOutputStream(tempApk.outputStream())
-                zf.entries().toList().forEach { e ->
-                    zos.putNextEntry(java.util.zip.ZipEntry(e.name))
-                    val nb = results[e.name]
-                    if (nb != null) zos.write(nb) else zf.getInputStream(e).use { it.copyTo(zos) }
-                    zos.closeEntry()
+                java.util.zip.ZipOutputStream(tempApk.outputStream()).use { zos ->
+                    zf.entries().toList().forEach { e ->
+                        zos.putNextEntry(java.util.zip.ZipEntry(e.name))
+                        val nb = results[e.name]
+                        if (nb != null) zos.write(nb) else zf.getInputStream(e).use { it.copyTo(zos) }
+                        zos.closeEntry()
+                    }
                 }
-                zos.close()
             }
             apk.copyTo(backup, overwrite = true)
             apk.delete()
@@ -592,17 +592,17 @@ object SmaliEditTools {
             val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
             try {
                 ZipFile(apk).use { zf ->
-                    val zos = java.util.zip.ZipOutputStream(tempApk.outputStream())
-                    zf.entries().toList().forEach { e ->
-                        zos.putNextEntry(java.util.zip.ZipEntry(e.name))
-                        if (e.name == dexEntryName) {
-                            zos.write(newDexBytes)
-                        } else {
-                            zf.getInputStream(e).use { it.copyTo(zos) }
+                    java.util.zip.ZipOutputStream(tempApk.outputStream()).use { zos ->
+                        zf.entries().toList().forEach { e ->
+                            zos.putNextEntry(java.util.zip.ZipEntry(e.name))
+                            if (e.name == dexEntryName) {
+                                zos.write(newDexBytes)
+                            } else {
+                                zf.getInputStream(e).use { it.copyTo(zos) }
+                            }
+                            zos.closeEntry()
                         }
-                        zos.closeEntry()
                     }
-                    zos.close()
                 }
                 // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback), 再留 .bak 双保险
                 EditSnapshotService.snapshot(ctx.context, "taffy_smali_edit", apk.absolutePath)

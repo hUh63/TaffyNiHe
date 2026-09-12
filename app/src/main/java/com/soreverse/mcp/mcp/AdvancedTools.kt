@@ -304,7 +304,7 @@ object AdvancedTools {
                                 val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
                                     if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
                                     val allBytes = guarded
-                                val expectedBytes = expectedHex.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
+                                val expectedBytes = com.soreverse.mcp.core.HexCodec.bytes(expectedHex.replace(Regex("\\s+"), "")) ?: return err("INVALID_HEX", "expectedHex 含非法字符", "expectedHex", expectedHex)
                                 val actualBytes = if (offset < allBytes.size) allBytes.sliceArray(offset until minOf(offset + expectedBytes.size, allBytes.size)) else ByteArray(0)
                                 val match = actualBytes.contentEquals(expectedBytes)
                                 ok(JSONObject()
@@ -323,7 +323,7 @@ object AdvancedTools {
                         if (hexStr.isBlank()) return err("INVALID_ARGUMENT", "write 需要 hex 参数", "hex", hexStr)
                         val offset = args.intValue("offset", 0).coerceAtLeast(0)
                         val expectedHex = args.str("expectedHex")
-                        val writeBytes = hexStr.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
+                        val writeBytes = com.soreverse.mcp.core.HexCodec.bytes(hexStr.replace(Regex("\\s+"), "")) ?: return err("INVALID_HEX", "hex 含非法字符", "hex", hexStr)
 
                         ZipFile(file).use { zf ->
                             val entry = zf.getEntry(entryName)
@@ -335,7 +335,7 @@ object AdvancedTools {
                                     val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
                                     if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
                                     val allBytes = guarded
-                                    val expectedBytes = expectedHex.split("\\s+".toRegex()).filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
+                                    val expectedBytes = com.soreverse.mcp.core.HexCodec.bytes(expectedHex.replace(Regex("\\s+"), "")) ?: return err("INVALID_HEX", "expectedHex 含非法字符", "expectedHex", expectedHex)
                                     val actualBytes = if (offset < allBytes.size) allBytes.sliceArray(offset until minOf(offset + expectedBytes.size, allBytes.size)) else ByteArray(0)
                                     if (!actualBytes.contentEquals(expectedBytes)) {
                                         return err("CAS_MISMATCH",

@@ -780,7 +780,7 @@ object DeviceTools {
                 "hex" -> {
                     val clean = data.replace(" ", "").replace("\n", "").replace("0x", "")
                     if (clean.length % 2 != 0) return err("INVALID_HEX", "hex 长度必须为偶数", "data", data)
-                    ByteArray(clean.length / 2) { i -> clean.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+                    com.soreverse.mcp.core.HexCodec.bytes(clean) ?: return err("INVALID_HEX", "hex 含非法字符", "data", data)
                 }
                 "base64" -> try { android.util.Base64.decode(data, android.util.Base64.DEFAULT) }
                     catch (e: Exception) { return err("INVALID_FORMAT", "base64 解码失败: ${e.message}", "data", data) }

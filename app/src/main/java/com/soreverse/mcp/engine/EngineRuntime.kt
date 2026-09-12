@@ -49,7 +49,9 @@ internal class EngineRuntime(internal val context: Context) {
             message.startsWith("NOT_ELF_INPUT") -> err("NOT_ELF_INPUT", message.substringAfter(": ").ifBlank { "The selected entry is not an ELF SO file." })
             message.startsWith("SO path not found") -> err("SO_NOT_FOUND", message, "path", message.substringAfter(": ", ""))
             message.contains("Invalid URI", ignoreCase = true) -> err("INVALID_WORK_DIRECTORY", message)
-            else -> err("ELF_CORRUPTED", message)
+            message.contains("elf", ignoreCase = true) || message.contains("magic", ignoreCase = true) ||
+                message.contains("corrupt", ignoreCase = true) -> err("ELF_CORRUPTED", message)
+            else -> err("TOOL_FAILED", message)
         }
     }
 

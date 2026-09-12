@@ -498,7 +498,8 @@ object ToolCatalog {
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "analyze")) {
-            "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("rizin"))
+            "capabilities" -> (e.capabilityRegistry().optJSONObject("backends")?.optJSONObject("rizin")?.let { ok(it) }
+                ?: err("CAPABILITY_UNAVAILABLE", "rizin 能力信息不可用"))
             "command" -> e.rzCommand(a.str("workspaceId"), a.str("editSessionId"), a.str("command"), a.bool("unsafe", false))
             "analyze" -> e.rzAnalyze(a.str("workspaceId"), a.str("editSessionId"))
             "functions" -> e.rzFunctions(a.str("workspaceId"), a.str("editSessionId"), a.intValue("limit", s.defaultLimit), a.str("cursor"))
@@ -544,7 +545,8 @@ object ToolCatalog {
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "parse")) {
-            "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("lief"))
+            "capabilities" -> (e.capabilityRegistry().optJSONObject("backends")?.optJSONObject("lief")?.let { ok(it) }
+                ?: err("CAPABILITY_UNAVAILABLE", "lief 能力信息不可用"))
             "dispatch" -> e.liefDispatch(a.str("workspaceId"), a.str("editSessionId"), a.str("op", "roots"), a.str("objectPath"), a.str("method"), a.optJSONArray("args") ?: JSONArray(), a.bool("dryRun", false))
             "parse" -> e.readStats(a.str("workspaceId"), a.str("editSessionId"))
             "parse_any" -> e.liefDispatch(a.str("workspaceId"), a.str("editSessionId"), "parse_any", args = JSONArray().put(a.str("format", "auto")))
@@ -580,7 +582,8 @@ object ToolCatalog {
         }, required = listOf("workspaceId")) }
     ) { e, a, s ->
         when (a.str("action", "status")) {
-            "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("unidbg"))
+            "capabilities" -> (e.capabilityRegistry().optJSONObject("backends")?.optJSONObject("unidbg")?.let { ok(it) }
+                ?: err("CAPABILITY_UNAVAILABLE", "unidbg 能力信息不可用"))
             "dispatch" -> e.unidbgDispatch(a.str("workspaceId"), a.str("editSessionId"), a.str("op", "status"), a.str("method"), a.optJSONArray("args") ?: a.optJSONArray("dispatchArgs") ?: JSONArray())
             "status" -> ok(e.emulationStatus().put("enabled", s.emulationEnabled))
             "call" -> if (!s.emulationEnabled) err("EMULATION_DISABLED", "Emulation is disabled", "emulationEnabled", false) else e.emulate(a.str("workspaceId"), a.str("editSessionId"), a.str("symbolName"), a.optJSONArray("args") ?: JSONArray(), a.bool("trace", false))
@@ -759,7 +762,8 @@ object ToolCatalog {
         }, required = listOf("workspaceId")) }
     ) { e, a, _ ->
         when (a.str("action", "status")) {
-            "capabilities" -> ok(e.capabilityRegistry().getJSONObject("backends").getJSONObject("xanso"))
+            "capabilities" -> (e.capabilityRegistry().optJSONObject("backends")?.optJSONObject("xanso")?.let { ok(it) }
+                ?: err("CAPABILITY_UNAVAILABLE", "xanso 能力信息不可用"))
             "dispatch" -> e.xansoDispatch(a.str("workspaceId"), a.str("editSessionId"), a.str("op", "status"))
             "status", "help" -> e.xansoDispatch(a.str("workspaceId"), a.str("editSessionId"), a.str("action"))
             "build-section", "fix_sections" -> e.xansoBuildSections(a.str("workspaceId"), a.str("editSessionId"), a.bool("force", false))

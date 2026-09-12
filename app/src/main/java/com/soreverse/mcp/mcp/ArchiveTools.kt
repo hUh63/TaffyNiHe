@@ -55,18 +55,14 @@ object ArchiveTools {
             else -> {
                 // Try to detect by magic bytes
                 try {
-                    val magic = File(path).inputStream().use { it.readNBytes(4) }
+                    // 一次性读取 512 字节（USTAR 魔数 "ustar" 位于偏移 257），避免重复开流与永不命中的死分支。
+                    val magic = File(path).inputStream().use { it.readNBytes(512) }
                     when {
                         magic.size >= 4 && magic[0] == 0x50.toByte() && magic[1] == 0x4B.toByte() && magic[2] == 0x03.toByte() && magic[3] == 0x04.toByte() -> "zip"
-                        magic.size >= 3 && magic[0] == 0x1F.toByte() && magic[1] == 0x8B.toByte() -> "gz"
+                        magic.size >= 2 && magic[0] == 0x1F.toByte() && magic[1] == 0x8B.toByte() -> "gz"
                         magic.size >= 3 && magic[0] == 0x42.toByte() && magic[1] == 0x5A.toByte() && magic[2] == 0x68.toByte() -> "bz2"
                         magic.size >= 6 && magic[0] == 0x37.toByte() && magic[1] == 0x7A.toByte() && magic[2] == 0xBC.toByte() && magic[3] == 0xAF.toByte() && magic[4] == 0x27.toByte() && magic[5] == 0x1C.toByte() -> "7z"
-                        // TAR magic at byte 257: "ustar"
-                        magic.size >= 262 -> {
-                            val m = File(path).inputStream().use { it.readNBytes(262) }
-                            if (m.size >= 262 && m[257] == 0x75.toByte() && m[258] == 0x73.toByte() && m[259] == 0x74.toByte() && m[260] == 0x61.toByte() && m[261] == 0x72.toByte()) "tar"
-                            else "unknown"
-                        }
+                        magic.size >= 262 && magic[257] == 0x75.toByte() && magic[258] == 0x73.toByte() && magic[259] == 0x74.toByte() && magic[260] == 0x61.toByte() && magic[261] == 0x72.toByte() -> "tar"
                         else -> "unknown"
                     }
                 } catch (_: Exception) { "unknown" }

@@ -236,17 +236,17 @@ object SmaliBatchTool {
                     // 重建 ZIP: 替换目标 DEX, 其余条目原样
                     val tempApk = File.createTempFile("apk_batch_", ".apk", apkFile.parentFile)
                     ZipFile(apkFile).use { zf ->
-                        val zos = java.util.zip.ZipOutputStream(tempApk.outputStream())
-                        var replaced = 0
-                        zf.entries().toList().forEach { e ->
-                            zos.putNextEntry(java.util.zip.ZipEntry(e.name))
-                            val nb = newDexBytes[e.name]
-                            if (nb != null) { zos.write(nb); replaced++ } else
-                                zf.getInputStream(e).use { it.copyTo(zos) }
-                            zos.closeEntry()
+                        java.util.zip.ZipOutputStream(tempApk.outputStream()).use { zos ->
+                            var replaced = 0
+                            zf.entries().toList().forEach { e ->
+                                zos.putNextEntry(java.util.zip.ZipEntry(e.name))
+                                val nb = newDexBytes[e.name]
+                                if (nb != null) { zos.write(nb); replaced++ } else
+                                    zf.getInputStream(e).use { it.copyTo(zos) }
+                                zos.closeEntry()
+                            }
+                            if (replaced != newDexBytes.size) return@runCatching err("ZIP_MISMATCH", "APK 内 DEX 条目数与重编数不一致", "path", apkPath)
                         }
-                        zos.close()
-                        if (replaced != newDexBytes.size) return@runCatching err("ZIP_MISMATCH", "APK 内 DEX 条目数与重编数不一致", "path", apkPath)
                     }
                     apkFile.delete()
                     tempApk.copyTo(apkFile, overwrite = true)

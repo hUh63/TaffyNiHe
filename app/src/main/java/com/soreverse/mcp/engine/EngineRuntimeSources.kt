@@ -245,7 +245,7 @@ internal fun EngineRuntime.evictWorkspacesIfNeeded(keepId: String = ""): List<St
     for (w in candidates) {
         if (withinLimits()) break
         workspaces.remove(w.id)
-        workspaceBySourceKey.entries.removeIf { it.value == w.id }
+        workspaceBySourceKey.entries.removeAll { it.value == w.id }
         evicted.add(w.id)
     }
     return evicted

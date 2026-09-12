@@ -668,7 +668,7 @@ private fun AttackSurfaceRow(title: String, value: String, detail: String, tone:
 private fun toneColor(tone: String): Color = when (tone) {
     "danger" -> Color(0xFFDC3545)
     "warn" -> Color(0xFFFFC107)
-    "info" -> MaterialTheme.colorScheme.primary
+    "info" -> Color(0xFF0B6BFF)
     else -> Color(0xFF28A745)
 }
 

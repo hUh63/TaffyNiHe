@@ -35,7 +35,9 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.options
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import io.ktor.utils.io.readRemaining
 import io.ktor.utils.io.writeStringUtf8
+import kotlinx.io.readByteArray
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -301,21 +303,15 @@ class McpHttpServer(private val context: Context, private val port: Int, private
 
     private class RequestTooLargeException : Exception()
 
-    /** 边读边计数，超过 [maxBytes] 立刻抛错，避免把超大请求体整体读进内存。 */
+    /**
+     * 一次读入最多 maxBytes+1 字节：多出来的那 1 字节即证明请求体超限。
+     * 相比 receiveText() 整体读入，chunked 编码绕不过这个硬上限，内存有界。
+     */
     private suspend fun readBodyLimited(call: ApplicationCall, maxBytes: Int): String {
         val channel = call.receiveChannel()
-        val out = java.io.ByteArrayOutputStream(minOf(maxBytes, 64 * 1024).coerceAtLeast(1024))
-        val buf = ByteArray(16 * 1024)
-        val limit = maxBytes.toLong()
-        var total = 0L
-        while (true) {
-            val n = channel.readAvailable(buf, 0, buf.size)
-            if (n <= 0) break
-            total += n
-            if (total > limit) throw RequestTooLargeException()
-            out.write(buf, 0, n)
-        }
-        return out.toString("UTF-8")
+        val bytes = channel.readRemaining(maxBytes.toLong() + 1).readByteArray()
+        if (bytes.size > maxBytes) throw RequestTooLargeException()
+        return bytes.toString(Charsets.UTF_8)
     }
 
     private suspend fun handleJsonRpcPost(call: ApplicationCall) {

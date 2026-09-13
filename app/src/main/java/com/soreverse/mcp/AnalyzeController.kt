@@ -338,3 +338,15 @@ internal fun rewindDeepTurn(state: AnalyzeUiState) {
     state.deepReport = ""
 }
 
+/** 回退到指定用户轮次：删除该用户消息及其之后的全部消息，并把该轮输入回填输入框。
+ *  比 rewindDeepTurn 更进一步——支持回到任意一轮（多步历史回退）。 */
+internal fun rewindDeepTo(state: AnalyzeUiState, userMessageId: Long) {
+    val messages = state.deepMessages
+    val idx = messages.indexOfFirst { it.id == userMessageId && it.role == DeepChatRole.USER }
+    if (idx < 0) return
+    val userText = messages[idx].text
+    state.deepMessages = messages.take(idx)
+    state.deepInput = userText
+    state.deepReport = ""
+}
+

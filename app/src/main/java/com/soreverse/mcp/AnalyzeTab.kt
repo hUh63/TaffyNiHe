@@ -89,6 +89,7 @@ internal fun AnalyzeTab(
 ) {
     val context = LocalContext.current
     val deepChatListState = rememberLazyListState()
+    var showHistory by remember { mutableStateOf(false) }
     var followDeepOutput by remember { mutableStateOf(true) }
     val deepAtBottom by remember {
         derivedStateOf {
@@ -648,6 +649,12 @@ internal fun AnalyzeTab(
                             ) {
                                 Icon(Icons.Default.Restore, if (t.zh) "撤回上一轮" else "Rewind last turn")
                             }
+                            IconButton(onClick = { showHistory = true }, enabled = state.deepMessages.any { it.role == DeepChatRole.USER }) {
+                                Icon(Icons.Default.Restore, if (t.zh) "历史轮次" else "History")
+                            }
+                            if (showHistory) {
+                                DeepHistoryDialog(state.deepMessages, t.zh, onRewindTo = { id -> rewindDeepTo(state, id); showHistory = false }, onDismiss = { showHistory = false })
+                            }
                             IconButton(onClick = {
                                 state.deepMessages.lastOrNull { it.role == DeepChatRole.ASSISTANT }?.text?.let { copy(context, it, t.copied) }
                             }) {
@@ -1204,6 +1211,7 @@ internal fun DeepAiChatScreen(
 ) {
     val context = LocalContext.current
     val deepChatListState = rememberLazyListState()
+    var showHistory by remember { mutableStateOf(false) }
     Surface(
         modifier = Modifier.fillMaxSize().graphicsLayer {
             translationX = size.width * backProgress
@@ -1224,6 +1232,12 @@ internal fun DeepAiChatScreen(
                             enabled = state.deepAnalyzingPath == null && state.deepMessages.any { it.role == DeepChatRole.USER },
                         ) {
                             Icon(Icons.Default.Restore, if (t.zh) "撤回上一轮" else "Rewind last turn")
+                        }
+                        IconButton(onClick = { showHistory = true }, enabled = state.deepMessages.any { it.role == DeepChatRole.USER }) {
+                            Icon(Icons.Default.Restore, if (t.zh) "历史轮次" else "History")
+                        }
+                        if (showHistory) {
+                            DeepHistoryDialog(state.deepMessages, t.zh, onRewindTo = { id -> rewindDeepTo(state, id); showHistory = false }, onDismiss = { showHistory = false })
                         }
                         IconButton(onClick = {
                             state.deepMessages.lastOrNull { it.role == DeepChatRole.ASSISTANT }?.text?.let { copy(context, it, t.copied) }

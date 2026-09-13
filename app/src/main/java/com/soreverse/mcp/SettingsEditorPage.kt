@@ -102,6 +102,23 @@ private val SHELL_CMDS: List<Pair<String, String>> = listOf(
     "svc" to "服务控制", "input" to "注入输入", "screencap" to "截屏", "screenrecord" to "录屏", "wm" to "窗口管理",
 )
 
+/** 编辑模式行号 gutter（与文本行高 19sp 对齐；行数过多时省略，交由窗口化查看器）。 */
+@Composable
+private fun EditorGutter(lineCount: Int) {
+    if (lineCount <= 0 || lineCount > 3000) return
+    Column(Modifier.width(46.dp).padding(end = 6.dp)) {
+        for (i in 1..lineCount) {
+            Text(
+                i.toString(),
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 19.sp),
+                color = Color(0xFF607D8B),
+                textAlign = TextAlign.End,
+            )
+        }
+    }
+}
+
 /** 查找：返回 query 在 text 中所有匹配的起始下标（不重叠）。 */
 private fun findAllOccurrences(text: String, query: String): List<Int> {
     if (query.isEmpty()) return emptyList()
@@ -187,6 +204,11 @@ internal fun SettingsEditorPage(t: UiText) {
     // ── 大文件窗口化只读查看器（LazyColumn 仅渲染可见行；>200KB 自动启用）──
     var viewerMode by remember { mutableStateOf(false) }
     val viewerListState = rememberLazyListState()
+    // ── 编辑模式行号 / 跳转行 ──
+    val editorScroll = rememberScrollState()
+    val editorLineCount = remember(code) { code.count { c -> c == '\n' } + 1 }
+    var showJump by remember { mutableStateOf(false) }
+    var jumpLine by remember { mutableStateOf("") }
     LaunchedEffect(code) { if (code.length > 200_000) viewerMode = true }
 
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -294,6 +316,21 @@ internal fun SettingsEditorPage(t: UiText) {
         if (findQuery.isEmpty()) return
         val newText = tf.text.replace(findQuery, replaceQuery)
         setCode(newText)
+    }
+
+    /** 跳转到第 n 行（1-based）：把光标移动到该行行首。 */
+    fun jumpToLine(n: Int) {
+        val text = tf.text
+        if (text.isEmpty()) return
+        var idx = 0
+        var line = 1
+        while (line < n) {
+            val nl = text.indexOf('\n', idx)
+            if (nl < 0) { idx = text.length; break }
+            idx = nl + 1
+            line++
+        }
+        tf = TextFieldValue(text, selection = TextRange(idx))
     }
 
     // ── 多 tab（借鉴 Xed-Editor 多文件编辑：快照切换 / dirty 标记 / 关闭）──
@@ -839,6 +876,12 @@ internal fun SettingsEditorPage(t: UiText) {
             }
         }
 
+        val (curLn, curCol) = cursorLineCol()
+        Text(
+            "Ln $curLn : Col $curCol · ${editorLineCount} ${if (zh) "行" else "lines"}",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         // ── 编辑区（实时高亮编辑：BasicTextField + VisualTransformation，输入即高亮）──
         Box(Modifier.fillMaxWidth()) {
             Box(
@@ -874,13 +917,15 @@ internal fun SettingsEditorPage(t: UiText) {
                         }
                     }
                 } else {
+                Row(Modifier.fillMaxWidth().verticalScroll(editorScroll)) {
+                    EditorGutter(editorLineCount)
                 BasicTextField(
                     value = tf,
                     onValueChange = {
                         tf = it; code = it.text
                         lastInputAt = System.currentTimeMillis()   // 全模式自动补全（按模式分流）
                     },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.weight(1f),
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp, color = fg),
                     cursorBrush = SolidColor(AppPalette.teal),
                     visualTransformation = remember(mode) {
@@ -918,6 +963,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         }
                     },
                 )
+                }
                 }
             }
 
@@ -1000,6 +1046,9 @@ internal fun SettingsEditorPage(t: UiText) {
                     enabled = !completing,
                 )
             }
+            IconButton(onClick = { showJump = true }) {
+                Text("Ln", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             IconButton(onClick = { viewerMode = !viewerMode }) {
                 Text(if (viewerMode) "✎" else "≡", fontSize = 15.sp, color = if (viewerMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -1066,6 +1115,23 @@ internal fun SettingsEditorPage(t: UiText) {
                     TextButton(onClick = { showFind = false }) { Text(if (zh) "关闭" else "Close", fontSize = 11.sp) }
                 }
             }
+        }
+
+        if (showJump) {
+            AlertDialog(
+                onDismissRequest = { showJump = false },
+                title = { Text(if (zh) "跳转到行" else "Go to line") },
+                text = {
+                    OutlinedTextField(
+                        value = jumpLine,
+                        onValueChange = { v -> jumpLine = v.filter { it.isDigit() } },
+                        singleLine = true,
+                        label = { Text(if (zh) "行号" else "Line", fontSize = 11.sp) },
+                    )
+                },
+                confirmButton = { TextButton(onClick = { jumpLine.toIntOrNull()?.let { jumpToLine(it) }; showJump = false }) { Text(if (zh) "跳转" else "Go") } },
+                dismissButton = { TextButton(onClick = { showJump = false }) { Text(if (zh) "取消" else "Cancel") } },
+            )
         }
 
         // ── 最近文件 ──

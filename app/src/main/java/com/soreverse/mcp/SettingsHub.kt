@@ -97,6 +97,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.DexExplorer -> if (t.zh) "DEX / APK 浏览器" else "DEX / APK Explorer"
     SettingsDest.ApkEdit -> if (t.zh) "APK Manifest 编辑" else "APK Manifest Editor"
     SettingsDest.Snapshots -> if (t.zh) "编辑快照 / 回滚" else "Edit Snapshots"
+    SettingsDest.Workflow -> if (t.zh) "逆向工作流图" else "Reverse Workflow"
     SettingsDest.Help -> if (t.zh) "帮助" else "Help"
 }
 
@@ -241,6 +242,8 @@ internal fun SettingsHub(
                     GroupDivider()
                     NavRow(if (t.zh) "编辑快照 / 回滚" else "Edit Snapshots", if (t.zh) "查看差异并回滚写操作" else "Review diffs & roll back", Icons.Default.Restore, onClick = { onDest(SettingsDest.Snapshots) })
                     GroupDivider()
+                    NavRow(if (t.zh) "逆向工作流图 (DAG)" else "Reverse Workflow (DAG)", if (t.zh) "全流程导航，节点可跳转" else "End-to-end flow, nodes jump", Icons.Default.AccountTree, onClick = { onDest(SettingsDest.Workflow) })
+                    GroupDivider()
                     NavRow("Blutter", if (t.zh) "Flutter 3.44 / Dart 3.12.2 / 完全离线" else "Flutter 3.44 / Dart 3.12.2 / fully offline", Icons.Default.Memory, onClick = { onDest(SettingsDest.Blutter) })
                 }
 
@@ -313,6 +316,7 @@ internal fun SettingsHub(
             SettingsDest.DexExplorer -> SettingsDexExplorerPage(t)
             SettingsDest.ApkEdit -> SettingsApkEditPage(t)
             SettingsDest.Snapshots -> SettingsSnapshotsPage(t)
+            SettingsDest.Workflow -> SettingsWorkflowPage(t, onDest)
             SettingsDest.Rizin -> RizinPage(t)
             SettingsDest.Capture -> CapturePage(t)
             SettingsDest.Linux -> SettingsLinuxPage(t)

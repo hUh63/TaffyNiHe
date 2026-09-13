@@ -10,6 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -185,4 +191,43 @@ internal fun DeepProcessTimeline(parts: List<RikkaPart>, streaming: Boolean, zh:
 @Composable
 internal fun MarkdownMessageContent(markdown: String, selectable: Boolean) {
     RikkaMarkdown(content = markdown, modifier = Modifier.fillMaxWidth(), selectable = selectable)
+}
+
+/** 对话历史：列出所有用户轮次，点击任意一轮即回退到该轮并回填输入（多步回退）。 */
+@Composable
+internal fun DeepHistoryDialog(
+    messages: List<DeepChatMessage>,
+    zh: Boolean,
+    onRewindTo: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val turns = remember(messages) { messages.filter { it.role == DeepChatRole.USER } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (zh) "对话历史 · 回到某一轮" else "History · rewind to a turn") },
+        text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                if (turns.isEmpty()) {
+                    Text(if (zh) "暂无提问轮次" else "No turns yet", style = MaterialTheme.typography.bodySmall)
+                }
+                turns.forEachIndexed { i, m ->
+                    Column(
+                        Modifier.fillMaxWidth().clickable { onRewindTo(m.id) }.padding(vertical = 8.dp),
+                    ) {
+                        Text(
+                            "${i + 1}. " + m.text.lineSequence().firstOrNull().orEmpty().take(90),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            if (zh) "点击回退到这一轮" else "Tap to rewind to this turn",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(if (zh) "关闭" else "Close") } },
+    )
 }

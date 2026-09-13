@@ -5,6 +5,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.imePadding
@@ -61,6 +64,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.soreverse.mcp.core.EditorAiHelper
 import com.soreverse.mcp.core.LspClient
@@ -180,6 +184,10 @@ internal fun SettingsEditorPage(t: UiText) {
     var showFind by remember { mutableStateOf(false) }
     var findQuery by remember { mutableStateOf("") }
     var replaceQuery by remember { mutableStateOf("") }
+    // ── 大文件窗口化只读查看器（LazyColumn 仅渲染可见行；>200KB 自动启用）──
+    var viewerMode by remember { mutableStateOf(false) }
+    val viewerListState = rememberLazyListState()
+    LaunchedEffect(code) { if (code.length > 200_000) viewerMode = true }
 
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -839,6 +847,33 @@ internal fun SettingsEditorPage(t: UiText) {
                     .border(1.dp, Color(0xFF1E2A36), RoundedCornerShape(14.dp))
                     .padding(4.dp),
             ) {
+                if (viewerMode) {
+                    val vLines = remember(code) { code.lineSequence().take(200_001).toList() }
+                    LazyColumn(
+                        state = viewerListState,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 260.dp, max = 460.dp)
+                            .background(bg, RoundedCornerShape(14.dp))
+                            .border(1.dp, Color(0xFF1E2A36), RoundedCornerShape(14.dp))
+                            .padding(4.dp),
+                    ) {
+                        itemsIndexed(vLines) { idx, line ->
+                            Row(Modifier.fillMaxWidth()) {
+                                Text(
+                                    (idx + 1).toString(),
+                                    modifier = Modifier.width(46.dp).padding(end = 6.dp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                                    color = Color(0xFF607D8B),
+                                    textAlign = TextAlign.End,
+                                )
+                                Text(
+                                    line.ifEmpty { " " },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp),
+                                    color = fg,
+                                )
+                            }
+                        }
+                    }
+                } else {
                 BasicTextField(
                     value = tf,
                     onValueChange = {
@@ -883,6 +918,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         }
                     },
                 )
+                }
             }
 
             // 补全面板：覆盖在编辑区底部的浮层（不推挤布局），条件放宽到全部模式
@@ -963,6 +999,9 @@ internal fun SettingsEditorPage(t: UiText) {
                     label = { Text(if (zh) "⚠诊断" else "⚠Diag", fontSize = 10.sp) },
                     enabled = !completing,
                 )
+            }
+            IconButton(onClick = { viewerMode = !viewerMode }) {
+                Text(if (viewerMode) "✎" else "≡", fontSize = 15.sp, color = if (viewerMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { showFind = !showFind }) {
                 Icon(Icons.Default.Search, null, tint = if (showFind) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)

@@ -325,3 +325,16 @@ $history
 
 用户本轮问题：$request"""
 }
+
+/** 撤回上一轮对话：删除最后一条用户消息及其之后的所有消息，并把该用户输入回填到输入框。
+ *  借鉴 taixu 的 Rewind / 对话回退——让用户可改口重问，而不必新开一段对话。 */
+internal fun rewindDeepTurn(state: AnalyzeUiState) {
+    val messages = state.deepMessages
+    val lastUserIdx = messages.indexOfLast { it.role == DeepChatRole.USER }
+    if (lastUserIdx < 0) return
+    val userText = messages[lastUserIdx].text
+    state.deepMessages = messages.take(lastUserIdx)
+    state.deepInput = userText
+    state.deepReport = ""
+}
+

@@ -46,6 +46,7 @@ internal fun SettingsAuditPage(t: UiText, settings: SettingsStore) {
     var toolResultMaxChars by remember { mutableStateOf(settings.toolResultMaxChars.toString()) }
     var toolCallRateLimitPerMin by remember { mutableStateOf(settings.toolCallRateLimitPerMin.toString()) }
     var disabledTools by remember { mutableStateOf(settings.disabledTools) }
+    var blockDestructiveTools by remember { mutableStateOf(settings.blockDestructiveTools) }
     PageScroll {
         GlassGroup {
             ToggleRow(if (t.zh) "编辑前自动快照" else "Auto-snapshot before edit", autoSnapshotBeforeEdit) { autoSnapshotBeforeEdit = it; settings.autoSnapshotBeforeEdit = it }
@@ -136,6 +137,28 @@ internal fun SettingsAuditPage(t: UiText, settings: SettingsStore) {
                 }
             }
             Text(if (t.zh) "从下拉菜单勾选或直接输入工具名称，逗号分隔。" else "Check tools in the dropdown or type names directly, comma-separated.", modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        GlassGroup {
+            ToggleRow(if (t.zh) "拦截破坏性工具（写/删/签名等）" else "Block destructive tools (write/delete/sign)", blockDestructiveTools) {
+                blockDestructiveTools = it; settings.blockDestructiveTools = it
+            }
+            GroupDivider()
+            val destructive = remember { com.soreverse.mcp.mcp.ToolSafety.destructiveToolNames() }
+            Text(
+                if (t.zh) "开启后，被判定为破坏性的 ${destructive.size} 个工具会被拒绝。默认关闭——不影响原有工作流。"
+                else "When on, ${destructive.size} tools classed as destructive are rejected. Off by default.",
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (destructive.isNotEmpty()) {
+                Text(
+                    destructive.joinToString(", "),
+                    modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 10.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

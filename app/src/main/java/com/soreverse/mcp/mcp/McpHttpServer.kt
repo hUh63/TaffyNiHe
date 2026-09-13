@@ -616,6 +616,9 @@ $historyRows
         if (name.isNotEmpty() && isToolDisabled(settings, name)) {
             return err("TOOL_DISABLED", "Tool $name is disabled by server policy (settings.disabledTools).")
         }
+        if (settings.blockDestructiveTools && ToolSafety.isDestructive(name)) {
+            return err("DESTRUCTIVE_BLOCKED", "Tool $name is destructive (write/delete/sign) and blocked by settings.blockDestructiveTools. Turn off the guard in Settings > Edit & Audit to allow it.")
+        }
         val rateLimit = settings.toolCallRateLimitPerMin
         if (rateLimit > 0 && !RateLimiter.tryAcquire(name, rateLimit)) {
             return err("RATE_LIMITED", "Tool $name hit the per-minute rate limit ($rateLimit/min). Retry shortly.")

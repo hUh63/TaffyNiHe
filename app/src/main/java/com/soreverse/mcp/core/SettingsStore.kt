@@ -9,11 +9,10 @@ class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("so_reverse_mcp", Context.MODE_PRIVATE)
 
     init {
-        // APK MCP 持续自动探测默认开启（用户可在"桥接"页关闭）。
-        if (!prefs.getBoolean("apkAutoProbeDefaultOnV2", false)) {
+        if (!prefs.getBoolean("apkAutoProbeDefaultMigrated", false)) {
             prefs.edit()
-                .putBoolean("apkMcpAutoProbe", true)
-                .putBoolean("apkAutoProbeDefaultOnV2", true)
+                .putBoolean("apkMcpAutoProbe", false)
+                .putBoolean("apkAutoProbeDefaultMigrated", true)
                 .apply()
         }
         // Pre-populate default bridge URLs (MT Manager :8787, NP Manager :8788)
@@ -419,6 +418,12 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("disabledTools", "") ?: ""
         set(value) = prefs.edit().putString("disabledTools", value).apply()
 
+    /** 破坏性工具拦截（借鉴 fler 的 destructive-tools）。默认关闭，不改变原工作流；
+     *  开启后 McpHttpServer 拒绝 ToolSafety.isDestructive(name) 的调用（写/删/签名等）。 */
+    var blockDestructiveTools: Boolean
+        get() = prefs.getBoolean("blockDestructiveTools", false)
+        set(value) = prefs.edit().putBoolean("blockDestructiveTools", value).apply()
+
     var scanApks: Boolean
         get() = prefs.getBoolean("scanApks", true)
         set(value) = prefs.edit().putBoolean("scanApks", value).apply()
@@ -655,7 +660,7 @@ class SettingsStore(context: Context) {
         }
 
     var apkMcpAutoProbe: Boolean
-        get() = prefs.getBoolean("apkMcpAutoProbe", true)
+        get() = prefs.getBoolean("apkMcpAutoProbe", false)
         set(value) = prefs.edit().putBoolean("apkMcpAutoProbe", value).apply()
 
     var apkMcpMergeTools: Boolean

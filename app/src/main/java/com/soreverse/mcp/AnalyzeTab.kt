@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
@@ -641,6 +642,12 @@ internal fun AnalyzeTab(
                     onBack = onLeaveDeepReport,
                     trailing = {
                         if (state.deepMessages.isNotEmpty()) {
+                            IconButton(
+                                onClick = { rewindDeepTurn(state) },
+                                enabled = state.deepAnalyzingPath == null && state.deepMessages.any { it.role == DeepChatRole.USER },
+                            ) {
+                                Icon(Icons.Default.Restore, if (t.zh) "撤回上一轮" else "Rewind last turn")
+                            }
                             IconButton(onClick = {
                                 state.deepMessages.lastOrNull { it.role == DeepChatRole.ASSISTANT }?.text?.let { copy(context, it, t.copied) }
                             }) {
@@ -1212,6 +1219,12 @@ internal fun DeepAiChatScreen(
                 onBack = onLeaveDeepReport,
                 trailing = {
                     if (state.deepMessages.isNotEmpty()) {
+                        IconButton(
+                            onClick = { rewindDeepTurn(state) },
+                            enabled = state.deepAnalyzingPath == null && state.deepMessages.any { it.role == DeepChatRole.USER },
+                        ) {
+                            Icon(Icons.Default.Restore, if (t.zh) "撤回上一轮" else "Rewind last turn")
+                        }
                         IconButton(onClick = {
                             state.deepMessages.lastOrNull { it.role == DeepChatRole.ASSISTANT }?.text?.let { copy(context, it, t.copied) }
                         }) {

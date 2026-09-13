@@ -50,10 +50,12 @@ jobs:
       - name: 安装原生构建工具
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config cmake
 
-      - name: 克隆 Rizin（固定版本）
+      - name: 克隆 Rizin
         run: |
           if [ ! -d third_party/rizin-src/librz/include ]; then
-            git clone --depth 1 --branch v0.10.0 https://github.com/rizinorg/rizin.git third_party/rizin-src
+            # rizin 稳定 tag 最高为 v0.9.1；现有 librz_native.so 对应 rizin 0.10.0(开发版)，
+            # 故与上游 SOMCP 一致地取 main(0.10.x)，保持 API / JNI 兼容。
+            git clone --depth 1 https://github.com/rizinorg/rizin.git third_party/rizin-src
           fi
 
       - name: 克隆 LIEF 0.16.1

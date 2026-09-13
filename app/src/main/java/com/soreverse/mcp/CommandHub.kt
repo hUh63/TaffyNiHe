@@ -13,6 +13,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -201,22 +203,76 @@ internal fun CommandHubScreen(
             ConnDot(running = running, zh = zh)
         }
 
-        // 中央星系（星核 + 卫星环绕），限制最大尺寸，小窗下不占满过高
-        Box(
+        // 引擎电源卡（替代原「星核」）—— 一键启停 MCP 服务
+        val powerShape = RoundedCornerShape(AppShape.xl)
+        Row(
             Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp)
-                .heightIn(max = 320.dp),
-            contentAlignment = Alignment.Center,
+                .clip(powerShape)
+                .background(
+                    if (running) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            SatelliteSystem(
-                running = running,
-                sats = sats,
-                onCore = { toggle() },
-                zh = zh,
-                onSat = { onNavigate(it.tab, it.toolCategory) },
-                maxDiameter = 300.dp,
-            )
+            Box(
+                Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.PowerSettingsNew,
+                    contentDescription = if (running) (if (zh) "停止引擎" else "Stop engine") else (if (zh) "启动引擎" else "Start engine"),
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (running) (if (zh) "引擎运行中" else "Engine running") else (if (zh) "引擎已停止" else "Engine stopped"),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    if (running) (if (zh) "MCP 服务在线，AI 客户端可连接" else "MCP online — clients can connect")
+                    else (if (zh) "点击启动以暴露 MCP 服务" else "Tap Start to expose the MCP server"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Button(onClick = { toggle() }, shape = RoundedCornerShape(AppShape.sm)) {
+                Text(if (running) (if (zh) "停止" else "Stop") else (if (zh) "启动" else "Start"))
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // 功能入口矩阵（替代原「卫星环绕」）—— 任务导向的 2 列卡片, 直达各逆向工作流
+        Text(
+            if (zh) "功能" else "Workbench",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 8.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            sats.chunked(2).forEach { rowItems ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rowItems.forEach { sat ->
+                        WorkbenchCard(
+                            sat = sat,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onNavigate(sat.tab, sat.toolCategory) },
+                        )
+                    }
+                    if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
         }
 
         // 服务状态行：目录 / 桥接 / 保活（根据配置状态显示）
@@ -316,6 +372,43 @@ internal fun CommandHubScreen(
 }
 
 private data class Satellite(val icon: ImageVector, val label: String, val tab: MainTab, val toolCategory: String? = null)
+
+@Composable
+private fun WorkbenchCard(
+    sat: Satellite,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(AppShape.lg)
+    Row(
+        modifier
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)), shape)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(AppShape.sm))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(sat.icon, contentDescription = sat.label, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        }
+        Text(
+            sat.label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 @Composable
 private fun ConnDot(running: Boolean, zh: Boolean) {

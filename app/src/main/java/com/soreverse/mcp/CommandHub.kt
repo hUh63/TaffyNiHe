@@ -15,7 +15,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -233,10 +232,7 @@ internal fun CommandHubScreen(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { onNavigate(MainTab.Home, null) }
+                    .clickable { onNavigate(MainTab.Home, null) }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
@@ -406,10 +402,7 @@ private fun ServiceStatusRow(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(tunnelColor.copy(alpha = 0.10f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { onNavigateSettings(SettingsDest.Tunnel) }
+                .clickable { onNavigateSettings(SettingsDest.Tunnel) }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -473,10 +466,7 @@ private fun ServiceStatusRow(
                 Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .background(accent.copy(alpha = 0.14f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { onAnalyze() }
+                    .clickable { onAnalyze() }
                     .padding(horizontal = 10.dp, vertical = 10.dp),
             ) {
                 Icon(
@@ -639,10 +629,7 @@ private fun SatelliteNode(
             .size(width = sizeDp, height = sizeDp)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { onClick() },
+            .clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -699,10 +686,7 @@ private fun StarCore(running: Boolean, onClick: () -> Unit, zh: Boolean) {
                         style = Stroke(width = 2.dp.toPx()),
                     )
                 }
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { onClick() },
+                .clickable { onClick() },
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {

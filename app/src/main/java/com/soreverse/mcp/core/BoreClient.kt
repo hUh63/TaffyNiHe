@@ -523,6 +523,9 @@ class BoreClient(
         reconnectAttempts.set(0)
         reconnectThread?.interrupt()
         reconnectThread = null
+        // 立刻 close 活动 socket：阻塞中的 socket 读不响应 interrupt，
+        // 只有 close 才能让控制循环/数据转发线程马上醒来。
+        activeSockets.forEach { s -> try { s.close() } catch (_: Exception) {} }
     }
 
     @Synchronized

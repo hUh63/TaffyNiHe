@@ -49,6 +49,9 @@ class BoreClient(
     @Volatile private var running = false
     private var dataExecutor: ExecutorService? = null
     private val connectionThreads = ConcurrentHashMap<String, Thread>()
+    // 阻塞 socket 读不响应 Thread.interrupt，stop() 必须显式 close 掉所有活动
+    // socket 才能真正解除阻塞，否则控制循环/数据转发线程会残留。
+    private val activeSockets = java.util.Collections.newSetFromMap(ConcurrentHashMap<java.net.Socket, Boolean>())
     @Volatile private var assignedPort = -1
     @Volatile private var autoReconnect = true
     @Volatile private var stopRequested = false
@@ -132,6 +135,7 @@ class BoreClient(
                 fireEvent("${now()} ▶ 正在连接 ${boreHost}:${borePort}...")
                 controlSocket = Socket()
                 controlSocket.connect(InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS)
+                activeSockets.add(controlSocket)
                 fireEvent("${now()} ✓ TCP 连接已建立")
                 // 先设为无限阻塞，握手时再设超时
                 controlSocket.soTimeout = 0
@@ -167,7 +171,7 @@ class BoreClient(
             } finally {
                 running = false
                 assignedPort = -1
-                try { controlSocket?.close() } catch (_: Exception) {}
+                controlSocket?.let { s -> activeSockets.remove(s); try { s.close() } catch (_: Exception) {} }
                 listener?.onDisconnected()
                 if (autoReconnect && !stopRequested && generation.get() == runGeneration) {
                     scheduleReconnect(runGeneration)
@@ -367,6 +371,7 @@ class BoreClient(
                 fireEvent("${now()} ⇄ 处理数据连接: $connId")
                 dataSocket = Socket()
                 dataSocket.connect(InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS)
+                activeSockets.add(dataSocket)
                 fireEvent("${now()} ⇄ 数据连接已建立")
                 dataSocket.soTimeout = 0
                 dataSocket.tcpNoDelay = true
@@ -378,6 +383,7 @@ class BoreClient(
                 dataOut.flush()
                 localSocket = Socket()
                 localSocket.connect(InetSocketAddress("127.0.0.1", localPort), LOCAL_CONNECT_TIMEOUT_MS)
+                activeSockets.add(localSocket)
                 fireEvent("${now()} ⇄ 已连接本地 127.0.0.1:$localPort")
                 localSocket.soTimeout = 0
                 localSocket.tcpNoDelay = true
@@ -419,8 +425,8 @@ class BoreClient(
                 fireEvent("${now()} ✗ 数据连接异常: ${e.message}")
             } finally {
                 connectionThreads.remove(connId)
-                try { dataSocket?.close() } catch (_: Exception) {}
-                try { localSocket?.close() } catch (_: Exception) {}
+                dataSocket?.let { s -> activeSockets.remove(s); try { s.close() } catch (_: Exception) {} }
+                localSocket?.let { s -> activeSockets.remove(s); try { s.close() } catch (_: Exception) {} }
             }
         }.apply {
             isDaemon = true
@@ -534,6 +540,10 @@ class BoreClient(
         val count = connectionThreads.size
         connectionThreads.values.forEach { it.interrupt() }
         connectionThreads.clear()
+        // 显式关闭所有活动 socket：阻塞读不响应 interrupt，只有 close 才能真正唤醒
+        // 控制循环 / 数据转发线程，避免 stop() 返回后仍有线程卡在 socket 读上。
+        activeSockets.forEach { s -> try { s.close() } catch (_: Exception) {} }
+        activeSockets.clear()
         dataExecutor?.shutdownNow()
         dataExecutor = null
         val totalBytes = totalBytesTransferred.get()

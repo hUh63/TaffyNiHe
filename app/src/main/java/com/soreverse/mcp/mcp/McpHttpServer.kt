@@ -25,6 +25,7 @@ import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.header
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveText
 import io.ktor.server.request.uri
 import io.ktor.server.response.respondBytesWriter
@@ -66,12 +67,22 @@ class McpHttpServer(private val context: Context, private val port: Int, private
     private val startedAt = System.currentTimeMillis()
     private var engine: EmbeddedServer<*, *>? = null
     @Volatile private var heavyPermits = 1
-    private var heavyGate: Semaphore = Semaphore(1)
+    /** 已实际生效的许可数——reconfigure 幂等判断用。 */
+    @Volatile private var heavyAppliedPermits = 1
+    /** 当前被占用的 heavy 名额数：含已超时但仍在后台跑完的任务。 */
+    private val heavyInFlight = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var heavyGate: Semaphore = Semaphore(1)
 
-    /** 工具执行线程池：配合调用级超时使用；daemon 线程不阻止进程退出。 */
-    private val toolExecutor = java.util.concurrent.Executors.newCachedThreadPool { r ->
-        Thread(r).apply { isDaemon = true; name = "mcp-tool-worker" }
-    }
+    /**
+     * 工具执行线程池：配合调用级超时使用；daemon 线程不阻止进程退出。
+     * 有界（8~48 线程 + 256 队列）：异常/恶意客户端灌爆请求时不再无限建线程。
+     */
+    private val toolExecutor = java.util.concurrent.ThreadPoolExecutor(
+        8, 48, 60L, TimeUnit.SECONDS,
+        java.util.concurrent.LinkedBlockingQueue<Runnable>(256),
+        { r -> Thread(r).apply { isDaemon = true; name = "mcp-tool-worker" } },
+        java.util.concurrent.ThreadPoolExecutor.AbortPolicy()
+    ).apply { allowCoreThreadTimeOut(true) }
 
     // v2.1.0: Session management for Streamable HTTP transport
     private val sessions = ConcurrentHashMap<String, Long>() // sessionId -> createdAt
@@ -111,10 +122,22 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * reconfigure to current settings on every start.
      */
     fun reconfigureHeavyPermits(permits: Int) {
-        val p = permits.coerceIn(1, 16)
-        if (p == heavyPermits) return
-        heavyPermits = p
+        heavyPermits = permits.coerceIn(1, 16)
+        applyHeavyPermits()
+    }
+
+    /**
+     * 幂等地把 heavy 闸切到 [heavyPermits] 个许可。有任务在跑时绝不替换闸实例——
+     * 否则在跑任务的 finally 会把许可 release 到旧实例上，新实例许可凭空翻倍，
+     * heavy 工具就会并发执行、互相踩引擎状态。等名额归零时再切。
+     */
+    @Synchronized
+    private fun applyHeavyPermits() {
+        val p = heavyPermits
+        if (p == heavyAppliedPermits) return
+        if (heavyInFlight.get() > 0) return
         heavyGate = Semaphore(p)
+        heavyAppliedPermits = p
         AppLog.i("heavy tool gate permits=$p")
     }
 
@@ -276,6 +299,25 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         AppLog.i("SSE client disconnected: session=$sessionId")
     }
 
+    private class RequestTooLargeException : Exception()
+
+    /** 边读边计数，超过 [maxBytes] 立刻抛错，避免把超大请求体整体读进内存。 */
+    private suspend fun readBodyLimited(call: ApplicationCall, maxBytes: Int): String {
+        val channel = call.receiveChannel()
+        val out = java.io.ByteArrayOutputStream(minOf(maxBytes, 64 * 1024).coerceAtLeast(1024))
+        val buf = ByteArray(16 * 1024)
+        val limit = maxBytes.toLong()
+        var total = 0L
+        while (true) {
+            val n = channel.readAvailable(buf, 0, buf.size)
+            if (n <= 0) break
+            total += n
+            if (total > limit) throw RequestTooLargeException()
+            out.write(buf, 0, n)
+        }
+        return out.toString("UTF-8")
+    }
+
     private suspend fun handleJsonRpcPost(call: ApplicationCall) {
         // 先读取请求体，以便在鉴权失败时也能返回带正确 id 的错误响应
         val settings = SettingsStore(context)
@@ -285,7 +327,14 @@ class McpHttpServer(private val context: Context, private val port: Int, private
             call.respondText(requestTooLarge(maxBytes).toString(), ContentType.Application.Json, status = HttpStatusCode.PayloadTooLarge)
             return
         }
-        val body = call.receiveText()
+        // 流式读取并硬性截断：Content-Length 可被 chunked 编码绕过，必须边读边计数，
+        // 超限立即停止读取并回 413，避免把超大请求体整体读进内存（OOM 风险）。
+        val body = try {
+            readBodyLimited(call, maxBytes)
+        } catch (e: RequestTooLargeException) {
+            call.respondText(requestTooLarge(maxBytes).toString(), ContentType.Application.Json, status = HttpStatusCode.PayloadTooLarge)
+            return
+        }
         if (body.toByteArray(Charsets.UTF_8).size > maxBytes) {
             call.respondText(requestTooLarge(maxBytes).toString(), ContentType.Application.Json, status = HttpStatusCode.PayloadTooLarge)
             return
@@ -635,22 +684,43 @@ $historyRows
         // 的参数引用塔菲自身 APK 或内置 SO 时拒绝, 防止 MCP 客户端/桥接工具
         // 读改运行中应用的文件或破坏自身完整性校验。
         SelfArtifactGuard.findSelfArg(context, args)?.let { return SelfArtifactGuard.forbidden(it, name) }
-        // 服务级调用超时：卡死的工具不再永久占用 heavy 闸与工作线程
-        // （超时后底层线程被 interrupt 标记，IO 收尾可能仍在后台进行，结果丢弃）
-        val future = toolExecutor.submit(java.util.concurrent.Callable { callToolPayload(name, args) })
+        // 服务级调用超时：卡死的工具不再永久占用工作线程（超时后底层线程被
+        // interrupt 标记，IO 收尾可能仍在后台进行，结果丢弃）。
+        //
+        // 关键修复：heavy 许可由任务自身在“真正结束”后释放，而不是调用方 try/finally。
+        // future.cancel(true) 打断不了 native 调用；若调用方一超时就释放许可，
+        // 另一个 heavy 工具会立刻进来并发操作同一引擎/文件，造成状态竞争。
+        val worker = java.util.concurrent.Callable {
+            if (heavy) {
+                heavyInFlight.incrementAndGet()
+                try {
+                    callToolPayload(name, args)
+                } finally {
+                    if (heavyInFlight.decrementAndGet() == 0) applyHeavyPermits()
+                    acquiredGate.release()
+                }
+            } else {
+                callToolPayload(name, args)
+            }
+        }
+        val future = try {
+            toolExecutor.submit(worker)
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            if (heavy) acquiredGate.release()
+            AppLog.w("Tool $name rejected: tool executor saturated")
+            return err("SERVER_BUSY", "Server is saturated; tool '$name' was rejected. Retry shortly.")
+        }
         val timeoutSec = settings.toolCallTimeoutSec.coerceIn(30, 7200)
         return try {
             future.get(timeoutSec.toLong(), TimeUnit.SECONDS)
         } catch (e: java.util.concurrent.TimeoutException) {
             future.cancel(true)
-            AppLog.w("Tool $name timed out after ${timeoutSec}s; detached")
+            AppLog.w("Tool $name timed out after ${timeoutSec}s; detached (heavy gate held until it really finishes)")
             err("TOOL_TIMEOUT", "Tool '$name' exceeded ${timeoutSec}s and was detached. It may still be running in the background; check stats/logs for its outcome.", "tool", name, "timeoutSec" to timeoutSec)
         } catch (e: java.util.concurrent.ExecutionException) {
             val cause = e.cause ?: e
             AppLog.e("Tool $name threw an unexpected error", cause)
             err("TOOL_ERROR", "Tool '$name' failed unexpectedly: ${cause.message}", "tool", name)
-        } finally {
-            if (heavy) acquiredGate.release()
         }
     }
 

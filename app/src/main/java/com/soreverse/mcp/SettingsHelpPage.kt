@@ -229,7 +229,7 @@ private const val HELP_INTERNALS = """═══ 塔菲逆核 · 实现原理 ═
   JSON-RPC/Content-Length 客户端（LspClient）。
 
 【Frida 动态插桩】
-  内置 frida-server 17.17.0（root 启动监听 27042，
+  内置 frida-server 17.18.0（root 启动监听 27042，
   libfrida_server.so 随包；CI 构建时从官方 release
   注入保持最新）。免 root 走 gadget 重打包（见
   MCP Skill）。分析页 Frida 面板编辑脚本（JS 高亮），

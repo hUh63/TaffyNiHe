@@ -689,8 +689,19 @@ object FileTools {
         // Filter
         val filter = a.str("filter")
         if (filter.isNotBlank()) {
-            val regex = filter.replace(".", "\\.").replace("*", ".*").replace("?", ".")
-                .toRegex(if (a.bool("caseSensitive", true)) setOf() else setOf(RegexOption.IGNORE_CASE))
+            fun globToRegex(glob: String): String {
+                val sb = StringBuilder()
+                for (ch in glob) {
+                    when (ch) {
+                        '*' -> sb.append(".*")
+                        '?' -> sb.append('.')
+                        else -> sb.append(Regex.escape(ch.toString()))
+                    }
+                }
+                return sb.toString()
+            }
+            val regex = globToRegex(filter)
+                .toRegex(if (a.bool("caseSensitive", false)) setOf() else setOf(RegexOption.IGNORE_CASE))
             files = files.filter { !it.isDirectory && regex.matches(it.name) }
         } else {
             files = files.filter { !it.isDirectory }

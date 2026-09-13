@@ -190,11 +190,11 @@ internal fun ToggleRow(text: String, checked: Boolean, onChange: (Boolean) -> Un
             checked = checked,
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary,
-                uncheckedThumbColor = Color.White,
-                uncheckedTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
-                uncheckedBorderColor = Color.Transparent,
+                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
             ),
         )
     }

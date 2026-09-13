@@ -330,10 +330,20 @@ private fun BridgeCard(
                 Spacer(Modifier.width(4.dp))
                 Text(if (zh) "编辑" else "Edit", fontSize = 13.sp)
             }
-            TextButton(onClick = onDelete) {
+            var confirmDelete by remember { mutableStateOf(false) }
+            TextButton(onClick = { confirmDelete = true }) {
                 Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.width(4.dp))
                 Text(if (zh) "删除" else "Delete", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+            }
+            if (confirmDelete) {
+                AlertDialog(
+                    onDismissRequest = { confirmDelete = false },
+                    title = { Text(if (zh) "删除此桥接？" else "Delete this bridge?") },
+                    text = { Text(if (zh) "删除后该桥接配置与其工具注册会被移除，需要重新添加。" else "This removes the bridge config and its tool registration; you will need to re-add it.") },
+                    confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text(if (zh) "删除" else "Delete", color = MaterialTheme.colorScheme.error) } },
+                    dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(if (zh) "取消" else "Cancel") } },
+                )
             }
         }
     }

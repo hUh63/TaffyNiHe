@@ -29,6 +29,7 @@ object WorkspacePolicy {
         "path", "filePath", "soPath", "inputPath", "outputPath", "outPath",
         "workDir", "workDirPath", "dir", "dirPath", "sourcePath", "destPath",
         "targetPath", "archivePath", "extractDir", "outputDir", "inputFile",
+        "source", "target", "srcPath", "dstPath",
         "outputFile", "sourceFile", "destFile", "smaliDir", "localPath",
         "srcPath", "dstPath", "inFile", "outFile",
     )

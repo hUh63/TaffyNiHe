@@ -96,6 +96,10 @@ object EditSnapshotService {
         val curLen = current.length()
         val origHash = sha256(origCopy)
         val curHash = sha256(current)
+        if (origHash.isEmpty() || curHash.isEmpty()) {
+            out.put("error", "HASH_FAILED").put("message", "无法计算文件哈希（读取失败），无法判定是否相同")
+            return out
+        }
         out.put("origSize", origLen).put("currentSize", curLen)
             .put("origSha256", origHash).put("currentSha256", curHash)
             .put("same", origHash == curHash)

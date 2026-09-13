@@ -205,6 +205,7 @@ internal fun CommandHubScreen(
                 running = running,
                 sats = sats,
                 onCore = { toggle() },
+                zh = zh,
                 onSat = { onNavigate(it.tab, it.toolCategory) },
                 maxDiameter = 300.dp,
             )
@@ -555,6 +556,7 @@ private fun SatelliteSystem(
     sats: List<Satellite>,
     onCore: () -> Unit,
     onSat: (Satellite) -> Unit,
+    zh: Boolean,
     maxDiameter: Dp = 320.dp,
 ) {
     val accent = MaterialTheme.colorScheme.primary
@@ -591,7 +593,7 @@ private fun SatelliteSystem(
         // 顺序：measurables[0]=星核，之后依次是各卫星。
         Layout(
             content = {
-                StarCore(running = running, onClick = onCore)
+                StarCore(running = running, onClick = onCore, zh = zh)
                 sats.forEach { sat ->
                     SatelliteNode(sat = sat, running = running, onClick = { onSat(sat) })
                 }
@@ -656,7 +658,7 @@ private fun SatelliteNode(
 }
 
 @Composable
-private fun StarCore(running: Boolean, onClick: () -> Unit) {
+private fun StarCore(running: Boolean, onClick: () -> Unit, zh: Boolean) {
     val accent = MaterialTheme.colorScheme.primary
     val scale by animateFloatAsState(if (running) 1f else 0.94f, tween(300), label = "core-scale")
     val infinite = rememberInfiniteTransition(label = "core")
@@ -712,7 +714,7 @@ private fun StarCore(running: Boolean, onClick: () -> Unit) {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                if (running) "运行中" else "点击启动",
+                if (running) (if (zh) "运行中" else "Running") else (if (zh) "点击启动" else "Tap to start"),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = if (running) accent else MaterialTheme.colorScheme.onSurfaceVariant,

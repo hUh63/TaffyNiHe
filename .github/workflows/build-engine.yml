@@ -1,0 +1,104 @@
+name: Build native engine (rizin + LIEF)
+
+# 自建原生引擎流水线：从源码交叉编译 rizin(meson) + LIEF(cmake) 并链接出 librz_native.so。
+# 与 build-apk.yml 解耦——APK 构建仍使用仓库内预编译 so；本流水线负责「造 so」。
+# 产物以 artifact 上传；多 ABI 矩阵直接支撑多 ABI 支持。
+
+on:
+  workflow_dispatch:
+    inputs:
+      abis:
+        description: '要构建的 ABI（逗号分隔，留空=全部四个）'
+        required: false
+        default: 'arm64-v8a'
+  push:
+    paths:
+      - 'build-native-android.sh'
+      - 'rizin-cross-*.ini'
+      - 'third_party/patches/**'
+      - 'app/src/main/cpp/**'
+      - '.github/workflows/build-engine.yml'
+
+concurrency:
+  group: build-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: engine-${{ matrix.abi }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
+    permissions:
+      contents: read
+    steps:
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v5
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 NDK
+        run: |
+          sdkmanager "ndk;28.2.13676358" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "NDK=$ANDROID_HOME/ndk/28.2.13676358"
+
+      - name: 安装原生构建工具
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config cmake
+
+      - name: 克隆 Rizin（固定版本）
+        run: |
+          if [ ! -d third_party/rizin-src/librz/include ]; then
+            git clone --depth 1 --branch v0.10.0 https://github.com/rizinorg/rizin.git third_party/rizin-src
+          fi
+
+      - name: 克隆 LIEF 0.16.1
+        run: |
+          if [ ! -d third_party/lief-src ]; then
+            git clone --depth 1 --branch 0.16.1 https://github.com/lief-project/LIEF.git third_party/lief-src
+          fi
+
+      - name: 缓存原生构建产物
+        uses: actions/cache@v4
+        with:
+          path: |
+            rizin-build/${{ matrix.abi }}
+            third_party/lief-build/${{ matrix.abi }}
+          key: native-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini', 'third_party/patches/**') }}
+
+      - name: 编译原生后端 (rizin + LIEF)
+        env:
+          TARGET_ABI: ${{ matrix.abi }}
+        run: bash build-native-android.sh
+
+      - name: 链接 librz_native.so
+        run: |
+          set -euo pipefail
+          cmake -G Ninja \
+            -S app/src/main/cpp -B "build/native-${{ matrix.abi }}" \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "build/native-${{ matrix.abi }}" --target rz_native --parallel 4
+          ls -lh "build/native-${{ matrix.abi }}/librz_native.so"
+
+      - name: 校验产物（架构 + JNI 符号）
+        run: |
+          set -euo pipefail
+          SO="build/native-${{ matrix.abi }}/librz_native.so"
+          BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          "$BIN/llvm-readelf" -h "$SO" | grep -E "Machine|Class|Type"
+          echo "JNI symbols:"
+          "$BIN/llvm-nm" -D --defined-only "$SO" | grep -c "Java_com_soreverse_mcp" || true
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: librz_native-${{ matrix.abi }}
+          path: build/native-${{ matrix.abi }}/librz_native.so
+          if-no-files-found: error

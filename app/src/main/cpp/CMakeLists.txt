@@ -132,7 +132,7 @@ endif()
 
 # --- Rizin archives ---
 if(RIZIN_AVAILABLE)
-    set(RIZIN_SRC "C:/Users/15884/Downloads/somcp/rizin-src" CACHE PATH "Rizin source tree")
+    set(RIZIN_SRC "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/rizin-src" CACHE PATH "Rizin source tree")
     if(EXISTS "${RIZIN_SHARED_SDK}/lib/librz_core.so")
         message(STATUS "Rizin: linking shared SDK from ${RIZIN_SHARED_SDK}")
         target_include_directories(rz_native PRIVATE

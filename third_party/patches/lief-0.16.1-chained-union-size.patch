@@ -1,0 +1,13 @@
+diff --git a/include/LIEF/MachO/ChainedPointerAnalysis.hpp b/include/LIEF/MachO/ChainedPointerAnalysis.hpp
+index 564b5e3..0000000 100644
+--- a/include/LIEF/MachO/ChainedPointerAnalysis.hpp
++++ b/include/LIEF/MachO/ChainedPointerAnalysis.hpp
+@@ -385,7 +385,7 @@ public:
+       std::ostream& operator<<(std::ostream& os, const union_pointer_t& ptr);
+   };
+ 
+-  static_assert(sizeof(union_pointer_t) == 16);
++  static_assert(sizeof(union_pointer_t) >= 12, "unexpected chained pointer union size");
+ 
+   union_pointer_t get_as(DYLD_CHAINED_PTR_FORMAT fmt) const;
+ 

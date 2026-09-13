@@ -16,7 +16,7 @@ import java.util.zip.ZipFile
  * 反注入(Xposed/Substrate)、反 Frida、root/模拟器检测点, 从而决定要不要先绕过。
  * 与 taffy_apk_shell_check(判断壳/要不要脱)互补: 壳检测=要不要脱, 本工具=动调会卡在哪。
  *
- * 纯只读: 遍历 APK 内 classes*.dex / lib/*.so(及任意文件) 或单个 SO, 在字节层面
+ * 纯只读: 遍历 APK 内 classes*.dex 与 lib 目录下的 .so(及任意文件) 或单个 SO, 在字节层面
  * 以大小写不敏感方式匹配公开的反调试/反注入特征字符串。不改任何文件。
  */
 object AntiDebugTool {

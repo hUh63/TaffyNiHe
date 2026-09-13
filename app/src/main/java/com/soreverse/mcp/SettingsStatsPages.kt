@@ -49,7 +49,7 @@ import java.util.Locale
 private fun MetricPill(label: String, value: String, color: Color) {
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(AppShape.md))
             .background(color.copy(alpha = 0.10f))
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
@@ -68,7 +68,7 @@ private fun MetricProgressRow(label: String, value: String, progress: Float, col
         Spacer(Modifier.height(4.dp))
         LinearProgressIndicator(
             progress = { progress.coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)),
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(AppShape.pill)),
             color = color,
             trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
         )

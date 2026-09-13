@@ -216,16 +216,16 @@ internal fun CapturePage(t: UiText) {
     ) {
         // ── tab 选择：HTTP 抓包 / 采集工具 / 教程 ──
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(selected = tab == "http", onClick = { tab = "http" }, label = { Text(if (zh) "HTTP 抓包" else "HTTP capture", fontSize = 11.sp) })
-            FilterChip(selected = tab == "tools", onClick = { tab = "tools" }, label = { Text(if (zh) "采集工具" else "Tools", fontSize = 11.sp) })
-            FilterChip(selected = tab == "guide", onClick = { tab = "guide" }, label = { Text(if (zh) "教程" else "Guide", fontSize = 11.sp) })
+            FilterChip(selected = tab == "http", onClick = { tab = "http" }, label = { Text(if (zh) "HTTP 抓包" else "HTTP capture", fontSize = AppText.label) })
+            FilterChip(selected = tab == "tools", onClick = { tab = "tools" }, label = { Text(if (zh) "采集工具" else "Tools", fontSize = AppText.label) })
+            FilterChip(selected = tab == "guide", onClick = { tab = "guide" }, label = { Text(if (zh) "教程" else "Guide", fontSize = AppText.label) })
         }
         if (tab == "guide") {
             // 教程长文本可滚动（weight 占满剩余空间，防止撑爆/截断）
             SelectionContainer {
                 Text(
                     CAPTURE_GUIDE,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -286,15 +286,15 @@ internal fun CapturePage(t: UiText) {
                     }
                     clipboard.setText(androidx.compose.ui.text.AnnotatedString(json.toString(2)))
                     Toast.makeText(context, if (zh) "已复制 ${filteredEntries.size} 条（JSON）" else "Copied ${filteredEntries.size} entries (JSON)", Toast.LENGTH_SHORT).show()
-                }) { Text(if (zh) "导出 JSON" else "Export JSON", fontSize = 11.sp) }
-                TextButton(onClick = { pendingClearCapture = true }) { Text(if (zh) "清除" else "Clear", fontSize = 11.sp) }
+                }) { Text(if (zh) "导出 JSON" else "Export JSON", fontSize = AppText.label) }
+                TextButton(onClick = { pendingClearCapture = true }) { Text(if (zh) "清除" else "Clear", fontSize = AppText.label) }
             }
             // 过滤行：关键字 + 协议/方法 chips
             OutlinedTextField(
                 value = listFilter,
                 onValueChange = { listFilter = it },
-                placeholder = { Text(if (zh) "过滤: 域名 / 路径 / 状态码…" else "Filter: host / path / status…", fontSize = 11.sp) },
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                placeholder = { Text(if (zh) "过滤: 域名 / 路径 / 状态码…" else "Filter: host / path / status…", fontSize = AppText.label) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.small,
@@ -306,7 +306,7 @@ internal fun CapturePage(t: UiText) {
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 listOf("全部", "HTTPS", "HTTP", "GET", "POST", "CONNECT").forEach { m ->
-                    FilterChip(selected = methodFilter == m, onClick = { methodFilter = m }, label = { Text(m, fontSize = 9.sp) })
+                    FilterChip(selected = methodFilter == m, onClick = { methodFilter = m }, label = { Text(m, fontSize = AppText.label) })
                 }
             }
             if (filteredEntries.isEmpty()) {
@@ -330,7 +330,7 @@ internal fun CapturePage(t: UiText) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                                 Text(
                                     e.time + " " + e.method,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = AppText.label, fontFamily = FontFamily.Monospace),
                                     color = when (e.method) {
                                         "GET" -> AppPalette.green
                                         "POST" -> AppPalette.orange
@@ -340,13 +340,13 @@ internal fun CapturePage(t: UiText) {
                                 )
                                 Text(
                                     e.url,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
                                     (if (e.isHttps) "HTTPS" else "HTTP") + " · " + e.status.ifBlank { "—" } + " · " + (e.bytes / 1024) + " KB · " + e.elapsedMs + "ms",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = AppText.label),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
@@ -368,7 +368,7 @@ internal fun CapturePage(t: UiText) {
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 StatusPill("tcpdump", tcpdumpOk, Modifier.weight(1f))
-                TextButton(onClick = { probeEnv() }) { Text(if (zh) "检测" else "Probe", fontSize = 12.sp) }
+                TextButton(onClick = { probeEnv() }) { Text(if (zh) "检测" else "Probe", fontSize = AppText.body) }
             }
             Text(
                 if (zh)
@@ -384,10 +384,10 @@ internal fun CapturePage(t: UiText) {
         // ── 快捷采集 ──
         GlassGroup(title = if (zh) "快捷采集" else "Quick collect") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = false, onClick = { callTool("info") }, label = { Text(if (zh) "接口信息" else "Interfaces", fontSize = 11.sp) }, enabled = !busy)
-                FilterChip(selected = false, onClick = { callTool("conn") }, label = { Text(if (zh) "连接列表" else "Connections", fontSize = 11.sp) }, enabled = !busy && privOk)
-                FilterChip(selected = false, onClick = { callTool("traffic") }, label = { Text(if (zh) "流量统计" else "Traffic", fontSize = 11.sp) }, enabled = !busy)
-                FilterChip(selected = false, onClick = { callTool("dns") }, label = { Text("DNS", fontSize = 11.sp) }, enabled = !busy)
+                FilterChip(selected = false, onClick = { callTool("info") }, label = { Text(if (zh) "接口信息" else "Interfaces", fontSize = AppText.label) }, enabled = !busy)
+                FilterChip(selected = false, onClick = { callTool("conn") }, label = { Text(if (zh) "连接列表" else "Connections", fontSize = AppText.label) }, enabled = !busy && privOk)
+                FilterChip(selected = false, onClick = { callTool("traffic") }, label = { Text(if (zh) "流量统计" else "Traffic", fontSize = AppText.label) }, enabled = !busy)
+                FilterChip(selected = false, onClick = { callTool("dns") }, label = { Text("DNS", fontSize = AppText.label) }, enabled = !busy)
             }
         }
 
@@ -400,7 +400,7 @@ internal fun CapturePage(t: UiText) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("interface", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
                 OutlinedTextField(
                     value = filterInput,
@@ -408,7 +408,7 @@ internal fun CapturePage(t: UiText) {
                     modifier = Modifier.weight(2f),
                     placeholder = { Text(if (zh) "过滤表达式(如 tcp port 443)" else "filter (e.g. tcp port 443)", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -416,19 +416,19 @@ internal fun CapturePage(t: UiText) {
                     TextButton(onClick = { callTool("sniff_stop") }) {
                         Icon(Icons.Default.Stop, null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(if (zh) "停止抓包" else "Stop", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                        Text(if (zh) "停止抓包" else "Stop", fontSize = AppText.body, color = MaterialTheme.colorScheme.error)
                     }
                 } else {
                     TextButton(onClick = { callTool("sniff_start") { put("interface", ifaceInput); put("filter", filterInput) } }, enabled = privOk && !busy) {
                         Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(if (zh) "开始抓包" else "Start", fontSize = 12.sp)
+                        Text(if (zh) "开始抓包" else "Start", fontSize = AppText.body)
                     }
                 }
                 TextButton(onClick = { callTool("sniff_status") }, enabled = !busy) {
                     Icon(Icons.Default.Info, null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(if (zh) "状态" else "Status", fontSize = 12.sp)
+                    Text(if (zh) "状态" else "Status", fontSize = AppText.body)
                 }
                 if (sniffPath.isNotBlank()) {
                     TextButton(onClick = {
@@ -437,7 +437,7 @@ internal fun CapturePage(t: UiText) {
                     }, enabled = !busy) {
                         Icon(Icons.Default.Cloud, null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(if (zh) "拉取" else "Pull", fontSize = 12.sp)
+                        Text(if (zh) "拉取" else "Pull", fontSize = AppText.body)
                     }
                 }
                 if (sniffing) {
@@ -469,14 +469,14 @@ internal fun CapturePage(t: UiText) {
                 if (output.isBlank()) {
                     Text(
                         if (zh) "点击上方按钮执行采集，结果输出在这里" else "Run a collect action above; output shows here",
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace),
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label, fontFamily = FontFamily.Monospace),
                         color = androidx.compose.ui.graphics.Color(0xFF888888),
                     )
                 } else {
                     output.split("\n").forEach { line ->
                         Text(
                             line,
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label, fontFamily = FontFamily.Monospace),
                             color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
                         )
                     }
@@ -491,12 +491,12 @@ internal fun CapturePage(t: UiText) {
                     }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                         Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(12.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(if (zh) "复制" else "Copy", fontSize = 10.sp)
+                        Text(if (zh) "复制" else "Copy", fontSize = AppText.label)
                     }
                     TextButton(onClick = { output = "" }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
                         Icon(Icons.Default.Delete, null, modifier = Modifier.size(12.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(if (zh) "清空" else "Clear", fontSize = 10.sp)
+                        Text(if (zh) "清空" else "Clear", fontSize = AppText.label)
                     }
                 }
             }
@@ -513,7 +513,7 @@ internal fun CapturePage(t: UiText) {
             title = { Text(e.method + " · " + e.status.ifBlank { if (e.isHttps) "隧道" else "—" }, style = MaterialTheme.typography.titleSmall) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(e.url, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp), color = MaterialTheme.colorScheme.onSurface)
+                    Text(e.url, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = MaterialTheme.colorScheme.onSurface)
                     Text("${e.time} · ${e.bytes / 1024} KB · ${e.elapsedMs}ms · ${if (e.isHttps) "HTTPS(加密隧道)" else "HTTP"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (e.isWs) {
                         Text(
@@ -523,7 +523,7 @@ internal fun CapturePage(t: UiText) {
                         SelectionContainer {
                             Text(
                                 e.frames.ifEmpty { listOf(if (zh) "（尚未捕获到帧——保持会话打开）" else "(no frames yet)") }.joinToString("\n"),
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp, lineHeight = 13.sp),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 13.sp),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp),
                             )
@@ -532,22 +532,22 @@ internal fun CapturePage(t: UiText) {
                     if (e.reqHeaders.isNotBlank()) {
                         Text(if (zh) "请求头" else "Request headers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         SelectionContainer {
-                            Text(e.reqHeaders, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp, lineHeight = 13.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
+                            Text(e.reqHeaders, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 13.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
                         }
                     }
                     if (e.respHeaders.isNotBlank()) {
                         Text(if (zh) "响应头" else "Response headers", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         SelectionContainer {
-                            Text(e.respHeaders, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp, lineHeight = 13.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
+                            Text(e.respHeaders, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 13.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
                         }
                     }
                     if (e.isHttps) {
-                        Text(if (zh) "ⓘ HTTPS 为加密隧道：无明文请求头，不可重放。解密方案见「教程」tab。" else "ⓘ HTTPS tunnel: no plaintext headers, not replayable. See Guide tab.", style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = 9.sp)
+                        Text(if (zh) "ⓘ HTTPS 为加密隧道：无明文请求头，不可重放。解密方案见「教程」tab。" else "ⓘ HTTPS tunnel: no plaintext headers, not replayable. See Guide tab.", style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = AppText.label)
                     }
                     if (replayResult.isNotBlank()) {
                         Text(if (zh) "重放结果" else "Replay result", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         SelectionContainer {
-                            Text(replayResult, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
+                            Text(replayResult, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(Color(0xFF0B0F14)).padding(8.dp))
                         }
                     }
                 }

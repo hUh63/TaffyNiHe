@@ -168,7 +168,7 @@ internal fun RizinPage(t: UiText) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(groupName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 4.dp))
                     cmds.forEach { (c, label) ->
-                        FilterChip(selected = false, onClick = { runCmd(c) }, label = { Text(label, fontSize = 10.sp) }, enabled = !busy)
+                        FilterChip(selected = false, onClick = { runCmd(c) }, label = { Text(label, fontSize = AppText.label) }, enabled = !busy)
                     }
                 }
             }
@@ -179,21 +179,21 @@ internal fun RizinPage(t: UiText) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text(if (zh) "rz 命令，如: afl / pdf @main / izz" else "rz cmd, e.g. afl / pdf @main / izz", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
                 )
                 IconButton(onClick = { runCmd(cmdInput) }, enabled = !busy) {
-                    Icon(Icons.AutoMirrored.Filled.Send, null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.AutoMirrored.Filled.Send, "发送命令", tint = MaterialTheme.colorScheme.primary)
                 }
                 // 清空输出
                 IconButton(onClick = { output = "" }, enabled = output.isNotBlank()) {
-                    Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Delete, "清空输出", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
             }
             if (output.isNotBlank()) {
                 SelectionContainer {
                     Text(
                         output,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(androidx.compose.ui.graphics.Color(0xFF111111)).padding(10.dp),
                     )
@@ -207,7 +207,7 @@ internal fun RizinPage(t: UiText) {
             rootTools.forEachIndexed { i, (name, desc) ->
                 if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp), color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(190.dp))
+                    Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(190.dp))
                     Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -218,7 +218,7 @@ internal fun RizinPage(t: UiText) {
         SelectionContainer {
             Text(
                 quickCommands.joinToString("\n"),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)).padding(12.dp),
             )

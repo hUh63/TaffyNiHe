@@ -312,7 +312,7 @@ private fun BridgeCard(
                 lastError,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                fontSize = 11.sp,
+                fontSize = AppText.label,
             )
         }
         Spacer(Modifier.height(8.dp))
@@ -323,18 +323,18 @@ private fun BridgeCard(
             TextButton(onClick = onManageTools) {
                 Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text(if (zh) "管理工具" else "Manage tools", fontSize = 13.sp)
+                Text(if (zh) "管理工具" else "Manage tools", fontSize = AppText.bodyStrong)
             }
             TextButton(onClick = onEdit) {
                 Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text(if (zh) "编辑" else "Edit", fontSize = 13.sp)
+                Text(if (zh) "编辑" else "Edit", fontSize = AppText.bodyStrong)
             }
             var confirmDelete by remember { mutableStateOf(false) }
             TextButton(onClick = { confirmDelete = true }) {
                 Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.width(4.dp))
-                Text(if (zh) "删除" else "Delete", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                Text(if (zh) "删除" else "Delete", fontSize = AppText.bodyStrong, color = MaterialTheme.colorScheme.error)
             }
             if (confirmDelete) {
                 AlertDialog(
@@ -372,7 +372,7 @@ private fun BridgeEditDialog(
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
                     label = { Text(if (zh) "名称" else "Name") },
-                    singleLine = true, shape = RoundedCornerShape(12.dp),
+                    singleLine = true, shape = RoundedCornerShape(AppShape.md),
                     isError = name.isBlank() || name in existingNames,
                     supportingText = if (name.isBlank()) {
                         { Text(if (zh) "名称不能为空" else "Name required", color = MaterialTheme.colorScheme.error) }
@@ -385,7 +385,7 @@ private fun BridgeEditDialog(
                     value = url, onValueChange = { url = it },
                     label = { Text(if (zh) "MCP URL" else "MCP URL") },
                     placeholder = { Text("http://192.168.x.x:8787/mcp") },
-                    singleLine = true, shape = RoundedCornerShape(12.dp),
+                    singleLine = true, shape = RoundedCornerShape(AppShape.md),
                     isError = url.isBlank(),
                     supportingText = if (url.isBlank()) {
                         { Text(if (zh) "MCP URL 不能为空" else "URL required", color = MaterialTheme.colorScheme.error) }
@@ -395,13 +395,13 @@ private fun BridgeEditDialog(
                 OutlinedTextField(
                     value = token, onValueChange = { token = it },
                     label = { Text(if (zh) "Bearer token（可选）" else "Bearer token (optional)") },
-                    singleLine = true, shape = RoundedCornerShape(12.dp),
+                    singleLine = true, shape = RoundedCornerShape(AppShape.md),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = prefix, onValueChange = { prefix = it },
                     label = { Text(if (zh) "工具名前缀" else "Tool name prefix") },
-                    singleLine = true, shape = RoundedCornerShape(12.dp),
+                    singleLine = true, shape = RoundedCornerShape(AppShape.md),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
@@ -409,7 +409,7 @@ private fun BridgeEditDialog(
                     else "Bridged tools are exposed with this prefix (e.g. MCP1_read_file). Editable.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
+                    fontSize = AppText.label,
                 )
             }
         },
@@ -493,7 +493,7 @@ private fun BridgeToolsManagerPage(
                 val enabled = !disabledMap.optBoolean("$bridgeName::$toolName", false)
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
                 ) {
                     Row(
@@ -511,7 +511,7 @@ private fun BridgeToolsManagerPage(
                                     description,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 11.sp,
+                                    fontSize = AppText.label,
                                 )
                             }
                         }

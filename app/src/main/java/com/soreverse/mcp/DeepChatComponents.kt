@@ -64,7 +64,7 @@ internal fun DeepChatMessageItem(message: DeepChatMessage, zh: Boolean) {
                 Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("AI", color = MaterialTheme.colorScheme.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("AI", color = MaterialTheme.colorScheme.onPrimary, fontSize = AppText.label, fontWeight = FontWeight.Bold)
             }
             Text("SOMCP", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             if (message.streaming) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
@@ -79,7 +79,7 @@ internal fun DeepChatMessageItem(message: DeepChatMessage, zh: Boolean) {
         if (message.error.isNotBlank()) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(AppShape.lg),
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
             ) {
                 Row(
@@ -146,7 +146,7 @@ internal fun DeepMessageParts(parts: List<RikkaPart>, streaming: Boolean, zh: Bo
 internal fun DeepProcessTimeline(parts: List<RikkaPart>, streaming: Boolean, zh: Boolean) {
     var expanded by remember(parts.firstOrNull()) { mutableStateOf(streaming) }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.md)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
     ) {
         Row(
             Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 12.dp, vertical = 10.dp),

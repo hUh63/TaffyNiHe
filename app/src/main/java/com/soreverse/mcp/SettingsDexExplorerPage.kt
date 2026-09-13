@@ -144,7 +144,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
             HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
                 items(members, key = { it }) { m ->
-                    Text(m, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp))
+                    Text(m, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp))
                 }
             }
         } else {
@@ -153,7 +153,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
             Text(if (zh) "共 ${filtered.size} / ${classes.size} 个类" else "${filtered.size} / ${classes.size} classes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             LazyColumn(Modifier.fillMaxSize()) {
                 items(filtered, key = { it }) { c ->
-                    Text(c, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().clickable { openClass(c) }.padding(vertical = 2.dp))
+                    Text(c, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, modifier = Modifier.fillMaxWidth().clickable { openClass(c) }.padding(vertical = 2.dp))
                 }
             }
         }

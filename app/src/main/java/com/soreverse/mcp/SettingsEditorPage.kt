@@ -111,7 +111,7 @@ private fun EditorGutter(lineCount: Int) {
             Text(
                 i.toString(),
                 modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 19.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 19.sp),
                 color = Color(0xFF607D8B),
                 textAlign = TextAlign.End,
             )
@@ -842,12 +842,12 @@ internal fun SettingsEditorPage(t: UiText) {
                         CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(ext)
                             ?: com.soreverse.mcp.core.EditorSyntaxPacks.packs.firstOrNull()
                     }
-                }, label = { Text(label, fontSize = 11.sp) })
+                }, label = { Text(label, fontSize = AppText.label) })
             }
             FilterChip(
                 selected = false,
                 onClick = { showPackManager = true },
-                label = { Text(if (zh) "📦 语法包" else "📦 Packs", fontSize = 11.sp) },
+                label = { Text(if (zh) "📦 语法包" else "📦 Packs", fontSize = AppText.label) },
             )
         }
 
@@ -863,11 +863,11 @@ internal fun SettingsEditorPage(t: UiText) {
                 FilterChip(
                     selected = i == activeTab,
                     onClick = { switchTab(i) },
-                    label = { Text((if (dirty) "• " else "") + (if (t.untitled) (if (zh) "草稿" else "Draft") else t.name), fontSize = 10.sp, maxLines = 1) },
+                    label = { Text((if (dirty) "• " else "") + (if (t.untitled) (if (zh) "草稿" else "Draft") else t.name), fontSize = AppText.label, maxLines = 1) },
                     trailingIcon = {
                         Text(
                             "×",
-                            fontSize = 11.sp,
+                            fontSize = AppText.label,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.clickable { closeTab(i) }.padding(start = 2.dp),
                         )
@@ -886,8 +886,8 @@ internal fun SettingsEditorPage(t: UiText) {
         Box(Modifier.fillMaxWidth()) {
             Box(
                 Modifier.fillMaxWidth().heightIn(min = 260.dp, max = 460.dp)
-                    .background(bg, RoundedCornerShape(14.dp))
-                    .border(1.dp, Color(0xFF1E2A36), RoundedCornerShape(14.dp))
+                    .background(bg, RoundedCornerShape(AppShape.lg))
+                    .border(1.dp, Color(0xFF1E2A36), RoundedCornerShape(AppShape.lg))
                     .padding(4.dp),
             ) {
                 if (viewerMode) {
@@ -895,8 +895,8 @@ internal fun SettingsEditorPage(t: UiText) {
                     LazyColumn(
                         state = viewerListState,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 260.dp, max = 460.dp)
-                            .background(bg, RoundedCornerShape(14.dp))
-                            .border(1.dp, Color(0xFF1E2A36), RoundedCornerShape(14.dp))
+                            .background(bg, RoundedCornerShape(AppShape.lg))
+                            .border(1.dp, Color(0xFF1E2A36), RoundedCornerShape(AppShape.lg))
                             .padding(4.dp),
                     ) {
                         itemsIndexed(vLines) { idx, line ->
@@ -904,13 +904,13 @@ internal fun SettingsEditorPage(t: UiText) {
                                 Text(
                                     (idx + 1).toString(),
                                     modifier = Modifier.width(46.dp).padding(end = 6.dp),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                                     color = Color(0xFF607D8B),
                                     textAlign = TextAlign.End,
                                 )
                                 Text(
                                     line.ifEmpty { " " },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp),
                                     color = fg,
                                 )
                             }
@@ -926,7 +926,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         lastInputAt = System.currentTimeMillis()   // 全模式自动补全（按模式分流）
                     },
                     modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp, color = fg),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp, color = fg),
                     cursorBrush = SolidColor(AppPalette.teal),
                     visualTransformation = remember(mode) {
                         // 高亮结果按"原文"缓存：VisualTransformation 每次布局/光标移动都会调用，
@@ -955,7 +955,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                         else -> if (zh) "纯文本" else "plain text"
                                     },
                                     color = Color(0xFF607D8B), fontFamily = FontFamily.Monospace,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
                                     modifier = Modifier.padding(6.dp),
                                 )
                             }
@@ -971,7 +971,7 @@ internal fun SettingsEditorPage(t: UiText) {
             if (showCompletions && (mode != CodeHighlighter.Lang.TEXT)) {
                 Column(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = 190.dp)
-                        .background(Color(0xF20E141C), RoundedCornerShape(12.dp)),
+                        .background(Color(0xF20E141C), RoundedCornerShape(AppShape.md)),
                 ) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -996,11 +996,11 @@ internal fun SettingsEditorPage(t: UiText) {
                                     .padding(horizontal = 10.dp, vertical = 4.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp), color = fg, modifier = Modifier.weight(1f), maxLines = 1)
-                                    Text(type, style = MaterialTheme.typography.labelSmall, color = AppPalette.blue, fontSize = 9.sp)
+                                    Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body), color = fg, modifier = Modifier.weight(1f), maxLines = 1)
+                                    Text(type, style = MaterialTheme.typography.labelSmall, color = AppPalette.blue, fontSize = AppText.label)
                                 }
                                 if (doc.isNotBlank()) {
-                                    Text(doc, style = MaterialTheme.typography.labelSmall, color = Color(0xFF607D8B), fontSize = 9.sp, maxLines = 1)
+                                    Text(doc, style = MaterialTheme.typography.labelSmall, color = Color(0xFF607D8B), fontSize = AppText.label, maxLines = 1)
                                 }
                             }
                         }
@@ -1018,49 +1018,49 @@ internal fun SettingsEditorPage(t: UiText) {
             IconButton(
                 onClick = { requestAiAssist() },
                 enabled = aiReady && !aiBusy,
-            ) { Text(if (aiBusy) "…" else "🤖", fontSize = 15.sp) }
+            ) { Text(if (aiBusy) "…" else "🤖", fontSize = AppText.title) }
             if (mode == CodeHighlighter.Lang.PYTHON) {
                 // jedi 代码智能：补全 / 悬停文档 / 跳转定义
                 FilterChip(
                     selected = false,
                     onClick = { requestCompletion("complete") },
-                    label = { Text(if (zh) "⚡补全" else "⚡Complete", fontSize = 10.sp) },
+                    label = { Text(if (zh) "⚡补全" else "⚡Complete", fontSize = AppText.label) },
                     enabled = !completing,
                 )
                 FilterChip(
                     selected = false,
                     onClick = { requestCompletion("hover") },
-                    label = { Text(if (zh) "?文档" else "?Doc", fontSize = 10.sp) },
+                    label = { Text(if (zh) "?文档" else "?Doc", fontSize = AppText.label) },
                     enabled = !completing,
                 )
                 FilterChip(
                     selected = false,
                     onClick = { requestCompletion("defs") },
-                    label = { Text(if (zh) "→定义" else "→Def", fontSize = 10.sp) },
+                    label = { Text(if (zh) "→定义" else "→Def", fontSize = AppText.label) },
                     enabled = !completing,
                 )
                 FilterChip(
                     selected = false,
                     onClick = { requestCompletion("diag") },
-                    label = { Text(if (zh) "⚠诊断" else "⚠Diag", fontSize = 10.sp) },
+                    label = { Text(if (zh) "⚠诊断" else "⚠Diag", fontSize = AppText.label) },
                     enabled = !completing,
                 )
             }
             IconButton(onClick = { showJump = true }) {
-                Text("Ln", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Ln", fontSize = AppText.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { viewerMode = !viewerMode }) {
-                Text(if (viewerMode) "✎" else "≡", fontSize = 15.sp, color = if (viewerMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (viewerMode) "✎" else "≡", fontSize = AppText.title, color = if (viewerMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = { showFind = !showFind }) {
-                Icon(Icons.Default.Search, null, tint = if (showFind) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.Search, "查找", tint = if (showFind) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = { saveFile() }, enabled = code.isNotBlank()) { Icon(Icons.Default.Save, null, tint = MaterialTheme.colorScheme.primary) }
-            IconButton(onClick = { loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*")) }) { Icon(Icons.Default.FileOpen, null, tint = MaterialTheme.colorScheme.primary) }
+            IconButton(onClick = { saveFile() }, enabled = code.isNotBlank()) { Icon(Icons.Default.Save, "保存", tint = MaterialTheme.colorScheme.primary) }
+            IconButton(onClick = { loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*")) }) { Icon(Icons.Default.FileOpen, "打开文件", tint = MaterialTheme.colorScheme.primary) }
             IconButton(onClick = {
                 setCode(""); currentFile = null; currentFilePath = null; showCompletions = false
                 tabs = tabs.toMutableList().also { it[activeTab] = EditorTab(if (zh) "草稿" else "Draft", null, "", mode, true) }
-            }) { Icon(Icons.Default.CreateNewFolder, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }) { Icon(Icons.Default.CreateNewFolder, "新建文件", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             IconButton(onClick = {
                 // 从最近备份回滚（快照管理）
                 val name = currentFile
@@ -1084,8 +1084,8 @@ internal fun SettingsEditorPage(t: UiText) {
         if (showFind) {
             val matchStarts = remember(findQuery, code) { findAllOccurrences(code, findQuery) }
             Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF11181F), RoundedCornerShape(10.dp))
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.md))
+                    .background(Color(0xFF11181F), RoundedCornerShape(AppShape.md))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -1093,8 +1093,8 @@ internal fun SettingsEditorPage(t: UiText) {
                     OutlinedTextField(
                         value = findQuery, onValueChange = { findQuery = it },
                         modifier = Modifier.weight(1f), singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                        label = { Text(if (zh) "查找" else "Find", fontSize = 10.sp) },
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                        label = { Text(if (zh) "查找" else "Find", fontSize = AppText.label) },
                     )
                     Text(
                         if (findQuery.isEmpty()) "" else "${matchStarts.size} ${if (zh) "处" else ""}",
@@ -1107,12 +1107,12 @@ internal fun SettingsEditorPage(t: UiText) {
                     OutlinedTextField(
                         value = replaceQuery, onValueChange = { replaceQuery = it },
                         modifier = Modifier.weight(1f), singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                        label = { Text(if (zh) "替换为" else "Replace with", fontSize = 10.sp) },
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                        label = { Text(if (zh) "替换为" else "Replace with", fontSize = AppText.label) },
                     )
-                    TextButton(onClick = { replaceCurrentMatch() }, enabled = matchStarts.isNotEmpty()) { Text(if (zh) "替换" else "Replace", fontSize = 11.sp) }
-                    TextButton(onClick = { replaceAllMatches() }, enabled = matchStarts.isNotEmpty()) { Text(if (zh) "全部" else "All", fontSize = 11.sp) }
-                    TextButton(onClick = { showFind = false }) { Text(if (zh) "关闭" else "Close", fontSize = 11.sp) }
+                    TextButton(onClick = { replaceCurrentMatch() }, enabled = matchStarts.isNotEmpty()) { Text(if (zh) "替换" else "Replace", fontSize = AppText.label) }
+                    TextButton(onClick = { replaceAllMatches() }, enabled = matchStarts.isNotEmpty()) { Text(if (zh) "全部" else "All", fontSize = AppText.label) }
+                    TextButton(onClick = { showFind = false }) { Text(if (zh) "关闭" else "Close", fontSize = AppText.label) }
                 }
             }
         }
@@ -1126,7 +1126,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         value = jumpLine,
                         onValueChange = { v -> jumpLine = v.filter { it.isDigit() } },
                         singleLine = true,
-                        label = { Text(if (zh) "行号" else "Line", fontSize = 11.sp) },
+                        label = { Text(if (zh) "行号" else "Line", fontSize = AppText.label) },
                     )
                 },
                 confirmButton = { TextButton(onClick = { jumpLine.toIntOrNull()?.let { jumpToLine(it) }; showJump = false }) { Text(if (zh) "跳转" else "Go") } },
@@ -1141,7 +1141,7 @@ internal fun SettingsEditorPage(t: UiText) {
                     FilterChip(
                         selected = currentFile == name,
                         onClick = { ensureTab(name, File(File(context.filesDir, "editor_files"), name).absolutePath); loadFile(name) },
-                        label = { Text(name, fontSize = 10.sp) },
+                        label = { Text(name, fontSize = AppText.label) },
                     )
                 }
             }
@@ -1174,7 +1174,7 @@ internal fun SettingsEditorPage(t: UiText) {
             ) {
                 Text(
                     if (wsPanelExpanded) "▾" else "▸",
-                    fontSize = 11.sp,
+                    fontSize = AppText.label,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
@@ -1215,17 +1215,17 @@ internal fun SettingsEditorPage(t: UiText) {
                                 if (isDir) {
                                     Text(
                                         if (expanded) "▾" else "▸",
-                                        fontSize = 10.sp,
+                                        fontSize = AppText.label,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
-                                    Text("📁", fontSize = 12.sp)
+                                    Text("📁", fontSize = AppText.body)
                                 } else {
-                                    Text(" ", fontSize = 10.sp)
-                                    Text("📄", fontSize = 12.sp)
+                                    Text(" ", fontSize = AppText.label)
+                                    Text("📄", fontSize = AppText.body)
                                 }
                                 Text(
                                     name,
-                                    fontSize = 11.sp,
+                                    fontSize = AppText.label,
                                     fontFamily = FontFamily.Monospace,
                                     color = if (isDir) MaterialTheme.colorScheme.primary else fg,
                                     maxLines = 1,
@@ -1237,7 +1237,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                 if (children.isEmpty()) {
                                     Text(
                                         if (zh) "（空目录）" else "(empty)",
-                                        fontSize = 10.sp,
+                                        fontSize = AppText.label,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(start = ((depth + 1) * 14 + 30).dp, top = 2.dp, bottom = 2.dp),
                                     )
@@ -1250,7 +1250,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         if (wsListDir("").isEmpty()) {
                             Text(
                                 if (zh) "（工作区为空）" else "(workspace empty)",
-                                fontSize = 10.sp,
+                                fontSize = AppText.label,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(10.dp),
                             )
@@ -1263,7 +1263,7 @@ internal fun SettingsEditorPage(t: UiText) {
         // ── 控制台（经典终端：黑底 + 提示符 + 输入行内嵌底部，全模式可用）──
         Column(
             Modifier.fillMaxWidth().height(260.dp)
-                .background(bg, RoundedCornerShape(14.dp))
+                .background(bg, RoundedCornerShape(AppShape.lg))
                 .padding(8.dp),
         ) {
             // 标题行：控制台名 + 提示 + 清屏
@@ -1280,7 +1280,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 )
                 Text(
                     if (zh) "清屏" else "clear",
-                    fontSize = 10.sp,
+                    fontSize = AppText.label,
                     fontFamily = FontFamily.Monospace,
                     color = Color(0xFF7A8699),
                     modifier = Modifier.clickable { output = "" }.padding(horizontal = 4.dp),
@@ -1292,7 +1292,7 @@ internal fun SettingsEditorPage(t: UiText) {
             ) {
                 Text(
                     output.ifEmpty { if (zh) "（输出显示在这里——运行代码或输入命令）" else "(output appears here — run code or type a command)" },
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body, lineHeight = 17.sp),
                     color = fg,
                     modifier = Modifier.fillMaxWidth().padding(6.dp),
                 )
@@ -1305,7 +1305,7 @@ internal fun SettingsEditorPage(t: UiText) {
             ) {
                 Text(
                     if (mode == CodeHighlighter.Lang.PYTHON && sessionActive) ">>>" else "$",
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
                     color = AppPalette.teal,
                 )
                 OutlinedTextField(
@@ -1317,13 +1317,13 @@ internal fun SettingsEditorPage(t: UiText) {
                             if (mode == CodeHighlighter.Lang.PYTHON && sessionActive) (if (zh) "Python 表达式（▶ 运行代码）" else "python expression") else (if (zh) "shell 命令（id / ls / pm list packages…）" else "shell command"),
                             color = Color(0xFF90A4AE),
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
+                            fontSize = AppText.body,
                         )
                     },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = fg),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, color = fg),
                     colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f), unfocusedBorderColor = Color(0xFF1E2A36)),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                 )
                 IconButton(
                     onClick = {
@@ -1343,7 +1343,7 @@ internal fun SettingsEditorPage(t: UiText) {
             val packs = com.soreverse.mcp.core.EditorSyntaxPacks.packs
             AlertDialog(
                 onDismissRequest = { showPackManager = false },
-                title = { Text(if (zh) "语法包 · 语言插件" else "Syntax Packs", fontSize = 15.sp) },
+                title = { Text(if (zh) "语法包 · 语言插件" else "Syntax Packs", fontSize = AppText.title) },
                 text = {
                     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
@@ -1356,28 +1356,28 @@ internal fun SettingsEditorPage(t: UiText) {
                         )
                         packs.forEach { p ->
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("✦ ${p.name}", Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = fg)
-                                Text(p.extensions.joinToString(" "), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("✦ ${p.name}", Modifier.weight(1f), fontSize = AppText.body, fontFamily = FontFamily.Monospace, color = fg)
+                                Text(p.extensions.joinToString(" "), fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 TextButton(onClick = {
                                     com.soreverse.mcp.core.EditorSyntaxPacks.remove(context, p.id)
                                     if (CodeHighlighter.activePack?.id == p.id) CodeHighlighter.activePack = null
                                     packVersion++
-                                }) { Text(if (zh) "删除" else "Del", color = MaterialTheme.colorScheme.error, fontSize = 11.sp) }
+                                }) { Text(if (zh) "删除" else "Del", color = MaterialTheme.colorScheme.error, fontSize = AppText.label) }
                             }
                         }
                         if (packs.isEmpty()) {
-                            Text(if (zh) "（尚未安装语法包）" else "(no packs installed)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if (zh) "（尚未安装语法包）" else "(no packs installed)", fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         OutlinedTextField(
                             value = packJson,
                             onValueChange = { packJson = it },
                             label = { Text(if (zh) "粘贴语法包 JSON 导入" else "Paste syntax pack JSON to import") },
                             minLines = 4,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = fg),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = fg),
                             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg),
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        if (packMsg.isNotBlank()) Text(packMsg, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        if (packMsg.isNotBlank()) Text(packMsg, fontSize = AppText.label, color = MaterialTheme.colorScheme.primary)
                     }
                 },
                 confirmButton = {

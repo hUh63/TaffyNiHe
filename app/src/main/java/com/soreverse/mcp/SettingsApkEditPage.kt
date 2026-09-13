@@ -170,16 +170,16 @@ internal fun SettingsApkEditPage(t: UiText) {
             OutlinedTextField(
                 value = path, onValueChange = { path = it },
                 modifier = Modifier.weight(1f), singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                label = { Text(if (zh) "APK 路径" else "APK path", fontSize = 11.sp) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                label = { Text(if (zh) "APK 路径" else "APK path", fontSize = AppText.label) },
             )
             OutlinedButton(onClick = { picker.launch(arrayOf("application/vnd.android.package-archive", "*/*")) }) {
-                Text(if (zh) "选择" else "Pick", fontSize = 12.sp)
+                Text(if (zh) "选择" else "Pick", fontSize = AppText.body)
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { refresh(silent = false) }, enabled = !loading && path.isNotBlank()) {
-                Text(if (zh) "读取 Manifest" else "Load manifest", fontSize = 12.sp)
+                Text(if (zh) "读取 Manifest" else "Load manifest", fontSize = AppText.body)
             }
             if (loading) CircularProgressIndicator(Modifier.heightIn(max = 22.dp), strokeWidth = 2.dp)
         }
@@ -204,17 +204,17 @@ internal fun SettingsApkEditPage(t: UiText) {
                 modifier = Modifier.padding(top = 4.dp),
             )
             permissions.take(40).forEach { p ->
-                Text("· $p", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp))
+                Text("· $p", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
             }
             if (permissions.size > 40) Text("… +${permissions.size - 40}", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = { showXml = !showXml }) {
-                Text((if (showXml) (if (zh) "收起 XML" else "Hide XML") else (if (zh) "查看 XML" else "View XML")), fontSize = 12.sp)
+                Text((if (showXml) (if (zh) "收起 XML" else "Hide XML") else (if (zh) "查看 XML" else "View XML")), fontSize = AppText.body)
             }
             if (showXml) {
                 Column(
                     Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
                 ) {
-                    Text(xml, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp))
+                    Text(xml, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
                 }
             }
         }
@@ -225,11 +225,11 @@ internal fun SettingsApkEditPage(t: UiText) {
             OutlinedTextField(
                 value = newPackage, onValueChange = { newPackage = it },
                 modifier = Modifier.weight(1f), singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                label = { Text(if (zh) "新包名" else "new package", fontSize = 11.sp) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                label = { Text(if (zh) "新包名" else "new package", fontSize = AppText.label) },
             )
             Button(onClick = { act("set_package", if (zh) "改包名" else "set package", "value" to newPackage) }, enabled = !loading && newPackage.isNotBlank()) {
-                Text(if (zh) "应用" else "Apply", fontSize = 12.sp)
+                Text(if (zh) "应用" else "Apply", fontSize = AppText.body)
             }
         }
 
@@ -239,14 +239,14 @@ internal fun SettingsApkEditPage(t: UiText) {
             OutlinedTextField(
                 value = permInput, onValueChange = { permInput = it },
                 modifier = Modifier.weight(1f), singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                label = { Text("android.permission.XXX", fontSize = 11.sp) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                label = { Text("android.permission.XXX", fontSize = AppText.label) },
             )
             OutlinedButton(onClick = { act("add_perm", if (zh) "加权限" else "add perm", "value" to permInput) }, enabled = !loading && permInput.isNotBlank()) {
-                Text(if (zh) "添加" else "Add", fontSize = 12.sp)
+                Text(if (zh) "添加" else "Add", fontSize = AppText.body)
             }
             OutlinedButton(onClick = { act("remove_perm", if (zh) "删权限" else "remove perm", "value" to permInput) }, enabled = !loading && permInput.isNotBlank()) {
-                Text(if (zh) "移除" else "Remove", fontSize = 12.sp)
+                Text(if (zh) "移除" else "Remove", fontSize = AppText.body)
             }
         }
 
@@ -254,21 +254,21 @@ internal fun SettingsApkEditPage(t: UiText) {
         Text(if (zh) "③ 组件" else "③ Components", style = MaterialTheme.typography.labelMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("activity", "service", "receiver", "provider").forEach { ct ->
-                FilterChip(selected = compType == ct, onClick = { compType = ct }, label = { Text(ct, fontSize = 10.sp) })
+                FilterChip(selected = compType == ct, onClick = { compType = ct }, label = { Text(ct, fontSize = AppText.label) })
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = compInput, onValueChange = { compInput = it },
                 modifier = Modifier.weight(1f), singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                label = { Text(if (zh) "组件类名 (com.x.Y)" else "component class", fontSize = 11.sp) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                label = { Text(if (zh) "组件类名 (com.x.Y)" else "component class", fontSize = AppText.label) },
             )
             OutlinedButton(onClick = { act("add_component", if (zh) "加组件" else "add component", "value" to compInput, "componentType" to compType) }, enabled = !loading && compInput.isNotBlank()) {
-                Text(if (zh) "添加" else "Add", fontSize = 12.sp)
+                Text(if (zh) "添加" else "Add", fontSize = AppText.body)
             }
             OutlinedButton(onClick = { act("remove_component", if (zh) "删组件" else "remove component", "value" to compInput, "componentType" to compType) }, enabled = !loading && compInput.isNotBlank()) {
-                Text(if (zh) "移除" else "Remove", fontSize = 12.sp)
+                Text(if (zh) "移除" else "Remove", fontSize = AppText.body)
             }
         }
 
@@ -276,39 +276,39 @@ internal fun SettingsApkEditPage(t: UiText) {
         Text(if (zh) "④ debuggable / meta-data" else "④ debuggable / meta-data", style = MaterialTheme.typography.labelMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { act("set_debuggable", "debuggable=true", "debuggable" to "true") }, enabled = !loading) {
-                Text("debuggable = true", fontSize = 11.sp)
+                Text("debuggable = true", fontSize = AppText.label)
             }
             OutlinedButton(onClick = { act("set_debuggable", "debuggable=false", "debuggable" to "false") }, enabled = !loading) {
-                Text("debuggable = false", fontSize = 11.sp)
+                Text("debuggable = false", fontSize = AppText.label)
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = metaName, onValueChange = { metaName = it },
                 modifier = Modifier.weight(1f), singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                label = { Text("meta android:name", fontSize = 11.sp) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                label = { Text("meta android:name", fontSize = AppText.label) },
             )
             OutlinedTextField(
                 value = metaValue, onValueChange = { metaValue = it },
                 modifier = Modifier.weight(1f), singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                label = { Text(if (zh) "值" else "value", fontSize = 11.sp) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                label = { Text(if (zh) "值" else "value", fontSize = AppText.label) },
             )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { act("add_meta", if (zh) "加 meta" else "add meta", "metaName" to metaName, "metaValue" to metaValue) }, enabled = !loading && metaName.isNotBlank()) {
-                Text(if (zh) "添加 meta" else "Add meta", fontSize = 12.sp)
+                Text(if (zh) "添加 meta" else "Add meta", fontSize = AppText.body)
             }
             OutlinedButton(onClick = { act("remove_meta", if (zh) "删 meta" else "remove meta", "metaName" to metaName) }, enabled = !loading && metaName.isNotBlank()) {
-                Text(if (zh) "移除 meta" else "Remove meta", fontSize = 12.sp)
+                Text(if (zh) "移除 meta" else "Remove meta", fontSize = AppText.body)
             }
         }
 
         if (log.isNotBlank()) {
             HorizontalDivider()
             Text(if (zh) "操作记录" else "Activity log", style = MaterialTheme.typography.labelMedium)
-            Text(log, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp))
+            Text(log, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
         }
     }
 }

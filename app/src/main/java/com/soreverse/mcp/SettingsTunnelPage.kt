@@ -179,7 +179,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                         label = { Text(if (t.zh) "Tunnel token" else "Tunnel token") },
                         supportingText = { Text(if (t.zh) "从 Cloudflare Tunnel 安装命令中复制 --token 后面的完整值。" else "Copy the full value after --token from the Cloudflare Tunnel install command.") },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -194,7 +194,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                         label = { Text(if (t.zh) "公网主机名或 URL" else "Public hostname or URL") },
                         supportingText = { Text(if (t.zh) "例如 mcp.example.com；必须先在 Cloudflare Tunnel Routes 中映射到 http://localhost:${settings.tunnelTargetPort}" else "For example mcp.example.com; first map it in Cloudflare Tunnel Routes to http://localhost:${settings.tunnelTargetPort}") },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -234,7 +234,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                         label = { Text(if (t.zh) "Bore 服务器地址" else "Bore server") },
                         supportingText = { Text(if (t.zh) "临时隧道默认为 bore.pub；永久隧道填写你的自建服务器地址" else "Quick: bore.pub; Permanent: your own server") },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -255,7 +255,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                             label = { Text(if (t.zh) "密码" else "Secret") },
                             supportingText = { Text(if (t.zh) "自建 Bore 服务器配置的认证密码" else "Password set on your self-hosted bore server") },
                             singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(AppShape.md),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                                 unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -375,7 +375,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                 }
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp).fillMaxWidth()) {
                     logLines.takeLast(50).forEach { line ->
-                        Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 14.sp)
+                        Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 14.sp)
                     }
                 }
                 GroupDivider()
@@ -473,7 +473,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                         onValueChange = { importText = it },
                         label = { Text(if (t.zh) "粘贴 YAML 配置" else "Paste YAML config") },
                         minLines = 6,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

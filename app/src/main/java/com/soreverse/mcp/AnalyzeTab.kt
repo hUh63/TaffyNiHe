@@ -290,7 +290,7 @@ internal fun AnalyzeTab(
                                 }
                             }
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(AppShape.sm),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                         modifier = Modifier.height(28.dp),
                     ) {
@@ -694,7 +694,7 @@ internal fun AnalyzeTab(
                             onValueChange = { state.deepInput = it },
                             modifier = Modifier.weight(1f).heightIn(min = 50.dp, max = 132.dp),
                             placeholder = { Text(if (t.zh) "继续提问" else "Ask a follow-up", maxLines = 1) },
-                            shape = RoundedCornerShape(18.dp),
+                            shape = RoundedCornerShape(AppShape.lg),
                             maxLines = 5,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -743,7 +743,7 @@ internal fun AnalyzeTab(
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
             Surface(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(AppShape.xl),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -947,7 +947,7 @@ internal fun AnalyzeTab(
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
             Surface(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(AppShape.xl),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -979,7 +979,7 @@ internal fun AnalyzeTab(
                     TextButton(
                         onClick = { pickFile.launch(arrayOf("*/*")) },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                     ) {
                         Icon(Icons.Default.Storage, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
@@ -997,7 +997,7 @@ internal fun AnalyzeTab(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text(if (t.zh) "输入文件路径" else "Enter file path", maxLines = 1) },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         isError = fileDialogError.isNotBlank(),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             imeAction = androidx.compose.ui.text.input.ImeAction.Done,
@@ -1051,7 +1051,7 @@ internal fun AnalyzeTab(
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
             Surface(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(AppShape.xl),
                 color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.fillMaxWidth().padding(24.dp),
             ) {
@@ -1102,7 +1102,7 @@ internal fun AnalyzeTab(
                     } else if (state.decompileError.isNotBlank()) {
                         Surface(
                             color = MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(AppShape.md),
                         ) {
                             Text(
                                 state.decompileError,
@@ -1130,7 +1130,7 @@ internal fun AnalyzeTab(
                         }
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(AppShape.md),
                             modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp),
                         ) {
                             Text(
@@ -1278,7 +1278,7 @@ internal fun DeepAiChatScreen(
                         onValueChange = { state.deepInput = it },
                         modifier = Modifier.weight(1f).heightIn(min = 50.dp, max = 132.dp),
                         placeholder = { Text(if (t.zh) "继续提问" else "Ask a follow-up", maxLines = 1) },
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(AppShape.lg),
                         maxLines = 5,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surface,

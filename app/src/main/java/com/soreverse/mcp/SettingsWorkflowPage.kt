@@ -133,7 +133,7 @@ internal fun SettingsWorkflowPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                         Modifier
                             .offset(x = nodeX(n), y = nodeY(n))
                             .size(NODE_W, NODE_H)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(AppShape.md))
                             .background(nodeBg)
                             .clickable(enabled = isDest) { n.dest?.let(onDest) }
                             .padding(6.dp),
@@ -141,7 +141,7 @@ internal fun SettingsWorkflowPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                     ) {
                         Text(
                             if (zh) n.zh else n.en,
-                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = AppText.body),
                             color = if (isDest) accent else nodeFg,
                             textAlign = TextAlign.Center,
                         )

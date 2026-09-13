@@ -343,14 +343,14 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                 value = marketSource,
                 onValueChange = { marketSource = it },
                 label = { Text(if (zh) "市场源（index.json，默认官方 GitHub）" else "Market URL (index.json)") },
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = fg),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = fg),
                 colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedTextColor = fg, unfocusedTextColor = fg, cursorColor = AppPalette.blue),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { fetchMarket() }, enabled = !marketLoading, modifier = Modifier.weight(1f)) {
-                    Text(if (marketLoading) "…" else if (zh) "刷新市场" else "Refresh", fontSize = 12.sp)
+                    Text(if (marketLoading) "…" else if (zh) "刷新市场" else "Refresh", fontSize = AppText.body)
                 }
             }
             if (marketMsg.isNotEmpty()) Text(marketMsg, style = MaterialTheme.typography.bodySmall, color = if (marketMsg.startsWith(if (zh) "拉取失败" else "Fetch failed")) AppPalette.red else AppPalette.green)
@@ -363,18 +363,18 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
             marketItems.forEach { o ->
                 val mid = o.optString("id", o.optString("name"))
                 val installed = File(pluginsRoot, mid).let { File(it, "plugin.py").isFile }
-                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(AppShape.lg)).padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(o.optString("name", mid), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1)
                         Text("v${o.optString("version", "1.0")}", style = MaterialTheme.typography.labelSmall, color = dim)
                     }
-                    if (o.optString("author").isNotBlank()) Text("by ${o.optString("author")}", style = MaterialTheme.typography.labelSmall, color = dim, fontSize = 10.sp)
-                    if (o.optString("description").isNotBlank()) Text(o.optString("description"), style = MaterialTheme.typography.bodySmall, color = dim, fontSize = 11.sp, maxLines = 3)
+                    if (o.optString("author").isNotBlank()) Text("by ${o.optString("author")}", style = MaterialTheme.typography.labelSmall, color = dim, fontSize = AppText.label)
+                    if (o.optString("description").isNotBlank()) Text(o.optString("description"), style = MaterialTheme.typography.bodySmall, color = dim, fontSize = AppText.label, maxLines = 3)
                     OutlinedButton(
                         onClick = { installFromMarket(o) },
                         enabled = !marketLoading && !installed,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    ) { Text(if (installed) if (zh) "已安装" else "Installed" else if (zh) "安装" else "Install", fontSize = 11.sp) }
+                    ) { Text(if (installed) if (zh) "已安装" else "Installed" else if (zh) "安装" else "Install", fontSize = AppText.label) }
                 }
             }
         } else if (tab == 1) {
@@ -382,22 +382,22 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
             SelectionContainer {
                 Text(
                     EXTENSION_GUIDE,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
                     color = fg,
-                    modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(14.dp)).padding(12.dp),
+                    modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AppShape.lg)).padding(12.dp),
                 )
             }
         } else {
             // ── 操作行 ──
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { showNewDialog = true }, modifier = Modifier.weight(1f)) {
-                    Text(if (zh) "＋ 新建插件" else "＋ New plugin", fontSize = 12.sp)
+                    Text(if (zh) "＋ 新建插件" else "＋ New plugin", fontSize = AppText.body)
                 }
                 OutlinedButton(
                     onClick = { importLauncher.launch(arrayOf("*/*", "application/zip", "application/vnd.android.package-archive", "text/x-python")) },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(if (zh) "导入（.py/.apk/.zip）" else "Import", fontSize = 12.sp)
+                    Text(if (zh) "导入（.py/.apk/.zip）" else "Import", fontSize = AppText.body)
                 }
             }
             if (message.isNotEmpty()) {
@@ -417,22 +417,22 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                 val version = meta.optString("version", "1.0")
                 val source = meta.optString("source", "taffy")
                 val desc = meta.optString("description", "")
-                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(AppShape.lg)).padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(name, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1)
                         Text(
                             if (source == "xed") "Xed 转换" else "taffy",
-                            style = MaterialTheme.typography.labelSmall, fontSize = 9.sp,
+                            style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
                             color = if (source == "xed") AppPalette.orange else AppPalette.green,
-                            modifier = Modifier.background((if (source == "xed") AppPalette.orange else AppPalette.green).copy(alpha = 0.14f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.background((if (source == "xed") AppPalette.orange else AppPalette.green).copy(alpha = 0.14f), RoundedCornerShape(AppShape.sm)).padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
-                    Text("v$version · ${dir.name}", style = MaterialTheme.typography.labelSmall, color = dim, fontSize = 10.sp)
-                    if (desc.isNotBlank()) Text(desc, style = MaterialTheme.typography.bodySmall, color = dim, fontSize = 11.sp, maxLines = 2)
+                    Text("v$version · ${dir.name}", style = MaterialTheme.typography.labelSmall, color = dim, fontSize = AppText.label)
+                    if (desc.isNotBlank()) Text(desc, style = MaterialTheme.typography.bodySmall, color = dim, fontSize = AppText.label, maxLines = 2)
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { runPlugin(dir) }, enabled = !running, modifier = Modifier.weight(1f)) { Text(if (zh) "运行" else "Run", fontSize = 11.sp) }
-                        OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "编辑" else "Edit", fontSize = 11.sp) }
-                        OutlinedButton(onClick = { deleteTarget = dir }, modifier = Modifier.weight(1f)) { Text(if (zh) "删除" else "Delete", fontSize = 11.sp) }
+                        OutlinedButton(onClick = { runPlugin(dir) }, enabled = !running, modifier = Modifier.weight(1f)) { Text(if (zh) "运行" else "Run", fontSize = AppText.label) }
+                        OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "编辑" else "Edit", fontSize = AppText.label) }
+                        OutlinedButton(onClick = { deleteTarget = dir }, modifier = Modifier.weight(1f)) { Text(if (zh) "删除" else "Delete", fontSize = AppText.label) }
                     }
                     if (source == "xed") {
                         val promptFile = File(dir, "AI_CONVERT_PROMPT.txt")
@@ -441,12 +441,12 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                 OutlinedButton(onClick = {
                                     clipboard.setText(AnnotatedString(promptFile.readTextCapped(ReadLimits.META_JSON_BYTES)))
                                     Toast.makeText(context, if (zh) "AI 转换 prompt 已复制——粘贴给 AI 即可自动生成完整 plugin.py" else "AI convert prompt copied", Toast.LENGTH_LONG).show()
-                                }, modifier = Modifier.weight(1f)) { Text(if (zh) "🤖 AI 全自动转换" else "🤖 AI convert", fontSize = 10.sp) }
-                                OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "看转换报告" else "Report", fontSize = 10.sp) }
+                                }, modifier = Modifier.weight(1f)) { Text(if (zh) "🤖 AI 全自动转换" else "🤖 AI convert", fontSize = AppText.label) }
+                                OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "看转换报告" else "Report", fontSize = AppText.label) }
                             }
                             Text(
                                 if (zh) "逻辑无法从字节码自动翻译——点上方按钮复制 prompt 给 AI，自动产出完整 plugin.py 后在编辑器粘贴保存" else "Copy the AI prompt to auto-generate full plugin.py",
-                                style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = 9.sp,
+                                style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = AppText.label,
                             )
                         }
                     }
@@ -461,11 +461,11 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                     modifier = Modifier.clickable { if (output.isNotBlank()) clipboard.setText(AnnotatedString(output)) }.padding(horizontal = 6.dp),
                 )
             }
-            Box(Modifier.fillMaxWidth().height(190.dp).background(bg, RoundedCornerShape(12.dp))) {
+            Box(Modifier.fillMaxWidth().height(190.dp).background(bg, RoundedCornerShape(AppShape.md))) {
                 SelectionContainer {
                     Text(
                         output.ifEmpty { if (zh) "点插件的「运行」查看输出…" else "Run a plugin to see output…" },
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
                         color = if (output.isEmpty()) dim else fg,
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp),
                     )

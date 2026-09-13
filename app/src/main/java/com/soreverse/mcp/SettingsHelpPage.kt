@@ -81,9 +81,9 @@ internal fun SettingsHelpPage(t: UiText) {
         SelectionContainer {
             Text(
                 when (tab) { 0 -> HELP_GUIDE; 1 -> HELP_INTERNALS; 2 -> MCP_SKILL; else -> WORKFLOW_GUIDE },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
                 color = fg,
-                modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(14.dp)).padding(12.dp),
+                modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AppShape.lg)).padding(12.dp),
             )
         }
     }

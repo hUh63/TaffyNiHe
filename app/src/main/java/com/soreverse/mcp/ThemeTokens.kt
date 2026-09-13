@@ -35,6 +35,26 @@ internal object AppPalette {
     }
 }
 
+/** 形状 token：全局统一圆角档位（原先散落 2/4/6/8/10/12/14/18/20/24/26/999，收敛为 6 档）。 */
+internal object AppShape {
+    val xs = 4.dp        // 极小元素：徽标/分隔/微控件
+    val sm = 8.dp        // 小控件：chip/按钮/输入框
+    val md = 12.dp       // 常规：卡片/列表项
+    val lg = 16.dp       // 大容器：面板/弹层
+    val xl = 24.dp       // 特大：底部弹层/模态
+    val pill = 999.dp    // 胶囊
+}
+
+/** 文字尺寸 token：收敛原先 8~24sp 共 11 档为 6 档语义层级。 */
+internal object AppText {
+    val label = 11.sp        // 辅助标签/说明
+    val body = 12.sp         // 正文
+    val bodyStrong = 13.sp   // 强调正文/次级标题
+    val title = 15.sp        // 区块标题
+    val headline = 18.sp     // 页面标题
+    val display = 22.sp      // 数字/大标题
+}
+
 internal data class UiMetrics(
     val pagePad: androidx.compose.ui.unit.Dp,
     val sectionGap: androidx.compose.ui.unit.Dp,

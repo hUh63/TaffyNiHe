@@ -145,7 +145,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
                 onValueChange = { searchText = it },
                 placeholder = { Text(if (t.zh) "搜索日志…" else "Search logs…") },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -180,7 +180,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
 
 @Composable
 private fun LogActionButton(label: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(AppShape.lg)
     Row(
         modifier
             .clip(shape)
@@ -252,7 +252,7 @@ private fun ModernLogPanel(lines: List<String>, zh: Boolean, autoFollow: Boolean
                 Text(
                     line.level,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(AppShape.sm))
                         .background(levelColor.copy(alpha = 0.13f))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                     color = levelColor,

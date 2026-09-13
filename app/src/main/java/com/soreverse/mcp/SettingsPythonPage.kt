@@ -202,7 +202,7 @@ internal fun SettingsPythonPage(t: UiText) {
             Box(
                 Modifier.width(8.dp).height(8.dp).background(
                     if (sessionActive) AppPalette.green else AppPalette.mono,
-                    RoundedCornerShape(4.dp),
+                    RoundedCornerShape(AppShape.xs),
                 ),
             )
             Text(
@@ -229,26 +229,26 @@ internal fun SettingsPythonPage(t: UiText) {
                 onValueChange = { code = it },
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp),
                 placeholder = { Text(if (zh) "# 在此编写 Python 代码\nprint('hello')\n\n# 变量会在多次运行间保留" else "# write Python here\nprint('hello')\n\n# variables persist across runs", color = Color(0xFF607D8B), fontFamily = FontFamily.Monospace) },
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp, color = fg),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp, color = fg),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = bg,
                     unfocusedContainerColor = bg,
                     focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f),
                     unfocusedBorderColor = Color(0xFF1E2A36),
                 ),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(AppShape.lg),
             )
             // 操作按钮行
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 PrimaryActionButton(if (zh) "运行" else "Run", { runEditor() }, Modifier.weight(1f).height(40.dp), leading = Icons.Default.PlayArrow)
                 IconButton(onClick = { saveScript() }, enabled = code.isNotBlank()) {
-                    Icon(Icons.Default.Save, null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Save, "保存", tint = MaterialTheme.colorScheme.primary)
                 }
                 IconButton(onClick = { loadLauncher.launch(arrayOf("text/plain", "text/x-python", "*/*")) }) {
-                    Icon(Icons.Default.FileOpen, null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.FileOpen, "打开", tint = MaterialTheme.colorScheme.primary)
                 }
                 IconButton(onClick = { code = "" }, enabled = code.isNotBlank()) {
-                    Icon(Icons.Default.Clear, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Default.Clear, "清空", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -262,12 +262,12 @@ internal fun SettingsPythonPage(t: UiText) {
             )
             Box(
                 Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp)
-                    .background(bg, RoundedCornerShape(14.dp))
+                    .background(bg, RoundedCornerShape(AppShape.lg))
                     .verticalScroll(consoleScroll),
             ) {
                 Text(
                     output.ifEmpty { if (zh) "（控制台输出显示在这里）" else "(console output here)" },
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body, lineHeight = 17.sp),
                     color = fg,
                     modifier = Modifier.fillMaxWidth().padding(10.dp),
                 )
@@ -280,17 +280,17 @@ internal fun SettingsPythonPage(t: UiText) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text(if (zh) ">>> 输入表达式（Enter 执行）" else ">>> expression (Enter to run)", color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = fg),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, color = fg),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = bg,
                         unfocusedContainerColor = bg,
                         focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f),
                         unfocusedBorderColor = Color(0xFF1E2A36),
                     ),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                 )
                 IconButton(onClick = { sendRepl(replInput) }, enabled = sessionActive) {
-                    Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.PlayArrow, "运行", tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }

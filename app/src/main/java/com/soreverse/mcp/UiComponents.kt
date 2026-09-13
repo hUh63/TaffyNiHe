@@ -64,7 +64,7 @@ internal fun ScreenHeader(
     ) {
         if (showBack && onBack != null) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = MaterialTheme.colorScheme.primary)
             }
         }
         Column(Modifier.weight(1f)) {
@@ -159,7 +159,7 @@ internal fun NavRow(
             Box(
                 Modifier
                     .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(AppShape.md))
                     .background(resolvedTint.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {

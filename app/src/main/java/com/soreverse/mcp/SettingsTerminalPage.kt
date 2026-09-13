@@ -297,7 +297,7 @@ internal fun SettingsTerminalPage(t: UiText) {
             Box(
                 Modifier.width(8.dp).height(8.dp).background(
                     if (sessionActive) AppPalette.green else AppPalette.mono,
-                    RoundedCornerShape(4.dp),
+                    RoundedCornerShape(AppShape.xs),
                 ),
             )
             Text(
@@ -319,12 +319,12 @@ internal fun SettingsTerminalPage(t: UiText) {
         // ── 终端显示区 ──
         Box(
             Modifier.fillMaxWidth().weight(1f)
-                .background(bg, RoundedCornerShape(14.dp))
+                .background(bg, RoundedCornerShape(AppShape.lg))
                 .verticalScroll(outputScroll),
         ) {
             Text(
                 sessionOutput.ifEmpty { if (zh) "启动会话后在此显示终端输出…" else "Terminal output appears here after starting…" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body, lineHeight = 17.sp),
                 color = fg,
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
             )
@@ -337,7 +337,7 @@ internal fun SettingsTerminalPage(t: UiText) {
                     selected = false,
                     onClick = { terminalKey(k) },
                     enabled = true,
-                    label = { Text(label, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                    label = { Text(label, fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
                 )
             }
         }
@@ -345,7 +345,7 @@ internal fun SettingsTerminalPage(t: UiText) {
         // ── 快捷命令 ──
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             quick.forEach { (c, label) ->
-                FilterChip(selected = false, onClick = { send(c) }, label = { Text(label, fontSize = 10.sp) }, enabled = sessionActive)
+                FilterChip(selected = false, onClick = { send(c) }, label = { Text(label, fontSize = AppText.label) }, enabled = sessionActive)
             }
         }
 
@@ -377,11 +377,11 @@ internal fun SettingsTerminalPage(t: UiText) {
                 },
                 placeholder = { Text(if (zh) "输入命令，Enter 发送（↑↓ 历史）" else "Type command, Enter to send (↑↓ history)", color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace) },
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = fg),
-                shape = RoundedCornerShape(12.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, color = fg),
+                shape = RoundedCornerShape(AppShape.md),
             )
             IconButton(onClick = { send(input) }, enabled = sessionActive) {
-                Icon(Icons.Default.Send, null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.Send, "发送", tint = MaterialTheme.colorScheme.primary)
             }
         }
     }

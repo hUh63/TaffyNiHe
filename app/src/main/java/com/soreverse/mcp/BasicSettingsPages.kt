@@ -124,7 +124,7 @@ internal fun ChipRow(items: List<Pair<String, String>>, selected: String, onSele
                 selected = selected == value,
                 onClick = { onSelected(value) },
                 label = { Text(label) },
-                shape = RoundedCornerShape(999.dp),
+                shape = RoundedCornerShape(AppShape.pill),
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MaterialTheme.colorScheme.primary,
                     selectedLabelColor = Color.White,
@@ -323,7 +323,7 @@ internal fun SettingsAccessPage(t: UiText, settings: SettingsStore) {
                 onValueChange = { accessToken = it; settings.accessToken = it },
                 label = { Text(if (t.zh) "访问 token" else "Access token") },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -406,7 +406,7 @@ internal fun SettingsProbePage(t: UiText, settings: SettingsStore) {
                 value = probeUrl,
                 onValueChange = { probeUrl = it; settings.externalProbeUrl = it },
                 label = { Text(t.probeServiceUrl) },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),

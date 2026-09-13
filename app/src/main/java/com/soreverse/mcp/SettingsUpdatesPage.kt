@@ -291,7 +291,7 @@ internal fun SettingsUpdatesPage(
         }
         if (error.isNotBlank()) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(AppShape.lg),
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -313,11 +313,11 @@ internal fun SettingsUpdatesPage(
                         Spacer(Modifier.weight(1f))
                         Box(
                             Modifier
-                                .clip(RoundedCornerShape(999.dp))
+                                .clip(RoundedCornerShape(AppShape.pill))
                                 .background(accent.copy(alpha = 0.16f))
                                 .border(
                                     androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.3f)),
-                                    RoundedCornerShape(999.dp),
+                                    RoundedCornerShape(AppShape.pill),
                                 )
                                 .padding(horizontal = 9.dp, vertical = 3.dp),
                         ) {
@@ -441,7 +441,7 @@ private fun UpdateHero(icon: ImageVector, headline: String, subtitle: String, ti
 /** 当前版本卡：终端图标 + 版本号（等宽字体）（上游设计）。 */
 @Composable
 private fun UpdateVersionCard(versionText: String, accent: Color, zh: Boolean) {
-    val shape = RoundedCornerShape(26.dp)
+    val shape = RoundedCornerShape(AppShape.xl)
     val bg = Brush.verticalGradient(listOf(Color(0xFF1E2026), Color(0xFF15171D)))
     Row(
         Modifier
@@ -486,7 +486,7 @@ private fun UpdateVersionCard(versionText: String, accent: Color, zh: Boolean) {
 /** 频道切换分段 pill：正式版 / 测试版（上游 v1.0.21 设计）。 */
 @Composable
 private fun ChannelSegmentsPill(selected: String, onSelect: (String) -> Unit, zh: Boolean) {
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(AppShape.pill)
     data class Opt(val key: String, val icon: ImageVector, val label: String)
     val options = listOf(
         Opt("stable", Icons.Default.Verified, if (zh) "正式版" else "Stable"),

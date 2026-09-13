@@ -132,7 +132,7 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
                         label = { Text(if (t.zh) "V1 签名数据文件名" else "V1 signer file name") },
                         supportingText = { Text(if (t.zh) "自定义 V1 签名产生的 RSA/SF 文件的文件名，若留空则自动从签名密钥中获取数据" else "File name of the V1 .RSA/.SF files. If empty, derived from the signing key automatically.") },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -151,7 +151,7 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
 
 @Composable
 private fun KeySourceOption(label: String, selected: Boolean, tint: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(AppShape.lg)
     Row(
         modifier
             .clip(shape)
@@ -200,9 +200,9 @@ private fun ImportKeyDialog(t: UiText, settings: SettingsStore, onDismiss: () ->
                     icon = Icons.Default.FolderOpen,
                     onClick = { picker.launch(arrayOf("*/*")) },
                 )
-                OutlinedTextField(alias, { alias = it }, label = { Text(if (t.zh) "密钥别名 (alias)" else "Alias") }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(storePass, { storePass = it }, label = { Text(if (t.zh) "密钥库口令 (store pass)" else "Store pass") }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(keyPass, { keyPass = it }, label = { Text(if (t.zh) "密钥口令 (key pass, 可选)" else "Key pass (optional)") }, singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(alias, { alias = it }, label = { Text(if (t.zh) "密钥别名 (alias)" else "Alias") }, singleLine = true, shape = RoundedCornerShape(AppShape.md), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(storePass, { storePass = it }, label = { Text(if (t.zh) "密钥库口令 (store pass)" else "Store pass") }, singleLine = true, shape = RoundedCornerShape(AppShape.md), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(keyPass, { keyPass = it }, label = { Text(if (t.zh) "密钥口令 (key pass, 可选)" else "Key pass (optional)") }, singleLine = true, shape = RoundedCornerShape(AppShape.md), modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
@@ -246,7 +246,7 @@ private fun ManageKeysDialog(t: UiText, settings: SettingsStore, onDismiss: () -
                     val name = k.optString("name")
                     val isActive = name == active
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)).padding(10.dp),
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.md)).background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)).padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {

@@ -191,7 +191,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                         selected = target == name,
                         enabled = installed,
                         onClick = { target = name },
-                        label = { Text(name, fontSize = 12.sp) },
+                        label = { Text(name, fontSize = AppText.body) },
                     )
                 }
                 Text(
@@ -210,7 +210,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                     FilterChip(
                         selected = false,
                         onClick = { runIn(target, script) },
-                        label = { Text(label, fontSize = 10.sp) },
+                        label = { Text(label, fontSize = AppText.label) },
                         enabled = busy == null,
                     )
                 }

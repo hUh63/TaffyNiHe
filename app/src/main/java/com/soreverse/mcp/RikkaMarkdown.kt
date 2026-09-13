@@ -157,8 +157,8 @@ private fun MarkdownAstNode(node: ASTNode, content: String) {
 
 @Composable
 private fun CodeSurface(code: String) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Text(code, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.horizontalScroll(rememberScrollState()).padding(14.dp))
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(AppShape.md), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Text(code, fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 20.sp, modifier = Modifier.horizontalScroll(rememberScrollState()).padding(14.dp))
     }
 }
 
@@ -182,7 +182,7 @@ private fun inlineText(node: ASTNode, content: String) = buildAnnotatedString {
 @Composable
 private fun MarkdownAstTable(node: ASTNode, content: String) {
     val rows = node.children.filter { it.type == GFMElementTypes.HEADER || it.type == GFMElementTypes.ROW }
-    Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))) {
+    Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(AppShape.sm)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))) {
         rows.forEachIndexed { rowIndex, row ->
             Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 row.children.filter { it.type == GFMTokenTypes.CELL }.forEach { cell ->
@@ -226,20 +226,20 @@ private fun MarkdownElement(element: Element) {
             val code = element.selectFirst("code")?.wholeText() ?: element.wholeText()
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
             ) {
                 Text(
                     code,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
+                    fontSize = AppText.bodyStrong,
                     lineHeight = 20.sp,
                     modifier = Modifier.horizontalScroll(rememberScrollState()).padding(14.dp),
                 )
             }
         }
         "blockquote" -> Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(start = 4.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.xs)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(start = 4.dp),
         ) {
             Column(Modifier.fillMaxWidth().padding(start = 10.dp, top = 10.dp, end = 12.dp, bottom = 10.dp)) {
                 element.childNodes().forEach { MarkdownNode(it) }
@@ -309,7 +309,7 @@ private fun inlineHtml(element: Element) = buildAnnotatedString {
 private fun MarkdownTable(table: Element) {
     val rows = table.select("tr")
     Column(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(AppShape.sm)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
     ) {
         rows.forEachIndexed { rowIndex, row ->
             Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {

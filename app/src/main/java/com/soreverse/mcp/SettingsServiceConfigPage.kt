@@ -123,7 +123,7 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                     onValueChange = { portText = it.filter(Char::isDigit).take(5) },
                     label = { Text(t.port) },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                     modifier = Modifier.weight(1f),
                 )
                 PrimaryActionButton(if (t.zh) "应用" else "Apply", {
@@ -139,7 +139,7 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
             }
         }
         GlassGroup(title = if (t.zh) "网页测试" else "Web test") {
-            val shape = RoundedCornerShape(12.dp)
+            val shape = RoundedCornerShape(AppShape.md)
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -222,7 +222,7 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 onValueChange = { accessToken = it; settings.accessToken = it },
                 label = { Text(if (t.zh) "访问 Token" else "Access token") },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
@@ -345,7 +345,7 @@ private fun EndpointCard(
     onCopy: () -> Unit,
     onTest: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(AppShape.md)
     Column(
         Modifier
             .fillMaxWidth()
@@ -393,7 +393,7 @@ private fun EndpointCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(AppShape.sm))
                     .clickable(onClick = onTest)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )

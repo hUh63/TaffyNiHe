@@ -110,7 +110,7 @@ private fun SettingsTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(AppShape.lg)
     Column(
         modifier
             .clip(shape)
@@ -123,7 +123,7 @@ private fun SettingsTile(
         Box(
             Modifier
                 .size(36.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(AppShape.md))
                 .background(tint.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center,
         ) {

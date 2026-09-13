@@ -160,7 +160,7 @@ internal fun SettingsGitPage(t: UiText) {
                 FilterChip(
                     selected = distro == d.name,
                     onClick = { distro = d.name; output = "" },
-                    label = { Text("${d.name} · ${d.pkgMgr}", fontSize = 11.sp) },
+                    label = { Text("${d.name} · ${d.pkgMgr}", fontSize = AppText.label) },
                 )
             }
         }
@@ -191,10 +191,10 @@ internal fun SettingsGitPage(t: UiText) {
                     },
                     enabled = !running,
                     colors = ButtonDefaults.buttonColors(containerColor = AppPalette.green),
-                ) { Text(if (zh) "一键安装 git" else "Install git", fontSize = 12.sp) }
+                ) { Text(if (zh) "一键安装 git" else "Install git", fontSize = AppText.body) }
             } else {
                 OutlinedButton(onClick = { refreshStatus() }, enabled = !running) {
-                    Text(if (zh) "刷新状态" else "Refresh", fontSize = 12.sp)
+                    Text(if (zh) "刷新状态" else "Refresh", fontSize = AppText.body)
                 }
             }
         }
@@ -204,13 +204,13 @@ internal fun SettingsGitPage(t: UiText) {
             value = repoPath,
             onValueChange = { repoPath = it },
             label = { Text(if (zh) "仓库目录（默认塔菲工作区）" else "Repo dir (default: taffy workspace)") },
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = fg),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = fg),
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedTextColor = fg, unfocusedTextColor = fg, cursorColor = AppPalette.blue),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
         if (repoSummary.isNotEmpty()) {
-            Text(repoSummary, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp), color = AppPalette.blue)
+            Text(repoSummary, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = AppPalette.blue)
         }
 
         // ── 基础操作 ──
@@ -220,19 +220,19 @@ internal fun SettingsGitPage(t: UiText) {
                 gitRun("git init -b main && git config user.email 'taffy@local' && git config user.name 'taffy' && echo '[已初始化仓库 (分支 main)]'") { r ->
                     appendOut(r.output.trim()); refreshStatus()
                 }
-            }, enabled = !running) { Text("init", fontSize = 12.sp) }
+            }, enabled = !running) { Text("init", fontSize = AppText.body) }
             OutlinedButton(onClick = {
                 gitRun("git status && echo --- && git status --porcelain | head -40") { r -> appendOut(r.output.trim()) }
-            }, enabled = !running) { Text("status", fontSize = 12.sp) }
+            }, enabled = !running) { Text("status", fontSize = AppText.body) }
             OutlinedButton(onClick = {
                 gitRun("git diff --stat | head -40 && echo '---' && git diff | head -200") { r -> appendOut(r.output.trim().ifEmpty { if (zh) "[无未暂存改动]" else "[no unstaged changes]" }) }
-            }, enabled = !running) { Text("diff", fontSize = 12.sp) }
+            }, enabled = !running) { Text("diff", fontSize = AppText.body) }
             OutlinedButton(onClick = {
                 gitRun("git log --oneline --decorate -15") { r -> appendOut(r.output.trim().ifEmpty { if (zh) "[暂无提交]" else "[no commits]" }) }
-            }, enabled = !running) { Text("log", fontSize = 12.sp) }
+            }, enabled = !running) { Text("log", fontSize = AppText.body) }
             OutlinedButton(onClick = {
                 gitRun("git add -A && git status --short | head -40") { r -> appendOut(if (r.code == 0) "[已暂存全部改动]" else r.output.trim()) }
-            }, enabled = !running) { Text("add -A", fontSize = 12.sp) }
+            }, enabled = !running) { Text("add -A", fontSize = AppText.body) }
         }
 
         // ── 提交 ──
@@ -240,7 +240,7 @@ internal fun SettingsGitPage(t: UiText) {
             value = commitMsg,
             onValueChange = { commitMsg = it },
             label = { Text(if (zh) "提交信息（commit message）" else "Commit message") },
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, color = fg),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body, color = fg),
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedTextColor = fg, unfocusedTextColor = fg, cursorColor = AppPalette.blue),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
@@ -267,7 +267,7 @@ internal fun SettingsGitPage(t: UiText) {
             value = remoteUrl,
             onValueChange = { remoteUrl = it },
             label = { Text(if (zh) "远程地址（HTTPS，私有仓库需在 rootfs 内配置凭据）" else "Remote URL (HTTPS; configure creds in rootfs)") },
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = fg),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = fg),
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedTextColor = fg, unfocusedTextColor = fg, cursorColor = AppPalette.blue),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
@@ -277,17 +277,17 @@ internal fun SettingsGitPage(t: UiText) {
                 val u = remoteUrl.trim()
                 if (u.isEmpty()) { appendOut("[请填写远程地址]"); return@OutlinedButton }
                 gitRun("git remote remove origin 2>/dev/null; git remote add origin \"$u\" && git remote -v") { r -> appendOut(r.output.trim()) }
-            }, enabled = !running) { Text(if (zh) "设置 origin" else "Set origin", fontSize = 12.sp) }
+            }, enabled = !running) { Text(if (zh) "设置 origin" else "Set origin", fontSize = AppText.body) }
             OutlinedButton(onClick = {
                 gitRun("git fetch origin --prune 2>&1 && git status -sb") { r -> appendOut(r.output.trim()) }
-            }, enabled = !running) { Text("fetch", fontSize = 12.sp) }
+            }, enabled = !running) { Text("fetch", fontSize = AppText.body) }
             OutlinedButton(onClick = {
                 gitRun("git pull --no-rebase origin \$(git symbolic-ref --short HEAD 2>/dev/null || echo main) 2>&1") { r -> appendOut(r.output.trim()) }
-            }, enabled = !running) { Text("pull", fontSize = 12.sp) }
+            }, enabled = !running) { Text("pull", fontSize = AppText.body) }
             OutlinedButton(onClick = {
                 val br = "main"
                 gitRun("git push -u origin $br 2>&1") { r -> appendOut(r.output.trim()) }
-            }, enabled = !running) { Text("push", fontSize = 12.sp) }
+            }, enabled = !running) { Text("push", fontSize = AppText.body) }
         }
         Text(
             if (zh) "提示: push 私有仓库需先在终端进入 rootfs 配置凭据（如 https://<token>@github.com/... 或 git credential store）"
@@ -298,7 +298,7 @@ internal fun SettingsGitPage(t: UiText) {
         // ── 输出 ──
         androidx.compose.foundation.layout.Box(
             Modifier.fillMaxWidth().height(220.dp)
-                .background(bg, RoundedCornerShape(12.dp)),
+                .background(bg, RoundedCornerShape(AppShape.md)),
         ) {
             Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -314,7 +314,7 @@ internal fun SettingsGitPage(t: UiText) {
                     Column(Modifier.fillMaxSize().verticalScroll(outScroll).padding(horizontal = 12.dp, vertical = 8.dp)) {
                         Text(
                             output.ifEmpty { if (zh) "命令输出显示在这里…" else "Output appears here…" },
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
                             color = if (output.isEmpty()) dim else fg,
                         )
                     }

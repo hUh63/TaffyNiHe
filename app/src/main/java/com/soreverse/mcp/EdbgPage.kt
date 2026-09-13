@@ -206,7 +206,7 @@ internal fun EdbgPage(t: UiText) {
         val tabs = listOf(if (zh) "调试" else "Debug", if (zh) "反编译" else "Decompile")
         TabRow(selectedTabIndex = if (tab == "decompile") 1 else 0, containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)) {
             tabs.forEachIndexed { i, label ->
-                Tab(selected = (tab == "decompile") == (i == 1), onClick = { tab = if (i == 1) "decompile" else "session" }, text = { Text(label, fontSize = 12.sp) })
+                Tab(selected = (tab == "decompile") == (i == 1), onClick = { tab = if (i == 1) "decompile" else "session" }, text = { Text(label, fontSize = AppText.body) })
             }
         }
 
@@ -221,7 +221,7 @@ internal fun EdbgPage(t: UiText) {
             }
             if (classSource.isNotBlank()) {
                 SelectionContainer {
-                    Text(classSource, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp), modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).verticalScroll(rememberScrollState()))
+                    Text(classSource, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).verticalScroll(rememberScrollState()))
                 }
                 TextButton(onClick = { classSource = "" }) { Text(if (zh) "返回类列表" else "Back to list") }
             } else {
@@ -249,7 +249,7 @@ internal fun EdbgPage(t: UiText) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text(if (zh) "目标包名" else "Target package", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
                 if (sessionActive) {
                     TextButton(onClick = { runAction("stop") }) { Text(if (zh) "停止" else "Stop", color = MaterialTheme.colorScheme.error) }
@@ -267,7 +267,7 @@ internal fun EdbgPage(t: UiText) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text(if (zh) "库名(可选)" else "Library (optional)", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
                 OutlinedTextField(
                     value = brkInput,
@@ -275,7 +275,7 @@ internal fun EdbgPage(t: UiText) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("偏移 0x0", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
             }
             // ── 命令面板：执行控制 / 断点内存 两组快捷 ──
@@ -286,7 +286,7 @@ internal fun EdbgPage(t: UiText) {
                         selected = false,
                         onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
                         enabled = sessionActive && !busy,
-                        label = { Text(quick, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                        label = { Text(quick, fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
                     )
                 }
             }
@@ -297,14 +297,14 @@ internal fun EdbgPage(t: UiText) {
                     selected = false,
                     onClick = { if (sessionActive && brkInput.isNotBlank()) { cmdInput = "b ${brkInput.trim()}"; runAction("cmd") } },
                     enabled = sessionActive && !busy && brkInput.isNotBlank(),
-                    label = { Text("b ${brkInput.ifBlank { "0x…" }}", fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                    label = { Text("b ${brkInput.ifBlank { "0x…" }}", fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
                 )
                 listOf("hbreak", "watch", "info regs", "x/16gx \$pc").forEach { quick ->
                     FilterChip(
                         selected = false,
                         onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
                         enabled = sessionActive && !busy,
-                        label = { Text(quick, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+                        label = { Text(quick, fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
                     )
                 }
             }
@@ -315,7 +315,7 @@ internal fun EdbgPage(t: UiText) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text(if (zh) "调试命令（b 地址 / hbreak / watch / examine…）" else "Debug command (b addr / hbreak / watch / examine…)", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body, fontFamily = FontFamily.Monospace),
                 )
                 TextButton(onClick = { if (cmdInput.isNotBlank()) runAction("cmd") }, enabled = sessionActive && !busy && cmdInput.isNotBlank()) {
                     Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.width(14.dp))
@@ -326,7 +326,7 @@ internal fun EdbgPage(t: UiText) {
             SelectionContainer {
                 Text(
                     output.ifBlank { if (zh) "（eDBG 输出显示在这里。启动后先等待断点命中，再发调试命令）" else "(eDBG output appears here. Wait for the breakpoint, then send commands.)" },
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().height(200.dp)
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), MaterialTheme.shapes.medium)

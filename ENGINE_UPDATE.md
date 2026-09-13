@@ -45,3 +45,34 @@ JNI 符号与我们的 Kotlin 引擎 **完全兼容**：
   我们的 Kotlin 解析层（EngineRuntimeRead 等）可能需微调 —— 以设备实测为准
 - rizin_core.cpp 源码仍引用旧 API（rz_io_read_at），但 CMake 已禁用、走预编译 so，不影响运行；
   如需重编译需同步升级 cpp 源码（rz_io_read_at → rz_io_read_at_mapped，rz_diff_bytes_new 去掉第 5 参）
+
+
+---
+
+## 复核（2026-09-13）：上游 v1.0.18 → v1.0.21 无引擎变更
+
+对照上游 release notes 与提交历史（v1.0.17..v1.0.21）：
+
+- **无任何 rizin / LIEF / librz_native 构建或版本变更**。v1.0.18~v1.0.21 的改动全部在
+  Kotlin / CI / 安全 / UI 层：Frida 兼容新版 frida-server（WebSocket + D-Bus）、备份页联动、
+  XOR 密钥改为构建期注入、v2/v3 签名者序列解包修复、启动崩溃循环修复、Unidbg/unicorn 打包修复、
+  cloudflared 交叉编译内置（移除运行时下载）、Dart 3.13 / Flutter 3.47 支持、更新渠道 UI 重构。
+- 上游仍由 `build-native-android.sh` 从 `third_party/rizin-src`（rizinorg/rizin）+ LIEF
+  现场交叉编译后链接成单一 `librz_native.so`；期间**未见 rizin / LIEF 子模块升级提交**。
+
+**结论**：塔菲内置的 `librz_native.so`（rizin 0.10.0 + LIEF 0.16.1 + ghidra sleigh，取自
+上游 v1.0.17）即上游当前引擎代际，**无需升级**。自建（meson/ninja + NDK 交叉编译 rizin 源码）
+只会产出同一 rizin 版本，无功能收益且引入 JNI/ABI 回归风险，故本轮不做。
+
+> 取证限制：沙箱网络对 GitHub release 大资产限速（52MB APK 仅能拉到数 MB），代理拒绝 HTTP
+> Range 请求，无法做逐字节比对；上述结论基于「release notes + commit 历史 + 上游构建脚本」
+> 三方一致性交叉验证。
+
+## 其余原生库 / 依赖版本核对（2026-09-13）
+
+| 组件 | 塔菲内置 | 上游最新 | 结论 |
+|---|---|---|---|
+| librz_native.so（rizin 0.10.0 + LIEF 0.16.1 + ghidra） | v1.0.17 版 | 上游引擎未变 | 保持 |
+| libcloudflared.so | 2026.9.1 | 2026.9.1（2026-09-11） | 已最新 |
+| libfrida_server.so | 17.18.0（CI 注入） | 17.18.0（2026-09-09） | 已最新 |
+| bore 协议 | Kotlin 实现（无二进制） | v0.6.0（2025-06-09） | 协议未变；已对齐半关闭语义 |

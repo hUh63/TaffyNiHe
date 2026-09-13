@@ -206,9 +206,9 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
+                    .clip(RoundedCornerShape(AppShape.xs))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(4.dp))
+                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(AppShape.xs))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 for (i in 0 until recommend.length()) {
@@ -219,7 +219,7 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
                         ?: recommend.optString(i)
                     Text(
                         "• ${text.removePrefix("• ").trim()}",
-                        fontSize = 12.sp,
+                        fontSize = AppText.body,
                         lineHeight = 22.sp,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -245,7 +245,7 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
                         ?: attack.optString(i)
                     Text(
                         text,
-                        fontSize = 12.sp,
+                        fontSize = AppText.body,
                         lineHeight = 22.sp,
                         color = if (id == "dyn_reg" || id == "init_array" || text.contains("⚠")) Color(0xFFD73A49) else MaterialTheme.colorScheme.onSurface,
                         fontWeight = if (id == "dyn_reg" || id == "init_array" || text.contains("⚠")) FontWeight.Bold else FontWeight.Normal,
@@ -287,7 +287,7 @@ internal fun ElfOverviewPanel(detail: SoDetailUi, zh: Boolean, onCopy: (String) 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(AppShape.md))
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
                     .padding(10.dp),
             )
@@ -341,9 +341,9 @@ private fun OverviewSectionCard(title: String, content: @Composable ColumnScope.
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(AppShape.lg))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)), RoundedCornerShape(14.dp))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)), RoundedCornerShape(AppShape.lg))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         content = {
@@ -366,16 +366,16 @@ private fun ReferenceOverviewCard(title: String, content: @Composable ColumnScop
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(AppShape.sm))
             .background(Color.White)
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceContainerHigh), RoundedCornerShape(6.dp))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceContainerHigh), RoundedCornerShape(AppShape.sm))
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             title,
             fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
+            fontSize = AppText.bodyStrong,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(bottom = 4.dp),
         )
@@ -389,9 +389,9 @@ private fun OverviewAlert(title: String, body: String) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(AppShape.md))
             .background(Color(0xFFFFF3CD))
-            .border(BorderStroke(1.dp, Color(0xFFFFE08A)), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, Color(0xFFFFE08A)), RoundedCornerShape(AppShape.md))
             .padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -448,7 +448,7 @@ private fun OverviewMetric(
 ) {
     Column(
         modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(AppShape.md))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -465,11 +465,11 @@ private fun StatusToneBadge(text: String, tone: String, selected: Boolean = fals
     Text(
         text,
         modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
+            .clip(RoundedCornerShape(AppShape.pill))
             .background(bg)
             .then(
                 if (selected) {
-                    Modifier.border(BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)), RoundedCornerShape(999.dp))
+                    Modifier.border(BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)), RoundedCornerShape(AppShape.pill))
                 } else {
                     Modifier
                 },
@@ -505,7 +505,7 @@ private fun SecurityFeatureCloud(
             val selected = selectedId == id
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(999.dp))
+                    .clip(RoundedCornerShape(AppShape.pill))
                     .clickable { onSelect(id) },
             ) {
                 StatusToneBadge(label, tone, selected = selected)
@@ -519,9 +519,9 @@ private fun SecurityFeatureDetail(label: String, tone: String, description: Stri
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(AppShape.md))
             .background(toneColor(tone).copy(alpha = 0.10f))
-            .border(BorderStroke(1.dp, toneColor(tone).copy(alpha = 0.28f)), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, toneColor(tone).copy(alpha = 0.28f)), RoundedCornerShape(AppShape.md))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -550,17 +550,17 @@ private fun DifficultyHeader(score: String, level: String, cls: String, zh: Bool
                 .background(bg),
             contentAlignment = Alignment.Center,
         ) {
-            Text(score, color = fg, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text(score, color = fg, fontSize = AppText.display, fontWeight = FontWeight.Bold)
         }
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (zh) "逆向难度：" else "Difficulty: ", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(if (zh) "逆向难度：" else "Difficulty: ", fontWeight = FontWeight.Bold, fontSize = AppText.headline, color = MaterialTheme.colorScheme.onSurface)
                 StatusToneBadge(level, cls)
             }
             Text(
                 if (zh) "评分范围 0-10，分值越高逆向难度越大" else "Score 0–10; higher means harder to reverse",
                 modifier = Modifier.padding(top = 4.dp),
-                fontSize = 12.sp,
+                fontSize = AppText.body,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -570,7 +570,7 @@ private fun DifficultyHeader(score: String, level: String, cls: String, zh: Bool
 @Composable
 private fun ReferenceReportLine(text: String, divider: Boolean) {
     Column(Modifier.fillMaxWidth()) {
-        Text(text, fontSize = 12.sp, lineHeight = 22.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
+        Text(text, fontSize = AppText.body, lineHeight = 22.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 2.dp))
         if (divider) HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
@@ -596,7 +596,7 @@ private fun FeasibilityFactorRow(title: String, detail: String, weight: Double, 
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(AppShape.xs)).background(color))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
@@ -631,7 +631,7 @@ private fun FeasibilityRecommendRow(title: String, detail: String, tone: String)
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(AppShape.xs)).background(color))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = color)
             if (detail.isNotBlank()) {
@@ -650,7 +650,7 @@ private fun AttackSurfaceRow(title: String, value: String, detail: String, tone:
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Box(Modifier.width(3.dp).height(32.dp).clip(RoundedCornerShape(AppShape.xs)).background(color))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = color)
@@ -682,7 +682,7 @@ private fun EntropySparkline(values: List<Double>) {
         Modifier
             .fillMaxWidth()
             .height(60.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(AppShape.sm))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
             .padding(horizontal = 4.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(1.dp),
@@ -704,7 +704,7 @@ private fun EntropySparkline(values: List<Double>) {
                     Modifier
                         .weight(1f)
                         .fillMaxHeight(ratio)
-                        .clip(RoundedCornerShape(2.dp))
+                        .clip(RoundedCornerShape(AppShape.xs))
                         .background(color),
                 )
             }

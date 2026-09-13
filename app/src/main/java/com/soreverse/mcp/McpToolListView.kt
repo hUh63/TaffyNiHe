@@ -125,7 +125,7 @@ private fun ToolCard(handler: ToolHandler, zh: Boolean) {
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(AppShape.sm),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
     ) {
         Column(Modifier.padding(10.dp)) {
@@ -136,7 +136,7 @@ private fun ToolCard(handler: ToolHandler, zh: Boolean) {
             Spacer(Modifier.size(2.dp))
             Text(
                 if (zh) meta.zh else meta.en,
-                style = MaterialTheme.typography.bodySmall, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodySmall, fontSize = AppText.body, color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 3,
             )
         }

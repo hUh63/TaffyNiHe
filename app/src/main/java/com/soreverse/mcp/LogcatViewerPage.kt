@@ -789,7 +789,7 @@ internal fun LogcatViewerPage(t: UiText) {
                             }
                         }
                     },
-                    label = { Text(label, fontSize = 11.sp) },
+                    label = { Text(label, fontSize = AppText.label) },
                 )
             }
         }
@@ -808,7 +808,7 @@ internal fun LogcatViewerPage(t: UiText) {
             ) {
                 Icon(Icons.Default.AdminPanelSettings, null, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
-                Text(if (zh) "访问所有设备日志" else "Read all device logs", fontSize = 11.sp)
+                Text(if (zh) "访问所有设备日志" else "Read all device logs", fontSize = AppText.label)
             }
             Text(
                 if (readLogsGranted) (if (zh) "已授权 ✓" else "Granted ✓") else (if (zh) "未授予" else "Not granted"),
@@ -826,7 +826,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 modifier = Modifier.weight(1f),
                 placeholder = { Text(if (zh) "录制名称" else "Record name", maxLines = 1) },
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
             )
             if (recording) {
                 TextButton(onClick = { stopRecord() }) { Text(if (zh) "停止" else "Stop", color = MaterialTheme.colorScheme.error) }
@@ -839,12 +839,12 @@ internal fun LogcatViewerPage(t: UiText) {
             TextButton(onClick = { saveLogFile() }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
                 Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(2.dp))
-                Text(if (zh) "保存.log" else "Save .log", fontSize = 10.sp)
+                Text(if (zh) "保存.log" else "Save .log", fontSize = AppText.label)
             }
             TextButton(onClick = { exportZip(visible) }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
                 Icon(Icons.Default.Archive, null, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(2.dp))
-                Text(if (zh) "导出.zip" else "Export .zip", fontSize = 10.sp)
+                Text(if (zh) "导出.zip" else "Export .zip", fontSize = AppText.label)
             }
             Text(
                 when {
@@ -954,7 +954,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 if (zh) "应用" else "Apps",
                 if (zh) "设置" else "Settings",
             ).forEachIndexed { i, label ->
-                Tab(selected = tabIndex == i, onClick = { tab = tabs[i] }, text = { Text(label, fontSize = 12.sp) })
+                Tab(selected = tabIndex == i, onClick = { tab = tabs[i] }, text = { Text(label, fontSize = AppText.body) })
             }
         }
 
@@ -974,7 +974,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         modifier = Modifier.weight(1f),
                         placeholder = { Text(if (zh) "过滤器名称" else "Filter name", maxLines = 1) },
                         singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                     )
                     TextButton(
                         onClick = {
@@ -1013,10 +1013,10 @@ internal fun LogcatViewerPage(t: UiText) {
                                 overflow = TextOverflow.Ellipsis,
                             )
                             TextButton(onClick = { applyPreset(key) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                Text(if (zh) "应用" else "Apply", fontSize = 11.sp)
+                                Text(if (zh) "应用" else "Apply", fontSize = AppText.label)
                             }
                             TextButton(onClick = { deletePreset(key) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                Text(if (zh) "删除" else "Delete", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                Text(if (zh) "删除" else "Delete", fontSize = AppText.label, color = MaterialTheme.colorScheme.error)
                             }
                         }
                     }
@@ -1098,7 +1098,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                     ) {
                                         Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(14.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text(if (zh) "复制" else "Copy", fontSize = 11.sp)
+                                        Text(if (zh) "复制" else "Copy", fontSize = AppText.label)
                                     }
                                     TextButton(
                                         onClick = {
@@ -1108,7 +1108,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                     ) {
                                         Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text(if (zh) "删除" else "Delete", fontSize = 11.sp)
+                                        Text(if (zh) "删除" else "Delete", fontSize = AppText.label)
                                     }
                                 }
                                 // 日志内容（黑色背景，LogFox 终端样式）
@@ -1122,7 +1122,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                     showLines.forEach { l ->
                                         Text(
                                             l.raw,
-                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label, fontFamily = FontFamily.Monospace),
                                             color = Color(0xFFE0E0E0),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -1152,7 +1152,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 // 保存目录详细
                 Text(
                     (if (zh) "保存目录: " else "Save dir: ") + context.filesDir.absolutePath,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = AppText.label),
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -1208,7 +1208,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                     ) {
                                         Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(14.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text(if (zh) "复制路径" else "Copy path", fontSize = 11.sp)
+                                        Text(if (zh) "复制路径" else "Copy path", fontSize = AppText.label)
                                     }
                                     TextButton(
                                         onClick = {
@@ -1228,12 +1228,12 @@ internal fun LogcatViewerPage(t: UiText) {
                                     ) {
                                         Icon(Icons.Default.FileDownload, null, modifier = Modifier.size(14.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text(if (zh) "分享" else "Share", fontSize = 11.sp)
+                                        Text(if (zh) "分享" else "Share", fontSize = AppText.label)
                                     }
                                 }
                                 Text(
                                     f.absolutePath,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = AppText.label),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -1256,7 +1256,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text(if (zh) "应用名或包名" else "App name or package", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
                 val filtered = remember(appList, appSearch) {
                     if (appSearch.isBlank()) appList
@@ -1382,7 +1382,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text(if (zh) "搜索" else "Search", maxLines = 1) },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
                 // 实时过滤折叠面板（LogFox: 默认折叠，展开显示包名/PID/Tag/开关）
                 Row(
@@ -1417,7 +1417,7 @@ internal fun LogcatViewerPage(t: UiText) {
                             modifier = Modifier.weight(1f),
                             placeholder = { Text(if (zh) "包名" else "Package", maxLines = 1) },
                             singleLine = true,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label),
                         )
                         OutlinedTextField(
                             value = pidFilter,
@@ -1425,7 +1425,7 @@ internal fun LogcatViewerPage(t: UiText) {
                             modifier = Modifier.weight(1f),
                             placeholder = { Text("PID", maxLines = 1) },
                             singleLine = true,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label),
                         )
                     }
                     // Tag
@@ -1435,13 +1435,13 @@ internal fun LogcatViewerPage(t: UiText) {
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text(if (zh) "Tag 过滤（逗号分隔多 tag）" else "Tag filter (comma separated)", maxLines = 1) },
                         singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label),
                     )
                     // 开关行
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        FilterChip(selected = regexEnabled, onClick = { regexEnabled = !regexEnabled }, label = { Text(if (zh) "正则" else "Regex", fontSize = 10.sp) })
-                        FilterChip(selected = caseSensitive, onClick = { caseSensitive = !caseSensitive }, label = { Text(if (zh) "区分大小写" else "Case", fontSize = 10.sp) })
-                        FilterChip(selected = crashOnly, onClick = { crashOnly = !crashOnly }, label = { Text(if (zh) "仅崩溃与ANR" else "Crashes", fontSize = 10.sp) })
+                        FilterChip(selected = regexEnabled, onClick = { regexEnabled = !regexEnabled }, label = { Text(if (zh) "正则" else "Regex", fontSize = AppText.label) })
+                        FilterChip(selected = caseSensitive, onClick = { caseSensitive = !caseSensitive }, label = { Text(if (zh) "区分大小写" else "Case", fontSize = AppText.label) })
+                        FilterChip(selected = crashOnly, onClick = { crashOnly = !crashOnly }, label = { Text(if (zh) "仅崩溃与ANR" else "Crashes", fontSize = AppText.label) })
                     }
                 }
                 // 级别（中间横滑）+ 工具栏（两端固定）
@@ -1452,7 +1452,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         onClick = {
                             levelSet = if (levelSet.size == 6) emptySet() else setOf("V", "D", "I", "W", "E", "F")
                         },
-                        label = { Text(if (zh) "全部" else "All", fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                        label = { Text(if (zh) "全部" else "All", fontSize = AppText.label, fontWeight = FontWeight.Bold) },
                     )
                     // 级别按钮（可左右滑动）
                     Row(
@@ -1463,7 +1463,7 @@ internal fun LogcatViewerPage(t: UiText) {
                             FilterChip(
                                 selected = lv in levelSet,
                                 onClick = { levelSet = if (lv in levelSet) levelSet - lv else levelSet + lv },
-                                label = { Text(lv, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = levelColor(lv)) },
+                                label = { Text(lv, fontSize = AppText.label, fontWeight = FontWeight.Bold, color = levelColor(lv)) },
                             )
                         }
                     }
@@ -1555,7 +1555,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     items(appLogVisible) { l ->
                         Text(
                             l,
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontFamily = FontFamily.Monospace),
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label, fontFamily = FontFamily.Monospace),
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
                         )
@@ -1575,16 +1575,16 @@ internal fun LogcatViewerPage(t: UiText) {
                     SelectionContainer {
                         Text(
                             text = buildAnnotatedString {
-                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append(line.time + " ")
                                 }
-                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append(line.pid + " ")
                                 }
-                                withStyle(SpanStyle(color = levelColor(line.level), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                withStyle(SpanStyle(color = levelColor(line.level), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append(line.level + " ")
                                 }
-                                withStyle(SpanStyle(color = Color(0xFF4DD0E1), fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, fontSize = 10.sp)) {
+                                withStyle(SpanStyle(color = Color(0xFF4DD0E1), fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append("${line.tag} ")
                                 }
                                     // 消息（关键字高亮）
@@ -1605,7 +1605,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                         append(msg)
                                     }
                                 },
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace, lineHeight = 16.sp),
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label, fontFamily = FontFamily.Monospace, lineHeight = 16.sp),
                                 // 点击日志行=复制该行（长按仍可文本选择）
                                 modifier = Modifier.fillMaxWidth()
                                     .clickable {

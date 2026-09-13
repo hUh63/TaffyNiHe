@@ -38,6 +38,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.RssFeed
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -148,14 +157,14 @@ internal fun CommandHubScreen(
     val zh = t.zh
     val sats = remember(zh) {
         listOf(
-            Satellite("📖", if (zh) "反编译" else "Decompile", MainTab.Home, "decompile"),
-            Satellite("🔓", if (zh) "脱壳" else "Unpack", MainTab.Home, "unpack"),
-            Satellite("🧬", if (zh) "SO 分析" else "SO", MainTab.Home, "soanalyze"),
-            Satellite("⚡", if (zh) "模拟" else "Emulate", MainTab.Home, "emulate"),
-            Satellite("🎯", "Frida", MainTab.Home, "frida"),
-            Satellite("📦", if (zh) "回编" else "Rebuild", MainTab.Home, "rebuild"),
-            Satellite("📡", if (zh) "日志" else "Logs", MainTab.Home, "logs"),
-            Satellite("⚙️", if (zh) "设置" else "Settings", MainTab.Settings),
+            Satellite(Icons.Default.Code, if (zh) "反编译" else "Decompile", MainTab.Home, "decompile"),
+            Satellite(Icons.Default.LockOpen, if (zh) "脱壳" else "Unpack", MainTab.Home, "unpack"),
+            Satellite(Icons.Default.Memory, if (zh) "SO 分析" else "SO", MainTab.Home, "soanalyze"),
+            Satellite(Icons.Default.FlashOn, if (zh) "模拟" else "Emulate", MainTab.Home, "emulate"),
+            Satellite(Icons.Default.MyLocation, "Frida", MainTab.Home, "frida"),
+            Satellite(Icons.Default.Inventory2, if (zh) "回编" else "Rebuild", MainTab.Home, "rebuild"),
+            Satellite(Icons.Default.RssFeed, if (zh) "日志" else "Logs", MainTab.Home, "logs"),
+            Satellite(Icons.Default.Settings, if (zh) "设置" else "Settings", MainTab.Settings),
         )
     }
     Column(
@@ -231,7 +240,7 @@ internal fun CommandHubScreen(
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(AppShape.sm))
                     .clickable { onNavigate(MainTab.Home, null) }
                     .padding(horizontal = 12.dp, vertical = 4.dp),
             )
@@ -263,7 +272,7 @@ internal fun CommandHubScreen(
         }
 
         // 连接地址条
-        val addrShape = RoundedCornerShape(18.dp)
+        val addrShape = RoundedCornerShape(AppShape.lg)
         Row(
             Modifier
                 .fillMaxWidth()
@@ -306,7 +315,7 @@ internal fun CommandHubScreen(
     }
 }
 
-private data class Satellite(val icon: String, val label: String, val tab: MainTab, val toolCategory: String? = null)
+private data class Satellite(val icon: ImageVector, val label: String, val tab: MainTab, val toolCategory: String? = null)
 
 @Composable
 private fun ConnDot(running: Boolean, zh: Boolean) {
@@ -400,7 +409,7 @@ private fun ServiceStatusRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(AppShape.md))
                 .background(tunnelColor.copy(alpha = 0.10f))
                 .clickable { onNavigateSettings(SettingsDest.Tunnel) }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -464,7 +473,7 @@ private fun ServiceStatusRow(
         ) {
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(AppShape.md))
                     .background(accent.copy(alpha = 0.14f))
                     .clickable { onAnalyze() }
                     .padding(horizontal = 10.dp, vertical = 10.dp),
@@ -497,7 +506,7 @@ private fun ServiceStatusItem(
 ) {
     val green = MaterialTheme.colorScheme.primary
     val gray = MaterialTheme.colorScheme.outline
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(AppShape.md)
     val dotColor = if (configured) green else gray
 
     Column(
@@ -622,7 +631,7 @@ private fun SatelliteNode(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(AppShape.xl)
     val sizeDp = 56.dp
     Column(
         modifier
@@ -633,7 +642,7 @@ private fun SatelliteNode(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(sat.icon, fontSize = 22.sp)
+        Icon(sat.icon, contentDescription = sat.label, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(1.dp))
         Text(
             sat.label,

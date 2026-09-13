@@ -231,7 +231,7 @@ object CodeHighlighter {
         }
     }
 
-    private fun mono(fg: Color) = SpanStyle(color = fg, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+    private fun mono(fg: Color) = SpanStyle(color = fg, fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong)
 
     private fun highlightLine(builder: androidx.compose.ui.text.AnnotatedString.Builder, line: String, lang: Lang) {
         val py = lang == Lang.PYTHON

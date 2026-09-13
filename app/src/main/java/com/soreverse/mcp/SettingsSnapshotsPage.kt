@@ -109,7 +109,7 @@ internal fun SettingsSnapshotsPage(t: UiText) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { refresh() }, enabled = !loading) { Text(if (zh) "刷新" else "Refresh", fontSize = 12.sp) }
+            Button(onClick = { refresh() }, enabled = !loading) { Text(if (zh) "刷新" else "Refresh", fontSize = AppText.body) }
             if (loading) CircularProgressIndicator(Modifier.heightIn(max = 22.dp), strokeWidth = 2.dp)
             Text(
                 "${snaps.size} ${if (zh) "份快照" else "snapshots"}",
@@ -126,11 +126,11 @@ internal fun SettingsSnapshotsPage(t: UiText) {
                 val at = s.optLong("createdAt")
                 Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                     Text("$tool  ·  $id", style = MaterialTheme.typography.labelMedium)
-                    Text(path, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp), maxLines = 2)
+                    Text(path, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), maxLines = 2)
                     if (at > 0) Text(fmt.format(Date(at)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { showDiff(tool, id) }) { Text(if (zh) "差异" else "Diff", fontSize = 11.sp) }
-                        TextButton(onClick = { pendingRollback = tool to id }) { Text(if (zh) "回滚" else "Rollback", fontSize = 11.sp) }
+                        TextButton(onClick = { showDiff(tool, id) }) { Text(if (zh) "差异" else "Diff", fontSize = AppText.label) }
+                        TextButton(onClick = { pendingRollback = tool to id }) { Text(if (zh) "回滚" else "Rollback", fontSize = AppText.label) }
                     }
                 }
                 HorizontalDivider()
@@ -140,9 +140,9 @@ internal fun SettingsSnapshotsPage(t: UiText) {
         if (detail.isNotBlank()) {
             Text(detailTitle, style = MaterialTheme.typography.labelMedium)
             Column(Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
-                Text(detail, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp))
+                Text(detail, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
             }
-            OutlinedButton(onClick = { detail = "" }) { Text(if (zh) "收起差异" else "Hide diff", fontSize = 12.sp) }
+            OutlinedButton(onClick = { detail = "" }) { Text(if (zh) "收起差异" else "Hide diff", fontSize = AppText.body) }
         }
     }
 

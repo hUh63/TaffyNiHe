@@ -108,7 +108,7 @@ private fun RequestFieldsEditor(
                     onValueChange = { next -> onChange(fields.toMutableList().also { it[index] = field.copy(key = next) }) },
                     label = { Text(keyHint) },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                     modifier = Modifier.weight(0.9f),
                 )
                 Text(":", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -117,7 +117,7 @@ private fun RequestFieldsEditor(
                     onValueChange = { next -> onChange(fields.toMutableList().also { it[index] = field.copy(value = next) }) },
                     label = { Text(valueHint) },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                     modifier = Modifier.weight(1.1f),
                 )
                 TextButton(onClick = { onChange(fields.filterIndexed { itemIndex, _ -> itemIndex != index }) }) { Text("−") }
@@ -183,7 +183,7 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
                 onValueChange = { endpoint = it; settings.aiEndpoint = it },
                 label = { Text(if (t.zh) "API 端点" else "API endpoint") },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -197,7 +197,7 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
                 onValueChange = { apiKey = it; settings.aiApiKey = it },
                 label = { Text("API Key") },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -211,7 +211,7 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
                 onValueChange = { model = it; settings.aiModel = it },
                 label = { Text(if (t.zh) "模型" else "Model") },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -346,7 +346,7 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
                 onValueChange = { systemPrompt = it; settings.aiSystemPrompt = it },
                 label = { Text(if (t.zh) "系统提示词" else "System prompt") },
                 minLines = 8,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(AppShape.md),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),

@@ -119,19 +119,19 @@ internal fun AnalysisWorkspace(
             Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(onClick = onOpenTask,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                shape = RoundedCornerShape(6.dp)) {
-                Text((cur?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
+                shape = RoundedCornerShape(AppShape.sm)) {
+                Text((cur?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
             }
             if (cur != null && tools.sharedWorkspaceId.isBlank()) {
-                Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.weight(1f))
             Button(onClick = { toolsExpanded = !toolsExpanded },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                shape = RoundedCornerShape(6.dp)) {
-                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
+                shape = RoundedCornerShape(AppShape.sm)) {
+                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
                 Spacer(Modifier.size(3.dp))
-                Text(if (toolsExpanded) "▲" else "▼", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
+                Text(if (toolsExpanded) "▲" else "▼", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
             }
             WorkspacePicker(state, zh)
         }
@@ -146,8 +146,8 @@ internal fun AnalysisWorkspace(
                         colors = if (sel) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                        shape = RoundedCornerShape(6.dp),
-                    ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelSmall, fontSize = 12.sp) }
+                        shape = RoundedCornerShape(AppShape.sm),
+                    ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelSmall, fontSize = AppText.body) }
                 }
             }
         }
@@ -162,14 +162,14 @@ internal fun AnalysisWorkspace(
             if (state.activeTool.isNotBlank()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(AppShape.sm),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                 ) { ToolConsole(state, zh, onAiAnalyze) }
                 Spacer(Modifier.size(4.dp))
             }
             Surface(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                shape = RoundedCornerShape(6.dp),
+                shape = RoundedCornerShape(AppShape.sm),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
             ) { ResultStream(tools, zh) }
         }
@@ -181,52 +181,52 @@ internal fun AnalysisWorkspace(
 private fun AddrBar(state: WorkspaceState, zh: Boolean) {
     val tools = state.tools
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(if (zh) "地址" else "Addr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+        Text(if (zh) "地址" else "Addr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = AppText.label)
         OutlinedTextField(
             value = tools.disasmAddr,
             onValueChange = { tools.disasmAddr = it },
             singleLine = true,
             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
-            shape = RoundedCornerShape(4.dp),
-            placeholder = { Text(if (zh) "地址或符号" else "addr or sym", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            shape = RoundedCornerShape(AppShape.xs),
+            placeholder = { Text(if (zh) "地址或符号" else "addr or sym", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong), color = MaterialTheme.colorScheme.onSurfaceVariant) },
         )
         // 根据当前工具显示不同的辅助输入
         when (state.activeTool) {
             "decompile" -> {
-                Text(if (zh) "符号" else "Sym", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                Text(if (zh) "符号" else "Sym", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = AppText.label)
                 OutlinedTextField(
                     value = tools.decompileTarget,
                     onValueChange = { tools.decompileTarget = it },
                     singleLine = true,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
-                    shape = RoundedCornerShape(4.dp),
-                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    shape = RoundedCornerShape(AppShape.xs),
+                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
             "emulate" -> {
-                Text(if (zh) "符号" else "Sym", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                Text(if (zh) "符号" else "Sym", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = AppText.label)
                 OutlinedTextField(
                     value = tools.emulateSymbol,
                     onValueChange = { tools.emulateSymbol = it },
                     singleLine = true,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
-                    shape = RoundedCornerShape(4.dp),
-                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    shape = RoundedCornerShape(AppShape.xs),
+                    placeholder = { Text(if (zh) "函数名" else "func name", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
             "editor" -> {
-                Text(if (zh) "对比地址" else "Diff", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                Text(if (zh) "对比地址" else "Diff", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = AppText.label)
                 OutlinedTextField(
                     value = tools.decompileTarget,
                     onValueChange = { tools.decompileTarget = it },
                     singleLine = true,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 14.sp),
-                    shape = RoundedCornerShape(4.dp),
-                    placeholder = { Text(if (zh) "对比地址" else "diff addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    shape = RoundedCornerShape(AppShape.xs),
+                    placeholder = { Text(if (zh) "对比地址" else "diff addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
         }
@@ -270,10 +270,10 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
     }
 
     Button(onClick = { showDialog = true; manualPath = ""; manualError = "" },
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), enabled = !tools.opening, shape = RoundedCornerShape(6.dp)) {
-        if (tools.opening) { CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary); Spacer(Modifier.size(4.dp)); Text(if (zh) "加载中…" else "Loading…", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), enabled = !tools.opening, shape = RoundedCornerShape(AppShape.sm)) {
+        if (tools.opening) { CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary); Spacer(Modifier.size(4.dp)); Text(if (zh) "加载中…" else "Loading…", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label) }
         else { Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp)) }
-        Spacer(Modifier.size(4.dp)); Text((tools.sharedSoName.ifBlank { if (zh) "选文件" else "Open" }).take(12), style = MaterialTheme.typography.labelSmall, fontSize = 11.sp)
+        Spacer(Modifier.size(4.dp)); Text((tools.sharedSoName.ifBlank { if (zh) "选文件" else "Open" }).take(12), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
     }
     if (tools.openError.isNotBlank()) Text(tools.openError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
 
@@ -283,7 +283,7 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
             Surface(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(AppShape.xl),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -323,7 +323,7 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                     ) {
                         Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
@@ -341,7 +341,7 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text(if (zh) "输入文件路径" else "Enter file path", maxLines = 1) },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         isError = manualError.isNotBlank(),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             imeAction = androidx.compose.ui.text.input.ImeAction.Done,
@@ -583,10 +583,10 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
 
 @Composable
 private fun SmBtn(label: String, modifier: Modifier, padding: PaddingValues, onClick: () -> Unit, enabled: Boolean = true, loading: Boolean = false) {
-    Button(onClick = onClick, enabled = enabled && !loading, contentPadding = padding, modifier = modifier, shape = RoundedCornerShape(4.dp),
+    Button(onClick = onClick, enabled = enabled && !loading, contentPadding = padding, modifier = modifier, shape = RoundedCornerShape(AppShape.xs),
         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f), disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         if (loading) CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.onPrimary)
-        else Text(label, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp))
+        else Text(label, style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong))
     }
 }
 
@@ -600,23 +600,23 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
             // 顶栏：标签 + 简洁/详细切换
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.size(2.dp))
                     tabs.forEachIndexed { idx, tab ->
                         val isSel = idx == selectedTab
-                        Surface(shape = RoundedCornerShape(4.dp), color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
+                        Surface(shape = RoundedCornerShape(AppShape.xs), color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
                             Row(Modifier.clickable { tools.selectedTabIndex = idx }.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.size(2.dp))
                                 IconButton(onClick = { tools.closeTab(idx) }, modifier = Modifier.size(40.dp)) { Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
                         }
                     }
-                    IconButton(onClick = { tools.clearTabs() }, modifier = Modifier.size(40.dp)) { Text("×", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.error) }
+                    IconButton(onClick = { tools.clearTabs() }, modifier = Modifier.size(40.dp)) { Text("×", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.error) }
                 }
                 Spacer(Modifier.size(4.dp))
-                Surface(onClick = { detailMode = !detailMode }, shape = RoundedCornerShape(4.dp), color = if (detailMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
-                    Text(if (detailMode) (if (zh) "详细" else "Detail") else (if (zh) "简洁" else "Simple"), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = if (detailMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                Surface(onClick = { detailMode = !detailMode }, shape = RoundedCornerShape(AppShape.xs), color = if (detailMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
+                    Text(if (detailMode) (if (zh) "详细" else "Detail") else (if (zh) "简洁" else "Simple"), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = if (detailMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Spacer(Modifier.size(4.dp))
@@ -628,11 +628,11 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
             // 底部导航
             Spacer(Modifier.size(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { if (selectedTab > 0) tools.selectedTabIndex-- }, enabled = selectedTab > 0, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), shape = RoundedCornerShape(6.dp)) { Text("◀ " + if (zh) "上一页" else "Prev", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
+                Button(onClick = { if (selectedTab > 0) tools.selectedTabIndex-- }, enabled = selectedTab > 0, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), shape = RoundedCornerShape(AppShape.sm)) { Text("◀ " + if (zh) "上一页" else "Prev", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label) }
                 Spacer(Modifier.size(12.dp))
                 Text("${selectedTab + 1} / ${tabs.size}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.size(12.dp))
-                Button(onClick = { if (selectedTab < tabs.size - 1) tools.selectedTabIndex++ }, enabled = selectedTab < tabs.size - 1, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), shape = RoundedCornerShape(6.dp)) { Text(if (zh) "下一页" else "Next" + " ▶", style = MaterialTheme.typography.labelSmall, fontSize = 11.sp) }
+                Button(onClick = { if (selectedTab < tabs.size - 1) tools.selectedTabIndex++ }, enabled = selectedTab < tabs.size - 1, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), shape = RoundedCornerShape(AppShape.sm)) { Text(if (zh) "下一页" else "Next" + " ▶", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label) }
             }
         }
     } else {
@@ -650,10 +650,10 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
 private fun TextSummary(text: String, zh: Boolean) {
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
-    if (json == null) { Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp); return }
+    if (json == null) { Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.body, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp); return }
     val sb = StringBuilder()
     describeJson(json, sb, zh, 0)
-    Text(sb.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
+    Text(sb.toString(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.body, color = MaterialTheme.colorScheme.onSurface, lineHeight = 18.sp)
 }
 
 /** 将任意 JSON 描述为文字，不产生问号或省略号 */
@@ -1011,7 +1011,7 @@ private fun overviewExtrasText(ov: JSONObject, zh: Boolean): String {
 private fun ExtraInfoText(ov: JSONObject, zh: Boolean) {
     val text = remember(ov, zh) { overviewExtrasText(ov, zh) }
     if (text.isNotBlank()) {
-        Text(text, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(text, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -1065,7 +1065,7 @@ private fun fieldLabelCh(k: String): String = when (k) {
 private fun StructuredJsonView(text: String, zh: Boolean) {
     if (text.isBlank()) return
     val json = runCatching { JSONObject(text) }.getOrNull()
-    if (json == null) { Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, lineHeight = 16.sp); return }
+    if (json == null) { Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurface, lineHeight = 16.sp); return }
 
     val ov = json.optJSONObject("overview")
     if (ov != null) {
@@ -1080,7 +1080,7 @@ private fun StructuredJsonView(text: String, zh: Boolean) {
                         val s = sec.optJSONObject(i) ?: continue; val label = s.optString("label", s.optString("id", "?"))
                         val active = s.optBoolean("active", false); val desc = s.optString("description", "")
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface); Text(if (active) (if (zh) "✓ 启用" else "✓ Yes") else (if (zh) "✗ 未启用" else "✗ No"), style = MaterialTheme.typography.bodySmall, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
-                        if (desc.isNotBlank()) Text("  $desc", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                        if (desc.isNotBlank()) Text("  $desc", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = AppText.label)
                     }
                 }
             }
@@ -1109,7 +1109,7 @@ private fun StructuredJsonView(text: String, zh: Boolean) {
     val cryptoArr = json.optJSONArray("cryptoFindings") ?: json.optJSONArray("findings") ?: json.optJSONArray("scans")
     if (cryptoArr != null && cryptoArr.length() > 0) { StructuredCryptoCard(cryptoArr, zh); return }
     val keys = json.keys().asSequence().filter { it != "ok" && it != "pagination" }.toList()
-    if (keys.isEmpty()) { Text(json.toString(2), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface); return }
+    if (keys.isEmpty()) { Text(json.toString(2), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurface); return }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         keys.forEach { k -> val v = json.opt(k); val vStr = when (v) { is JSONObject -> "{${v.length()} fields}\n${v.toString(2).take(500)}"; is org.json.JSONArray -> "[${v.length()} items]\n${(0 until v.length()).joinToString("\n") { i -> "  [$i] ${v.opt(i)}" }.take(500)}"; null -> "—"; else -> v.toString() }; Kv(k, vStr) }
     }
@@ -1141,7 +1141,7 @@ private fun ItemsTable(items: JSONArray, zh: Boolean) {
                     is org.json.JSONArray -> "[${item.length()} sub-items]"
                     else -> item.toString()
                 }
-                Text("• $line", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("• $line", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         return
@@ -1157,13 +1157,13 @@ private fun ItemsTable(items: JSONArray, zh: Boolean) {
         for (i in 0 until rows) {
             val o = items.optJSONObject(i)
             if (o == null) {
-                Text("• ${items.opt(i)}", modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("• ${items.opt(i)}", modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 continue
             }
             Row(Modifier.fillMaxWidth()) {
                 columns.forEach { c ->
                     val v = o.opt(c)
-                    Text(v?.toString() ?: "—", modifier = Modifier.width(colW).padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(v?.toString() ?: "—", modifier = Modifier.width(colW).padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -1177,8 +1177,8 @@ private fun StructuredCryptoCard(cryptoArr: JSONArray, zh: Boolean) {
         Text(if (zh) "共 ${cryptoArr.length()} 项发现" else "${cryptoArr.length()} findings", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         for (i in 0 until cryptoArr.length()) {
             val c = cryptoArr.optJSONObject(i) ?: continue; val name = c.optString("name", c.optString("algorithm", c.optString("type", "?"))); val count = c.optInt("count", c.optInt("matches", 0)); val detail = c.optString("detail", c.optString("description", ""))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("• $name", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface); if (count > 0) Text("×$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
-            if (detail.isNotBlank()) Text("  $detail", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("• $name", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurface); if (count > 0) Text("×$count", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+            if (detail.isNotBlank()) Text("  $detail", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = AppText.label)
         }
     }
 }
@@ -1190,19 +1190,19 @@ private fun JsonKeyValues(json: JSONObject, zh: Boolean, keys: List<String>) {
 
 @Composable
 private fun SectionCard(title: String, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(6.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.6f))) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(AppShape.sm), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.6f))) {
         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) { Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary); content() }
     }
 }
 
 @Composable
 private fun Kv(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurface) }
 }
 
 @Composable
 private fun MetricRowFull(vararg pairs: Pair<String, String>) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { pairs.forEach { (label, value) -> Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary); Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp) } } }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { pairs.forEach { (label, value) -> Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary); Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = AppText.label) } } }
 }
 
 private fun fmtBytes(v: Long): String {

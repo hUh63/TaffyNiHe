@@ -178,7 +178,7 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
                         onValueChange = { decryptPassword = it; decryptError = null },
                         label = { Text(t.backupEncryptPassword) },
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(AppShape.md),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -306,7 +306,7 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -326,7 +326,7 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
                     supportingText = if (encryptConfirm.isNotEmpty() && encryptPassword != encryptConfirm) {
                         { Text(t.backupPasswordMismatch, color = MaterialTheme.colorScheme.error) }
                     } else null,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(AppShape.md),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
@@ -416,7 +416,7 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
                         Text(
                             t.backupRestoreAction,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(AppShape.sm))
                                 .clickable { importLauncher.launch(arrayOf("application/json", "*/*")) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             style = MaterialTheme.typography.bodyMedium,

@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicLong
  * 4. 数据连接用 CountDownLatch 避免线程阻塞
  * 5. 流量统计
  * 6. 保活探测（控制连接 idle 检测）
+ * 7. 半关闭（half-close）转发：单方向 EOF 只 shutdownOutput 对端写半端，
+ *    另一方向继续传输直至自然结束（对齐上游 bore v0.6.0 copy_bidirectional 修复）
  */
 class BoreClient(
     private val boreHost: String = "bore.pub",
@@ -73,6 +75,10 @@ class BoreClient(
         const val RECONNECT_MAX_DELAY_MS = 30000
         const val CONNECT_TIMEOUT_TOTAL_MS = 60000
         const val MAX_FRAME_LENGTH = 65536
+
+        // 半关闭（half-close）后等待对侧自然收尾的上限：一条连接某方向 EOF 后，
+        // 另一方向仍可继续传输；超过此时长仍未结束才强制收尾（死连接兜底）。
+        const val HALF_CLOSE_GRACE_MS = 120_000L
 
         fun parseHost(hostPort: String): String {
             var raw = hostPort.trim()
@@ -391,13 +397,18 @@ class BoreClient(
                 val localOut = localSocket.getOutputStream()
                 val dataIn = dataSocket.getInputStream()
                 fireEvent("${now()} ⇄ 开始双向转发")
-                // 用 CountDownLatch 替代 join，避免线程阻塞
+                // 半关闭（half-close）语义，对齐上游 ekzhang/bore v0.6.0 对 copy_bidirectional 的修复：
+                // 某一方向读到 EOF 时只关闭「对端的写半端」(shutdownOutput)，放行另一方向继续传输，
+                // 直到两个方向都自然结束；避免「客户端发完请求就 shutdown write、响应还没回来」被误判为断开。
+                val ds = dataSocket!!
+                val ls = localSocket!!
                 val latch = CountDownLatch(2)
                 val forwarder1 = Thread {
                     try {
                         pipe(dataIn, localOut)
                     } catch (_: Exception) {
                     } finally {
+                        runCatching { ls.shutdownOutput() }
                         latch.countDown()
                     }
                 }.apply { isDaemon = true; name = "bore-pipe-c2l-$connId" }
@@ -406,15 +417,18 @@ class BoreClient(
                         pipe(localIn, dataOut)
                     } catch (_: Exception) {
                     } finally {
+                        runCatching { ds.shutdownOutput() }
                         latch.countDown()
                     }
                 }.apply { isDaemon = true; name = "bore-pipe-l2c-$connId" }
                 connectionThreads[connId] = forwarder1
                 forwarder1.start()
                 forwarder2.start()
-                // 等待任一方向结束，最多等 30 秒
-                latch.await(30, TimeUnit.SECONDS)
-                // 强制关闭两端 socket 以中断另一方向的 pipe
+                // 等待两个方向都自然收尾；半关闭后对侧仍可继续传，仅在超时兜底时强制收尾。
+                if (!latch.await(HALF_CLOSE_GRACE_MS, TimeUnit.MILLISECONDS)) {
+                    fireEvent("${now()} ⏱ 数据连接 $connId 半关闭后超时，强制收尾")
+                }
+                // 强制关闭两端 socket 以中断仍阻塞在 read 上的方向
                 runCatching { dataSocket.close() }
                 runCatching { localSocket.close() }
                 latch.await(2, TimeUnit.SECONDS)

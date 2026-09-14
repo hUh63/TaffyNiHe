@@ -82,9 +82,6 @@ target_link_libraries(blutter_bridge PRIVATE dl log)
 
 # 逆核: 启用 xAnSo(ELF section 重建) native 库 —— third_party/xAnSo-src 由 CI 拉取。
 # 库缺失/编译失败时 XAnSoEngine 用 runCatching 优雅降级, 不影响 App 启动。
-NOTE(逆核 路线B): xAnSo-src submodule 未拉取(空目录), 暂时禁用 xanso_native 库以保证 APK 能编译。
-XAnSoEngine.kt 用 runCatching{System.loadLibrary("xanso_native")} 加载, 库缺失时 available()=false, 所有调用优雅返回 null, 不会崩溃。
-后续拉取 third_party/xAnSo-src submodule 后取消下面注释即可恢复 ELF section 重建功能。
 set(XANSO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/xAnSo-src")
 
 # Compatibility header for Windows-specific includes in xAnSo.

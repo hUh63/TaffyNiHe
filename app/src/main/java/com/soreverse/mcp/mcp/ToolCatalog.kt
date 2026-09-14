@@ -1114,6 +1114,8 @@ object ToolCatalog {
         *AntiDebugTool.ALL.toTypedArray(),
         // 塔菲逆核: APK 组件攻击面分析(exported 组件/权限/危险开关)
         *AttackSurfaceTool.ALL.toTypedArray(),
+        // 塔菲逆核: DEX 字符串->引用方法交叉引用
+        *StringXrefTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

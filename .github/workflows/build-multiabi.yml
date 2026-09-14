@@ -1,0 +1,213 @@
+name: Build multi-ABI APK
+
+# 多 ABI 支持流水线：为 4 个 ABI 各自造齐 native so
+#   librz_native.so (rizin+LIEF 自建) / libcapstone / libkeystone / libunicorn (自建)
+#   libcloudflared.so (Go 交叉编译) / libfrida_server.so (官方下载) / libc++_shared.so (NDK)
+# 然后组装进 app/src/main/jniLibs/<abi>/ 并使用 -PabiFilter 打包多 ABI APK。
+#
+# 说明：libdsmcp_native.so / libblutter_*.so / libxanso_native.so 目前仅有 arm64 版，
+# 非 arm64 ABI 缺失时对应能力按塔菲「可优雅降级」原则降级（不影响 App 启动与核心引擎）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      abis:
+        description: '要打包的 ABI（逗号分隔，与矩阵一致即可）'
+        required: false
+        default: 'arm64-v8a,armeabi-v7a,x86,x86_64'
+  push:
+    paths:
+      - '.github/workflows/build-multiabi.yml'
+      - 'build-native-android.sh'
+      - 'rizin-cross-*.ini'
+      - 'third_party/patches/**'
+      - 'app/src/main/cpp/**'
+      - 'scripts/build-unidbg-native.sh'
+      - 'app/build.gradle.kts'
+
+concurrency:
+  group: build-multiabi-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prep:
+    name: prep-${{ matrix.abi }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
+    steps:
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v5
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 NDK 与构建工具
+        run: |
+          sdkmanager "ndk;28.2.13676358" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config cmake golang-go
+
+      - name: 克隆源码 (rizin / LIEF / capstone / keystone / unicorn)
+        run: |
+          set -e
+          clone() { [ -d "$2" ] || git clone --depth 1 $3 "$1" "$2"; }
+          [ -d third_party/rizin-src/librz/include ] || git clone --depth 1 --branch v0.9.1 https://github.com/rizinorg/rizin.git third_party/rizin-src
+          [ -d third_party/lief-src ] || git clone --depth 1 --branch 0.16.1 https://github.com/lief-project/LIEF.git third_party/lief-src
+          [ -d third_party/zhkl-capstone-src ] || (git clone --depth 1 https://github.com/zhkl0228/capstone.git third_party/zhkl-capstone-src \
+            || git clone --depth 1 --branch 4.0.2 https://github.com/capstone-engine/capstone.git third_party/zhkl-capstone-src)
+          [ -d third_party/keystone-engine-src ] || git clone --depth 1 --branch 0.9.2 https://github.com/keystone-engine/keystone.git third_party/keystone-engine-src
+          [ -d third_party/unicorn-zhkl0228 ] || (git clone --depth 1 https://github.com/zhkl0228/unicorn.git third_party/unicorn-zhkl0228 \
+            || git clone --depth 1 https://github.com/unicorn-engine/unicorn.git third_party/unicorn-zhkl0228)
+
+      - name: 缓存 rizin/LIEF 产物
+        uses: actions/cache@v4
+        with:
+          path: |
+            rizin-build/${{ matrix.abi }}
+            third_party/lief-build/${{ matrix.abi }}
+          key: native-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini', 'third_party/patches/**') }}
+
+      - name: 编译 rizin + LIEF
+        env:
+          TARGET_ABI: ${{ matrix.abi }}
+        run: bash build-native-android.sh
+
+      - name: 链接 librz_native.so
+        run: |
+          set -euo pipefail
+          cmake -G Ninja -S app/src/main/cpp -B "build/native-${{ matrix.abi }}" \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=android-26 -DCMAKE_BUILD_TYPE=Release
+          cmake --build "build/native-${{ matrix.abi }}" --target rz_native --parallel 4
+          mkdir -p "app/src/main/jniLibs/${{ matrix.abi }}"
+          cp "build/native-${{ matrix.abi }}/librz_native.so" "app/src/main/jniLibs/${{ matrix.abi }}/"
+
+      - name: 编译 unidbg 原生库 (capstone/keystone/unicorn)
+        run: bash scripts/build-unidbg-native.sh -Abi ${{ matrix.abi }} -Ndk "$ANDROID_NDK_HOME"
+
+      - name: 编译 cloudflared (Go)
+        run: |
+          set -euo pipefail
+          case "${{ matrix.abi }}" in
+            arm64-v8a)   G=arm64 ;;
+            armeabi-v7a) G=arm ;;
+            x86)         G=386 ;;
+            x86_64)      G=amd64 ;;
+          esac
+          git clone --depth 1 https://github.com/cloudflare/cloudflared.git /tmp/cloudflared-src
+          ( cd /tmp/cloudflared-src && GOOS=linux GOARCH=$G CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+              -o "$GITHUB_WORKSPACE/app/src/main/jniLibs/${{ matrix.abi }}/libcloudflared.so" ./cmd/cloudflared )
+
+      - name: 注入 frida-server
+        run: |
+          set -euo pipefail
+          FRIDA_VERSION="17.18.0"
+          case "${{ matrix.abi }}" in
+            arm64-v8a)   A=arm64 ;;
+            armeabi-v7a) A=arm ;;
+            x86)         A=x86 ;;
+            x86_64)      A=x86_64 ;;
+          esac
+          curl -sL --retry 3 --max-time 500 \
+            "https://github.com/frida/frida/releases/download/${FRIDA_VERSION}/frida-server-${FRIDA_VERSION}-android-${A}.xz" -o /tmp/frida.xz
+          python3 - <<PY
+          import lzma
+          data = lzma.open('/tmp/frida.xz').read()
+          open('$GITHUB_WORKSPACE/app/src/main/jniLibs/${{ matrix.abi }}/libfrida_server.so','wb').write(data)
+          print('frida-server %.1f MB' % (len(data)/1048576))
+          PY
+
+      - name: 复制 libc++_shared.so
+        run: |
+          cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ matrix.abi }}/libc++_shared.so" \
+             "app/src/main/jniLibs/${{ matrix.abi }}/" || true
+
+      - name: 校验并上传本 ABI 的 so
+        run: |
+          set -euo pipefail
+          echo "=== ${{ matrix.abi }} jniLibs ==="
+          ls -lh "app/src/main/jniLibs/${{ matrix.abi }}/"
+          test -f "app/src/main/jniLibs/${{ matrix.abi }}/librz_native.so"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jniLibs-${{ matrix.abi }}
+          path: app/src/main/jniLibs/${{ matrix.abi }}/
+          if-no-files-found: error
+
+  package:
+    name: package-multiabi-apk
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 配置 JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: 下载各 ABI 的 native so
+        uses: actions/download-artifact@v4
+        with:
+          pattern: jniLibs-*
+          path: app/src/main/jniLibs
+
+      - name: 归位到 jniLibs/<abi>/
+        run: |
+          set -euo pipefail
+          for d in app/src/main/jniLibs/jniLibs-*; do
+            [ -d "$d" ] || continue
+            abi="${d##*jniLibs-}"
+            mkdir -p "app/src/main/jniLibs/$abi"
+            cp -f "$d"/* "app/src/main/jniLibs/$abi/" || true
+            rm -rf "$d"
+          done
+          echo "=== 最终 jniLibs 结构 ==="
+          find app/src/main/jniLibs -name '*.so' | sort
+
+      - name: 恢复签名密钥
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release/so-reverse-mcp-release.jks
+          fi
+          if [ -n "${{ secrets.KEYSTORE_PROPERTIES }}" ]; then
+            echo "${{ secrets.KEYSTORE_PROPERTIES }}" > release/keystore.properties
+          fi
+          test -f release/so-reverse-mcp-release.jks || { echo "::error::缺少签名密钥"; exit 1; }
+          test -f release/keystore.properties || { echo "::error::缺少 keystore.properties"; exit 1; }
+
+      - name: 打包多 ABI APK
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace \
+            -PabiFilter=arm64-v8a,armeabi-v7a,x86,x86_64
+
+      - name: 收集 APK + SHA256SUMS + mapping
+        run: |
+          set -euo pipefail
+          mkdir -p apk-output
+          find app/build/outputs/apk -name '*.apk' -exec cp {} apk-output/ \;
+          ls -lh apk-output/
+          [ -f app/build/outputs/mapping/release/mapping.txt ] && cp app/build/outputs/mapping/release/mapping.txt apk-output/mapping.txt || true
+          ( cd apk-output && sha256sum *.apk | tee SHA256SUMS )
+
+      - name: 上传多 ABI APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiabi-apk
+          path: |
+            apk-output/*.apk
+            apk-output/SHA256SUMS
+            apk-output/mapping.txt
+          if-no-files-found: error

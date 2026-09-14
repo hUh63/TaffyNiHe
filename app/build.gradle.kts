@@ -43,10 +43,16 @@ android {
 
     splits {
         abi {
-            // 逆核: 只出 arm64-v8a。原版 native so 我们只提取了 arm64 版, 且目标用户(逆向)基本都是 arm64 机。
+            // 逆核: 默认只出 arm64-v8a(与既有发布一致)。
+            // 多 ABI 打包由 build-multiabi workflow 传入
+            //   -PabiFilter=arm64-v8a,armeabi-v7a,x86,x86_64
+            // 覆盖; 未指定时行为不变, 不影响既有单 ABI 发布流程。
             isEnable = true
             reset()
-            include("arm64-v8a")
+            val abiFilter = (project.findProperty("abiFilter") as String?)
+                ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+                ?: listOf("arm64-v8a")
+            include(*abiFilter.toTypedArray())
             isUniversalApk = false
         }
     }

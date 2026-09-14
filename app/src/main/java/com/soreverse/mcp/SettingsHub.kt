@@ -222,6 +222,13 @@ internal fun SettingsHub(
                     SettingsTile(if (t.zh) "Logcat 查看器" else "Logcat Viewer", if (t.zh) "实时日志 / 过滤 / 着色" else "Live logs / filter / color", Icons.Default.Description, AppPalette.teal, { onDest(SettingsDest.LogcatViewer) }, Modifier.weight(1f).fillMaxHeight())
                     Box(Modifier.weight(1f))
                 }
+                SurfacePanel {
+                    NavRow(if (t.zh) "DEX / APK 浏览器" else "DEX / APK Explorer", if (t.zh) "可视化浏览类与方法" else "Browse classes & methods", Icons.Default.Storage, onClick = { onDest(SettingsDest.DexExplorer) })
+                    GroupDivider()
+                    NavRow(if (t.zh) "APK Manifest 编辑" else "APK Manifest Editor", if (t.zh) "图形化编辑包名 / 权限 / 组件" else "Edit package / permissions / components", Icons.Default.Description, onClick = { onDest(SettingsDest.ApkEdit) })
+                    GroupDivider()
+                    NavRow("Blutter", if (t.zh) "Flutter 3.44 / Dart 3.12.2 / 完全离线" else "Flutter 3.44 / Dart 3.12.2 / fully offline", Icons.Default.Memory, onClick = { onDest(SettingsDest.Blutter) })
+                }
                 Text(if (t.zh) "开发环境" else "Dev Environment", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "Linux 环境" else "Linux Env", if (t.zh) "Alpine / Ubuntu / 无 root 可用" else "Alpine / Ubuntu / no-root", Icons.Default.Terminal, AppPalette.green, { onDest(SettingsDest.Linux) }, Modifier.weight(1f).fillMaxHeight())
@@ -235,7 +242,7 @@ internal fun SettingsHub(
                     SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 管理 / 临时清理" else "Directory / manage / temp clean", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
                     SettingsTile(if (t.zh) "扩展系统" else "Extensions", if (t.zh) "Python 插件 / Xed 转换 / 教程" else "Python plugins / Xed convert / guide", Icons.Default.Extension, AppPalette.blue, { onDest(SettingsDest.Extensions) }, Modifier.weight(1f).fillMaxHeight())
                 }
-                Text(if (t.zh) "引擎" else "Engine", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                Text(if (t.zh) "引擎与产物" else "Engine & artifacts", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
                     NavRow(if (t.zh) "返回数量" else "Result limits", "limit / disasm / hexdump", Icons.Default.Analytics, onClick = { onDest(SettingsDest.Limits) })
                     GroupDivider()
@@ -245,15 +252,9 @@ internal fun SettingsHub(
                     GroupDivider()
                     NavRow(if (t.zh) "APK 签名设置" else "APK Signing", if (t.zh) "APK 签名 / 密钥（构建产物相关）" else "APK signing / keys", Icons.Default.Build, onClick = { onDest(SettingsDest.ApkSign) })
                     GroupDivider()
-                    NavRow(if (t.zh) "DEX / APK 浏览器" else "DEX / APK Explorer", if (t.zh) "可视化浏览类与方法" else "Browse classes & methods", Icons.Default.Storage, onClick = { onDest(SettingsDest.DexExplorer) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "APK Manifest 编辑" else "APK Manifest Editor", if (t.zh) "图形化编辑包名 / 权限 / 组件" else "Edit package / permissions / components", Icons.Default.Description, onClick = { onDest(SettingsDest.ApkEdit) })
-                    GroupDivider()
                     NavRow(if (t.zh) "编辑快照 / 回滚" else "Edit Snapshots", if (t.zh) "查看差异并回滚写操作" else "Review diffs & roll back", Icons.Default.Restore, onClick = { onDest(SettingsDest.Snapshots) })
                     GroupDivider()
                     NavRow(if (t.zh) "逆向工作流图 (DAG)" else "Reverse Workflow (DAG)", if (t.zh) "全流程导航，节点可跳转" else "End-to-end flow, nodes jump", Icons.Default.AccountTree, onClick = { onDest(SettingsDest.Workflow) })
-                    GroupDivider()
-                    NavRow("Blutter", if (t.zh) "Flutter 3.44 / Dart 3.12.2 / 完全离线" else "Flutter 3.44 / Dart 3.12.2 / fully offline", Icons.Default.Memory, onClick = { onDest(SettingsDest.Blutter) })
                 }
 
                 Text(if (t.zh) "诊断与关于" else "Diagnostics & about", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))

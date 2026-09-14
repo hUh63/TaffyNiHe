@@ -47,12 +47,32 @@ jobs:
         uses: actions/checkout@v5
 
       - name: 准备 Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          set -e
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK" ]; then SDK=/usr/local/lib/android/sdk; fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SM_BIN="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | head -1)"
+          if [ -n "$SM_BIN" ]; then
+            echo "$SM_BIN" >> "$GITHUB_PATH"
+            echo "使用 runner 自带 cmdline-tools: $SM_BIN"
+          else
+            echo "::error::未找到 sdkmanager，无法继续"; exit 1
+          fi
 
       - name: 安装 NDK 与构建工具
         run: |
-          sdkmanager "ndk;28.2.13676358" > /dev/null
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          set -e
+          for i in 1 2 3 4; do
+            echo "尝试安装 NDK (第 $i 次)..."
+            if sdkmanager --install "ndk;28.2.13676358" "platform-tools" > /dev/null 2>&1; then
+              echo "NDK 安装成功"; break
+            fi
+            [ "$i" = "4" ] && { echo "::error::sdkmanager 安装 NDK 连续失败"; exit 1; }
+            sleep 15
+          done
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/28.2.13676358" >> "$GITHUB_ENV"
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config cmake golang-go
 

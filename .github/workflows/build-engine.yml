@@ -53,9 +53,10 @@ jobs:
       - name: 克隆 Rizin
         run: |
           if [ ! -d third_party/rizin-src/librz/include ]; then
-            # rizin 稳定 tag 最高为 v0.9.1；现有 librz_native.so 对应 rizin 0.10.0(开发版)，
-            # 故与上游 SOMCP 一致地取 main(0.10.x)，保持 API / JNI 兼容。
-            git clone --depth 1 https://github.com/rizinorg/rizin.git third_party/rizin-src
+            # rizin main(0.10.x-dev) 当前存在编译错误 (librz/util/file.c: 'n_bytes' undeclared)，
+            # 先取最近稳定 tag v0.9.1 打通「自建流水线」(可编译、可复现、可缓存)；
+            # main 修复后再跟进升级。
+            git clone --depth 1 --branch v0.9.1 https://github.com/rizinorg/rizin.git third_party/rizin-src
           fi
 
       - name: 克隆 LIEF 0.16.1

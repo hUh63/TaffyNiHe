@@ -1,3 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Copyright (C) 2026 bilieebiliee1-design
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+//
 // rizin_core.cpp — JNI bridge exposing Rizin (librz) full capabilities to Kotlin.
 //
 // Rizin is the sole disasm/asm/analysis/search/emulation/diff engine.
@@ -230,7 +247,8 @@ namespace {
         const ut64 maxScan = 4ull * 1024ull * 1024ull;
         if (rangeTo - rangeFrom > maxScan) rangeTo = rangeFrom + maxScan;
         std::vector<uint8_t> buf(static_cast<size_t>(rangeTo - rangeFrom));
-        const int n = rz_io_read_at(core->io, rangeFrom, buf.data(), static_cast<int>(buf.size()));
+        const int n = rz_io_read_at_mapped(core->io, rangeFrom, buf.data(), buf.size())
+            ? static_cast<int>(buf.size()) : 0;
         if (n < 8) return;
         const size_t bytes = static_cast<size_t>(n) & ~size_t(3);
         for (size_t off = 0; off + 4 <= bytes; off += 4) {
@@ -264,7 +282,8 @@ namespace {
         const ut64 maxSpan = 0x10000;
         if (hardEnd - start > maxSpan) hardEnd = start + maxSpan;
         std::vector<uint8_t> buf(static_cast<size_t>(hardEnd - start));
-        const int n = rz_io_read_at(core->io, start, buf.data(), static_cast<int>(buf.size()));
+        const int n = rz_io_read_at_mapped(core->io, start, buf.data(), buf.size())
+            ? static_cast<int>(buf.size()) : 0;
         if (n < 8) return 0;
         const size_t bytes = static_cast<size_t>(n) & ~size_t(3);
         bool sawBody = false;
@@ -444,7 +463,7 @@ namespace {
         if (end > addr + 0x80) end = addr + 0x80;
         if (end <= addr || end - addr < 8) return false;
         std::vector<uint8_t> code(static_cast<size_t>(end - addr));
-        if (!rz_io_read_at(core->io, addr, code.data(), code.size())) return false;
+        if (!rz_io_read_at_mapped(core->io, addr, code.data(), code.size())) return false;
         const int read = static_cast<int>(code.size());
         int syscallNumber = -1;
         bool hasSvc = false;
@@ -564,27 +583,81 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzConfigureGhidra(
         ghidraPluginDir = jStr(env, pluginDir);
         ghidraSleighHome = jStr(env, sleighHome);
         if (!ghidraPluginDir.empty()) setenv("RZ_LIB_PLUGINS", ghidraPluginDir.c_str(), 1);
+        if (!ghidraSleighHome.empty()) setenv("SLEIGHHOME", ghidraSleighHome.c_str(), 1);
         RZ_NATIVE_LOG("configure ghidra pluginDir=%s sleighHome=%s", ghidraPluginDir.c_str(), ghidraSleighHome.c_str());
     }
+    // Do NOT spin up a full RzCore here just to probe the Ghidra plugin. On the
+    // x86_64 emulator assigning the "pdg?" command to a short-lived RzCore that
+    // is immediately torn down with rz_core_free() triggers a use-after-free in
+    // Rizin's plugin/config teardown (>#52, signal 11 / SEGV_MAPERR at
+    // 0xdead1005, ~1s after process start). The plugin gets loaded lazily by the
+    // actual analysis path (applyGhidraConfig is already called before every
+    // decompile), so here we only verify the plugin file is present.
     bool ok = !ghidraPluginDir.empty() && !ghidraSleighHome.empty();
     if (ok) {
-        RzCore* core = rz_core_new();
-        if (core) {
-            applyGhidraConfig(core);
-            char* help = rz_core_cmd_str(core, "pdg?");
-            bool hasPdg = help && help[0] && std::string(help).find("unknown command") == std::string::npos;
-            RZ_NATIVE_LOG("ghidra selftest pdg=%d help=%s", hasPdg ? 1 : 0, help ? help : "");
-            if (help) free(help);
-            rz_core_free(core);
-            ok = hasPdg;
+        std::string pluginFile = ghidraPluginDir + "/libcore_ghidra.so";
+        FILE* f = fopen(pluginFile.c_str(), "r");
+        if (f) {
+            fclose(f);
         } else {
             ok = false;
+            RZ_NATIVE_LOG("ghidra plugin missing at %s", pluginFile.c_str());
         }
     }
     return ok;
 }
 
 extern "C" {
+
+// JNI 冒烟自检：验证 librz_native.so 是真实 Rizin 而非空 stub。
+// 空 stub（rizin_stub.cpp）没有本函数符号，Kotlin 侧调用会抛
+// UnsatisfiedLinkError，从而让 available() 如实返回 false，而不是
+// 把"能 dlopen"误报成"Rizin 可用"。同时用 ARM64 的 `ret` 做一次真实
+// 解码，确认 asm 插件（asm.arm）已静态注册。
+JNIEXPORT jstring JNICALL
+Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzSelfTest(
+        JNIEnv* env, jobject) {
+    RzAsm* a = rz_asm_new();
+    if (!a) return env->NewStringUTF("ERROR:rz_asm_new failed");
+    // 先试 AArch64（`ret` = C0 03 5F D6）；若该构建未注册 arm64 插件，
+    // 回退验证 ARM32（`mov r0, r0` = 00 00 A0 E1），避免误伤仅含 arm32
+    // 插件（armeabi-v7a 构建）的 Rizin 库。
+    struct ArmProbe { const char* arch; int bits; const uint8_t bytes[4]; };
+    const ArmProbe probes[] = {
+        { "arm", 64, { 0xC0, 0x03, 0x5F, 0xD6 } },
+        { "arm", 32, { 0x00, 0x00, 0xA0, 0xE1 } },
+    };
+    bool okArch = false;
+    int hitBits = 0;
+    std::string disasm;
+    for (const auto& probe : probes) {
+        if (!rz_asm_set_arch(a, probe.arch, probe.bits)) continue;
+        okArch = true;
+        hitBits = probe.bits;
+        disasm.clear();
+        rz_asm_set_pc(a, 0x1000);
+        RzAsmCode* code = rz_asm_mdisassemble(a, probe.bytes, 4);
+        if (code) {
+            if (code->assembly) disasm = code->assembly;
+            rz_asm_code_free(code);
+        }
+        if (!disasm.empty()) break;
+    }
+    rz_asm_free(a);
+    if (!okArch) {
+        RZ_NATIVE_LOG("rzSelfTest ERROR: rz_asm_set_arch(arm,*) failed — asm.arm plugin not registered");
+        return env->NewStringUTF("ERROR:rz_asm_set_arch(arm,32/64) failed — asm.arm plugin not registered");
+    }
+    if (disasm.empty()) {
+        RZ_NATIVE_LOG("rzSelfTest ERROR: failed to decode ARM probe (ret / mov r0,r0)");
+        return env->NewStringUTF("ERROR:failed to decode ARM probe (arm64 ret C0 03 5F D6 / arm32 mov r0,r0 00 00 A0 E1)");
+    }
+    char buf[192];
+    snprintf(buf, sizeof(buf), "arch_arm%d=%d disasm=%s",
+             hitBits, 1, disasm.c_str());
+    RZ_NATIVE_LOG("rzSelfTest %s", buf);
+    return env->NewStringUTF(buf);
+}
 
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDisassemble(
@@ -671,7 +744,8 @@ static void seedAarch64BranchXrefs(RzCore* core, ut64 targetVa) {
                 ut64 scanSize = sec->vsize;
                 if (scanSize > maxScan) scanSize = maxScan;
                 std::vector<uint8_t> buf(static_cast<size_t>(scanSize));
-                const int n = rz_io_read_at(core->io, sec->vaddr, buf.data(), static_cast<int>(buf.size()));
+                const int n = rz_io_read_at_mapped(core->io, sec->vaddr, buf.data(), buf.size())
+                    ? static_cast<int>(buf.size()) : 0;
                 if (n < 4) continue;
                 const size_t bytes = static_cast<size_t>(n) & ~size_t(3);
                 for (size_t off = 0; off + 4 <= bytes; off += 4) {
@@ -1118,7 +1192,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDiff(
     env->GetByteArrayRegion(jbytesB, 0, lenB, reinterpret_cast<jbyte*>(bufB.data()));
 
     RzDiff* diff = rz_diff_bytes_new(bufA.data(), (ut32)bufA.size(),
-                                      bufB.data(), (ut32)bufB.size(), nullptr);
+                                      bufB.data(), (ut32)bufB.size());
     if (!diff) return env->NewStringUTF("{\"error\":\"diff\"}");
 
     double ratio = 0.0;
@@ -1307,7 +1381,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
 
     if (nextBoundary > va && nextBoundary - va <= 0x20000) {
         std::vector<uint8_t> targetCode(static_cast<size_t>(nextBoundary - va));
-        const int targetRead = rz_io_read_at(core->io, va, targetCode.data(), targetCode.size())
+        const int targetRead = rz_io_read_at_mapped(core->io, va, targetCode.data(), targetCode.size())
             ? static_cast<int>(targetCode.size()) : 0;
         for (int off = 0; off + 4 <= targetRead; off += 4) {
             const uint8_t* p = targetCode.data() + off;
@@ -1332,7 +1406,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
 
     if (scanTo > scanFrom && scanTo - scanFrom <= 0x20000) {
         std::vector<uint8_t> scanCode(static_cast<size_t>(scanTo - scanFrom));
-        const int scanRead = rz_io_read_at(core->io, scanFrom, scanCode.data(), scanCode.size())
+        const int scanRead = rz_io_read_at_mapped(core->io, scanFrom, scanCode.data(), scanCode.size())
             ? static_cast<int>(scanCode.size()) : 0;
         for (int off = 0; off + 8 <= scanRead; off += 4) {
             const uint8_t* p = scanCode.data() + off;

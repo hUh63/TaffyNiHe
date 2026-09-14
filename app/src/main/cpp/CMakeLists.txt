@@ -80,46 +80,48 @@ target_sources(rz_native PRIVATE zstd_compat_stub.cpp)
 add_library(blutter_bridge SHARED blutter_bridge.cpp)
 target_link_libraries(blutter_bridge PRIVATE dl log)
 
-# NOTE(逆核 路线B): xAnSo-src submodule 未拉取(空目录), 暂时禁用 xanso_native 库以保证 APK 能编译。
-# XAnSoEngine.kt 用 runCatching{System.loadLibrary("xanso_native")} 加载, 库缺失时 available()=false, 所有调用优雅返回 null, 不会崩溃。
-# 后续拉取 third_party/xAnSo-src submodule 后取消下面注释即可恢复 ELF section 重建功能。
-# set(XANSO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/xAnSo-src")
-#
-# # Compatibility header for Windows-specific includes in xAnSo.
-# set(XANSO_COMPAT_DIR "${CMAKE_CURRENT_BINARY_DIR}/xanso_compat")
-# file(WRITE "${XANSO_COMPAT_DIR}/strsafe.h" "#include <stdio.h>\n")
-#
-# # Patch log.cpp: fix invalid va_list dereference.
-# set(XANSO_PATCHED_DIR "${CMAKE_CURRENT_BINARY_DIR}/xanso_patched")
-# file(READ "${XANSO_ROOT}/log.cpp" XANSO_LOG_SRC)
-# string(REPLACE "printf(log_format, *var_arg);" "vprintf(log_format, var_arg);"
-#        XANSO_LOG_SRC_PATCHED "${XANSO_LOG_SRC}")
-# file(WRITE "${XANSO_PATCHED_DIR}/log.cpp" "${XANSO_LOG_SRC_PATCHED}")
-#
-# # Patch util.cpp: replace Windows-only ::_itoa_s() with standard snprintf.
-# file(READ "${XANSO_ROOT}/util/util.cpp" XANSO_UTIL_SRC)
-# string(REPLACE "::_itoa_s(i, _rs, rdx)"
-#        "snprintf(_rs, sizeof(_rs), (rdx==16)?\"%x\":(rdx==8)?\"%o\":\"%d\", i)"
-#        XANSO_UTIL_SRC_PATCHED "${XANSO_UTIL_SRC}")
-# file(WRITE "${XANSO_PATCHED_DIR}/util.cpp" "${XANSO_UTIL_SRC_PATCHED}")
-#
-# add_library(xanso_native SHARED
-#     xanso_jni.cpp
-#     ${XANSO_PATCHED_DIR}/log.cpp
-#     ${XANSO_PATCHED_DIR}/util.cpp
-#     ${XANSO_ROOT}/Core/dyn_item.cpp
-#     ${XANSO_ROOT}/Core/dyn_section.cpp
-#     ${XANSO_ROOT}/Core/elf_header.cpp
-#     ${XANSO_ROOT}/Core/elf_section.cpp
-#     ${XANSO_ROOT}/Core/elf_segment.cpp
-#     ${XANSO_ROOT}/fix/section_fix.cpp
-# )
-# target_include_directories(xanso_native PRIVATE
-#     "${XANSO_COMPAT_DIR}"
-#     "${XANSO_ROOT}/util"
-# )
-# target_compile_options(xanso_native PRIVATE "-iquote${XANSO_ROOT}")
-# target_link_libraries(xanso_native PRIVATE log)
+# 逆核: 启用 xAnSo(ELF section 重建) native 库 —— third_party/xAnSo-src 由 CI 拉取。
+# 库缺失/编译失败时 XAnSoEngine 用 runCatching 优雅降级, 不影响 App 启动。
+NOTE(逆核 路线B): xAnSo-src submodule 未拉取(空目录), 暂时禁用 xanso_native 库以保证 APK 能编译。
+XAnSoEngine.kt 用 runCatching{System.loadLibrary("xanso_native")} 加载, 库缺失时 available()=false, 所有调用优雅返回 null, 不会崩溃。
+后续拉取 third_party/xAnSo-src submodule 后取消下面注释即可恢复 ELF section 重建功能。
+set(XANSO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/xAnSo-src")
+
+# Compatibility header for Windows-specific includes in xAnSo.
+set(XANSO_COMPAT_DIR "${CMAKE_CURRENT_BINARY_DIR}/xanso_compat")
+file(WRITE "${XANSO_COMPAT_DIR}/strsafe.h" "#include <stdio.h>\n")
+
+# Patch log.cpp: fix invalid va_list dereference.
+set(XANSO_PATCHED_DIR "${CMAKE_CURRENT_BINARY_DIR}/xanso_patched")
+file(READ "${XANSO_ROOT}/log.cpp" XANSO_LOG_SRC)
+string(REPLACE "printf(log_format, *var_arg);" "vprintf(log_format, var_arg);"
+       XANSO_LOG_SRC_PATCHED "${XANSO_LOG_SRC}")
+file(WRITE "${XANSO_PATCHED_DIR}/log.cpp" "${XANSO_LOG_SRC_PATCHED}")
+
+# Patch util.cpp: replace Windows-only ::_itoa_s() with standard snprintf.
+file(READ "${XANSO_ROOT}/util/util.cpp" XANSO_UTIL_SRC)
+string(REPLACE "::_itoa_s(i, _rs, rdx)"
+       "snprintf(_rs, sizeof(_rs), (rdx==16)?\"%x\":(rdx==8)?\"%o\":\"%d\", i)"
+       XANSO_UTIL_SRC_PATCHED "${XANSO_UTIL_SRC}")
+file(WRITE "${XANSO_PATCHED_DIR}/util.cpp" "${XANSO_UTIL_SRC_PATCHED}")
+
+add_library(xanso_native SHARED
+    xanso_jni.cpp
+    ${XANSO_PATCHED_DIR}/log.cpp
+    ${XANSO_PATCHED_DIR}/util.cpp
+    ${XANSO_ROOT}/Core/dyn_item.cpp
+    ${XANSO_ROOT}/Core/dyn_section.cpp
+    ${XANSO_ROOT}/Core/elf_header.cpp
+    ${XANSO_ROOT}/Core/elf_section.cpp
+    ${XANSO_ROOT}/Core/elf_segment.cpp
+    ${XANSO_ROOT}/fix/section_fix.cpp
+)
+target_include_directories(xanso_native PRIVATE
+    "${XANSO_COMPAT_DIR}"
+    "${XANSO_ROOT}/util"
+)
+target_compile_options(xanso_native PRIVATE "-iquote${XANSO_ROOT}")
+target_link_libraries(xanso_native PRIVATE log)
 
 # --- LIEF include dirs and link ---
 if(LIEF_AVAILABLE)

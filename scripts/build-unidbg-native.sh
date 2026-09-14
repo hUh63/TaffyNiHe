@@ -221,8 +221,11 @@ if [[ $SKIP_CAPSTONE -eq 0 ]]; then
 fi
 
 if [[ $SKIP_KEYSTONE -eq 0 ]]; then
+  # keystone 默认只产静态库 libkeystone.so 需要 BUILD_SHARED_LIBS=ON
+  # (否则 CMake 输出 llvm/lib/libkeystone.a, unidbg 的 JNA 绑定加载不到 .so)。
   build_one keystone "$PROJECT/third_party/keystone-engine-src" \
-    -DBUILD_LIBS_ONLY=ON -DLLVM_BUILD_TOOLS=OFF
+    -DBUILD_LIBS_ONLY=ON -DLLVM_BUILD_TOOLS=OFF -DBUILD_SHARED_LIBS=ON \
+    -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" 
   RZ_SO="$(find "$BUILD_ROOT/keystone" -name 'libkeystone.so' -print -quit)"
   [ -n "$RZ_SO" ] || { echo "error: libkeystone.so not produced"; exit 1; }
   cp "$RZ_SO" "$JNI_LIBS/"

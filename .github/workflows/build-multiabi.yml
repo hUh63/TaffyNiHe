@@ -88,20 +88,31 @@ jobs:
           cp "build/native-${{ matrix.abi }}/librz_native.so" "app/src/main/jniLibs/${{ matrix.abi }}/"
 
       - name: 编译 unidbg 原生库 (capstone/keystone/unicorn)
-        run: bash scripts/build-unidbg-native.sh -Abi ${{ matrix.abi }} -Ndk "$ANDROID_NDK_HOME"
+        run: |
+          # unicorn(QEMU) 依赖 __uint128_t，只有 64 位 ABI 可编译；32 位(armeabi-v7a/x86)跳过，
+          # 与上游 SOMCP 的做法一致(32 位 ABI 不打包 unicorn)。
+          EXTRA=""
+          case "${{ matrix.abi }}" in
+            armeabi-v7a|x86) EXTRA="-SkipUnicorn" ;;
+          esac
+          bash scripts/build-unidbg-native.sh -Abi ${{ matrix.abi }} -Ndk "$ANDROID_NDK_HOME" $EXTRA
 
-      - name: 编译 cloudflared (Go)
+      - name: 下载 cloudflared (官方预编译二进制)
         run: |
           set -euo pipefail
+          # 直接用官方 release 的 linux 二进制(与仓库内置 libcloudflared.so 同源)，
+          # 避免在 CI 里依赖 Go 1.26 toolchain(GOOS=android 交叉编译不可用)。
+          CF_VER="2026.9.1"
           case "${{ matrix.abi }}" in
-            arm64-v8a)   G=arm64 ;;
-            armeabi-v7a) G=arm ;;
-            x86)         G=386 ;;
-            x86_64)      G=amd64 ;;
+            arm64-v8a)   C=arm64 ;;
+            armeabi-v7a) C=arm ;;
+            x86)         C=386 ;;
+            x86_64)      C=amd64 ;;
           esac
-          git clone --depth 1 https://github.com/cloudflare/cloudflared.git /tmp/cloudflared-src
-          ( cd /tmp/cloudflared-src && GOOS=linux GOARCH=$G CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-              -o "$GITHUB_WORKSPACE/app/src/main/jniLibs/${{ matrix.abi }}/libcloudflared.so" ./cmd/cloudflared )
+          curl -sL --retry 3 --max-time 500 \
+            "https://github.com/cloudflare/cloudflared/releases/download/${CF_VER}/cloudflared-linux-${C}" \
+            -o "app/src/main/jniLibs/${{ matrix.abi }}/libcloudflared.so"
+          ls -lh "app/src/main/jniLibs/${{ matrix.abi }}/libcloudflared.so"
 
       - name: 注入 frida-server
         run: |

@@ -115,7 +115,10 @@ if [[ $abi_ok -eq 0 ]]; then
 fi
 
 # Script lives at the repo root, so the script dir IS the project root.
-PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 塔菲: 本脚本位于 <repo>/scripts/ 下(上游 SOMCP 在仓库根), 自动上溯到仓库根,
+# 使 third_party/ 与 app/src/main/jniLibs/ 的相对路径仍然正确。
+if [ -f "$SCRIPT_DIR/settings.gradle.kts" ]; then PROJECT="$SCRIPT_DIR"; else PROJECT="$(cd "$SCRIPT_DIR/.." && pwd)"; fi
 JNI_LIBS="$PROJECT/app/src/main/jniLibs/$ABI"
 mkdir -p "$JNI_LIBS"
 

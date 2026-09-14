@@ -222,3 +222,15 @@ jobs:
             apk-output/SHA256SUMS
             apk-output/mapping.txt
           if-no-files-found: error
+
+      - name: 发布 Release（tag 触发·多 ABI）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            apk-output/*.apk
+            apk-output/SHA256SUMS
+            apk-output/mapping.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

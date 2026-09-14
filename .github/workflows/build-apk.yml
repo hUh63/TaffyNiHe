@@ -225,8 +225,8 @@ jobs:
             echo "::warning:: 未找到 mapping.txt (${MAPPING})"
           fi
 
-      - name: 创建 GitHub Release (发布版本)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: 创建 GitHub Release (已由 build-multiabi.yml 统一发布多 ABI, 此处禁用避免同名竞争)
+        if: false
         uses: softprops/action-gh-release@v3
         with:
           files: |

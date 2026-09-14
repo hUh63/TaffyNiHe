@@ -214,14 +214,18 @@ if [[ $SKIP_CAPSTONE -eq 0 ]]; then
     -DCAPSTONE_BUILD_TESTS=OFF -DCAPSTONE_BUILD_CSTOOL=OFF \
     -DCAPSTONE_ARCHITECTURE_DEFAULT=OFF \
     -DCAPSTONE_ARM_SUPPORT=ON -DCAPSTONE_ARM64_SUPPORT=ON
-  cp "$BUILD_ROOT/capstone/libcapstone.so" "$JNI_LIBS/"
+  RZ_SO="$(find "$BUILD_ROOT/capstone" -name 'libcapstone.so' -print -quit)"
+  [ -n "$RZ_SO" ] || { echo "error: libcapstone.so not produced"; exit 1; }
+  cp "$RZ_SO" "$JNI_LIBS/"
   echo "[unidbg-native] copied libcapstone.so -> $JNI_LIBS"
 fi
 
 if [[ $SKIP_KEYSTONE -eq 0 ]]; then
   build_one keystone "$PROJECT/third_party/keystone-engine-src" \
     -DBUILD_LIBS_ONLY=ON -DLLVM_BUILD_TOOLS=OFF
-  cp "$BUILD_ROOT/keystone/libkeystone.so" "$JNI_LIBS/"
+  RZ_SO="$(find "$BUILD_ROOT/keystone" -name 'libkeystone.so' -print -quit)"
+  [ -n "$RZ_SO" ] || { echo "error: libkeystone.so not produced"; exit 1; }
+  cp "$RZ_SO" "$JNI_LIBS/"
   echo "[unidbg-native] copied libkeystone.so -> $JNI_LIBS"
 fi
 
@@ -231,7 +235,9 @@ if [[ $SKIP_UNICORN -eq 0 ]]; then
   [[ -d "$uni" ]] || uni="$PROJECT/third_party/unicorn-engine-unicorn2"
   build_one unicorn "$uni" \
     -DUNICORN_ARCH=arm,aarch64 -DUNICORN_BUILD_TESTS=OFF -DUNICORN_BUILD_SAMPLES=OFF
-  cp "$BUILD_ROOT/unicorn/libunicorn.so" "$JNI_LIBS/"
+  RZ_SO="$(find "$BUILD_ROOT/unicorn" -name 'libunicorn.so' -print -quit)"
+  [ -n "$RZ_SO" ] || { echo "error: libunicorn.so not produced"; exit 1; }
+  cp "$RZ_SO" "$JNI_LIBS/"
   echo "[unidbg-native] copied libunicorn.so -> $JNI_LIBS"
 fi
 

@@ -1112,6 +1112,8 @@ object ToolCatalog {
         *McpToolsConfig.ALL.toTypedArray(),
         // 塔菲逆核: 反调试/反注入/环境检测特征扫描(动态分析前置体检)
         *AntiDebugTool.ALL.toTypedArray(),
+        // 塔菲逆核: APK 组件攻击面分析(exported 组件/权限/危险开关)
+        *AttackSurfaceTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

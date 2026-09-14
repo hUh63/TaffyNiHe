@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
@@ -40,11 +41,16 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -175,7 +181,7 @@ internal fun SettingsHub(
         Column(Modifier.fillMaxSize()) {
             ScreenHeader(
                 title = t.settings,
-                subtitle = if (t.zh) "常用在前，极客选项更深一层" else "Common first, power options deeper",
+                subtitle = if (t.zh) "服务 / 分析 / 开发 / 引擎 / 诊断（可搜索）" else "Service / analysis / dev / engine / diagnostics (searchable)",
                 showBack = onHome != null,
                 onBack = onHome,
             )
@@ -187,6 +193,9 @@ internal fun SettingsHub(
                     .padding(bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                var settingsQuery by remember { mutableStateOf("") }
+                SettingsSearchField(t, settingsQuery) { settingsQuery = it }
+                if (settingsQuery.isBlank()) {
                 Text(if (t.zh) "常用" else "Essentials", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile(if (t.zh) "服务配置" else "Service", if (t.zh) "目录 / 端口 / 地址 / 工具" else "Directory / port / URLs / tools", Icons.Default.Settings, MaterialTheme.colorScheme.primary, { onDest(SettingsDest.ServiceConfig) }, Modifier.weight(1f).fillMaxHeight())
@@ -249,6 +258,10 @@ internal fun SettingsHub(
 
                 Text(if (t.zh) "诊断与关于" else "Diagnostics & about", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 SurfacePanel {
+                    NavRow(if (t.zh) "MCP 访问控制" else "MCP access", if (t.zh) "鉴权 / Token / 白名单" else "Auth / token / allowlist", Icons.Default.Security, onClick = { onDest(SettingsDest.Access) })
+                    GroupDivider()
+                    NavRow(if (t.zh) "外部工具探测" else "External probe", if (t.zh) "Termux / 编译器 / 运行时探测" else "Termux / compiler / runtime probe", Icons.Default.Link, onClick = { onDest(SettingsDest.Probe) })
+                    GroupDivider()
                     NavRow(if (t.zh) "帮助" else "Help", if (t.zh) "功能教程 / 实现原理 / MCP Skill" else "Guide / internals / MCP skill", Icons.Default.Description, onClick = { onDest(SettingsDest.Help) })
                     GroupDivider()
                     NavRow(if (t.zh) "权限管理" else "Permissions", if (t.zh) "Root / Shizuku / Dhizuku" else "Root / Shizuku / Dhizuku", Icons.Default.Security, onClick = { onDest(SettingsDest.Permissions) })
@@ -268,6 +281,9 @@ internal fun SettingsHub(
                     NavRow(t.disclaimer, icon = Icons.Default.Info, onClick = { onDest(SettingsDest.Disclaimer) })
                     GroupDivider()
                     NavRow(t.about, icon = Icons.Default.Info, onClick = { onDest(SettingsDest.About) })
+                }
+                } else {
+                    SettingsSearchResults(t, settingsQuery, onDest)
                 }
                 // License footer
                 Text(
@@ -402,3 +418,39 @@ internal fun SettingsHub(
 }
 }
 
+@Composable
+private fun SettingsSearchField(t: UiText, query: String, onQuery: (String) -> Unit) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQuery,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        shape = RoundedCornerShape(AppShape.md),
+        placeholder = { Text(if (t.zh) "搜索设置…" else "Search settings…", style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+    )
+}
+
+@Composable
+private fun SettingsSearchResults(t: UiText, query: String, onDest: (SettingsDest) -> Unit) {
+    val hits = remember(query, t.zh) {
+        SettingsDest.values()
+            .filter { it != SettingsDest.Root }
+            .filter { settingsTitle(t, it).contains(query.trim(), ignoreCase = true) }
+    }
+    if (hits.isEmpty()) {
+        Text(
+            if (t.zh) "没有匹配的设置项" else "No matching settings",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    } else {
+        SurfacePanel {
+            hits.forEachIndexed { i, dest ->
+                if (i > 0) GroupDivider()
+                NavRow(settingsTitle(t, dest), "", Icons.Default.Settings, onClick = { onDest(dest) })
+            }
+        }
+    }
+}

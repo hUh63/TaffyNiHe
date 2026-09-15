@@ -52,7 +52,7 @@ object SignatureVerifier {
         }
         return try {
             nativeReadApkCertificate(apkPath)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             AppLog.e("SignatureVerifier: nativeReadApkCertificate failed", e)
             null
         }
@@ -105,7 +105,7 @@ object SignatureVerifier {
         if (!loaded) return ""
         return try {
             nativeGetExpectedSignerDigest()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             AppLog.e("SignatureVerifier: nativeGetExpectedSignerDigest failed", e)
             ""
         }
@@ -144,7 +144,7 @@ object SignatureVerifier {
         }
         return try {
             nativeVerifyPackageName(packageName)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             AppLog.e("SignatureVerifier: nativeVerifyPackageName failed", e)
             false
         }
@@ -165,7 +165,7 @@ object SignatureVerifier {
             }
             val native = try {
                 nativeVerifyApkIntegrity(apkPath)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 AppLog.e("SignatureVerifier: nativeVerifyApkIntegrity failed", e)
                 -1
             }
@@ -179,7 +179,7 @@ object SignatureVerifier {
         if (!loaded) return null
         return try {
             nativeComputeSha256Hex(data)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             AppLog.e("SignatureVerifier: nativeComputeSha256Hex failed", e)
             null
         }

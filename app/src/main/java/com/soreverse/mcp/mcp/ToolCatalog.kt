@@ -1118,6 +1118,10 @@ object ToolCatalog {
         *StringXrefTool.ALL.toTypedArray(),
         // 塔菲逆核: DEX 方法调用图(callers/callees)
         *CallGraphTool.ALL.toTypedArray(),
+        // 塔菲逆核: 框架 API 参照解析(android.jar 标注 DEX 调用 + 隐藏/非 SDK API 检测)
+        *ApiResolveTool.ALL.toTypedArray(),
+        // 塔菲逆核: APK 内 JS 资产抽取 + 混淆指纹
+        *JsAssetsTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
@@ -445,14 +446,26 @@ internal fun LogcatViewerPage(t: UiText) {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: java.io.IOException) {
-                // destroy()/stop() 会关闭流导致 readLine 抛 InterruptedIOException，
-                // 这是正常停止路径，静默忽略；仅非正常退出才记录
-                // 轮询降级时 destroy 实时流也会触发此异常，此时 pollMode 已 true，同样静默
-                if (running && !pollMode) {
-                    com.soreverse.mcp.core.AppLog.e("Logcat reader ended: ${e.message}")
-                    // 非正常退出时显示原因到界面（如 UserService 通道流中断）
+                // destroy()/stop()/重开会关闭流，readLine 会抛 InterruptedIOException
+                // （"read interrupted by close() on another thread" 等）——这是正常路径。
+                // 之前只在 running=false 时静默，导致重开采集/通道重连时把良性中断当错误弹到界面。
+                val msg = e.message ?: ""
+                val benign = msg.contains("interrupted by close", true) ||
+                    msg.contains("Stream closed", true) ||
+                    msg.contains("Socket closed", true) ||
+                    msg.contains("Broken pipe", true)
+                if (benign) {
+                    com.soreverse.mcp.core.AppLog.w("Logcat reader closed (benign): $msg")
+                    // 良性中断但仍应在采集：降级为轮询，保证日志能继续出
+                    if (running && !pollMode) {
+                        pollMode = true
+                        channelInfo = if (zh) "Shizuku 通道（轮询模式）" else "Shizuku channel (polling)"
+                        startPolling(synchronized(logs) { logs.lastOrNull()?.raw })
+                    }
+                } else if (running && !pollMode) {
+                    com.soreverse.mcp.core.AppLog.e("Logcat reader ended: $msg")
                     if (channelError.isBlank()) {
-                        channelError = "日志读取中断: ${e.message}"
+                        channelError = "日志读取中断: $msg"
                     }
                 }
             } catch (e: Exception) {
@@ -948,13 +961,13 @@ internal fun LogcatViewerPage(t: UiText) {
         TabRow(selectedTabIndex = tabIndex, containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)) {
             listOf(
                 if (zh) "日志" else "Logs",
-                if (zh) "过滤器" else "Filters",
+                if (zh) "过滤" else "Filter",
                 if (zh) "崩溃" else "Crashes",
                 if (zh) "录制" else "Record",
                 if (zh) "应用" else "Apps",
                 if (zh) "设置" else "Settings",
             ).forEachIndexed { i, label ->
-                Tab(selected = tabIndex == i, onClick = { tab = tabs[i] }, text = { Text(label, fontSize = AppText.body) })
+                Tab(selected = tabIndex == i, onClick = { tab = tabs[i] }, text = { Text(label, fontSize = AppText.body, maxLines = 1, softWrap = false) })
             }
         }
 
@@ -1473,7 +1486,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         else scope.launch(Dispatchers.IO) { start() }
                     }, modifier = Modifier.size(32.dp)) {
                         Icon(
-                            if (running) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            if (running) Icons.Default.Stop else Icons.Default.PlayArrow,
                             contentDescription = if (zh) (if (running) "停止" else "开始") else (if (running) "Stop" else "Start"),
                             modifier = Modifier.size(18.dp),
                         )

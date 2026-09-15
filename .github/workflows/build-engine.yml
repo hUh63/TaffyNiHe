@@ -12,6 +12,9 @@ on:
         required: false
         default: 'arm64-v8a'
   push:
+    # 只在 main 分支的代码改动时构建；避免打 tag 时白跑一次完整引擎构建
+    # （GitHub 的 paths 过滤器对 tag push 不生效，故显式限定 branches）
+    branches: [main]
     paths:
       - 'build-native-android.sh'
       - 'rizin-cross-*.ini'

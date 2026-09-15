@@ -1116,6 +1116,8 @@ object ToolCatalog {
         *AttackSurfaceTool.ALL.toTypedArray(),
         // 塔菲逆核: DEX 字符串->引用方法交叉引用
         *StringXrefTool.ALL.toTypedArray(),
+        // 塔菲逆核: DEX 方法调用图(callers/callees)
+        *CallGraphTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

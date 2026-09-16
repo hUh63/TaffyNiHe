@@ -252,26 +252,25 @@ internal fun CommandHubScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // 功能入口矩阵（替代原「卫星环绕」）—— 任务导向的 2 列卡片, 直达各逆向工作流
+        // 功能入口（单列紧凑行列表，衔接工具页）
         Text(
             if (zh) "功能" else "Workbench",
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 6.dp, bottom = 4.dp),
         )
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            sats.chunked(2).forEach { rowItems ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    rowItems.forEach { sat ->
-                        WorkbenchCard(
-                            sat = sat,
-                            modifier = Modifier.weight(1f),
-                            onClick = { onNavigate(sat.tab, sat.toolCategory) },
-                        )
-                    }
-                    if (rowItems.size == 1) Spacer(Modifier.weight(1f))
-                }
+        val fnShape = RoundedCornerShape(AppShape.lg)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(fnShape)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)), fnShape),
+        ) {
+            sats.forEachIndexed { idx, sat ->
+                if (idx > 0) GroupDivider()
+                NavRow(sat.label, null, sat.icon, onClick = { onNavigate(sat.tab, sat.toolCategory) })
             }
         }
 
@@ -282,25 +281,6 @@ internal fun CommandHubScreen(
             onNavigateSettings = onNavigateSettings,
             onAnalyze = { onNavigate(MainTab.Tools, null) },
         )
-
-        // 工具列表入口文本
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                if (zh) "工具列表" else "Tools",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(AppShape.sm))
-                    .clickable { onNavigate(MainTab.Home, null) }
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-        }
 
         // 快捷统计
         val engineCount = remember(context) {

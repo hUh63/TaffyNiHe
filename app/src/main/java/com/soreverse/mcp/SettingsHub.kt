@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -108,39 +109,6 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
 }
 
 @Composable
-private fun SettingsTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    tint: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val shape = RoundedCornerShape(AppShape.lg)
-    Column(
-        modifier
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)), shape)
-            .clickable(onClick = onClick)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(AppShape.md))
-                .background(tint.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
-        }
-        Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleSmall)
-        Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
 internal fun SettingsHub(
     modifier: Modifier = Modifier,
     backProgress: Float,
@@ -181,7 +149,7 @@ internal fun SettingsHub(
         Column(Modifier.fillMaxSize()) {
             ScreenHeader(
                 title = t.settings,
-                subtitle = if (t.zh) "服务 / 分析 / 开发 / 引擎 / 诊断（可搜索）" else "Service / analysis / dev / engine / diagnostics (searchable)",
+                subtitle = if (t.zh) "服务 / 分析 / 编辑 / 开发 / 诊断（可搜索）" else "Service / analysis / dev / engine / diagnostics (searchable)",
                 showBack = onHome != null,
                 onBack = onHome,
             )
@@ -196,93 +164,56 @@ internal fun SettingsHub(
                 var settingsQuery by remember { mutableStateOf("") }
                 SettingsSearchField(t, settingsQuery) { settingsQuery = it }
                 if (settingsQuery.isBlank()) {
-                Text(if (t.zh) "常用" else "Essentials", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "服务配置" else "Service", if (t.zh) "目录 / 端口 / 地址 / 工具" else "Directory / port / URLs / tools", Icons.Default.Settings, MaterialTheme.colorScheme.primary, { onDest(SettingsDest.ServiceConfig) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "MCP 桥接" else "MCP Bridge", if (t.zh) "MT 管理器等外部 MCP 桥接" else "External MCP bridges (MT Manager etc.)", Icons.Default.Link, AppPalette.orange, { onDest(SettingsDest.ApkBridge) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "隧道" else "Tunnel", if (t.zh) "公网暴露 / 保活" else "Public expose", Icons.Default.Cloud, AppPalette.purple, { onDest(SettingsDest.Tunnel) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "AI 深度分析" else "AI Deep", if (t.zh) "端点 / Key / 模型" else "Endpoint / key / model", Icons.Default.Memory, AppPalette.indigo, { onDest(SettingsDest.AiDeep) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "外观" else "Look", if (t.zh) "主题 / 强调色 / 密度" else "Theme / accent / density", Icons.Default.Tune, AppPalette.indigo, { onDest(SettingsDest.Appearance) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "保活" else "Keep-alive", if (t.zh) "唤醒锁 / 自启" else "Wake lock / boot", Icons.Default.PowerSettingsNew, AppPalette.green, { onDest(SettingsDest.KeepAlive) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Text(if (t.zh) "逆向分析" else "Reverse Analysis", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile("Rizin", if (t.zh) "引擎能力 / 工具路由 / 命令速查" else "Engine / tool routing / commands", Icons.Default.Memory, AppPalette.purple, { onDest(SettingsDest.Rizin) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile("eDBG", if (t.zh) "eBPF 调试器 / 图形化 / 反编译" else "eBPF debugger / GUI / decompile", Icons.Default.BugReport, AppPalette.red, { onDest(SettingsDest.Edbg) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "抓包" else "Capture", if (t.zh) "网络抓包 / 流量采集 / tcpdump" else "Network capture / traffic / tcpdump", Icons.Default.Analytics, AppPalette.teal, { onDest(SettingsDest.Capture) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "动态沙箱" else "Sandbox", if (t.zh) "安装 / 启动 / 日志 / 崩溃" else "Install / launch / logs", Icons.Default.PlayArrow, AppPalette.red, { onDest(SettingsDest.Sandbox) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "Logcat 查看器" else "Logcat Viewer", if (t.zh) "实时日志 / 过滤 / 着色" else "Live logs / filter / color", Icons.Default.Description, AppPalette.teal, { onDest(SettingsDest.LogcatViewer) }, Modifier.weight(1f).fillMaxHeight())
-                    Box(Modifier.weight(1f))
-                }
-                SurfacePanel {
-                    NavRow(if (t.zh) "DEX / APK 浏览器" else "DEX / APK Explorer", if (t.zh) "可视化浏览类与方法" else "Browse classes & methods", Icons.Default.Storage, onClick = { onDest(SettingsDest.DexExplorer) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "APK Manifest 编辑" else "APK Manifest Editor", if (t.zh) "图形化编辑包名 / 权限 / 组件" else "Edit package / permissions / components", Icons.Default.Description, onClick = { onDest(SettingsDest.ApkEdit) })
-                    GroupDivider()
-                    NavRow("Blutter", if (t.zh) "Flutter 3.44 / Dart 3.12.2 / 完全离线" else "Flutter 3.44 / Dart 3.12.2 / fully offline", Icons.Default.Memory, onClick = { onDest(SettingsDest.Blutter) })
-                }
-                Text(if (t.zh) "开发环境" else "Dev Environment", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "Linux 环境" else "Linux Env", if (t.zh) "Alpine / Ubuntu / 无 root 可用" else "Alpine / Ubuntu / no-root", Icons.Default.Terminal, AppPalette.green, { onDest(SettingsDest.Linux) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "终端执行" else "Terminal", if (t.zh) "真会话 / Python / taffy CLI" else "Real session / Python / taffy CLI", Icons.Default.Code, AppPalette.orange, { onDest(SettingsDest.Terminal) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "编辑器" else "Editor", if (t.zh) "Python/Shell/JSON + 工作区/快照" else "Python/Shell/JSON + workspace", Icons.Default.Create, AppPalette.blue, { onDest(SettingsDest.Python) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile("Git", if (t.zh) "完整版本管理 / commit / push" else "Full version control / commit / push", Icons.Default.AccountTree, AppPalette.orange, { onDest(SettingsDest.Git) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (t.zh) "工作区" else "Workspace", if (t.zh) "目录 / 管理 / 临时清理" else "Directory / manage / temp clean", Icons.Default.FolderOpen, AppPalette.indigo, { onDest(SettingsDest.Workspace) }, Modifier.weight(1f).fillMaxHeight())
-                    SettingsTile(if (t.zh) "扩展系统" else "Extensions", if (t.zh) "Python 插件 / Xed 转换 / 教程" else "Python plugins / Xed convert / guide", Icons.Default.Extension, AppPalette.blue, { onDest(SettingsDest.Extensions) }, Modifier.weight(1f).fillMaxHeight())
-                }
-                Text(if (t.zh) "引擎与产物" else "Engine & artifacts", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                SurfacePanel {
-                    NavRow(if (t.zh) "返回数量" else "Result limits", "limit / disasm / hexdump", Icons.Default.Analytics, onClick = { onDest(SettingsDest.Limits) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "导出" else "Export", if (t.zh) "冲突策略与构建镜像" else "Conflict strategy", Icons.Default.Storage, onClick = { onDest(SettingsDest.Export) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "编辑校验与审计" else "Edit & Audit", if (t.zh) "快照 / 并发 / 模拟" else "Snapshot / concurrency", Icons.Default.Security, onClick = { onDest(SettingsDest.Audit) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "APK 签名设置" else "APK Signing", if (t.zh) "APK 签名 / 密钥（构建产物相关）" else "APK signing / keys", Icons.Default.Build, onClick = { onDest(SettingsDest.ApkSign) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "编辑快照 / 回滚" else "Edit Snapshots", if (t.zh) "查看差异并回滚写操作" else "Review diffs & roll back", Icons.Default.Restore, onClick = { onDest(SettingsDest.Snapshots) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "逆向工作流图 (DAG)" else "Reverse Workflow (DAG)", if (t.zh) "全流程导航，节点可跳转" else "End-to-end flow, nodes jump", Icons.Default.AccountTree, onClick = { onDest(SettingsDest.Workflow) })
-                }
-
-                Text(if (t.zh) "诊断与关于" else "Diagnostics & about", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                SurfacePanel {
-                    NavRow(if (t.zh) "MCP 访问控制" else "MCP access", if (t.zh) "鉴权 / Token / 白名单" else "Auth / token / allowlist", Icons.Default.Security, onClick = { onDest(SettingsDest.Access) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "外部工具探测" else "External probe", if (t.zh) "Termux / 编译器 / 运行时探测" else "Termux / compiler / runtime probe", Icons.Default.Link, onClick = { onDest(SettingsDest.Probe) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "帮助" else "Help", if (t.zh) "功能教程 / 实现原理 / MCP Skill" else "Guide / internals / MCP skill", Icons.Default.Description, onClick = { onDest(SettingsDest.Help) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "权限管理" else "Permissions", if (t.zh) "Root / Shizuku / Dhizuku" else "Root / Shizuku / Dhizuku", Icons.Default.Security, onClick = { onDest(SettingsDest.Permissions) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "版本更新" else "Software update", if (t.zh) "GitHub Releases / 自动检查" else "GitHub Releases / automatic checks", Icons.Default.Info, trailing = availableRelease?.tag.orEmpty(), onClick = { onDest(SettingsDest.Updates) })
-                    GroupDivider()
-                    NavRow(t.backupRestore, t.backupRestoreSubtitle, Icons.Default.Cloud, onClick = { onDest(SettingsDest.BackupRestore) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "工具调用审计" else "Tool audit", if (t.zh) "调用统计与失败率" else "Stats and failures", Icons.Default.Analytics, onClick = { onDest(SettingsDest.ToolStats) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "隧道稳定性" else "Tunnel stability", if (t.zh) "重启与探查" else "Restart and probe", Icons.Default.Cloud, onClick = { onDest(SettingsDest.TunnelStats) })
-                    GroupDivider()
-                    NavRow(if (t.zh) "日志" else "Logs", if (t.zh) "应用运行日志" else "App runtime logs", Icons.Default.Description, onClick = { onLogs() })
-                    GroupDivider()
-                    NavRow(if (t.zh) "开源致谢" else "Credits", if (t.zh) "依赖与参考" else "Dependencies", Icons.Default.Build, onClick = { onDest(SettingsDest.Credits) })
-                    GroupDivider()
-                    NavRow(t.disclaimer, icon = Icons.Default.Info, onClick = { onDest(SettingsDest.Disclaimer) })
-                    GroupDivider()
-                    NavRow(t.about, icon = Icons.Default.Info, onClick = { onDest(SettingsDest.About) })
-                }
+                    SettingsGroup(if (t.zh) "服务与连接" else "Service & connection") {
+                        SettingsNavRow(t, SettingsDest.ServiceConfig, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.ApkBridge, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Tunnel, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.AiDeep, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Access, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Probe, onDest)
+                    }
+                    SettingsGroup(if (t.zh) "逆向分析" else "Reverse analysis") {
+                        SettingsNavRow(t, SettingsDest.Rizin, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Edbg, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.LogcatViewer, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Capture, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Sandbox, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Workflow, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Blutter, onDest)
+                    }
+                    SettingsGroup(if (t.zh) "编辑与产物" else "Editing & artifacts") {
+                        SettingsNavRow(t, SettingsDest.ApkEdit, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.DexExplorer, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.ApkSign, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Snapshots, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Audit, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Export, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Limits, onDest)
+                    }
+                    SettingsGroup(if (t.zh) "开发环境" else "Dev environment") {
+                        SettingsNavRow(t, SettingsDest.Linux, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Terminal, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Python, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Git, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Workspace, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.TempWorkspace, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Extensions, onDest)
+                    }
+                    SettingsGroup(if (t.zh) "外观与保活" else "Appearance & keep-alive") {
+                        SettingsNavRow(t, SettingsDest.Appearance, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.KeepAlive, onDest)
+                    }
+                    SettingsGroup(if (t.zh) "诊断与关于" else "Diagnostics & about") {
+                        SettingsNavRow(t, SettingsDest.ToolStats, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.TunnelStats, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Permissions, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Updates, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.BackupRestore, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Help, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Credits, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Disclaimer, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.About, onDest)
+                    }
                 } else {
                     SettingsSearchResults(t, settingsQuery, onDest)
                 }
@@ -450,8 +381,78 @@ private fun SettingsSearchResults(t: UiText, query: String, onDest: (SettingsDes
         SurfacePanel {
             hits.forEachIndexed { i, dest ->
                 if (i > 0) GroupDivider()
-                NavRow(settingsTitle(t, dest), "", Icons.Default.Settings, onClick = { onDest(dest) })
+                NavRow(settingsTitle(t, dest), null, settingsIcon(dest), onClick = { onDest(dest) })
             }
         }
     }
+}
+
+@Composable
+private fun SettingsNavRow(t: UiText, dest: SettingsDest, onDest: (SettingsDest) -> Unit) {
+    NavRow(settingsTitle(t, dest), null, settingsIcon(dest), onClick = { onDest(dest) })
+}
+
+/** 单列分组卡片：组标题 + 一张圆角面板（行之间用 GroupDivider 分隔）。 */
+@Composable
+private fun SettingsGroup(title: String, rows: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 6.dp, top = 2.dp),
+        )
+        val shape = RoundedCornerShape(AppShape.lg)
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)), shape),
+            content = rows,
+        )
+    }
+}
+
+/** 设置项图标：首页入口 / 设置分组 / 搜索结果共用一个来源，保证视觉一致。 */
+private fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
+    SettingsDest.ServiceConfig -> Icons.Default.Settings
+    SettingsDest.ApkBridge -> Icons.Default.Link
+    SettingsDest.Tunnel -> Icons.Default.Cloud
+    SettingsDest.AiDeep -> Icons.Default.Memory
+    SettingsDest.Access -> Icons.Default.Security
+    SettingsDest.Probe -> Icons.Default.Search
+    SettingsDest.Rizin -> Icons.Default.Build
+    SettingsDest.Edbg -> Icons.Default.BugReport
+    SettingsDest.LogcatViewer -> Icons.Default.Description
+    SettingsDest.Capture -> Icons.Default.Cloud
+    SettingsDest.Sandbox -> Icons.Default.PlayArrow
+    SettingsDest.Workflow -> Icons.Default.AccountTree
+    SettingsDest.Blutter -> Icons.Default.Memory
+    SettingsDest.ApkEdit -> Icons.Default.Create
+    SettingsDest.DexExplorer -> Icons.Default.Code
+    SettingsDest.ApkSign -> Icons.Default.Security
+    SettingsDest.Snapshots -> Icons.Default.Restore
+    SettingsDest.Audit -> Icons.Default.Tune
+    SettingsDest.Export -> Icons.Default.Storage
+    SettingsDest.Limits -> Icons.Default.Analytics
+    SettingsDest.Linux -> Icons.Default.Terminal
+    SettingsDest.Terminal -> Icons.Default.Terminal
+    SettingsDest.Python -> Icons.Default.Code
+    SettingsDest.Git -> Icons.Default.AccountTree
+    SettingsDest.Workspace -> Icons.Default.FolderOpen
+    SettingsDest.TempWorkspace -> Icons.Default.FolderOpen
+    SettingsDest.Extensions -> Icons.Default.Extension
+    SettingsDest.Appearance -> Icons.Default.Tune
+    SettingsDest.KeepAlive -> Icons.Default.PowerSettingsNew
+    SettingsDest.ToolStats -> Icons.Default.Analytics
+    SettingsDest.TunnelStats -> Icons.Default.Cloud
+    SettingsDest.Permissions -> Icons.Default.Security
+    SettingsDest.Updates -> Icons.Default.Restore
+    SettingsDest.BackupRestore -> Icons.Default.Restore
+    SettingsDest.Help -> Icons.Default.Info
+    SettingsDest.Credits -> Icons.Default.Info
+    SettingsDest.Disclaimer -> Icons.Default.Info
+    SettingsDest.About -> Icons.Default.Info
+    SettingsDest.Root -> Icons.Default.Settings
 }

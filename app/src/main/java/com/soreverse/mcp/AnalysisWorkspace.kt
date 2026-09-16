@@ -9,6 +9,8 @@ import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,9 +62,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -202,20 +208,17 @@ internal fun AnalysisWorkspace(
                 WorkspacePicker(state, zh)
             }
             Spacer(Modifier.size(4.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("tool" to (if (zh) "工具控制台" else "Console"), "result" to (if (zh) "结果" else "Results")).forEach { pair ->
-                    val sel = pane == pair.first
-                    Text(
-                        pair.second,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = AppText.label,
-                        color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                        modifier = Modifier.clip(RoundedCornerShape(AppShape.sm))
-                            .background(if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                            .clickable { pane = pair.first }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                WbTab(if (zh) "工具控制台" else "Console", pane == "tool") { pane = "tool" }
+                WbTab(if (zh) "十六进制" else "Hex", pane == "hex") { pane = "hex" }
+                tools.resultTabs.forEachIndexed { idx, tb ->
+                    WbTab(tb.label, pane == "result" && tools.selectedTabIndex == idx, onClose = {
+                        tools.closeTab(idx)
+                        if (tools.resultTabs.isEmpty()) pane = "tool"
+                    }) {
+                        tools.selectedTabIndex = idx
+                        pane = "result"
+                    }
                 }
             }
             Spacer(Modifier.size(4.dp))
@@ -224,7 +227,11 @@ internal fun AnalysisWorkspace(
                 Spacer(Modifier.size(4.dp))
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (pane == "result") {
+                if (pane == "hex") {
+                    Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)) {
+                        HexPane(state, zh)
+                    }
+                } else if (pane == "result") {
                     Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)) {
                         ResultStream(tools, zh)
                     }
@@ -702,50 +709,24 @@ private fun SmBtn(label: String, modifier: Modifier, padding: PaddingValues, onC
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     val tabs = tools.resultTabs; val selectedTab = tools.selectedTabIndex
     var detailMode by remember { mutableStateOf(false) }
-
-    if (tabs.isNotEmpty()) {
-        Column(Modifier.fillMaxSize().padding(4.dp)) {
-            // 顶栏：标签 + 简洁/详细切换
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.size(2.dp))
-                    tabs.forEachIndexed { idx, tab ->
-                        val isSel = idx == selectedTab
-                        Surface(shape = RoundedCornerShape(AppShape.xs), color = if (isSel) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
-                            Row(Modifier.clickable { tools.selectedTabIndex = idx }.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(tab.label, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(Modifier.size(2.dp))
-                                IconButton(onClick = { tools.closeTab(idx) }, modifier = Modifier.size(40.dp)) { Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                            }
-                        }
-                    }
-                    IconButton(onClick = { tools.clearTabs() }, modifier = Modifier.size(40.dp)) { Text("×", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.error) }
-                }
-                Spacer(Modifier.size(4.dp))
-                Surface(onClick = { detailMode = !detailMode }, shape = RoundedCornerShape(AppShape.xs), color = if (detailMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
-                    Text(if (detailMode) (if (zh) "详细" else "Detail") else (if (zh) "简洁" else "Simple"), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = if (detailMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Spacer(Modifier.size(4.dp))
-            val current = tabs.getOrNull(selectedTab) ?: return
-            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                if (detailMode) StructuredJsonView(current.text, zh)
-                else TextSummary(current.text, zh)
-            }
-            // 底部导航
-            Spacer(Modifier.size(4.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { if (selectedTab > 0) tools.selectedTabIndex-- }, enabled = selectedTab > 0, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), shape = RoundedCornerShape(AppShape.sm)) { Text("◀ " + if (zh) "上一页" else "Prev", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label) }
-                Spacer(Modifier.size(12.dp))
-                Text("${selectedTab + 1} / ${tabs.size}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.size(12.dp))
-                Button(onClick = { if (selectedTab < tabs.size - 1) tools.selectedTabIndex++ }, enabled = selectedTab < tabs.size - 1, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), shape = RoundedCornerShape(AppShape.sm)) { Text(if (zh) "下一页" else "Next" + " ▶", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label) }
+    val current = tabs.getOrNull(selectedTab)
+    Column(Modifier.fillMaxSize().padding(4.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.size(6.dp))
+            Surface(onClick = { detailMode = !detailMode }, shape = RoundedCornerShape(AppShape.xs), color = if (detailMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
+                Text(if (detailMode) (if (zh) "详细" else "Detail") else (if (zh) "简洁" else "Simple"), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = if (detailMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    } else {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(if (zh) "暂无结果，请执行分析工具" else "No results yet, run a tool", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.size(4.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (current == null) {
+                Text(if (zh) "暂无结果，请执行分析工具" else "No results yet, run a tool", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    if (detailMode) StructuredJsonView(current.text, zh) else TextSummary(current.text, zh)
+                }
+            }
         }
     }
 }
@@ -1317,4 +1298,148 @@ private fun fmtBytes(v: Long): String {
     val units = arrayOf("B", "KB", "MB", "GB"); var u = 0; var value = v.toDouble()
     while (value >= 1024 && u < units.size - 1) { value /= 1024; u++ }
     return "%.1f %s".format(value, units[u])
+}
+
+/** 工作台顶层标签（IDA 风格）：可选带关闭按钮。 */
+@Composable
+private fun WbTab(label: String, selected: Boolean, onClose: (() -> Unit)? = null, onClick: () -> Unit) {
+    Surface(shape = RoundedCornerShape(AppShape.sm), color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)) {
+        Row(
+            Modifier.clickable(onClick = onClick).padding(start = 8.dp, end = if (onClose != null) 2.dp else 8.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (onClose != null) {
+                IconButton(onClick = onClose, modifier = Modifier.size(22.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(11.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun monoStyle() = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label)
+
+/**
+ * 十六进制视图：按偏移转储（纯 Java hexdump 工具，等宽显示，支持分页/跳转）。
+ * 目标文件取当前任务主文件；若是 content:// 或为空，则提供文件路径输入。
+ */
+@Composable
+private fun HexPane(state: WorkspaceState, zh: Boolean) {
+    val ctx = LocalContext.current
+    val task = state.currentTask()
+    val scope = rememberCoroutineScope()
+    var path by remember(task?.id) { mutableStateOf(task?.mainPath.orEmpty()) }
+    var offsetText by remember { mutableStateOf("0") }
+    var lengthText by remember { mutableStateOf("512") }
+    var dump by remember { mutableStateOf("") }
+    var info by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+
+    fun parseOffset(s: String): Int = runCatching {
+        val v = s.trim()
+        if (v.startsWith("0x", true)) v.substring(2).toLong(16) else v.toLong()
+    }.getOrDefault(0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+
+    fun load(off: Int) {
+        val p = path.trim()
+        if (p.isBlank()) { error = if (zh) "请先选择文件或填入绝对路径" else "Pick a file or enter an absolute path"; return }
+        scope.launch {
+            loading = true; error = ""
+            val len = (lengthText.trim().toIntOrNull() ?: 512).coerceIn(16, 65536)
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val tc = com.soreverse.mcp.mcp.ToolContext(ctx, com.soreverse.mcp.core.SettingsStore(ctx), EngineProvider.get(ctx))
+                    com.soreverse.mcp.mcp.SoStandaloneTools.hexdump.handle(tc, JSONObject().put("path", p).put("offset", off).put("length", len))
+                }.getOrElse { e -> JSONObject().put("error", e.message ?: "hexdump failed") }
+            }
+            val e = res.optString("error")
+            if (e.isNotBlank()) {
+                error = e; dump = ""
+            } else {
+                dump = res.optString("hexdump")
+                info = res.optString("file") + " · size=" + res.optInt("fileSize") + " · off=" + res.optInt("offset") + " · len=" + res.optInt("length")
+                offsetText = "0x" + Integer.toHexString(res.optInt("offset"))
+            }
+            loading = false
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(value = offsetText, onValueChange = { offsetText = it }, label = { Text("offset", fontSize = AppText.label) }, singleLine = true, modifier = Modifier.weight(1f), textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
+            OutlinedTextField(value = lengthText, onValueChange = { lengthText = it }, label = { Text("len", fontSize = AppText.label) }, singleLine = true, modifier = Modifier.width(76.dp), textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
+            TextButton(onClick = { load(parseOffset(offsetText)) }, enabled = !loading) { Text(if (zh) "转储" else "Dump", fontSize = AppText.label) }
+        }
+        if (path.isBlank() || path.startsWith("content://")) {
+            OutlinedTextField(value = path, onValueChange = { path = it }, label = { Text(if (zh) "文件绝对路径" else "Absolute file path", fontSize = AppText.label) }, singleLine = true, modifier = Modifier.fillMaxWidth(), textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
+        }
+        Spacer(Modifier.size(4.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            val step = (lengthText.trim().toIntOrNull() ?: 512).coerceIn(16, 65536)
+            TextButton(onClick = { load((parseOffset(offsetText) - step).coerceAtLeast(0)) }, enabled = !loading) { Text("◀", fontSize = AppText.label) }
+            TextButton(onClick = { load(0) }, enabled = !loading) { Text(if (zh) "顶部" else "Top", fontSize = AppText.label) }
+            TextButton(onClick = { load(parseOffset(offsetText) + step) }, enabled = !loading) { Text("▶", fontSize = AppText.label) }
+            Spacer(Modifier.weight(1f))
+            if (loading) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
+            Text(info, style = monoStyle(), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (error.isNotBlank()) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        Spacer(Modifier.size(4.dp))
+        Surface(Modifier.weight(1f).fillMaxWidth(), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)) {
+            if (dump.isBlank()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(if (zh) "点「转储」加载数据" else "Tap Dump to load", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize().padding(6.dp)) {
+                    items(dump.split("\n")) { line -> HexLine(line) }
+                }
+            }
+        }
+    }
+}
+
+/** 单行 hexdump：偏移 / 字节 / ASCII 三段分色（优先走语法高亮）。 */
+@Composable
+private fun HexLine(line: String) {
+    if (line.isBlank()) { Spacer(Modifier.height(2.dp)); return }
+    val hl = highlightHexLine(line)
+    if (hl != null) { Text(hl, style = monoStyle()); return }
+    val parts = line.split(Regex("\\s{2,}"), limit = 3)
+    Row(Modifier.fillMaxWidth()) {
+        Text(parts.getOrElse(0) { "" }, style = monoStyle(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (parts.size > 1) { Spacer(Modifier.size(8.dp)); Text(parts[1], style = monoStyle(), color = MaterialTheme.colorScheme.primary) }
+        if (parts.size > 2) { Spacer(Modifier.size(8.dp)); Text(parts[2], style = monoStyle(), color = MaterialTheme.colorScheme.onSurface) }
+    }
+}
+
+/** 单行 hexdump 的等宽分色（偏移 / 字节 / ASCII）；不像 hexdump 行则返回 null。 */
+@Composable
+private fun highlightHexLine(line: String): AnnotatedString? {
+    val parts = line.split(Regex("\\s{2,}"), limit = 3)
+    if (parts.size < 2 || !parts[0].matches(Regex("[0-9a-fA-F]{4,16}"))) return null
+    val offColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val hexColor = MaterialTheme.colorScheme.primary
+    val ascColor = MaterialTheme.colorScheme.onSurface
+    return buildAnnotatedString {
+        withStyle(SpanStyle(color = offColor, fontFamily = FontFamily.Monospace)) { append(parts[0]) }
+        append("  ")
+        withStyle(SpanStyle(color = hexColor, fontFamily = FontFamily.Monospace)) { append(parts[1]) }
+        if (parts.size > 2) {
+            append("  ")
+            withStyle(SpanStyle(color = ascColor, fontFamily = FontFamily.Monospace)) { append(parts[2]) }
+        }
+    }
 }

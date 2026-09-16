@@ -94,12 +94,13 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * 塔菲逆核 · 命令中枢首页（创新1布局，彻底脱离 SOMCP 原版底部导航范式）。
+ * 塔菲逆核 · 命令中枢首页（v1.3.7 扁平简洁风）。
  *
- * 交互隐喻：中央"星核"= 引擎启动开关；8 个功能像卫星环绕四周，点击卫星进入对应功能。
+ * 布局：品牌行 → 引擎启停行 → 功能列表（8 项 + 全部工具）→ 服务状态行 → 连接地址行。
+ * 全部为无卡片背景的扁平行 + 细分隔线；不放大卡片、不做环绕/星核动效。
  * 底层完全复用现有逻辑：McpForegroundService（启停）/ SettingsStore / filteredEndpoints / EngineProvider。
  *
- * @param onNavigate 卫星点击回调 —— 交给 MainActivity 切换到对应 MainTab（工具/日志/设置）。
+ * @param onNavigate 功能行点击回调 —— 交给 MainActivity 切换到对应 MainTab 或工具清单（category=null 时为全部工具）。
  */
 @Composable
 internal fun CommandHubScreen(
@@ -154,8 +155,8 @@ internal fun CommandHubScreen(
         }
     }
 
-    // 8 个卫星节点（顺时针，从正上方开始）
-    // 反编译、脱壳、SO分析、模拟、Frida、回编跳转到工具页对应位置（滚动定位，不过滤）
+    // 8 个功能入口：反编译 / 脱壳 / SO 分析 / 模拟 / Frida / 回编 → 打开对应分类的 MCP 工具清单；
+    // 日志 → 日志页；设置 → 设置页。
     val zh = t.zh
     val sats = remember(zh) {
         listOf(
@@ -177,119 +178,79 @@ internal fun CommandHubScreen(
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // 顶部品牌（紧凑单行，去掉原「下移一行半」的 24dp 空转）
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
+
+        // 品牌 + 连接状态（一行）
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (zh) "塔菲逆核" else "Taffy NieHe",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    if (zh) "聚合式逆向 · 命令中枢" else "Reverse Command Hub",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                if (zh) "塔菲逆核" else "Taffy NieHe",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                if (zh) "命令中枢" else "Command Hub",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
             ConnDot(running = running, zh = zh)
-        }
-
-        // 引擎电源条（紧凑：小圆 + 状态两行 + 启停按钮）
-        val powerShape = RoundedCornerShape(AppShape.lg)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(powerShape)
-                .background(
-                    if (running) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                )
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(
-                Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.PowerSettingsNew,
-                    contentDescription = if (running) (if (zh) "停止引擎" else "Stop engine") else (if (zh) "启动引擎" else "Start engine"),
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(17.dp),
-                )
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (running) (if (zh) "引擎运行中" else "Engine running") else (if (zh) "引擎已停止" else "Engine stopped"),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    if (running) (if (zh) "MCP 在线，AI 客户端可连接" else "MCP online — clients can connect")
-                    else (if (zh) "点击启动以暴露 MCP 服务" else "Tap Start to expose the MCP server"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(AppShape.sm))
-                    .background(if (running) MaterialTheme.colorScheme.error.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary)
-                    .clickable { toggle() }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-            ) {
-                Text(
-                    if (running) (if (zh) "停止" else "Stop") else (if (zh) "启动" else "Start"),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onPrimary,
-                )
-            }
         }
 
         Spacer(Modifier.height(10.dp))
 
-        // 功能入口（紧凑行列表：一行 ≈34dp；末行 = 全部 MCP 工具）
-        Text(
-            if (zh) "功能" else "Workbench",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 2.dp),
-        )
-        val fnShape = RoundedCornerShape(AppShape.lg)
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(fnShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)), fnShape),
+        // 引擎启停（扁平一行，不做卡片）
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            sats.forEachIndexed { idx, sat ->
-                if (idx > 0) HubDivider()
-                HubRow(sat.icon, sat.label) { onNavigate(sat.tab, sat.toolCategory) }
-            }
-            HubDivider()
-            // 「全部工具」入口：打开完整 MCP 工具清单（v1.3.5 简洁化时误删，现恢复）
-            HubRow(
-                Icons.Default.Analytics,
-                if (zh) "全部工具 · ${ToolCatalog.ALL.size}" else "All tools · ${ToolCatalog.ALL.size}",
-                tint = MaterialTheme.colorScheme.tertiary,
-            ) { onNavigate(MainTab.Home, null) }
+            Icon(
+                Icons.Filled.PowerSettingsNew,
+                contentDescription = null,
+                tint = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                if (running) (if (zh) "引擎运行中 · MCP 在线" else "Engine running · MCP online")
+                else (if (zh) "引擎已停止" else "Engine stopped"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (running) (if (zh) "停止" else "Stop") else (if (zh) "启动" else "Start"),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(AppShape.sm))
+                    .clickable { toggle() }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
         }
 
-        // 服务状态行：目录 / 桥接 / 保活（根据配置状态显示）
+        HubDivider()
+
+        // 功能（扁平列表）
+        SectionLabel(if (zh) "功能" else "Workbench")
+        sats.forEach { sat ->
+            HubRow(sat.icon, sat.label) { onNavigate(sat.tab, sat.toolCategory) }
+        }
+        HubRow(
+            Icons.Default.Analytics,
+            if (zh) "全部工具 · ${ToolCatalog.ALL.size}" else "All tools · ${ToolCatalog.ALL.size}",
+            tint = MaterialTheme.colorScheme.tertiary,
+        ) { onNavigate(MainTab.Home, null) }
+
+        Spacer(Modifier.height(8.dp))
+        HubDivider()
+
+        // 服务状态（一行小条 + 分析入口）
         ServiceStatusRow(
             zh = zh,
             settings = settings,
@@ -297,78 +258,58 @@ internal fun CommandHubScreen(
             onAnalyze = { onNavigate(MainTab.Tools, null) },
         )
 
-        // 快捷统计（紧凑）
-        val engineCount = remember(context) {
-            runCatching { context.applicationInfo.nativeLibraryDir?.let { java.io.File(it).listFiles { f -> f.isFile && f.name.endsWith(".so") }?.size } ?: 0 }
-                .getOrDefault(0)
-                .coerceAtLeast(0)
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            QuickStat(
-                ToolCatalog.ALL.size.toString(),
-                if (zh) "工具" else "Tools",
-            )
-            QuickStat(
-                engineCount.toString(),
-                if (zh) "引擎" else "Engines",
-            )
-            QuickStat(
-                if (running) (if (zh) "在线" else "On") else (if (zh) "离线" else "Off"),
-                if (zh) "状态" else "State",
-                highlight = running,
-            )
-        }
+        HubDivider()
 
-        // 连接地址条（单行紧凑，点按复制）
-        val addrShape = RoundedCornerShape(AppShape.md)
+        // 连接地址（一行，点按复制）
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(addrShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = if (running) 0.9f else 0.5f))
                 .clickable(enabled = running) {
                     clipboard.setText(AnnotatedString(loopbackUrl))
                     Toast.makeText(context, if (zh) "已复制，填到 AI 客户端 MCP 地址" else "Copied", Toast.LENGTH_SHORT).show()
                 }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                if (running) loopbackUrl else (if (zh) "等待启动引擎…" else "Engine offline"),
+                if (running) loopbackUrl else (if (zh) "未启动" else "Offline"),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelMedium,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
                 color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (running) {
-                Icon(Icons.Filled.ContentCopy, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    contentDescription = if (zh) "复制地址" else "Copy address",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
             } else {
                 Icon(
-                    Icons.Filled.FolderOpen, null, tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Icons.Filled.FolderOpen,
+                    contentDescription = if (zh) "选择工作目录" else "Pick work dir",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp).clickable {
-                        // 无 SAF 提供方设备（部分国产 ROM）会抛 ActivityNotFoundException——捕获并提示手动路径
+                        // 无 SAF 提供方设备（部分国产 ROM）会抛 ActivityNotFoundException——捕获并提示
                         try { pickTree.launch(null) }
                         catch (e: android.content.ActivityNotFoundException) {
-                            Toast.makeText(context, if (t.zh) "系统未提供文件选择器（SAF），请先启动服务后在分析页用文件路径打开" else "No SAF picker on this device; open files by path from the analyze tab", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, if (t.zh) "系统未提供文件选择器（SAF），请在分析页用文件路径打开" else "No SAF picker on this device; open files by path from Analyze", Toast.LENGTH_LONG).show()
                         }
                     },
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
     }
 }
 
 private data class Satellite(val icon: ImageVector, val label: String, val tab: MainTab, val toolCategory: String? = null)
 
-/** 首页紧凑行：26dp 图标 + 标签，行高 ≈34dp（替代原 NavRow 的 58dp）。 */
+/** 首页扁平行：18dp 图标 + 标签，无卡片背景（简洁风）。 */
 @Composable
 private fun HubRow(
     icon: ImageVector,
@@ -376,28 +317,24 @@ private fun HubRow(
     tint: Color? = null,
     onClick: () -> Unit,
 ) {
-    val resolvedTint = tint ?: MaterialTheme.colorScheme.primary
     Row(
         Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.sm))
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 2.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(
-            Modifier
-                .size(26.dp)
-                .clip(RoundedCornerShape(AppShape.sm))
-                .background(resolvedTint.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = label, tint = resolvedTint, modifier = Modifier.size(15.dp))
-        }
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -405,13 +342,24 @@ private fun HubRow(
     }
 }
 
-/** 首页紧凑分隔线（左侧让出图标宽度）。 */
+/** 细分隔线（简洁风：整行一条 0.5dp 淡线）。 */
 @Composable
 private fun HubDivider() {
     androidx.compose.material3.HorizontalDivider(
-        modifier = Modifier.padding(start = 48.dp),
         thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
+        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f),
+    )
+}
+
+/** 小节标题（功能 / 状态 …）。 */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(start = 2.dp, top = 6.dp, bottom = 2.dp),
     )
 }
 
@@ -432,24 +380,6 @@ private fun ConnDot(running: Boolean, zh: Boolean) {
     }
 }
 
-@Composable
-private fun QuickStat(value: String, label: String, highlight: Boolean = false) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            value,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        )
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-/**
- * 服务状态行：目录 / APK MCP / 保活 + 右侧独立分析按钮。
- * 根据配置状态显示绿/灰指示灯 + 状态文字，卡片可点击跳转到对应设置页。
- * 分析按钮单独放在整行最右侧，点击打开分析页。
- */
 @Composable
 private fun ServiceStatusRow(
     zh: Boolean,
@@ -500,17 +430,16 @@ private fun ServiceStatusRow(
     val accent = MaterialTheme.colorScheme.primary
 
     Column(
-        Modifier.fillMaxWidth().padding(bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         // 公网隧道状态文本
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(AppShape.md))
-                .background(tunnelColor.copy(alpha = 0.10f))
+                .clip(RoundedCornerShape(AppShape.sm))
                 .clickable { onNavigateSettings(SettingsDest.Tunnel) }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -559,18 +488,25 @@ private fun ServiceStatusRow(
                 modifier = Modifier.weight(1f),
                 onClick = { onNavigateSettings(SettingsDest.KeepAlive) },
             )
-            Box(
+            Row(
                 Modifier
-                    .clip(RoundedCornerShape(AppShape.md))
-                    .background(accent.copy(alpha = 0.14f))
+                    .clip(RoundedCornerShape(AppShape.sm))
                     .clickable { onAnalyze() }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Icon(
                     Icons.Filled.Analytics,
-                    contentDescription = if (zh) "分析" else "Analyze",
+                    contentDescription = null,
                     tint = accent,
                     modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    if (zh) "分析" else "Go",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent,
+                    fontWeight = FontWeight.Medium,
                 )
             }
         }
@@ -589,10 +525,9 @@ private fun StatusChip(
     val dotColor = if (configured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
     Row(
         modifier
-            .clip(RoundedCornerShape(AppShape.md))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+            .clip(RoundedCornerShape(AppShape.sm))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -605,176 +540,5 @@ private fun StatusChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-/**
- * 星系：外圈旋转轨道 + 8 卫星环绕 + 中央星核。
- * 卫星用极坐标（半径 * cos/sin）绝对定位，容器是正方形。
- */
-@Composable
-private fun SatelliteSystem(
-    running: Boolean,
-    sats: List<Satellite>,
-    onCore: () -> Unit,
-    onSat: (Satellite) -> Unit,
-    zh: Boolean,
-    maxDiameter: Dp = 320.dp,
-) {
-    val accent = MaterialTheme.colorScheme.primary
-    val outline = MaterialTheme.colorScheme.outline
-    val infinite = rememberInfiniteTransition(label = "orbit")
-    val spin by infinite.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(40000, easing = LinearEasing), RepeatMode.Restart),
-        label = "spin",
-    )
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .widthIn(max = maxDiameter)
-            .aspectRatio(1f),
-        contentAlignment = Alignment.Center,
-    ) {
-        // 轨道环（铺底）
-        Canvas(Modifier.fillMaxSize()) {
-            val r1 = size.minDimension / 2f - 40.dp.toPx()
-            val r2 = r1 - 26.dp.toPx()
-            drawCircle(color = outline.copy(alpha = 0.25f), radius = r1, style = Stroke(width = 1.2.dp.toPx()))
-            rotate(spin) {
-                drawCircle(
-                    color = accent.copy(alpha = if (running) 0.4f else 0.15f),
-                    radius = r2,
-                    style = Stroke(width = 1.dp.toPx()),
-                )
-            }
-        }
-
-        // 用自定义 Layout 统一测量并按容器真实尺寸把星核放中央、卫星放圆周。
-        // 顺序：measurables[0]=星核，之后依次是各卫星。
-        Layout(
-            content = {
-                StarCore(running = running, onClick = onCore, zh = zh)
-                sats.forEach { sat ->
-                    SatelliteNode(sat = sat, running = running, onClick = { onSat(sat) })
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        ) { measurables, constraints ->
-            val w = constraints.maxWidth
-            val h = constraints.maxHeight
-            val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
-            // 卫星圆周半径：容器一半再留出卫星尺寸的边距
-            val satHalf = (placeables.getOrNull(1)?.width ?: 0) / 2
-            val radius = (minOf(w, h) / 2f) - satHalf - 6.dp.roundToPx()
-            layout(w, h) {
-                // 星核居中
-                placeables.firstOrNull()?.let { core ->
-                    core.place(w / 2 - core.width / 2, h / 2 - core.height / 2)
-                }
-                // 卫星环绕（从正上方开始顺时针均分）
-                val satCount = placeables.size - 1
-                for (i in 0 until satCount) {
-                    val p = placeables[i + 1]
-                    val angle = Math.toRadians(-90.0 + i * (360.0 / satCount))
-                    val cx = w / 2f + radius * cos(angle)
-                    val cy = h / 2f + radius * sin(angle)
-                    p.place((cx - p.width / 2).toInt(), (cy - p.height / 2).toInt())
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SatelliteNode(
-    sat: Satellite,
-    running: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val shape = RoundedCornerShape(AppShape.xl)
-    val sizeDp = 56.dp
-    Column(
-        modifier
-            .size(width = sizeDp, height = sizeDp)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-            .clickable { onClick() },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(sat.icon, contentDescription = sat.label, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(1.dp))
-        Text(
-            sat.label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun StarCore(running: Boolean, onClick: () -> Unit, zh: Boolean) {
-    val accent = MaterialTheme.colorScheme.primary
-    val scale by animateFloatAsState(if (running) 1f else 0.94f, tween(300), label = "core-scale")
-    val infinite = rememberInfiniteTransition(label = "core")
-    val pulse by infinite.animateFloat(
-        initialValue = 0.9f, targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Reverse),
-        label = "pulse",
-    )
-    Box(
-        Modifier
-            .size(128.dp)
-            .scale(scale),
-        contentAlignment = Alignment.Center,
-    ) {
-        // 运行时脉冲光晕
-        if (running) {
-            Box(
-                Modifier
-                    .size(128.dp)
-                    .scale(pulse)
-                    .clip(CircleShape)
-                    .background(accent.copy(alpha = 0.12f)),
-            )
-        }
-        Column(
-            Modifier
-                .size(120.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        if (running) listOf(accent.copy(alpha = 0.45f), accent.copy(alpha = 0.08f))
-                        else listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface),
-                    ),
-                )
-                .drawBehind {
-                    drawCircle(
-                        color = if (running) accent else accent.copy(alpha = 0.3f),
-                        style = Stroke(width = 2.dp.toPx()),
-                    )
-                }
-                .clickable { onClick() },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                Icons.Filled.PowerSettingsNew,
-                contentDescription = null,
-                tint = if (running) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(34.dp),
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                if (running) (if (zh) "运行中" else "Running") else (if (zh) "点击启动" else "Tap to start"),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = if (running) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }

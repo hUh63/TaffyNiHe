@@ -71,7 +71,6 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.ServiceConfig -> if (t.zh) "服务配置" else "Service Configuration"
     SettingsDest.Appearance -> if (t.zh) "外观与语言" else "Appearance"
     SettingsDest.KeepAlive -> t.keepAlive
-    SettingsDest.Access -> if (t.zh) "MCP 访问控制" else "MCP Access"
     SettingsDest.Limits -> if (t.zh) "返回数量" else "Result Limits"
     SettingsDest.Export -> if (t.zh) "导出" else "Export"
     SettingsDest.Audit -> if (t.zh) "编辑校验与审计" else "Edit & Audit"
@@ -81,7 +80,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.AiDeep -> if (t.zh) "AI 深度分析" else "AI Deep Analysis"
     SettingsDest.Updates -> if (t.zh) "版本更新" else "Software Update"
     SettingsDest.Probe -> t.externalProbe
-    SettingsDest.ToolStats -> if (t.zh) "工具调用审计" else "Tool Call Audit"
+    SettingsDest.ToolStats -> if (t.zh) "工具调用统计" else "Tool Call Stats"
     SettingsDest.TunnelStats -> if (t.zh) "隧道稳定性" else "Tunnel Stability"
     SettingsDest.Credits -> if (t.zh) "开源致谢" else "Credits"
     SettingsDest.Disclaimer -> t.disclaimer
@@ -169,7 +168,6 @@ internal fun SettingsHub(
                         SettingsNavRow(t, SettingsDest.ApkBridge, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Tunnel, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.AiDeep, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Access, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Probe, onDest)
                     }
                     SettingsGroup(if (t.zh) "逆向分析" else "Reverse analysis") {
@@ -245,7 +243,6 @@ internal fun SettingsHub(
             SettingsDest.ServiceConfig -> SettingsServiceConfigPage(t, settings)
             SettingsDest.Appearance -> SettingsAppearancePage(t, language, onLanguage, themeMode, onTheme, accentColor, onAccent, pureBlackDark, onPureBlack, uiDensity, onDensity, cornerStyle, onCorner, motionMode, onMotion, showAdvancedHome, onShowAdvancedHome, highContrast, onHighContrast, textScale, onTextScale, predictiveBack, onPredictiveBack)
             SettingsDest.KeepAlive -> SettingsKeepAlivePage(t, settings)
-            SettingsDest.Access -> SettingsAccessPage(t, settings)
             SettingsDest.Limits -> SettingsLimitsPage(t, settings)
             SettingsDest.Export -> SettingsExportPage(t, settings)
             SettingsDest.Audit -> SettingsAuditPage(t, settings)
@@ -420,7 +417,6 @@ private fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
     SettingsDest.ApkBridge -> Icons.Default.Link
     SettingsDest.Tunnel -> Icons.Default.Cloud
     SettingsDest.AiDeep -> Icons.Default.Memory
-    SettingsDest.Access -> Icons.Default.Security
     SettingsDest.Probe -> Icons.Default.Search
     SettingsDest.Rizin -> Icons.Default.Build
     SettingsDest.Edbg -> Icons.Default.BugReport

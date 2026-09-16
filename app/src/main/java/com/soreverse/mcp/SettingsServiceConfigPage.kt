@@ -202,6 +202,17 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
             }
         }
         GlassGroup(title = if (t.zh) "访问控制" else "Access control", footer = if (t.zh) "修改端口、绑定地址或 Token 后需重启服务。" else "Restart the service after changing port, bind address, or token.") {
+            // v1.3.7: 原「MCP 访问控制」独立页与本分组完全重复，已合并到此处；保留其「谁能连接」说明
+            Text(
+                when {
+                    settings.tunnelMode != "off" -> if (t.zh) "Cloudflare 隧道已配置：公网访问必须启用 Token。" else "Cloudflare Tunnel configured: public access requires a token."
+                    bindHost == "127.0.0.1" -> if (t.zh) "仅本机连接：Token 可选，适合本机客户端或 adb forward。" else "Local only: token is optional for local clients or adb forward."
+                    else -> if (t.zh) "局域网连接：强烈建议启用 Token。" else "LAN access: enabling a token is strongly recommended."
+                },
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             ToggleRow(if (t.zh) "启用访问 Token" else "Require access token", authEnabled) {
                 authEnabled = it
                 settings.authEnabled = it

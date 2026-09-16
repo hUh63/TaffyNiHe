@@ -283,64 +283,6 @@ internal fun keepAliveAdvice(zh: Boolean): String {
 }
 
 @Composable
-internal fun SettingsAccessPage(t: UiText, settings: SettingsStore) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var bindHost by remember { mutableStateOf(settings.bindHost) }
-    var authEnabled by remember { mutableStateOf(settings.authEnabled) }
-    var accessToken by remember { mutableStateOf(settings.accessToken) }
-    PageScroll {
-        GlassGroup {
-            Text(if (t.zh) "谁能连接" else "Who can connect", modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
-            Text(
-                when {
-                    settings.tunnelMode != "off" -> if (t.zh) "Cloudflare 隧道已配置：公网访问必须启用 Token。" else "Cloudflare Tunnel is configured: public access requires a token."
-                    bindHost == "127.0.0.1" -> if (t.zh) "仅本机：Token 可选，适合本机客户端或 adb forward。" else "Local only: token is optional for local clients or adb forward."
-                    else -> if (t.zh) "局域网：强烈建议启用 Token。" else "LAN access: enabling a token is strongly recommended."
-                },
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            GroupDivider()
-            ToggleRow(if (t.zh) "启用访问 token" else "Require access token", authEnabled) {
-                authEnabled = it
-                settings.authEnabled = it
-            }
-        }
-        GlassGroup(title = if (t.zh) "绑定地址" else "Bind address") {
-            ChipRow(
-                listOf("0.0.0.0" to if (t.zh) "允许局域网" else "LAN", "127.0.0.1" to if (t.zh) "仅本机" else "Local only"),
-                bindHost,
-                {
-                    bindHost = it
-                    settings.bindHost = it
-                },
-            )
-        }
-        GlassGroup(footer = if (t.zh) "修改端口、绑定地址或 token 后，重启服务生效。" else "Restart the service after changing port, bind address, or token.") {
-            OutlinedTextField(
-                value = accessToken,
-                onValueChange = { accessToken = it; settings.accessToken = it },
-                label = { Text(if (t.zh) "访问 token" else "Access token") },
-                singleLine = true,
-                shape = RoundedCornerShape(AppShape.md),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                ),
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
-            )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(14.dp)) {
-                PrimaryActionButton(if (t.zh) "重新生成" else "Regenerate", { accessToken = settings.resetAccessToken() })
-                SecondaryActionButton(if (t.zh) "复制 token" else "Copy token") { copy(context, accessToken, t.copied) }
-            }
-        }
-    }
-}
-
-@Composable
 internal fun SettingsLimitsPage(t: UiText, settings: SettingsStore) {
     var defaultLimit by remember { mutableStateOf(settings.defaultLimit.toString()) }
     var stringLimit by remember { mutableStateOf(settings.stringLimit.toString()) }

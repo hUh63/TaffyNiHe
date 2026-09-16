@@ -203,35 +203,47 @@ internal fun CommandHubScreen(
 
         Spacer(Modifier.height(10.dp))
 
-        // 引擎启停（扁平一行，不做卡片）
+        // 引擎启停：40dp 圆形电源键（保留一点「星核」记忆 —— 细环 + 运行时柔和内圆，但不做卡片底）
+        val engineRing = if (running) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(
-                Icons.Filled.PowerSettingsNew,
-                contentDescription = null,
-                tint = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-            Text(
-                if (running) (if (zh) "引擎运行中 · MCP 在线" else "Engine running · MCP online")
-                else (if (zh) "引擎已停止" else "Engine stopped"),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (running) (if (zh) "停止" else "Stop") else (if (zh) "启动" else "Start"),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(AppShape.sm))
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
                     .clickable { toggle() }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
+                    .drawBehind {
+                        if (running) drawCircle(color = engineRing.copy(alpha = 0.16f))
+                        drawCircle(color = engineRing, style = Stroke(width = 1.5.dp.toPx()))
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.PowerSettingsNew,
+                    contentDescription = if (running) (if (zh) "停止引擎" else "Stop engine") else (if (zh) "启动引擎" else "Start engine"),
+                    tint = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (running) (if (zh) "引擎运行中 · MCP 在线" else "Engine running · MCP online")
+                    else (if (zh) "引擎已停止" else "Engine stopped"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    if (running) (if (zh) "点按电源键停止" else "Tap the key to stop")
+                    else (if (zh) "点按电源键启动" else "Tap the key to start"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         HubDivider()

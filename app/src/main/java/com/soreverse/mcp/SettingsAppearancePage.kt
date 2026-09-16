@@ -64,6 +64,18 @@ internal fun SettingsAppearancePage(
                 PrimaryActionButton(if (t.zh) "示例主按钮" else "Sample primary", onClick = {}, modifier = Modifier.fillMaxWidth())
             }
         }
+        GlassGroup(title = if (t.zh) "预设" else "Presets") {
+            PrimaryActionButton(
+                if (t.zh) "IDA 深色 · 等宽紧凑" else "IDA Dark · mono compact",
+                onClick = {
+                    onTheme("dark")
+                    onAccent("mono")
+                    onPureBlack(true)
+                    onDensity("compact")
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         GlassGroup(title = t.language) {
             ChipRow(listOf("system" to if (t.zh) "跟随系统" else "System", "zh" to "中文", "en" to "English"), language, onLanguage)
         }

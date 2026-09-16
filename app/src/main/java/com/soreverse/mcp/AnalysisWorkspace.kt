@@ -780,23 +780,33 @@ private fun SmBtn(label: String, modifier: Modifier, padding: PaddingValues, onC
 @Composable
 private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     val tabs = tools.resultTabs; val selectedTab = tools.selectedTabIndex
-    var detailMode by remember { mutableStateOf(false) }
+    var viewMode by remember { mutableStateOf(0) }  // 0=简洁 1=详细 2=汇编
     val current = tabs.getOrNull(selectedTab)
     Column(Modifier.fillMaxSize().padding(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.size(6.dp))
-            Surface(onClick = { detailMode = !detailMode }, shape = RoundedCornerShape(AppShape.xs), color = if (detailMode) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant) {
-                Text(if (detailMode) (if (zh) "详细" else "Detail") else (if (zh) "简洁" else "Simple"), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = if (detailMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(onClick = { viewMode = (viewMode + 1) % 3 }, shape = RoundedCornerShape(AppShape.xs), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Text(
+                    when (viewMode) { 0 -> (if (zh) "简洁" else "Simple"); 1 -> (if (zh) "详细" else "Detail"); else -> (if (zh) "汇编" else "Asm") },
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
         }
         Spacer(Modifier.size(4.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (current == null) {
                 Text(if (zh) "暂无结果，请执行分析工具" else "No results yet, run a tool", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (viewMode == 2) {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(current.text.split("\n")) { line -> DisasmLine(line) }
+                }
             } else {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    if (detailMode) StructuredJsonView(current.text, zh) else TextSummary(current.text, zh)
+                    if (viewMode == 1) StructuredJsonView(current.text, zh) else TextSummary(current.text, zh)
                 }
             }
         }
@@ -1543,4 +1553,36 @@ private fun extractNames(o: JSONObject?): List<String> {
         }
     }
     return out
+}
+
+/** 反汇编单行：地址 / 助记符 / 寄存器 / 立即数 / 注释 分色（IDA 风格）。 */
+@Composable
+private fun DisasmLine(line: String) {
+    if (line.isBlank()) { Spacer(Modifier.height(2.dp)); return }
+    val cs = MaterialTheme.colorScheme
+    val out = buildAnnotatedString {
+        val ci = line.indexOf(';')
+        val code = if (ci >= 0) line.substring(0, ci) else line
+        val comment = if (ci >= 0) line.substring(ci) else ""
+        var first = true
+        val tokens = code.split(" ")
+        tokens.forEachIndexed { ti, tk ->
+            if (ti > 0) append(" ")
+            if (tk.isEmpty()) return@forEachIndexed
+            val isAlpha = tk.matches(Regex("[a-z][a-z0-9.]*"))
+            val color = when {
+                tk.matches(Regex("(0x)?[0-9a-fA-F]{4,16}:?")) -> cs.onSurfaceVariant
+                tk.startsWith("#") || tk.matches(Regex("0x[0-9a-fA-F]+")) -> cs.secondary
+                tk.matches(Regex("(x|w|q|d|s|v)[0-9]{1,2}|sp|lr|pc|wzr|xzr|fp|rax|rbx|rcx|rdx|rsi|rdi")) -> cs.tertiary
+                first && isAlpha -> cs.primary
+                else -> cs.onSurface
+            }
+            withStyle(SpanStyle(color = color, fontFamily = FontFamily.Monospace, fontSize = AppText.label, fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal)) { append(tk) }
+            if (isAlpha) first = false
+        }
+        if (comment.isNotEmpty()) {
+            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) { append(comment) }
+        }
+    }
+    Text(out, style = monoStyle())
 }

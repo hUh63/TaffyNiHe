@@ -130,7 +130,8 @@ internal fun AnalysisWorkspace(
     val zh = t.zh
     val tools = state.tools
     // ── IDA 风格工作台：左导轨 + 左停靠面板 + 视图标签 + 底部输出面板 ──
-    var leftDock by remember { mutableStateOf(true) }
+    // v1.3.6: 默认收起左停靠面板（窄屏下 46+152dp 占掉半屏），点导轨「面板」展开
+    var leftDock by remember { mutableStateOf(false) }
     var bottomOpen by remember { mutableStateOf(false) }
     var pane by remember { mutableStateOf("result") }
     // 对象树状态
@@ -156,14 +157,14 @@ internal fun AnalysisWorkspace(
     Row(Modifier.fillMaxSize().statusBarsPadding()) {
         // 左导轨（窄工具条）
         Column(
-            Modifier.width(46.dp).fillMaxHeight()
+            Modifier.width(38.dp).fillMaxHeight()
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f))
-                .padding(vertical = 6.dp),
+                .padding(vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             IdaRail(Icons.Default.Menu, if (zh) "面板" else "Panel", leftDock) { leftDock = !leftDock }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             toolDefs.forEachIndexed { i, def ->
                 IdaRail(railIcons[i % railIcons.size], if (zh) def.labelZh else def.labelEn, pane == "tool" && state.activeTool == def.key) {
                     state.activeTool = def.key
@@ -176,11 +177,11 @@ internal fun AnalysisWorkspace(
         // 左停靠面板：工作区 / 工具 / 结果
         if (leftDock) {
             Column(
-                Modifier.width(152.dp).fillMaxHeight()
+                Modifier.width(132.dp).fillMaxHeight()
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(if (zh) "工作区" else "Workspace", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                 Text((state.currentTask()?.title ?: if (zh) "未选择文件" else "No file").take(24), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
@@ -267,7 +268,7 @@ internal fun AnalysisWorkspace(
             }
         }
         // 主区
-        Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 6.dp, vertical = 5.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = onOpenTask, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), shape = RoundedCornerShape(AppShape.sm)) {
@@ -312,7 +313,7 @@ internal fun AnalysisWorkspace(
                         ToolConsole(state, zh, onAiAnalyze)
                     }
                 } else {
-                    Text(if (zh) "从左栏切换工具" else "Pick a tool from the dock", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (zh) "点左栏图标选工具" else "Pick a tool from the rail", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Spacer(Modifier.size(4.dp))
@@ -353,12 +354,12 @@ private val railIcons = listOf(
 /** 左导轨按钮（IDA 风格）。 */
 @Composable
 private fun IdaRail(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+    IconButton(onClick = onClick, modifier = Modifier.size(30.dp)) {
         Icon(
             icon,
             contentDescription = label,
             tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(15.dp),
         )
     }
 }

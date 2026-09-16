@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -27,6 +29,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.ListAlt
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -48,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -111,68 +122,165 @@ internal fun AnalysisWorkspace(
 ) {
     val zh = t.zh
     val tools = state.tools
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp)) {
-        var toolsExpanded by remember { mutableStateOf(false) }
-        // 顶部栏：任务 + 工具切换 + 选文件
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val cur = state.currentTask()
-            Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = onOpenTask,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                shape = RoundedCornerShape(AppShape.sm)) {
-                Text((cur?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
-            }
-            if (cur != null && tools.sharedWorkspaceId.isBlank()) {
-                Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.error)
+    // ── IDA 风格工作台：左导轨 + 左停靠面板 + 视图标签 + 底部输出面板 ──
+    var leftDock by remember { mutableStateOf(true) }
+    var bottomOpen by remember { mutableStateOf(false) }
+    var pane by remember { mutableStateOf("result") }
+
+    Row(Modifier.fillMaxSize().statusBarsPadding()) {
+        // 左导轨（窄工具条）
+        Column(
+            Modifier.width(46.dp).fillMaxHeight()
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f))
+                .padding(vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            IdaRail(Icons.Default.Menu, if (zh) "面板" else "Panel", leftDock) { leftDock = !leftDock }
+            Spacer(Modifier.height(4.dp))
+            toolDefs.forEachIndexed { i, def ->
+                IdaRail(railIcons[i % railIcons.size], if (zh) def.labelZh else def.labelEn, pane == "tool" && state.activeTool == def.key) {
+                    state.activeTool = def.key
+                    pane = "tool"
+                }
             }
             Spacer(Modifier.weight(1f))
-            Button(onClick = { toolsExpanded = !toolsExpanded },
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                shape = RoundedCornerShape(AppShape.sm)) {
-                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
-                Spacer(Modifier.size(3.dp))
-                Text(if (toolsExpanded) "▲" else "▼", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
-            }
-            WorkspacePicker(state, zh)
+            IdaRail(Icons.Default.ListAlt, if (zh) "结果" else "Results", pane == "result") { pane = "result" }
         }
-        // 可折叠工具切换条
-        if (toolsExpanded) {
+        // 左停靠面板：工作区 / 工具 / 结果
+        if (leftDock) {
+            Column(
+                Modifier.width(152.dp).fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(if (zh) "工作区" else "Workspace", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text((state.currentTask()?.title ?: if (zh) "未选择文件" else "No file").take(24), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
+                if (tools.sharedWorkspaceId.isBlank()) {
+                    TextButton(onClick = onOpenTask, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                        Text(if (zh) "选择文件" else "Pick file", fontSize = AppText.label)
+                    }
+                }
+                GroupDivider()
+                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                toolDefs.forEach { def ->
+                    val sel = pane == "tool" && state.activeTool == def.key
+                    Text(
+                        if (zh) def.labelZh else def.labelEn,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm))
+                            .clickable { state.activeTool = def.key; pane = "tool" }
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                    )
+                }
+                GroupDivider()
+                Text(
+                    if (zh) "结果 (${tools.resultTabs.size})" else "Results (${tools.resultTabs.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.fillMaxWidth().clickable { pane = "result" }.padding(vertical = 3.dp),
+                )
+            }
+        }
+        // 主区
+        Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 8.dp, vertical = 6.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = onOpenTask, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), shape = RoundedCornerShape(AppShape.sm)) {
+                    Text((state.currentTask()?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
+                }
+                if (state.currentTask() != null && tools.sharedWorkspaceId.isBlank()) {
+                    Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(Modifier.weight(1f))
+                WorkspacePicker(state, zh)
+            }
             Spacer(Modifier.size(4.dp))
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                toolDefs.forEach { def ->
-                    val sel = state.activeTool == def.key
-                    Button(
-                        onClick = { state.activeTool = def.key; toolsExpanded = false },
-                        colors = if (sel) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                            else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                        shape = RoundedCornerShape(AppShape.sm),
-                    ) { Text(if (zh) def.labelZh else def.labelEn, style = MaterialTheme.typography.labelSmall, fontSize = AppText.body) }
+                listOf("tool" to (if (zh) "工具控制台" else "Console"), "result" to (if (zh) "结果" else "Results")).forEach { pair ->
+                    val sel = pane == pair.first
+                    Text(
+                        pair.second,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.clip(RoundedCornerShape(AppShape.sm))
+                            .background(if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                            .clickable { pane = pair.first }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.size(4.dp))
+            if (pane == "tool" && state.activeTool in addrNeededTools) {
+                AddrBar(state, zh)
+                Spacer(Modifier.size(4.dp))
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (pane == "result") {
+                    Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)) {
+                        ResultStream(tools, zh)
+                    }
+                } else if (state.activeTool.isNotBlank()) {
+                    Surface(Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
+                        ToolConsole(state, zh, onAiAnalyze)
+                    }
+                } else {
+                    Text(if (zh) "从左栏切换工具" else "Pick a tool from the dock", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.size(4.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    .clickable { bottomOpen = !bottomOpen }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (bottomOpen) "▾" else "▸", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.size(6.dp))
+                Text(if (zh) "输出" else "Output", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text("${tools.resultTabs.size} tabs", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (bottomOpen) {
+                Surface(Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 180.dp), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f)) {
+                    Column(Modifier.verticalScroll(rememberScrollState()).padding(8.dp)) {
+                        val tb = tools.resultTabs.getOrNull(tools.selectedTabIndex)
+                        Text(
+                            tb?.text ?: (if (zh) "暂无输出" else "No output"),
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
-        Spacer(Modifier.size(4.dp))
-        // 地址栏：放在工作区选择下面，仅在需要地址的工具中显示
-        if (state.activeTool in addrNeededTools) {
-            AddrBar(state, zh)
-            Spacer(Modifier.size(4.dp))
-        }
-        // 主体
-        Column(Modifier.fillMaxSize()) {
-            if (state.activeTool.isNotBlank()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(AppShape.sm),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                ) { ToolConsole(state, zh, onAiAnalyze) }
-                Spacer(Modifier.size(4.dp))
-            }
-            Surface(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                shape = RoundedCornerShape(AppShape.sm),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-            ) { ResultStream(tools, zh) }
-        }
+    }
+}
+
+private val railIcons = listOf(
+    Icons.Default.Code, Icons.Default.LockOpen, Icons.Default.Memory,
+    Icons.Default.FlashOn, Icons.Default.MyLocation, Icons.Default.Inventory2,
+)
+
+/** 左导轨按钮（IDA 风格）。 */
+@Composable
+private fun IdaRail(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

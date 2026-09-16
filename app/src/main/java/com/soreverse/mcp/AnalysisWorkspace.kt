@@ -3,6 +3,7 @@ package com.soreverse.mcp
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.widget.Toast
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
@@ -132,6 +133,25 @@ internal fun AnalysisWorkspace(
     var leftDock by remember { mutableStateOf(true) }
     var bottomOpen by remember { mutableStateOf(false) }
     var pane by remember { mutableStateOf("result") }
+    // 对象树状态
+    val treeScope = rememberCoroutineScope()
+    var treeOpen by remember { mutableStateOf(setOf<String>()) }
+    var treeChildren by remember { mutableStateOf(mapOf<String, List<String>>()) }
+    var treeLoading by remember { mutableStateOf("") }
+    var treeSel by remember { mutableStateOf("") }
+
+    fun loadTree(key: String) {
+        val ws = tools.sharedWorkspaceId
+        if (ws.isBlank()) return
+        treeScope.launch {
+            treeLoading = key
+            val res = withContext(Dispatchers.IO) {
+                runCatching { EngineProvider.get(context).list(ws, "", key, "", 200) }.getOrNull()
+            }
+            treeChildren = treeChildren + (key to extractNames(res))
+            treeLoading = ""
+        }
+    }
 
     Row(Modifier.fillMaxSize().statusBarsPadding()) {
         // 左导轨（窄工具条）
@@ -167,6 +187,58 @@ internal fun AnalysisWorkspace(
                 if (tools.sharedWorkspaceId.isBlank()) {
                     TextButton(onClick = onOpenTask, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
                         Text(if (zh) "选择文件" else "Pick file", fontSize = AppText.label)
+                    }
+                }
+                GroupDivider()
+                Text(if (zh) "对象" else "Objects", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                if (tools.sharedWorkspaceId.isBlank()) {
+                    Text(if (zh) "未打开工作区" else "No workspace", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    treeCats.forEach { cat ->
+                        val open = cat.key in treeOpen
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                treeOpen = if (open) treeOpen - cat.key else treeOpen + cat.key
+                                if (!open && !treeChildren.containsKey(cat.key)) loadTree(cat.key)
+                            }.padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(if (open) "▾" else "▸", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.size(4.dp))
+                            Text(if (zh) cat.zh else cat.en, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.weight(1f))
+                            if (treeLoading == cat.key) {
+                                CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 2.dp)
+                            } else {
+                                treeChildren[cat.key]?.let { Text(it.size.toString(), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        }
+                        if (open) {
+                            val kids = treeChildren[cat.key]
+                            if (kids != null) {
+                                kids.take(300).forEach { name ->
+                                    Text(
+                                        name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = if (treeSel == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.fillMaxWidth()
+                                            .clickable {
+                                                treeSel = name
+                                                runCatching {
+                                                    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                                    cm.setPrimaryClip(android.content.ClipData.newPlainText("taffy", name))
+                                                }
+                                                Toast.makeText(context, if (zh) "已复制：$name" else "Copied: $name", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .padding(start = 14.dp, top = 2.dp, bottom = 2.dp),
+                                    )
+                                }
+                                if (kids.size > 300) Text(if (zh) "… 共 ${kids.size} 项" else "… ${kids.size} total", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 14.dp))
+                            }
+                        }
                     }
                 }
                 GroupDivider()
@@ -1442,4 +1514,33 @@ private fun highlightHexLine(line: String): AnnotatedString? {
             withStyle(SpanStyle(color = ascColor, fontFamily = FontFamily.Monospace)) { append(parts[2]) }
         }
     }
+}
+
+private data class TreeCat(val key: String, val zh: String, val en: String)
+
+private val treeCats = listOf(
+    TreeCat("sections", "节区", "Sections"),
+    TreeCat("symbols", "符号", "Symbols"),
+    TreeCat("functions", "函数", "Functions"),
+    TreeCat("strings", "字符串", "Strings"),
+    TreeCat("imports", "导入", "Imports"),
+)
+
+/** 容错提取列表类返回里的名字/地址。 */
+private fun extractNames(o: JSONObject?): List<String> {
+    if (o == null) return emptyList()
+    val arr = o.optJSONArray("items") ?: o.optJSONArray("values") ?: o.optJSONArray("list")
+        ?: o.optJSONArray("entries") ?: o.optJSONArray("data") ?: o.optJSONArray("result") ?: return emptyList()
+    val out = ArrayList<String>(arr.length())
+    for (i in 0 until arr.length()) {
+        when (val v = arr.opt(i)) {
+            is String -> out.add(v)
+            is JSONObject -> {
+                val n = v.optString("name").ifBlank { v.optString("va").ifBlank { v.optString("address").ifBlank { v.optString("id") } } }
+                if (n.isNotBlank()) out.add(n)
+            }
+            else -> {}
+        }
+    }
+    return out
 }

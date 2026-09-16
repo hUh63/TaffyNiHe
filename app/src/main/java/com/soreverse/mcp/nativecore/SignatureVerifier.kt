@@ -113,9 +113,10 @@ object SignatureVerifier {
 
     private fun normalizeSignerDigest(value: String): String = value.filter { it.isLetterOrDigit() }.uppercase()
 
-    // ── 上游 1.0.19 移植: APK 完整性校验（Kotlin 等价实现）──
-    // 上游用 cpp/signature_verify.cpp 的 nativeVerifyApkIntegrity（mmap + 64 位溢出防护 +
-    // 流式 CRC32）；我们的 1.0.17 预编译 so 无该导出，故用纯 Kotlin 实现等价检查项：
+    // ── APK 完整性校验（native 优先，Kotlin fallback）──
+    // v1.3.6 起 cpp/signature_verify.cpp 已随 rz_native 一起编译并导出 nativeVerifyApkIntegrity
+    // （mmap + 64 位溢出防护 + 流式 CRC32 + v2/v3 signing block 探测）。
+    // 下方 Kotlin 实现保留为 native so 不可用时的 fallback，检查项等价：
     //   EOCD/central-directory 边界、关键条目存在性、classes.dex CRC（ZipFile 自动处理 deflate）。
 
     object IntegrityCode {
@@ -129,6 +130,8 @@ object SignatureVerifier {
         const val MISSING_SIGNATURE = 1 shl 6
         const val MISSING_NATIVE = 1 shl 7
         const val CRC_MISMATCH = 1 shl 8
+        // 仅 native 产出：无 v2/v3 APK Signing Block signer（上游 1.0.19 同值 1<<9）
+        const val MISSING_APK_SIG_V234 = 1 shl 9
     }
 
     /**

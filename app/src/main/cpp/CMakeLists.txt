@@ -75,7 +75,10 @@ if(LIEF_AVAILABLE)
 endif()
 
 add_library(rz_native SHARED ${RZ_SOURCES})
-target_sources(rz_native PRIVATE zstd_compat_stub.cpp)
+# 逆核 v1.3.6: native 级防篡改（直接读 APK 文件系统的 META-INF PKCS7 证书，
+# 绕过可被 kstools/ApkSignatureKiller hook 的 PackageManager Binder）。
+# 需要 zlib(inflate) + android log；pin 值见同目录 key_generated.h。
+target_sources(rz_native PRIVATE zstd_compat_stub.cpp signature_verify.cpp)
 
 add_library(blutter_bridge SHARED blutter_bridge.cpp)
 target_link_libraries(blutter_bridge PRIVATE dl log)
@@ -191,7 +194,8 @@ else()
     message(WARNING "Rizin static libs not found under '${RIZIN_BUILD_DIR}'. "
                     "Rizin backend will be unavailable at runtime. "
                     "Run the meson cross-compile first.")
-    target_link_libraries(rz_native PRIVATE log)
+    # z: signature_verify.cpp 的 inflate() 需要（无 Rizin 时也要能编译该文件）
+    target_link_libraries(rz_native PRIVATE log z)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR NOT CMAKE_BUILD_TYPE)

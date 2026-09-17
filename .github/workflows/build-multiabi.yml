@@ -255,12 +255,39 @@ jobs:
 
       - name: 发布 Release（tag 触发·多 ABI）
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            apk-output/*.apk
-            apk-output/SHA256SUMS
-            apk-output/mapping.txt
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # v1.3.9: 从 softprops/action-gh-release 改为「先建 draft -> 逐个上传（每文件最多 5 次
+          # 重试）-> 全部成功才发布」。原实现并发上传 6 个资产（含 183MB APK / 108MB mapping），
+          # runner 出网抖动时会整体卡死或超时（v1.3.9 首次发布即因此失败、draft 里只落了 4 个资产）；
+          # 逐个上传 + 重试既提高成功率，也保证半成品不会以已发布状态对外可见。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG 已存在（复用 draft）"
+          else
+            gh release create "$TAG" --draft --title "$TAG" --generate-notes
+          fi
+          for f in apk-output/*.apk apk-output/SHA256SUMS apk-output/mapping.txt; do
+            if [ ! -f "$f" ]; then
+              echo "缺少发布资产: $f"
+              exit 1
+            fi
+            ok=0
+            for i in 1 2 3 4 5; do
+              if gh release upload "$TAG" "$f" --clobber; then
+                ok=1
+                echo "已上传 $f（第 $i 次尝试）"
+                break
+              fi
+              echo "上传 $f 失败，重试 $i/5 ..."
+              sleep 15
+            done
+            if [ "$ok" != "1" ]; then
+              echo "上传失败且重试耗尽: $f"
+              exit 1
+            fi
+          done
+          gh release edit "$TAG" --draft=false --prerelease=false
+          echo "Release $TAG 已发布" 

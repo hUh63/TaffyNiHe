@@ -83,13 +83,10 @@ def main():
         # signature_verify.cpp 引用的 4 个符号
         "kEncodedExpectedSha256": xor_encode(EXPECTED_SHA256, key),
         "kEncodedExpectedPackage": xor_encode(EXPECTED_PACKAGE, key),
-        # 无内嵌上报 API Key（未使用）—— 占位 1 字节 + 长度 0
-        "kEncodedReportingApiKey": [0],
     }
     lengths = {
         "kEncodedExpectedSha256": len(EXPECTED_SHA256),
         "kEncodedExpectedPackage": len(EXPECTED_PACKAGE),
-        "kEncodedReportingApiKey": 0,
     }
 
     parts = []
@@ -107,7 +104,7 @@ def main():
         + "};\n"
         "static const size_t kXorKeyLen = " + str(len(key)) + ";\n\n"
     )
-    for name in ("kEncodedExpectedSha256", "kEncodedExpectedPackage", "kEncodedReportingApiKey"):
+    for name in ("kEncodedExpectedSha256", "kEncodedExpectedPackage"):
         parts.append(fmt_array(name, arrays[name]))
         parts.append(f"static const size_t {name}Len = {lengths[name]};\n\n")
 

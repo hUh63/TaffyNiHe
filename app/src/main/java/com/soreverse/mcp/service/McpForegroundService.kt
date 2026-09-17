@@ -52,7 +52,13 @@ class McpForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_START
         when (action) {
-            ACTION_START -> startServer()
+            ACTION_START -> {
+                // v1.3.9 (上游 v1.0.21 借鉴)：startServer() 返回 false 表示本次启动永远无法被满足
+                // （后台 STICKY 重启时 startForeground 被拒 / 完整性校验拦截 / 服务启动失败）。
+                // 此时必须上报 START_NOT_STICKY，否则系统会无限重投这次启动 —— 旧代码无条件
+                // START_STICKY 把每次重启都变成了崩溃循环。
+                return if (startServer()) START_STICKY else START_NOT_STICKY
+            }
             ACTION_STOP -> {
                 running = false
                 runCatching { server?.tunnel?.requestStop() }
@@ -68,11 +74,12 @@ class McpForegroundService : Service() {
                 val settings = SettingsStore(this)
                 if (settings.floatingEnabled && Settings.canDrawOverlays(this)) {
                     // 保活模式：停止 MCP 服务但保留悬浮窗，显示"服务未启动"
-                    createChannel()
                     val zh = settings.language == "zh" || (settings.language == "system" && Locale.getDefault().language == "zh")
-                    startForeground(1001, notification(if (zh) "塔菲逆核保活中 · 服务未启动" else "Taffy keep-alive · service off"))
-                    updateFloating()
-                    AppLog.i("MCP server stopped, keeping service alive for floating window")
+                    // v1.3.9: 二次前台化同样要能扛住后台启动被拒，否则保活路径会崩溃
+                    if (enterForeground(settings, if (zh) "塔菲逆核保活中 · 服务未启动" else "Taffy keep-alive · service off")) {
+                        updateFloating()
+                        AppLog.i("MCP server stopped, keeping service alive for floating window")
+                    }
                 } else {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
@@ -81,10 +88,9 @@ class McpForegroundService : Service() {
             ACTION_REFRESH_FLOATING -> {
                 val settings = SettingsStore(this)
                 if (server == null && settings.floatingEnabled && Settings.canDrawOverlays(this)) {
-                    // 服务未运行但悬浮窗已开启：启动前台服务保活
-                    createChannel()
+                    // 服务未运行但悬浮窗已开启：启动前台服务保活（v1.3.9: 带拒绝兜底）
                     val zh = settings.language == "zh" || (settings.language == "system" && Locale.getDefault().language == "zh")
-                    startForeground(1001, notification(if (zh) "塔菲逆核保活中 · 服务未启动" else "Taffy keep-alive · service off"))
+                    enterForeground(settings, if (zh) "塔菲逆核保活中 · 服务未启动" else "Taffy keep-alive · service off")
                 }
                 updateFloating()
             }
@@ -138,29 +144,35 @@ class McpForegroundService : Service() {
         stopSelf(startId)
     }
 
-    private fun startServer() {
+    /**
+     * 启动 MCP 服务。
+     *
+     * 返回 true = 本次启动已被满足，服务应保持 STICKY；false = 本次启动永远无法满足，
+     * 调用方必须上报 START_NOT_STICKY，否则系统会无限重投这次启动造成崩溃循环。
+     *
+     * v1.3.9 (上游 v1.0.21 借鉴) 两处顺序与兜底修复：
+     * - 平台契约：由 startForegroundService 启动的服务必须先进前台才允许自我拆除；旧代码会
+     *   在 startForeground 之前就 stopSelf，系统随后抛 RemoteServiceException。
+     * - 后台 STICKY 重启会以 null intent 重新投递 onStartCommand，此时 startForeground 会被
+     *   平台拒绝（API 31+ 抛 ForegroundServiceStartNotAllowedException）。
+     */
+    private fun startServer(): Boolean {
+        val settings = SettingsStore(this)
+        if (!enterForeground(settings)) return false
         if (!IntegrityGuard.isTrusted(applicationContext)) {
             AppLog.e("MCP service start blocked by integrity guard")
             running = false
             stopSelf()
-            return
+            return false
         }
-        val settings = SettingsStore(this)
         val host = settings.bindHost
-        createChannel()
-        // Avoid showing the bind wildcard 0.0.0.0 in the notification: users kept
-        // typing 0.0.0.0:8000/mcp as the client URL and it never connects. When
-        // bound to all interfaces, surface a real reachable address (LAN IP if
-        // available, otherwise 127.0.0.1) plus the required /mcp path.
-        val displayText = buildNotificationText(host, settings.port)
-        startForeground(1001, notification(displayText))
         updateWakeLock(settings.wakeLockEnabled)
         EngineProvider.restoreWorkDirectory(applicationContext)
         if (server != null && activePort == settings.port && activeHost == host) {
             running = true
             updateFloating()
             AppLog.i("MCP server already running on $host:${settings.port}/mcp")
-            return
+            return true
         }
         server?.stop()
         runCatching {
@@ -178,8 +190,35 @@ class McpForegroundService : Service() {
             activeHost = ""
             AppLog.e("Failed to start MCP server", it)
             stopSelf()
+            return false
         }
         AppLog.i("MCP server started on $host:${settings.port}/mcp")
+        return true
+    }
+
+    /**
+     * 进入前台（本 Service 唯一入口）。
+     *
+     * text 为 null 时使用「真实可达地址」文案：避免把绑定通配符 0.0.0.0 显示给用户，
+     * 他们常把 0.0.0.0:8000/mcp 直接填进客户端导致永远连不上。
+     *
+     * 返回 true = 已进入前台；false = 被平台拒绝（此时已 stopSelf）。
+     * 统一 catch Throwable 而非具体异常类：minSdk=26，而 ForegroundServiceStartNotAllowed
+     * 异常仅存在于 API 31+，直接 catch 具体类型在低版本设备上会在异常匹配阶段遇到类解析
+     * 问题；此处只做「记日志 + 停服务」，不吞掉需要继续向上传播的信息。
+     */
+    private fun enterForeground(settings: SettingsStore, text: String? = null): Boolean = try {
+        createChannel()
+        // Avoid showing the bind wildcard 0.0.0.0 in the notification: users kept
+        // typing 0.0.0.0:8000/mcp as the client URL and it never connects. When
+        // bound to all interfaces, surface a real reachable address (LAN IP if
+        // available, otherwise 127.0.0.1) plus the required /mcp path.
+        startForeground(1001, notification(text ?: buildNotificationText(settings.bindHost, settings.port)))
+        true
+    } catch (e: Throwable) {
+        AppLog.e("startForeground rejected (background start / not allowed); stopping service", e)
+        runCatching { stopSelf() }
+        false
     }
 
     private fun maybeAutoStartTunnel(settings: SettingsStore) {

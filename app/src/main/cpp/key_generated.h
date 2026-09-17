@@ -26,9 +26,3 @@ static const size_t kEncodedExpectedSha256Len = 64;
         0xF6,
     };
 static const size_t kEncodedExpectedPackageLen = 13;
-
-    static const uint8_t kEncodedReportingApiKey[] = {
-        0x00,
-    };
-static const size_t kEncodedReportingApiKeyLen = 0;
-

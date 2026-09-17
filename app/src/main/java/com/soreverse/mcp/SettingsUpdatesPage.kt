@@ -67,10 +67,9 @@ internal fun SettingsUpdatesPage(
     onRelease: (GitHubRelease?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var autoCheck by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        settings.autoCheckUpdates = false
-    }
+    // v1.3.9: 旧代码在这里把 settings.autoCheckUpdates 强制清零，却又照常渲染「启动时自动检查」
+    // 开关 —— 用户打开开关后下次进本页又被关掉，显示与实际行为矛盾。改为与开关一致的持久化行为。
+    var autoCheck by remember { mutableStateOf(settings.autoCheckUpdates) }
     var release by remember(initialRelease) { mutableStateOf(initialRelease) }
     var checking by remember { mutableStateOf(false) }
     var downloading by remember { mutableStateOf(false) }
@@ -164,7 +163,7 @@ internal fun SettingsUpdatesPage(
     }
 
     /** 检查更新（按频道）：正式版走 /releases/latest，测试版取最新 prerelease。 */
-    fun checkUpdates(target: String) {
+    fun checkUpdates(target: String = channel) {
         if (checking || downloading) return
         checking = true
         error = ""
@@ -254,6 +253,7 @@ internal fun SettingsUpdatesPage(
         // 当前版本 "power card"（上游设计）
         UpdateVersionCard(
             versionText = versionText,
+            badge = versionBadge,
             accent = accent,
             zh = t.zh,
         )
@@ -438,9 +438,9 @@ private fun UpdateHero(icon: ImageVector, headline: String, subtitle: String, ti
     }
 }
 
-/** 当前版本卡：终端图标 + 版本号（等宽字体）（上游设计）。 */
+/** 当前版本卡：终端图标 + 版本号（等宽字体）+ 频道徽章（上游 v1.0.21 设计）。 */
 @Composable
-private fun UpdateVersionCard(versionText: String, accent: Color, zh: Boolean) {
+private fun UpdateVersionCard(versionText: String, badge: String?, accent: Color, zh: Boolean) {
     val shape = RoundedCornerShape(AppShape.xl)
     val bg = Brush.verticalGradient(listOf(Color(0xFF1E2026), Color(0xFF15171D)))
     Row(
@@ -453,32 +453,56 @@ private fun UpdateVersionCard(versionText: String, accent: Color, zh: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(
-            Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(accent.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
+        Row(
+            Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(
-                Icons.Default.Terminal,
-                null,
-                tint = accent,
-                modifier = Modifier.size(22.dp),
-            )
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Terminal,
+                    null,
+                    tint = accent,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    if (zh) "当前版本" else "Current version",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color(0xFF9AA0AF),
+                )
+                Text(
+                    versionText,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                )
+            }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                if (zh) "当前版本" else "Current version",
-                style = MaterialTheme.typography.labelMedium,
-                color = Color(0xFF9AA0AF),
-            )
-            Text(
-                versionText,
-                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-            )
+        // 频道徽章（测试版 / BETA）——此前 versionBadge 算了但从未渲染
+        if (badge != null) {
+            val pill = RoundedCornerShape(999.dp)
+            Box(
+                Modifier
+                    .clip(pill)
+                    .background(accent.copy(alpha = 0.18f))
+                    .border(BorderStroke(1.dp, accent.copy(alpha = 0.34f)), pill)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
     }
 }

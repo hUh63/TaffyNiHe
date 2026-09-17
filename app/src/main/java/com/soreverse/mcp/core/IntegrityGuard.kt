@@ -45,6 +45,38 @@ object IntegrityGuard {
 
     @Volatile private var cached: Pair<Long, Result>? = null
 
+    /** 失败记录的「签名」，用于去重（避免每 3 秒轮询时刷屏日志/写盘）。 */
+    @Volatile private var lastFailureSignature: String = ""
+
+    private const val PREFS = "integrity_guard"
+    private const val KEY_LAST_FAILURE = "last_failure"
+
+    /**
+     * 最近一次完整性校验失败记录（诊断用）。
+     * v1.3.9 (上游 v1.0.21 借鉴)：以前失败后进程被静默退出，用户无从查因；现在把失败原因
+     * 落到 SharedPreferences，重启后仍能在弹窗/日志里看到「上次为什么被杀」。
+     */
+    fun lastFailure(context: Context): String? = runCatching {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LAST_FAILURE, null)
+    }.getOrNull()
+
+    private fun recordFailure(context: Context, result: Result) {
+        val signature = "${result.reason}|${result.expected}|${result.actual.joinToString()}|${result.integrityCode}"
+        if (signature == lastFailureSignature) return
+        lastFailureSignature = signature
+        runCatching {
+            val stamp = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+            val line = "$stamp | ${result.reason} | expected=${result.expected.take(16)}… | " +
+                "actual=${result.actual.firstOrNull()?.take(16) ?: "-"}… | code=0x${result.integrityCode.toString(16)}"
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_LAST_FAILURE, line).apply()
+            AppLog.e(
+                "Integrity check FAILED: ${result.reason}; expected=${result.expected}; " +
+                    "actual=${result.actual.joinToString()}; integrityCode=0x${result.integrityCode.toString(16)}"
+            )
+        }
+    }
+
     fun verify(context: Context): Result {
         cached?.let { (time, result) ->
             if (System.currentTimeMillis() - time < 2_000L) return result
@@ -95,6 +127,7 @@ object IntegrityGuard {
         }.getOrElse {
             Result(false, it.message ?: it.javaClass.simpleName, expectedSignerDigest(), emptyList())
         }
+        if (!result.trusted) recordFailure(context, result)
         cached = System.currentTimeMillis() to result
         return result
     }
@@ -104,7 +137,15 @@ object IntegrityGuard {
     // 如需恢复完整检测, 取消下方注释并改 isTrusted 调用 verify(context).trusted。
     fun isTrusted(context: Context): Boolean = verify(context).trusted
 
+    /**
+     * 终止进程（签名明确不匹配时的最终拦截）。
+     * v1.3.9: 终止前先把失败原因落日志/落盘 —— 否则用户只会看到"应用闪退"，无从判断是
+     * 安装包被改过还是校验误判（上游 v1.0.21 同类修复）。
+     */
     fun terminate(activity: Activity) {
+        runCatching {
+            AppLog.e("Integrity gate: terminating process; lastFailure=${lastFailure(activity.applicationContext) ?: "-"}")
+        }
         runCatching { activity.finishAffinity() }
         exitProcess(173)
     }

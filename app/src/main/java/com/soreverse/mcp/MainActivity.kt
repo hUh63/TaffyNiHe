@@ -112,6 +112,7 @@ import com.soreverse.mcp.core.DeepReportStore
 import com.soreverse.mcp.core.IntegrityGuard
 import com.soreverse.mcp.core.GitHubRelease
 import com.soreverse.mcp.core.GitHubUpdateManager
+import com.soreverse.mcp.core.UpdateChannel
 import com.soreverse.mcp.core.PublicReachability
 import com.soreverse.mcp.core.SettingsStore
 import kotlinx.coroutines.CancellationException
@@ -149,11 +150,17 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
         content()
         return
     }
+    // v1.3.9 (上游 v1.0.21 借鉴)：只有「签名者摘要明确不匹配」才倒计时退出。
+    // 其他失败（native 库加载失败 UnsatisfiedLinkError、PackageManager 异常、v2/v3 解析差异等）
+    // 一律不自动杀进程 —— 旧行为会让一次误判直接变成"启动即退出"的死循环，且没有任何记录可查。
+    val hardFail = result.expected.isNotBlank() && result.actual.isNotEmpty() &&
+        result.reason == "application signature mismatch"
+    val lastFailure = remember { IntegrityGuard.lastFailure(context.applicationContext) }
     var remaining by remember { mutableStateOf(10) }
     var proceed by remember { mutableStateOf(false) }
     // 用户选择"仍然使用"后立即放行，不再倒计时退出
-    LaunchedEffect(proceed) {
-        if (proceed) return@LaunchedEffect
+    LaunchedEffect(proceed, hardFail) {
+        if (proceed || !hardFail) return@LaunchedEffect
         while (remaining > 0) {
             delay(1000)
             remaining--
@@ -174,11 +181,20 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
                 title = { Text("应用完整性校验失败", fontWeight = FontWeight.SemiBold) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("检测到当前安装包签名与官方发布签名不一致，或运行环境存在调试、注入、Hook 风险。为保护本地数据、MCP 服务和原生编辑能力，应用将在 $remaining 秒后退出。")
+                        Text(
+                            if (hardFail) {
+                                "检测到当前安装包签名与官方发布签名不一致。为保护本地数据、MCP 服务和原生编辑能力，应用将在 $remaining 秒后退出；如为你自行签名/修改的包，可点「仍然使用」。"
+                            } else {
+                                "完整性校验未通过（原因不是签名不匹配，可能是运行环境或原生库问题）。本次不会自动退出，原因已记录，可点「仍然使用」继续。"
+                            },
+                        )
                         Text("原因: ${result.reason}", style = MaterialTheme.typography.bodySmall)
                         if (result.expected.isNotBlank()) Text("期望: ${result.expected.take(16)}...${result.expected.takeLast(16)}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         if (result.actual.isNotEmpty()) Text("实际: ${result.actual.joinToString { it.take(16) + "..." + it.takeLast(16) }}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         if (result.threats.isNotEmpty()) Text("威胁: ${result.threats.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        if (lastFailure != null) {
+                            Text("上次失败记录: $lastFailure", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         Text("如果这是你自行签名/修改的安装包，可点击「仍然使用」继续（下次安装官方签名包即恢复校验）。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
@@ -331,7 +347,11 @@ private fun SoReverseApp() {
     }
     LaunchedEffect(Unit) {
         if (settings.autoCheckUpdates) {
-            updateManager.check()
+            // v1.3.9: 启动自动检查必须跟随用户选择的更新频道。旧代码写死 check()（=正式版），
+            // 于是用户切到「测试版」后启动检查仍然只查 stable —— Beta 频道形同虚设。
+            val startupChannel = runCatching { UpdateChannel.valueOf(settings.updateChannel.uppercase()) }
+                .getOrDefault(UpdateChannel.STABLE)
+            updateManager.check(startupChannel)
                 .onSuccess { result ->
                     if (result is com.soreverse.mcp.core.UpdateCheckResult.Available) {
                         availableRelease = result.release

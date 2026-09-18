@@ -199,6 +199,29 @@ else()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR NOT CMAKE_BUILD_TYPE)
-    target_compile_options(rz_native PRIVATE -O2 -ffunction-sections -fdata-sections -fvisibility=hidden)
-    target_link_options(rz_native PRIVATE -Wl,--gc-sections -Wl,--icf=safe -Wl,--exclude-libs,ALL)
+    # 加固开关（对齐上游 SOMCP v1.0.21）：
+    #   -fstack-protector-all  所有函数插入栈 canary，防栈溢出覆盖返回地址
+    #   -D_FORTIFY_SOURCE=2    在 -O2 下启用运行期缓冲区溢出检查（先 -U 消除与 NDK 默认宏的重定义）
+    #   -fno-strict-overflow   禁止基于有符号溢出的 UB 优化（避免安全检查被优化裁剪）
+    # 说明：PRIVATE，仅作用于本 target 的胶水源码；rizin/LIEF 静态库为独立交叉编译产物，不受影响。
+    target_compile_options(rz_native PRIVATE
+        -O2
+        -ffunction-sections
+        -fdata-sections
+        -fvisibility=hidden
+        -fstack-protector-all
+        -U_FORTIFY_SOURCE
+        -D_FORTIFY_SOURCE=2
+        -fno-strict-overflow
+    )
+    # 链接期加固：-z now + -z relro 在加载时立即绑定 PLT 并整段只读重定位（阻断运行时 PLT/GOT hook）；
+    # --as-needed 收缩依赖面。故意不使用 --strip-all：保留符号表以便引擎自检 / map / 诊断。
+    target_link_options(rz_native PRIVATE
+        -Wl,--gc-sections
+        -Wl,--icf=safe
+        -Wl,--exclude-libs,ALL
+        -Wl,-z,relro
+        -Wl,-z,now
+        -Wl,--as-needed
+    )
 endif()

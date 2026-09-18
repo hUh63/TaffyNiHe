@@ -187,10 +187,27 @@ jobs:
           print('frida-server %.1f MB' % (len(data)/1048576))
           PY
 
-      - name: 复制 libc++_shared.so
+      - name: 复制 libc++_shared.so（NDK，路径按三元组解析）
         run: |
-          cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${{ matrix.abi }}/libc++_shared.so" \
-             "app/src/main/jniLibs/${{ matrix.abi }}/" || true
+          set -euo pipefail
+          D="app/src/main/jniLibs/${{ matrix.abi }}"
+          # 旧实现把 NDK 目录当成 ABI 名（.../sysroot/usr/lib/x86_64/...），实际是三元组名
+          # （x86_64-linux-android / aarch64-linux-android / arm-linux-androideabi /
+          # i686-linux-android），而且结尾是 `|| true` → 静默失败：非 arm64 的 APK 里
+          # 根本没有 libc++_shared.so，而 librz_native.so/LIEF 需要它，运行期加载直接失败。
+          case "${{ matrix.abi }}" in
+            arm64-v8a)   T=aarch64-linux-android ;;
+            armeabi-v7a) T=arm-linux-androideabi ;;
+            x86)         T=i686-linux-android ;;
+            x86_64)      T=x86_64-linux-android ;;
+          esac
+          SRC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/$T/libc++_shared.so"
+          if [ ! -f "$SRC" ]; then
+            SRC="$(find "$ANDROID_NDK_HOME" -name libc++_shared.so -print -quit 2>/dev/null || true)"
+          fi
+          [ -n "${SRC:-}" ] && [ -f "$SRC" ] || { echo "::error::NDK 里找不到 libc++_shared.so"; exit 1; }
+          cp "$SRC" "$D/"
+          ls -lh "$D/libc++_shared.so"
 
       - name: 校验本 ABI 的 so（硬门禁 + ELF 架构一致性）
         run: |

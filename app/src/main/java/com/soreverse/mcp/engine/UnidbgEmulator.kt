@@ -49,6 +49,73 @@ class UnidbgEmulator(private val context: Context) {
         @Volatile private var demumbleSelfTest = false
         @Volatile private var nativeSelfTestStage = "not-started"
 
+        /**
+         * libunicorn.so 是否被 System.loadLibrary 成功加载。
+         * 32 位 ABI（armeabi-v7a/x86）永远为 false —— QEMU/unicorn 需要 __uint128_t，
+         * NDK 在 32 位下不提供，构建脚本也就不会打包它，属正常而非故障。
+         */
+        @Volatile private var unicornLoaded = false
+
+        /**
+         * Unicorn2 后端注册失败的原因（上游 issue #91 同坑）：BackendFactory.newBackend 会吞掉
+         * 绑定错误并回退到 legacy UnicornBackend，于是"libunicorn.so 在、但不是 unidbg 的
+         * unicorn2 JNI 桥"这种状态会一直不可见，直到 session_open 才炸。
+         */
+        @Volatile private var backendInitError: String? = null
+
+        /** 可选原生库（disassembler / demumble）缺失。 */
+        @Volatile private var optionalNativeMissing = false
+
+        /** 可用性降级警告只打一次，避免每次 available() 刷屏。 */
+        @Volatile private var unicornDegradedWarned = false
+
+        /** 当前运行时是否 64 位（只有 64 位才可能提供 unicorn）。 */
+        fun abiIs64Bit(): Boolean = runCatching {
+            android.os.Build.SUPPORTED_ABIS.firstOrNull()?.endsWith("64")
+                ?: (System.getProperty("os.arch")?.endsWith("64") ?: false)
+        }.getOrDefault(false)
+
+        fun isUnicornLoaded(): Boolean = unicornLoaded
+
+        /** 首次降级警告返回 false（并置位），之后返回 true。 */
+        fun warnDegradedOnce(): Boolean {
+            if (unicornDegradedWarned) return true
+            unicornDegradedWarned = true
+            return false
+        }
+        fun backendInitReason(): String? = backendInitError
+        fun isOptionalNativeMissing(): Boolean = optionalNativeMissing
+
+        /** 记录 Unicorn2 后端注册失败原因（由实例侧调用；传 null 表示成功、清空）。 */
+        fun recordBackendInitError(reason: String?) {
+            backendInitError = reason?.takeIf { it.isNotBlank() }
+        }
+
+        /**
+         * 人类可读的不可用/降级原因。用于 EMULATOR_UNAVAILABLE 的 message 与 emulation.status ——
+         * 以前只报 "classes not on classpath"，把「没打包 unicorn」「是裸引擎不是 JNI 桥」
+         * 都说成类路径问题，排查方向被带偏。
+         */
+        fun unavailableReason(): String {
+            nativeLoadError?.let { return "原生库加载失败: ${it.message}" }
+            if (!abiIs64Bit()) {
+                return "32 位运行时：不提供 libunicorn.so（QEMU/unicorn 需要 __uint128_t，" +
+                    "armeabi-v7a/x86 属正常设计，非故障）"
+            }
+            if (!unicornLoaded) {
+                return "libunicorn.so 未加载成功：该 ABI 未打包，或被系统拒绝加载" +
+                    "（64 位包应内置由 unidbg backend/unicorn2 JNI 桥链成的 libunicorn.so）"
+            }
+            backendInitError?.let {
+                return "libunicorn.so 已加载但不是 unidbg 的 unicorn2 JNI 桥 —— " +
+                    "Unicorn2Factory 注册失败（$it）；需用 backend/unicorn2 的原生桥重新链接"
+            }
+            if (optionalNativeMissing) {
+                return "可选原生库缺失（disassembler/demumble），核心模拟能力不受影响"
+            }
+            return "无已知问题"
+        }
+
         fun ensureNativeLibraries(): Boolean = synchronized(this) {
             if (nativeLoaded) return@synchronized true
             if (nativeLoadError != null) return@synchronized false
@@ -59,17 +126,37 @@ class UnidbgEmulator(private val context: Context) {
                     System.setProperty("jna.library.path", nativeDir)
                     listOf("capstone", "keystone", "unicorn", "jnidispatch", "disassembler", "demumble").forEach { NativeLibrary.addSearchPath(it, nativeDir) }
                 }
-                listOf("capstone", "keystone", "unicorn", "jnidispatch", "disassembler", "demumble").forEach { name ->
-                    // 修复：unicorn 由 unidbg 真实后端(Unicorn2Factory / NativeLoader)在创建 emulator 时
-                    // 自行加载。这里的 System.loadLibrary 是另一条路径，在部分设备/打包方式下会失败；
-                    // 若因它失败就把整体判定为不可用，会把本可用的引擎误报为 EMULATOR_UNAVAILABLE /
-                    // emulation.available=false（实测 session_open/call 均正常，却显示不可用）。
-                    runCatching { System.loadLibrary(name) }.onFailure { e ->
-                        if (name == "unicorn") {
-                            AppLog.i("System.loadLibrary(unicorn) not usable here (${e.message}); deferring to unidbg native loader")
-                        } else {
-                            throw e
+                // v1.3.10（上游 v1.0.21 借鉴）分三级加载，并如实记录状态：
+                //  1) 硬依赖 capstone / keystone / jnidispatch —— 失败即整体不可用；
+                //  2) unicorn —— 仅 64 位尝试（32 位不打包）。它的失败**不**判死（某些设备/打包
+                //     方式下由 unidbg 自有 NativeLoader 加载，实测 session_open/call 正常），
+                //     但必须记下 unicornLoaded=false，让诊断不再假装一切正常；
+                //  3) 可选库 disassembler / demumble —— 缺失只 warning（原实现会直接判失败）。
+                listOf("capstone", "keystone", "jnidispatch").forEach { System.loadLibrary(it) }
+                if (abiIs64Bit()) {
+                    runCatching { System.loadLibrary("unicorn") }
+                        .onSuccess {
+                            unicornLoaded = true
+                            AppLog.i("Unidbg native libunicorn.so loaded (64-bit runtime)")
                         }
+                        .onFailure { e ->
+                            unicornLoaded = false
+                            AppLog.w(
+                                "libunicorn.so 未加载（该 64 位设备将无法用 Unicorn2 后端）: ${e.message}；" +
+                                    "若为 32 位包属正常，否则请确认 release 包内置了 unidbg unicorn2 JNI 桥"
+                            )
+                        }
+                } else {
+                    unicornLoaded = false
+                    AppLog.i(
+                        "32 位运行时：跳过 libunicorn.so（QEMU/unicorn 需要 __uint128_t，" +
+                            "armeabi-v7a/x86 不打包，属正常设计）"
+                    )
+                }
+                listOf("disassembler", "demumble").forEach { name ->
+                    runCatching { System.loadLibrary(name) }.onFailure { e ->
+                        optionalNativeMissing = true
+                        AppLog.w("Unidbg 可选原生库 '$name' 缺失，继续运行: ${e.message}")
                     }
                 }
                 nativeSelfTestStage = "keystone-open"
@@ -147,6 +234,9 @@ class UnidbgEmulator(private val context: Context) {
         if (!ensureNativeLibraries()) return@runCatching false
         Class.forName("com.github.unidbg.AndroidEmulator")
         Class.forName("com.github.unidbg.linux.android.AndroidEmulatorBuilder")
+        if (!UnidbgEmulator.isUnicornLoaded() && !UnidbgEmulator.warnDegradedOnce()) {
+            AppLog.w("Unidbg 可用性降级（首次提示）: ${UnidbgEmulator.unavailableReason()}")
+        }
         true
     }.onFailure {
         availabilityError = it
@@ -177,7 +267,8 @@ class UnidbgEmulator(private val context: Context) {
         if (!available()) return@runCatching JSONObject()
             .put("ok", false)
             .put("error", JSONObject().put("code", "EMULATOR_UNAVAILABLE")
-                .put("message", "Unidbg classes not on classpath; check dependency com.github.zhkl0228:unidbg-android"))
+                .put("message", "Unidbg 原生后端不可用: ${UnidbgEmulator.unavailableReason()}")
+                .put("hint", "check dependency com.github.zhkl0228:unidbg-android and whether libunicorn.so is bundled"))
 
         val t0 = System.nanoTime()
         val result = JSONObject()
@@ -222,7 +313,8 @@ class UnidbgEmulator(private val context: Context) {
         if (!available()) return@runCatching JSONObject()
             .put("ok", false)
             .put("error", JSONObject().put("code", "EMULATOR_UNAVAILABLE")
-                .put("message", "Unidbg not available"))
+                .put("message", "Unidbg 原生后端不可用: ${UnidbgEmulator.unavailableReason()}")
+                .put("hint", "check dependency com.github.zhkl0228:unidbg-android and whether libunicorn.so is bundled"))
 
         val result = JSONObject()
         runCatching { doDumpMemory(bytes, arch, addr, size, result) }
@@ -911,14 +1003,25 @@ class UnidbgEmulator(private val context: Context) {
     }
 
     private fun addUnicorn2Backend(builder: Any): String {
-        val factoryClass = runCatching { Class.forName("com.github.unidbg.arm.backend.Unicorn2Factory") }.getOrNull() ?: return "missing"
-        val factory = factoryClass.constructors.firstOrNull { it.parameterCount == 1 && it.parameterTypes[0] == Boolean::class.javaPrimitiveType }
-            ?.newInstance(true)
-            ?: factoryClass.getDeclaredConstructor().newInstance()
-        val builderClass = Class.forName("com.github.unidbg.EmulatorBuilder")
-        val backendFactoryClass = Class.forName("com.github.unidbg.arm.backend.BackendFactory")
-        builderClass.getMethod("addBackendFactory", backendFactoryClass).invoke(builder, factory)
-        return factoryClass.name
+        val factoryClass = runCatching { Class.forName("com.github.unidbg.arm.backend.Unicorn2Factory") }
+            .onFailure { UnidbgEmulator.recordBackendInitError("Unicorn2Factory class missing: ${it.message}") }
+            .getOrNull() ?: return "missing"
+        return runCatching {
+            val factory = factoryClass.constructors.firstOrNull { it.parameterCount == 1 && it.parameterTypes[0] == Boolean::class.javaPrimitiveType }
+                ?.newInstance(true)
+                ?: factoryClass.getDeclaredConstructor().newInstance()
+            val builderClass = Class.forName("com.github.unidbg.EmulatorBuilder")
+            val backendFactoryClass = Class.forName("com.github.unidbg.arm.backend.BackendFactory")
+            builderClass.getMethod("addBackendFactory", backendFactoryClass).invoke(builder, factory)
+            UnidbgEmulator.recordBackendInitError(null)   // 成功即清空
+            factoryClass.name
+        }.getOrElse { e ->
+            val root = rootCause(e)
+            val reason = "${root.javaClass.name}: ${root.message?.take(200) ?: "-"}"
+            UnidbgEmulator.recordBackendInitError(reason)
+            AppLog.w("addUnicorn2Backend 注册失败（$reason）；Unidbg 会回退 legacy backend 或直接失败")
+            "missing"
+        }
     }
 
     private fun rootCause(error: Throwable): Throwable {

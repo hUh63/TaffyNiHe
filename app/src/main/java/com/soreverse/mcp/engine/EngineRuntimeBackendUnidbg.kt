@@ -308,7 +308,17 @@ internal fun EngineRuntime.emulationStatus(): JSONObject {
             .put("nativeLibraries", JSONArray(listOf("libcapstone.so", "libkeystone.so", "libunicorn.so", "libjnidispatch.so")))
             .put("nativeSelfTest", UnidbgEmulator.nativeSelfTest())
             .put("nativeLoadError", UnidbgEmulator.nativeDependencyError()?.toString() ?: JSONObject.NULL)
-            .put("availabilityError", UnidbgEmulator.availabilityError()?.toString() ?: JSONObject.NULL))
+            .put("availabilityError", UnidbgEmulator.availabilityError()?.toString() ?: JSONObject.NULL)
+            // v1.3.10（上游 v1.0.21 借鉴）：把 Unicorn2 后端真实状态透出来。
+            // 以前只报 available=true/false + "classes not on classpath"，掩盖了
+            // 「libunicorn.so 是裸引擎、不是 unidbg JNI 桥」这类必须等到 session_open 才炸的问题。
+            .put("unicornLoaded", UnidbgEmulator.isUnicornLoaded())
+            .put("abi64Bit", UnidbgEmulator.abiIs64Bit())
+            .put("optionalNativeMissing", UnidbgEmulator.isOptionalNativeMissing())
+            .put("backendInitReason", UnidbgEmulator.backendInitReason() ?: JSONObject.NULL)
+            .put("unavailableReason", UnidbgEmulator.unavailableReason())
+            .put("unicornExpectedSymbols", "Java_com_github_unidbg_arm_backend_unicorn_Unicorn_* (>=20)")
+            .put("unicornNote", "libunicorn.so 必须是 unidbg backend/unicorn2 的 JNI 桥；裸引擎能加载但 session_open 必失败（上游 issue #91）。CI 构建期用 tools/verify_unicorn_jni.py 做门禁。"))
         .put("limitations", JSONArray()
             .put("Android framework classes, syscalls, filesystem, and anti-analysis behavior are handled by concrete Unidbg hooks/stubs when a target SO requires them")
             .put("Use trace=true for diagnostics, inspect error.stage/error.nextActions, then add the exact missing hook/stub before retrying"))

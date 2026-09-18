@@ -47,6 +47,10 @@
 #   -h, --help        show this help
 #
 # Notes:
+#   - unicorn 段产出的 libunicorn.so 是「unicorn 引擎(静态) + unidbg backend/unicorn2
+#     JNI 桥」链接成的单一库；只打包裸引擎会导致后端看似可用、session_open 必失败
+#     （上游 issue #91）。构建期由 tools/verify_unicorn_jni.py 门禁。
+#     需要 third_party/unidbg-src（zhkl0228/unidbg v0.9.9）提供桥源码。
 #   - libjnidispatch.so is provided automatically by the JNA AAR
 #     (net.java.dev.jna:jna); no need to build it.
 #   - libdisassembler.so / libdemumble.so only serve optional diagnostic
@@ -233,15 +237,74 @@ if [[ $SKIP_KEYSTONE -eq 0 ]]; then
 fi
 
 if [[ $SKIP_UNICORN -eq 0 ]]; then
-  # unidbg 0.9.9's Unicorn2Factory uses unicorn2 (the zhkl0228 fork).
+  # ── v1.3.10 修复（上游 issue #91 同坑）─────────────────────────────────────────
+  # 旧实现有两个致命缺陷：
+  #   1) -DUNICORN_ARCH=arm,aarch64 —— cmake 里换行符/逗号都不是列表分隔符，
+  #      UNICORN_ARCH 只认空格/分号，这个值会被当成**单一** arch 名 → arm/aarch64
+  #      后端根本没编进去；
+  #   2) 更关键：它只把裸引擎产物当 libunicorn.so 打包，从不编译链接 unidbg 的
+  #      JNI 桥（backend/unicorn2/src/main/native/{unicorn.c,sample_arm.c,sample_arm64.c}）。
+  #      裸引擎能被 System.loadLibrary 成功加载（加载 .so 不要求 JNI 符号可解析），
+  #      于是后端一直显示"可用"，直到 session_open 才炸：Unicorn2Factory 绑定失败，
+  #      BackendFactory 吞掉异常回退 legacy UnicornBackend → NoClassDefFoundError。
+  # 现在：unicorn 按**静态库**构建（libunicorn.a），再与 JNI 桥链接成唯一产物
+  # libunicorn.so（CMake 胶水见 tools/unidbg-unicorn-bridge/CMakeLists.txt），
+  # 最后用 tools/verify_unicorn_jni.py 做构建期硬门禁。
   uni="$PROJECT/third_party/unicorn-zhkl0228"
   [[ -d "$uni" ]] || uni="$PROJECT/third_party/unicorn-engine-unicorn2"
-  build_one unicorn "$uni" \
-    -DUNICORN_ARCH=arm,aarch64 -DUNICORN_BUILD_TESTS=OFF -DUNICORN_BUILD_SAMPLES=OFF
-  RZ_SO="$(find "$BUILD_ROOT/unicorn" -name 'libunicorn.so' -print -quit)"
-  [ -n "$RZ_SO" ] || { echo "error: libunicorn.so not produced"; exit 1; }
-  cp "$RZ_SO" "$JNI_LIBS/"
-  echo "[unidbg-native] copied libunicorn.so -> $JNI_LIBS"
+  if [[ ! -d "$uni" ]]; then
+    echo "error: unicorn source missing: $uni - run 'git submodule update --init --recursive' first" >&2
+    exit 1
+  fi
+  # fail-fast：必须用 zhkl0228/unicorn 的 unicorn2 分支。master 与 unicorn-engine 官方仓库
+  # 都已移除 uc_ctl_set_cpu_model / uc_ctl_remove_cache，用它桥会编译不过（白等十几分钟）。
+  if ! grep -q 'uc_ctl_set_cpu_model' "$uni/include/unicorn/unicorn.h" 2>/dev/null; then
+    echo "error: $uni 不是 zhkl0228/unicorn 的 unicorn2 分支（缺 uc_ctl_set_cpu_model）" >&2
+    echo "       请: git clone --depth 1 --branch unicorn2 https://github.com/zhkl0228/unicorn.git third_party/unicorn-zhkl0228" >&2
+    exit 1
+  fi
+
+  BRIDGE_SRC="$PROJECT/third_party/unidbg-src/backend/unicorn2/src/main/native"
+  if [[ ! -f "$BRIDGE_SRC/unicorn.c" ]]; then
+    echo "error: unidbg unicorn2 JNI 桥源码缺失: $BRIDGE_SRC/unicorn.c" >&2
+    echo "       桥不在 unicorn 仓库里，而在 zhkl0228/unidbg 仓库。请执行：" >&2
+    echo "         git clone --depth 1 --branch v0.9.9 https://github.com/zhkl0228/unidbg.git third_party/unidbg-src" >&2
+    echo "       （CI 由 .github/workflows/build-multiabi.yml 的克隆步骤提供）" >&2
+    exit 1
+  fi
+
+  # 1) 组桥：我们的 CMake 胶水 + 上游桥源码（只取需要编译的文件）
+  BRIDGE_SRC_DIR="$BUILD_ROOT/unicorn-bridge-src"
+  rm -rf "$BRIDGE_SRC_DIR"; mkdir -p "$BRIDGE_SRC_DIR"
+  cp "$PROJECT/tools/unidbg-unicorn-bridge/CMakeLists.txt" "$BRIDGE_SRC_DIR/"
+  for f in unicorn.c sample_arm.c sample_arm64.c unicorn.h khash.h \
+           com_github_unidbg_arm_backend_unicorn_Unicorn.h; do
+    [[ -f "$BRIDGE_SRC/$f" ]] || { echo "error: missing bridge file: $BRIDGE_SRC/$f" >&2; exit 1; }
+    cp "$BRIDGE_SRC/$f" "$BRIDGE_SRC_DIR/"
+  done
+
+  # 2) 一次 cmake 搞定：引擎静态库 + JNI 桥 -> libunicorn.so
+  build_one unicorn-jni "$BRIDGE_SRC_DIR" -DUNICORN_SRC="$uni"
+  RZ_SO="$(find "$BUILD_ROOT/unicorn-jni" -name 'libunicorn.so' -print -quit)"
+  [ -n "$RZ_SO" ] || { echo "error: libunicorn.so not produced (unidbg unicorn2 JNI bridge)"; exit 1; }
+  cp "$RZ_SO" "$JNI_LIBS/libunicorn.so"
+
+  # 3) 瘦身：保留 .dynsym/.dynstr（--strip-unneeded 会保留动态符号表，JNI 绑定才有效）
+  HOST_TAG="$(ls -d "$NDK/toolchains/llvm/prebuilt"/* 2>/dev/null | head -1)"
+  STRIP_BIN="${HOST_TAG:-/nonexistent}/bin/llvm-strip"
+  if [[ -x "$STRIP_BIN" ]]; then
+    "$STRIP_BIN" --strip-unneeded "$JNI_LIBS/libunicorn.so" || true
+  fi
+
+  # 4) 构建期门禁：必须是 JNI 桥（裸引擎在这里就暴露，而不是等用户 session_open 才炸）
+  if command -v python3 >/dev/null 2>&1 && [[ -f "$PROJECT/tools/verify_unicorn_jni.py" ]]; then
+    python3 "$PROJECT/tools/verify_unicorn_jni.py" "$JNI_LIBS/libunicorn.so"
+  else
+    echo "[unidbg-native] warning: 未找到 python3/tools/verify_unicorn_jni.py，跳过 JNI 桥门禁" >&2
+  fi
+
+  ls -lh "$JNI_LIBS/libunicorn.so"
+  echo "[unidbg-native] built libunicorn.so (unicorn engine + unidbg unicorn2 JNI bridge) -> $JNI_LIBS"
 fi
 
 echo "[unidbg-native] DONE - rebuild the APK to enable the Unidbg backend (libjnidispatch.so is provided automatically by the JNA AAR)"

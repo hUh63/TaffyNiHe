@@ -2,6 +2,7 @@ package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
+import com.soreverse.mcp.engine.UnidbgEmulator
 import com.soreverse.mcp.nativecore.NativeEngine
 import org.json.JSONArray
 import org.json.JSONObject
@@ -78,11 +79,18 @@ object NativeSelfTestTool {
                 val rizinAvailable = runCatching { NativeEngine.active().available() }.getOrDefault(false)
                 // rizin 0.10.0 深度自检(新 so 导出; 失败则忽略, 不影响整体结论)
                 val rzSelf = runCatching { com.soreverse.mcp.nativecore.RizinNativeEngine.rzSelfTest() }.getOrNull() ?: ""
-                // 上游 1.0.18 借鉴: Unidbg 原生构建/可用性结论 —— 4 个依赖库全在且可加载才可用
-                val unidbgLibs = listOf("capstone", "keystone", "unicorn", "jnidispatch")
-                val unidbgOk = unidbgLibs.all { loadName ->
+                // 上游 1.0.18 借鉴 + v1.3.10 强化: Unidbg 可用性结论。
+                // 关键认知: "libunicorn.so 能 loadLibrary" ≠ 后端可用 —— .so 加载不要求 JNI
+                // 符号可解析，所以裸引擎也能加载成功，一直等到 session_open 才炸
+                // （BackendFactory 吞异常回退 legacy UnicornBackend → NoClassDefFoundError，
+                // 上游 issue #91）。这里改成直接向 UnidbgEmulator 要诚实的判定与原因。
+                val unidbgLibs = listOf("capstone", "keystone", "jnidispatch")
+                val unidbgNativeOk = unidbgLibs.all { loadName ->
                     existing.any { it.contains(loadName, true) } && runCatching { System.loadLibrary(loadName) }.isSuccess
                 }
+                val unidbgEmulatorOk = runCatching { UnidbgEmulator(ctx.context).available() }.getOrDefault(false)
+                val unidbgOk = unidbgNativeOk && unidbgEmulatorOk
+                val unidbgReason = UnidbgEmulator.unavailableReason()
                 ok(JSONObject()
                     .put("tool", "taffy_native_self_test")
                     .put("nativeLibraryDir", nativeDir.absolutePath)
@@ -92,8 +100,13 @@ object NativeSelfTestTool {
                     .put("rizinActiveAvailable", rizinAvailable)
                     .put("rizinSelfTest", if (rzSelf.isBlank()) JSONObject.NULL else runCatching { JSONObject(rzSelf) }.getOrDefault(rzSelf))
                     .put("unidbgEmulation", unidbgOk)
-                    .put("unidbgHint", if (unidbgOk) "Unidbg 4 个原生依赖(capstone/keystone/unicorn/jnidispatch)齐全, 模拟可用。"
-                        else "Unidbg 依赖缺失, 模拟不可用。可用 scripts/build-unidbg-native.sh 用 NDK 交叉编译重建 capstone/keystone/unicorn 后重新打包。")
+                    .put("unidbgUnicornLoaded", UnidbgEmulator.isUnicornLoaded())
+                    .put("unidbgAbi64Bit", UnidbgEmulator.abiIs64Bit())
+                    .put("unidbgBackendInitError", UnidbgEmulator.backendInitReason() ?: JSONObject.NULL)
+                    .put("unidbgUnavailableReason", unidbgReason)
+                    .put("unidbgHint", if (unidbgOk) "Unidbg 原生依赖齐全且 unicorn2 后端就绪, 模拟可用。"
+                        else "Unidbg 不可用: $unidbgReason 用 scripts/build-unidbg-native.sh 交叉编译重建后重新打包" +
+                            "(64 位包必须内置 unidbg backend/unicorn2 JNI 桥链成的 libunicorn.so, 裸引擎会假可用)。")
                     .put("healthy", broken == 0 && missing == 0)
                     .put("hint", if (broken + missing > 0) "存在缺失或加载失败的原生库, 会导致相关功能(反汇编/模拟/隧道)失效。" else "关键原生库齐全且可加载, 反汇编/模拟/隧道后端正常。"))
             }.getOrElse { e ->

@@ -1122,6 +1122,8 @@ object ToolCatalog {
         *ApiResolveTool.ALL.toTypedArray(),
         // 塔菲逆核: APK 内 JS 资产抽取 + 混淆指纹
         *JsAssetsTool.ALL.toTypedArray(),
+        // 塔菲逆核: 独立动态分析网关(unidbg 模拟 + Frida 真机 hook/trace/内存)
+        *DynamicApiTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

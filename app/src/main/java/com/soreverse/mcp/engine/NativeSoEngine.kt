@@ -71,6 +71,7 @@ class NativeSoEngine(context: Context) {
     fun capabilityRegistry(): JSONObject = runtime.capabilityRegistry()
     fun liefDispatch(workspaceId: String, editSessionId: String = "", op: String, objectPath: String = "", method: String = "", args: JSONArray = JSONArray(), dryRun: Boolean = false): JSONObject = runtime.liefDispatch(workspaceId, editSessionId, op, objectPath, method, args, dryRun)
     fun unidbgDispatch(workspaceId: String, editSessionId: String = "", op: String, method: String = "", args: JSONArray = JSONArray()): JSONObject = runtime.unidbgDispatch(workspaceId, editSessionId, op, method, args)
+    fun dynamicDispatch(workspaceId: String, editSessionId: String = "", op: String, method: String = "", args: JSONArray = JSONArray()): JSONObject = runtime.dynamicDispatch(workspaceId, editSessionId, op, method, args)
     fun xansoDispatch(workspaceId: String, editSessionId: String = "", op: String): JSONObject = runtime.xansoDispatch(workspaceId, editSessionId, op)
     fun xansoBuildSections(workspaceId: String, editSessionId: String = "", force: Boolean = false): JSONObject = runtime.xansoBuildSections(workspaceId, editSessionId, force)
     fun liefPatchAddress(workspaceId: String, editSessionId: String, va: Long, patch: ByteArray): JSONObject = runtime.liefPatchAddress(workspaceId, editSessionId, va, patch)

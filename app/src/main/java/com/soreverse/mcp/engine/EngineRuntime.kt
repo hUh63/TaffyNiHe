@@ -14,6 +14,8 @@ internal class EngineRuntime(internal val context: Context) {
     internal val xanso = XAnSoEngine(context)
     internal val unidbg = UnidbgEmulator(context)
     internal val blutter = BlutterCoordinator(context)
+    // 上游 1.0.20 借鉴: Frida 真机 hook 桥（独立动态分析网关的 Frida 后端）
+    internal val frida = FridaBridge(context)
     internal var workDir: WorkDirectory? = null
     internal var workDirUri: Uri? = null
     internal var sources: List<SoSource> = emptyList()

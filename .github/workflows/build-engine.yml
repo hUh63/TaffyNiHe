@@ -113,7 +113,7 @@ jobs:
           cmake --build "build/native-${{ matrix.abi }}" --target rz_native --parallel 4
           ls -lh "build/native-${{ matrix.abi }}/librz_native.so"
 
-      - name: 校验产物（架构 + JNI 符号）
+      - name: 校验产物（架构 + JNI 符号 + ELF 加固）
         run: |
           set -euo pipefail
           SO="build/native-${{ matrix.abi }}/librz_native.so"
@@ -121,6 +121,14 @@ jobs:
           "$BIN/llvm-readelf" -h "$SO" | grep -E "Machine|Class|Type"
           echo "JNI symbols:"
           "$BIN/llvm-nm" -D --defined-only "$SO" | grep -c "Java_com_soreverse_mcp" || true
+          echo "=== ELF 加固自检（PT_GNU_RELRO / BIND_NOW / __stack_chk_fail）==="
+          "$BIN/llvm-readelf" -l "$SO" | grep -i -A1 "GNU_RELRO" || true
+          "$BIN/llvm-readelf" -d "$SO" | grep -i -E "BIND_NOW|FLAGS" || true
+          STACK_CHK="$("$BIN/llvm-readelf" --dyn-syms "$SO" | grep -c "__stack_chk_fail" || true)"
+          echo "__stack_chk_fail refs: $STACK_CHK"
+          "$BIN/llvm-readelf" -l "$SO" | grep -qi "GNU_RELRO" || { echo "::error::librz_native.so 缺少 PT_GNU_RELRO（-z relro 未生效）"; exit 1; }
+          "$BIN/llvm-readelf" -d "$SO" | grep -qi "BIND_NOW" || { echo "::error::librz_native.so 缺少 BIND_NOW（-z now 未生效）"; exit 1; }
+          [ "${STACK_CHK:-0}" -ge 1 ] || { echo "::error::未发现 __stack_chk_fail（-fstack-protector-all 未生效）"; exit 1; }
 
       - name: 上传产物
         uses: actions/upload-artifact@v4

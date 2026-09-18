@@ -23,6 +23,17 @@ class CloudflareTunnelManager(private val context: Context, private val settings
          *  供 [WorkspacePolicy] 判断隧道是否开启。 */
         @Volatile
         var activeInstance: CloudflareTunnelManager? = null
+
+        /**
+         * 探测 cloudflared 可执行文件在设备上的就绪状态，不依赖 [CloudflareTunnelManager]
+         * 实例——MCP 未运行时隧道设置页也能据此诊断，避免把「二进制缺失」误显示为未知。
+         * 二进制随 APK 以 jniLibs/<abi>/libcloudflared.so 打包，安装时解压到 nativeLibraryDir。
+         */
+        fun probeBinaryState(context: Context): BinaryState {
+            val dir = context.applicationInfo?.nativeLibraryDir ?: return BinaryState.NOT_FOUND
+            val f = File(dir, "libcloudflared.so")
+            return if (f.exists() && f.length() > 0) BinaryState.READY else BinaryState.NOT_FOUND
+        }
     }
 
     init {
@@ -31,6 +42,9 @@ class CloudflareTunnelManager(private val context: Context, private val settings
 
     enum class Mode { OFF, QUICK, NAMED }
     enum class State { STOPPED, STARTING, RUNNING, FAILED }
+
+    /** cloudflared 可执行文件在本机的就绪状态（不依赖管理器实例，供 UI 在 MCP 关闭时诊断）。 */
+    enum class BinaryState { UNKNOWN, NOT_FOUND, READY }
 
     data class TunnelStatus(
         val state: State = State.STOPPED,

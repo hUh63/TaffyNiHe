@@ -94,6 +94,8 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
     }
 
     val isCfRunning = cfStatus?.state == CloudflareTunnelManager.State.RUNNING
+    // cloudflared 二进制就绪状态：不依赖 MCP/隧道是否在跑，用于提前诊断
+    val cfBinaryState = remember { CloudflareTunnelManager.probeBinaryState(context) }
     val isBoreRunning = boreRunning
     val isBoreConnecting = boreConnecting
     val isAnyRunning = if (tunnelType == "cloudflare") isCfRunning else isBoreRunning
@@ -132,6 +134,15 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
             )
             if (tunnelType == "cloudflare" && cfStatus?.message?.isNotBlank() == true) {
                 Text(cfStatus!!.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+            }
+            if (tunnelType == "cloudflare" && cfBinaryState != CloudflareTunnelManager.BinaryState.READY) {
+                Text(
+                    if (t.zh) "cloudflared 二进制未就绪（本 ABI 未随包提供 libcloudflared.so，或解压失败），启动隧道会失败"
+                    else "cloudflared binary not ready (libcloudflared.so not bundled for this ABI, or extraction failed); starting the tunnel will fail",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AppleColors.systemOrange,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                )
             }
             if (tunnelType == "bore" && boreUrl != null) {
                 GroupDivider()

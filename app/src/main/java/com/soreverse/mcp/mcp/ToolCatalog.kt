@@ -1126,6 +1126,8 @@ object ToolCatalog {
         *DynamicApiTool.ALL.toTypedArray(),
         // 塔菲逆核: 动态分析 AI(App 内 AI 对 dynamicRun 证据出报告)
         *DynamicAnalyzeAiTool.ALL.toTypedArray(),
+        // 塔菲逆核: SO 深度分析(C++ 虚表/符号还原/函数签名/JNI 还原/批量伪C)
+        *SoDeepTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

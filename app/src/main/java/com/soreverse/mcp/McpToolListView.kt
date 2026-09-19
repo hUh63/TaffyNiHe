@@ -1,40 +1,68 @@
 package com.soreverse.mcp
 
-import androidx.compose.foundation.clickable
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DataObject
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.mcp.ToolCatalog
 import com.soreverse.mcp.mcp.ToolClass
 import com.soreverse.mcp.mcp.ToolHandler
-import androidx.compose.ui.unit.sp
+
+// ============================================================
+// 共享元数据：分类映射 / 分类标签 / 分类图标与配色
+// 这些成员同时被 AnalysisWorkspace 的工具弹层复用（同包 internal）。
+// ============================================================
 
 /** 卫星分类 → MCP 工具分类的映射 */
-private val categoryMap = mapOf(
+internal val categoryMap = mapOf(
     "decompile" to setOf("decompile", "analyze", "read"),
     "unpack" to setOf("apk", "dynamic", "workspace", "search"),
     "soanalyze" to setOf("soanalyze", "analyze", "read", "workspace"),
@@ -45,7 +73,7 @@ private val categoryMap = mapOf(
 )
 
 /** 分类中文名 */
-private val categoryLabelZh = mapOf(
+internal val categoryLabelZh = mapOf(
     "workspace" to "工作区", "analyze" to "分析", "read" to "读取",
     "edit" to "编辑", "emulate" to "模拟", "search" to "搜索",
     "build" to "构建", "session" to "会话", "apk" to "APK",
@@ -56,7 +84,8 @@ private val categoryLabelZh = mapOf(
     "utility" to "工具",
 )
 
-private val categoryLabelEn = mapOf(
+/** 分类英文名 */
+internal val categoryLabelEn = mapOf(
     "workspace" to "Workspace", "analyze" to "Analyze", "read" to "Read",
     "edit" to "Edit", "emulate" to "Emulate", "search" to "Search",
     "build" to "Build", "session" to "Session", "apk" to "APK",
@@ -67,78 +96,312 @@ private val categoryLabelEn = mapOf(
     "utility" to "Utility",
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun McpToolListView(zh: Boolean, category: String?, onClose: () -> Unit) {
-    // 获取所有 MCP 工具
-    val allTools = ToolCatalog.ALL
-    val filteredTools = if (category == null) allTools else {
-        val allowedCategories = categoryMap[category]
-        if (allowedCategories == null) allTools
-        else allTools.filter { it.meta.category in allowedCategories }
-    }
-    // 按分类分组
-    val grouped = filteredTools.groupBy { it.meta.category }.toSortedMap()
+internal fun categoryLabel(cat: String, zh: Boolean): String =
+    (if (zh) categoryLabelZh[cat] else categoryLabelEn[cat]) ?: cat
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        if (category == null) (if (zh) "MCP 工具列表" else "MCP Tools")
-                        else (if (zh) "${categoryLabelZh[category] ?: category} 工具" else "${categoryLabelEn[category] ?: category} Tools"),
-                    )
-                },
-                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "back") } },
+/** 分类 → 图标（全部使用仓库既有 material-icons-extended 图标）。 */
+internal fun mcpCategoryIcon(cat: String): ImageVector = when (cat) {
+    "workspace" -> Icons.Filled.FolderOpen
+    "analyze", "decompile", "soanalyze" -> Icons.Filled.Code
+    "read", "file" -> Icons.Filled.Description
+    "archive" -> Icons.Filled.FolderZip
+    "edit" -> Icons.Filled.Edit
+    "emulate", "lowlevel", "device", "dynamic" -> Icons.Filled.Memory
+    "search" -> Icons.Filled.Search
+    "build" -> Icons.Filled.Build
+    "session" -> Icons.Filled.Link
+    "apk" -> Icons.Filled.Inventory2
+    "system" -> Icons.Filled.Settings
+    "meta", "mcp" -> Icons.Filled.Info
+    "diff" -> Icons.Filled.CompareArrows
+    "dotnet" -> Icons.Filled.DataObject
+    "utility" -> Icons.Filled.Terminal
+    else -> Icons.Filled.Build
+}
+
+/** 分类 → 主题强调色（跟随深浅色主题）。 */
+@Composable
+internal fun mcpCategoryTint(cat: String): Color {
+    val dark = isSystemInDarkTheme()
+    val name = when (cat) {
+        "analyze", "read", "decompile" -> "teal"
+        "workspace", "build" -> "indigo"
+        "search" -> "blue"
+        "apk", "archive" -> "orange"
+        "dynamic", "device", "emulate", "lowlevel" -> "purple"
+        "edit", "diff" -> "yellow"
+        "soanalyze", "file" -> "green"
+        "system", "meta", "mcp", "utility", "session" -> "mono"
+        else -> "blue"
+    }
+    return AppPalette.accent(name, dark)
+}
+
+// ============================================================
+// 共享列表模型与渲染（MCP 工具页 + 工作台工具弹层共用）
+// ============================================================
+
+/**
+ * 统一的工具列表项模型。
+ *
+ * [iconKey] 为空时按 [category] 取图标与配色；以 `tool:` 开头时使用工作台 console
+ * 工具的专属图标（用前缀避免与同名分类冲突）。
+ */
+internal data class ToolListEntry(
+    val id: String,
+    val category: String,
+    val title: String,
+    val subtitle: String? = null,
+    val meta: String? = null,
+    val iconKey: String = "",
+    val keywords: String = "",
+    val trailingIcon: ImageVector? = null,
+) {
+    val searchBlob: String
+        get() = (id + " " + title + " " + (subtitle ?: "") + " " + (meta ?: "") + " " + category + " " + keywords).lowercase()
+}
+
+private val consoleIconAliases: Map<String, ImageVector> = mapOf(
+    "tool:decompile" to Icons.Filled.Code,
+    "tool:unpack" to Icons.Filled.LockOpen,
+    "tool:soanalyze" to Icons.Filled.Memory,
+    "tool:emulate" to Icons.Filled.FlashOn,
+    "tool:frida" to Icons.Filled.MyLocation,
+    "tool:rebuild" to Icons.Filled.Inventory2,
+    "tool:editor" to Icons.Filled.Edit,
+)
+
+private fun entryIcon(e: ToolListEntry): ImageVector =
+    consoleIconAliases[e.iconKey] ?: mcpCategoryIcon(e.category)
+
+/** 按关键词过滤（匹配工具名、中英说明、分类、别名）；关键词为空时原样返回。 */
+internal fun filterToolEntries(all: List<ToolListEntry>, query: String): List<ToolListEntry> {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return all
+    return all.filter { it.searchBlob.contains(q) }
+}
+
+/** 顶部搜索框（圆角 16dp，占位「搜索工具 / Search tools」）。 */
+@Composable
+internal fun ToolSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        shape = RoundedCornerShape(AppShape.lg),
+        placeholder = {
+            Text(
+                "搜索工具 / Search tools",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-    ) { pad ->
-        LazyColumn(Modifier.fillMaxSize().padding(pad).padding(horizontal = 16.dp).statusBarsPadding(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            grouped.forEach { (cat, tools) ->
-                item {
-                    Spacer(Modifier.size(4.dp))
-                    Text(
-                        (if (zh) categoryLabelZh[cat] else categoryLabelEn[cat]) ?: cat,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.size(2.dp))
-                }
-                items(tools, key = { it.meta.name }) { handler ->
-                    ToolCard(handler = handler, zh = zh)
-                }
-            }
-            item { Spacer(Modifier.size(16.dp)) }
+        leadingIcon = {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        },
+        textStyle = MaterialTheme.typography.bodySmall,
+    )
+}
+
+/** 分组小标题：图标 + 分类名 + 数量，下接 GroupDivider。 */
+@Composable
+private fun CategoryHeader(cat: String, count: Int, zh: Boolean) {
+    Column(Modifier.fillMaxWidth()) {
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                mcpCategoryIcon(cat),
+                contentDescription = null,
+                tint = mcpCategoryTint(cat),
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                categoryLabel(cat, zh),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "· $count",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
         }
     }
 }
 
 @Composable
-private fun ToolCard(handler: ToolHandler, zh: Boolean) {
-    val meta = handler.meta
-    val tag = when (meta.cls) {
-        ToolClass.CORE -> if (zh) "核心" else "CORE"
-        ToolClass.EXTRA -> if (zh) "扩展" else "EXTRA"
-        ToolClass.META -> if (zh) "元" else "META"
-        else -> ""
+private fun EntryTrailingIcon(icon: ImageVector?) {
+    if (icon != null) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.size(15.dp),
+        )
     }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(AppShape.sm),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-    ) {
-        Column(Modifier.padding(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(meta.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                Text(tag, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.size(2.dp))
+}
+
+/** 列表项：36dp 圆角图标 + 标题 + 中英说明 + meta，整行可点。 */
+@Composable
+private fun ToolRowCard(e: ToolListEntry, onPick: ((ToolListEntry) -> Unit)?) {
+    val pick = onPick
+    var rowClick: (() -> Unit)? = null
+    if (pick != null) rowClick = { pick(e) }
+    CardRow(
+        title = e.title,
+        subtitle = e.subtitle,
+        meta = e.meta,
+        icon = entryIcon(e),
+        iconTint = mcpCategoryTint(e.category),
+        trailing = { EntryTrailingIcon(e.trailingIcon) },
+        onClick = rowClick,
+    )
+}
+
+/**
+ * 分组列表：无关键词时按分类分组（组标题行 + GroupDivider，隐藏空分组）；
+ * 有关键词时平铺过滤结果。
+ */
+@Composable
+internal fun ToolEntryList(
+    entries: List<ToolListEntry>,
+    query: String,
+    zh: Boolean,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    onPick: ((ToolListEntry) -> Unit)? = null,
+) {
+    if (entries.isEmpty()) {
+        Box(modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
             Text(
-                if (zh) meta.zh else meta.en,
-                style = MaterialTheme.typography.bodySmall, fontSize = AppText.body, color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 3,
+                if (zh) "没有匹配的工具" else "No matching tools",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        return
+    }
+    val searching = query.isNotBlank()
+    LazyColumn(modifier = modifier.fillMaxWidth(), contentPadding = contentPadding) {
+        if (searching) {
+            items(entries, key = { it.id }) { e -> ToolRowCard(e, onPick) }
+            item(key = "search-tail") { Spacer(Modifier.height(12.dp)) }
+        } else {
+            entries.groupBy { it.category }.toSortedMap().forEach { (cat, list) ->
+                if (list.isNotEmpty()) {
+                    item(key = "hdr-$cat") { CategoryHeader(cat, list.size, zh) }
+                    items(list, key = { it.id }) { e ->
+                        ToolRowCard(e, onPick)
+                        GroupDivider()
+                    }
+                }
+            }
+            item(key = "grouped-tail") { Spacer(Modifier.height(12.dp)) }
+        }
+    }
+}
+
+/** ToolHandler → 列表项。 */
+internal fun toolEntryOf(handler: ToolHandler, zh: Boolean): ToolListEntry {
+    val meta = handler.meta
+    val clsLabel = when (meta.cls) {
+        ToolClass.CORE -> if (zh) "核心" else "CORE"
+        ToolClass.EXTRA -> if (zh) "扩展" else "EXTRA"
+        ToolClass.META -> if (zh) "元信息" else "META"
+    }
+    val metaLine = buildString {
+        append(categoryLabel(meta.category, zh))
+        append(" · ")
+        append(clsLabel)
+        if (meta.heavy) {
+            append(" · ")
+            append(if (zh) "重型" else "heavy")
+        }
+    }
+    val desc = listOf(meta.zh, meta.en).filter { it.isNotBlank() }.joinToString("  ·  ")
+    return ToolListEntry(
+        id = meta.name,
+        category = meta.category,
+        title = meta.name,
+        subtitle = desc.ifBlank { null },
+        meta = metaLine,
+        keywords = "${meta.zh} ${meta.en} ${meta.name}",
+        trailingIcon = Icons.Filled.ContentCopy,
+    )
+}
+
+// ============================================================
+// MCP 工具列表页
+// ============================================================
+
+/**
+ * MCP 工具列表页：顶部搜索 + 按分类分组的 Exbin 圆角卡片列表。
+ * 点击一行复制工具名（便于粘贴到 MCP 客户端）。
+ */
+@Composable
+internal fun McpToolListView(zh: Boolean, category: String?, onClose: () -> Unit) {
+    val metrics = LocalUiMetrics.current
+    val context = LocalContext.current
+    var query by remember { mutableStateOf("") }
+
+    val base = remember(category) {
+        val all = ToolCatalog.ALL
+        if (category == null) all
+        else {
+            val allowed = categoryMap[category]
+            if (allowed == null) all else all.filter { it.meta.category in allowed }
+        }
+    }
+    val entries = remember(base, zh) { base.map { toolEntryOf(it, zh) } }
+    val shown = filterToolEntries(entries, query)
+
+    val title = if (category == null) {
+        if (zh) "MCP 工具列表" else "MCP Tools"
+    } else {
+        if (zh) "${categoryLabelZh[category] ?: category} 工具" else "${categoryLabelEn[category] ?: category} Tools"
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader(
+            title = title,
+            subtitle = if (zh) "共 ${shown.size} 个工具" else "${shown.size} tools",
+            showBack = true,
+            onBack = onClose,
+        )
+        ToolSearchField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.padding(horizontal = metrics.pagePad),
+        )
+        Spacer(Modifier.height(6.dp))
+        ToolEntryList(
+            entries = shown,
+            query = query,
+            zh = zh,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(start = metrics.pagePad, end = metrics.pagePad, bottom = 24.dp),
+            onPick = { e ->
+                runCatching {
+                    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("taffy-tool", e.id))
+                    Toast.makeText(context, if (zh) "已复制：${e.id}" else "Copied: ${e.id}", Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
     }
 }

@@ -7,6 +7,18 @@ import android.widget.Toast
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -129,11 +141,14 @@ internal fun AnalysisWorkspace(
 ) {
     val zh = t.zh
     val tools = state.tools
-    // ── IDA 风格工作台：左导轨 + 左停靠面板 + 视图标签 + 底部输出面板 ──
-    // v1.3.6: 默认收起左停靠面板（窄屏下 46+152dp 占掉半屏），点导轨「面板」展开
-    var leftDock by remember { mutableStateOf(false) }
-    var bottomOpen by remember { mutableStateOf(false) }
+    val metrics = LocalUiMetrics.current
+
+    // ── 标准 Material 结构：顶部信息/操作条 + 视图标签 + 内容区 + 底部输出面板 ──
     var pane by remember { mutableStateOf("result") }
+    var bottomOpen by remember { mutableStateOf(true) }
+    var showToolPicker by remember { mutableStateOf(false) }
+    var showTree by remember { mutableStateOf(false) }
+
     // 对象树状态
     val treeScope = rememberCoroutineScope()
     var treeOpen by remember { mutableStateOf(setOf<String>()) }
@@ -154,191 +169,459 @@ internal fun AnalysisWorkspace(
         }
     }
 
-    Row(Modifier.fillMaxSize().statusBarsPadding()) {
-        // 左导轨（窄工具条）
-        Column(
-            Modifier.width(38.dp).fillMaxHeight()
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f))
-                .padding(vertical = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            IdaRail(Icons.Default.Menu, if (zh) "面板" else "Panel", leftDock) { leftDock = !leftDock }
-            Spacer(Modifier.height(2.dp))
-            toolDefs.forEachIndexed { i, def ->
-                IdaRail(railIcons[i % railIcons.size], if (zh) def.labelZh else def.labelEn, pane == "tool" && state.activeTool == def.key) {
-                    state.activeTool = def.key
-                    pane = "tool"
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            IdaRail(Icons.Default.ListAlt, if (zh) "结果" else "Results", pane == "result") { pane = "result" }
+    fun pickName(name: String) {
+        treeSel = name
+        runCatching {
+            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("taffy", name))
         }
-        // 左停靠面板：工作区 / 工具 / 结果
-        if (leftDock) {
-            Column(
-                Modifier.width(132.dp).fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+        Toast.makeText(context, if (zh) "已复制：$name" else "Copied: $name", Toast.LENGTH_SHORT).show()
+    }
+
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        // ── 顶部任务/操作条：左侧任务名（点击换文件），右侧「工具 / 对象 / 输出」 ──
+        Row(
+            Modifier.fillMaxWidth().padding(start = metrics.pagePad, end = 6.dp, top = 8.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val task = state.currentTask()
+            val chipShape = RoundedCornerShape(AppShape.md)
+            Row(
+                Modifier.weight(1f).clip(chipShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), chipShape)
+                    .clickable(onClick = onOpenTask)
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(if (zh) "工作区" else "Workspace", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                Text((state.currentTask()?.title ?: if (zh) "未选择文件" else "No file").take(24), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
-                if (tools.sharedWorkspaceId.isBlank()) {
-                    TextButton(onClick = onOpenTask, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                        Text(if (zh) "选择文件" else "Pick file", fontSize = AppText.label)
-                    }
-                }
-                GroupDivider()
-                Text(if (zh) "对象" else "Objects", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                if (tools.sharedWorkspaceId.isBlank()) {
-                    Text(if (zh) "未打开工作区" else "No workspace", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    treeCats.forEach { cat ->
-                        val open = cat.key in treeOpen
-                        Row(
-                            Modifier.fillMaxWidth().clickable {
-                                treeOpen = if (open) treeOpen - cat.key else treeOpen + cat.key
-                                if (!open && !treeChildren.containsKey(cat.key)) loadTree(cat.key)
-                            }.padding(vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(if (open) "▾" else "▸", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.size(4.dp))
-                            Text(if (zh) cat.zh else cat.en, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
-                            Spacer(Modifier.weight(1f))
-                            if (treeLoading == cat.key) {
-                                CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 2.dp)
-                            } else {
-                                treeChildren[cat.key]?.let { Text(it.size.toString(), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                            }
-                        }
-                        if (open) {
-                            val kids = treeChildren[cat.key]
-                            if (kids != null) {
-                                kids.take(300).forEach { name ->
-                                    Text(
-                                        name,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        color = if (treeSel == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.fillMaxWidth()
-                                            .clickable {
-                                                treeSel = name
-                                                runCatching {
-                                                    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                                    cm.setPrimaryClip(android.content.ClipData.newPlainText("taffy", name))
-                                                }
-                                                Toast.makeText(context, if (zh) "已复制：$name" else "Copied: $name", Toast.LENGTH_SHORT).show()
-                                            }
-                                            .padding(start = 14.dp, top = 2.dp, bottom = 2.dp),
-                                    )
-                                }
-                                if (kids.size > 300) Text(if (zh) "… 共 ${kids.size} 项" else "… ${kids.size} total", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 14.dp))
-                            }
-                        }
-                    }
-                }
-                GroupDivider()
-                Text(if (zh) "工具" else "Tools", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                toolDefs.forEach { def ->
-                    val sel = pane == "tool" && state.activeTool == def.key
+                Icon(
+                    Icons.Filled.FolderOpen,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Column(Modifier.weight(1f)) {
                     Text(
-                        if (zh) def.labelZh else def.labelEn,
+                        if (task != null) (if (zh) "当前任务" else "Task") else (if (zh) "未选择文件" else "No file"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        (task?.title ?: if (zh) "选择文件" else "Pick file").take(40),
                         style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm))
-                            .clickable { state.activeTool = def.key; pane = "tool" }
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        fontSize = AppText.bodyStrong,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (task != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
                     )
                 }
-                GroupDivider()
-                Text(
-                    if (zh) "结果 (${tools.resultTabs.size})" else "Results (${tools.resultTabs.size})",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().clickable { pane = "result" }.padding(vertical = 3.dp),
+                if (task != null && tools.sharedWorkspaceId.isBlank()) {
+                    Text("⚠", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+            IconButton(onClick = { showToolPicker = true }) {
+                Icon(
+                    Icons.Filled.Build,
+                    contentDescription = if (zh) "工具" else "Tools",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            IconButton(onClick = { showTree = true }) {
+                Icon(
+                    Icons.Filled.ListAlt,
+                    contentDescription = if (zh) "对象" else "Objects",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { bottomOpen = !bottomOpen }) {
+                Icon(
+                    Icons.Filled.Terminal,
+                    contentDescription = if (zh) "输出" else "Output",
+                    tint = if (bottomOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
-        // 主区
-        Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 6.dp, vertical = 5.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(if (zh) "任务" else "Task", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onOpenTask, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), shape = RoundedCornerShape(AppShape.sm)) {
-                    Text((state.currentTask()?.title ?: if (zh) "未选择" else "None").take(12), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
+
+        // ── 顶层视图标签 + 工作区选择（FlowRow：窄屏自动换行，不截断） ──
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            WbTab(if (zh) "工具控制台" else "Console", pane == "tool") { pane = "tool" }
+            WbTab(if (zh) "十六进制" else "Hex", pane == "hex") { pane = "hex" }
+            tools.resultTabs.forEachIndexed { idx, tb ->
+                WbTab(tb.label, pane == "result" && tools.selectedTabIndex == idx, onClose = {
+                    tools.closeTab(idx)
+                    if (tools.resultTabs.isEmpty()) pane = "tool"
+                }) {
+                    tools.selectedTabIndex = idx
+                    pane = "result"
                 }
-                if (state.currentTask() != null && tools.sharedWorkspaceId.isBlank()) {
-                    Text(if (zh) "⚠ 需重选文件" else "⚠ Re-pick", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.error)
-                }
-                Spacer(Modifier.weight(1f))
-                WorkspacePicker(state, zh)
             }
+            WorkspacePicker(state, zh)
+        }
+        Spacer(Modifier.size(5.dp))
+
+        // ── 地址栏（仅需要地址的工具：反编译 / 模拟 / 编辑） ──
+        if (pane == "tool" && state.activeTool in addrNeededTools) {
+            Box(Modifier.padding(horizontal = metrics.pagePad)) { AddrBar(state, zh) }
+            Spacer(Modifier.size(5.dp))
+        }
+
+        // ── 内容区：十六进制 / 结果 / 工具控制台 ──
+        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = metrics.pagePad)) {
+            when {
+                pane == "hex" -> AppCard(Modifier.fillMaxSize()) { HexPane(state, zh) }
+                pane == "result" -> AppCard(Modifier.fillMaxSize()) { ResultStream(tools, zh) }
+                state.activeTool.isNotBlank() -> AppCard(Modifier.fillMaxWidth()) { ToolConsole(state, zh, onAiAnalyze) }
+                else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (zh) "点顶部「工具」选择工具" else "Tap 「Tools」 above to pick a tool",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+
+        // ── 底部输出面板：默认可见，点标题栏折叠/展开（结果与输出同屏可达） ──
+        val outShape = RoundedCornerShape(AppShape.md)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad)
+                .clip(outShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), outShape)
+                .clickable { bottomOpen = !bottomOpen }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                if (bottomOpen) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                if (zh) "输出" else "Output",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (zh) "${tools.resultTabs.size} 个结果" else "${tools.resultTabs.size} results",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (bottomOpen) {
             Spacer(Modifier.size(4.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                WbTab(if (zh) "工具控制台" else "Console", pane == "tool") { pane = "tool" }
-                WbTab(if (zh) "十六进制" else "Hex", pane == "hex") { pane = "hex" }
-                tools.resultTabs.forEachIndexed { idx, tb ->
-                    WbTab(tb.label, pane == "result" && tools.selectedTabIndex == idx, onClose = {
-                        tools.closeTab(idx)
-                        if (tools.resultTabs.isEmpty()) pane = "tool"
-                    }) {
-                        tools.selectedTabIndex = idx
-                        pane = "result"
-                    }
-                }
-            }
-            Spacer(Modifier.size(4.dp))
-            if (pane == "tool" && state.activeTool in addrNeededTools) {
-                AddrBar(state, zh)
-                Spacer(Modifier.size(4.dp))
-            }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (pane == "hex") {
-                    Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)) {
-                        HexPane(state, zh)
-                    }
-                } else if (pane == "result") {
-                    Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)) {
-                        ResultStream(tools, zh)
-                    }
-                } else if (state.activeTool.isNotBlank()) {
-                    Surface(Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
-                        ToolConsole(state, zh, onAiAnalyze)
-                    }
-                } else {
-                    Text(if (zh) "点左栏图标选工具" else "Pick a tool from the rail", modifier = Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Spacer(Modifier.size(4.dp))
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                    .clickable { bottomOpen = !bottomOpen }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            AppCard(
+                Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad).height(130.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                Text(if (bottomOpen) "▾" else "▸", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
-                Spacer(Modifier.size(6.dp))
-                Text(if (zh) "输出" else "Output", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.weight(1f))
-                Text("${tools.resultTabs.size} tabs", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val tb = tools.resultTabs.getOrNull(tools.selectedTabIndex)
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    Text(
+                        tb?.text ?: (if (zh) {
+                            "暂无输出。执行工具后，结果会出现在这里，并同步到上方结果标签页。"
+                        } else {
+                            "No output yet. Run a tool — results show here and in the result tab above."
+                        }),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            if (bottomOpen) {
-                Surface(Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 180.dp), shape = RoundedCornerShape(AppShape.sm), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f)) {
-                    Column(Modifier.verticalScroll(rememberScrollState()).padding(8.dp)) {
-                        val tb = tools.resultTabs.getOrNull(tools.selectedTabIndex)
+        }
+        Spacer(Modifier.size(10.dp))
+    }
+
+    // ── 工具选择弹层 ──
+    if (showToolPicker) {
+        ConsoleToolPickerDialog(
+            zh = zh,
+            onDismiss = { showToolPicker = false },
+            onPick = { key ->
+                state.activeTool = key
+                pane = "tool"
+                showToolPicker = false
+            },
+        )
+    }
+    // ── 对象树弹层（原窄停靠面板迁移而来，保留 loadTree / extractNames 逻辑） ──
+    if (showTree) {
+        ObjectTreeDialog(
+            zh = zh,
+            workspaceId = tools.sharedWorkspaceId,
+            treeOpen = treeOpen,
+            treeChildren = treeChildren,
+            treeLoading = treeLoading,
+            treeSel = treeSel,
+            onToggle = { key ->
+                val open = key in treeOpen
+                treeOpen = if (open) treeOpen - key else treeOpen + key
+                if (!open && !treeChildren.containsKey(key)) loadTree(key)
+            },
+            onPickName = { name -> pickName(name) },
+            onDismiss = { showTree = false },
+        )
+    }
+}
+
+// ============================================================
+// 工作台工具选择弹层：全宽 Dialog + 搜索 + 按分类分组的 CardRow 列表
+// ============================================================
+
+private val consoleToolDescZh = mapOf(
+    "decompile" to "伪代码反编译 / 函数列表 / 反汇编 / 十六进制转储",
+    "unpack" to "APK 结构分析 / 提取 SO 与 DEX / 文件列表",
+    "soanalyze" to "SO 概览 / 段与符号 / 导入导出表 / 加密特征",
+    "emulate" to "Unidbg 模拟执行 / 寄存器 / 内存 / 校验",
+    "frida" to "动态插桩：连接设备与 Hook",
+    "rebuild" to "回编 SO / 十六进制补丁 / 批量重命名",
+    "editor" to "十六进制编辑 / 文本编辑 / 地址对比",
+)
+
+private val consoleToolDescEn = mapOf(
+    "decompile" to "Pseudocode / functions / disassembly / hex dump",
+    "unpack" to "APK structure / extract SO and DEX / file list",
+    "soanalyze" to "SO overview / sections & symbols / import-export / crypto",
+    "emulate" to "Unidbg emulation / registers / memory / validation",
+    "frida" to "Dynamic instrumentation: attach & hook",
+    "rebuild" to "Rebuild SO / hex patch / bulk rename",
+    "editor" to "Hex edit / text edit / address diff",
+)
+
+/** 工作台 console 工具 → 统一列表项（复用 McpToolListView.kt 的 categoryMap / 图标 / 配色）。 */
+private fun consoleToolEntries(zh: Boolean): List<ToolListEntry> = toolDefs.map { def ->
+    val cat = categoryMap[def.key]?.firstOrNull() ?: "utility"
+    val dzh = consoleToolDescZh[def.key].orEmpty()
+    val den = consoleToolDescEn[def.key].orEmpty()
+    ToolListEntry(
+        id = def.key,
+        category = cat,
+        title = if (zh) "${def.labelZh} / ${def.labelEn}" else "${def.labelEn} / ${def.labelZh}",
+        subtitle = listOf(dzh, den).filter { it.isNotBlank() }.joinToString("  ·  ").ifBlank { null },
+        meta = "${categoryLabel(cat, zh)} · ${def.key}",
+        iconKey = "tool:${def.key}",
+        keywords = "${def.labelZh} ${def.labelEn} ${def.key} $dzh $den",
+        trailingIcon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+    )
+}
+
+@Composable
+private fun ConsoleToolPickerDialog(
+    zh: Boolean,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val all = remember(zh) { consoleToolEntries(zh) }
+    val shown = filterToolEntries(all, query)
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 56.dp),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 10.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Build,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            tb?.text ?: (if (zh) "暂无输出" else "No output"),
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                            if (zh) "选择工具" else "Pick a tool",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            if (zh) "共 ${shown.size} 个工具" else "${shown.size} tools",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = if (zh) "关闭" else "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                ToolSearchField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                ToolEntryList(
+                    entries = shown,
+                    query = query,
+                    zh = zh,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(start = 6.dp, end = 6.dp, bottom = 18.dp),
+                    onPick = { e -> onPick(e.id) },
+                )
+            }
+        }
+    }
+}
+
+// ============================================================
+// 对象树弹层（原 132dp 停靠面板迁移：卡片列表项 + 展开后叶子列表）
+// ============================================================
+
+private fun treeCatIcon(key: String): ImageVector = when (key) {
+    "sections" -> Icons.Filled.Inventory2
+    "symbols" -> Icons.Filled.Code
+    "functions" -> Icons.Filled.Memory
+    "strings" -> Icons.Filled.Description
+    "imports" -> Icons.Filled.Link
+    else -> Icons.Filled.ListAlt
+}
+
+@Composable
+private fun ObjectTreeDialog(
+    zh: Boolean,
+    workspaceId: String,
+    treeOpen: Set<String>,
+    treeChildren: Map<String, List<String>>,
+    treeLoading: String,
+    treeSel: String,
+    onToggle: (String) -> Unit,
+    onPickName: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 56.dp),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 10.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.ListAlt,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (zh) "对象树" else "Object tree",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            if (zh) "点分类展开，点条目复制" else "Tap a group to expand, tap an item to copy",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = if (zh) "关闭" else "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (workspaceId.isBlank()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (zh) "未打开工作区，请先选择文件" else "No workspace opened — pick a file first",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(0.dp),
+                    ) {
+                        treeCats.forEach { cat ->
+                            val open = cat.key in treeOpen
+                            item(key = "cat-${cat.key}") {
+                                Box(Modifier.padding(horizontal = 6.dp)) {
+                                    CardRow(
+                                        title = if (zh) cat.zh else cat.en,
+                                        subtitle = if (open) {
+                                            if (zh) "已展开，点击收起" else "Expanded — tap to collapse"
+                                        } else {
+                                            if (zh) "点击展开" else "Tap to expand"
+                                        },
+                                        meta = if (treeLoading == cat.key) {
+                                            if (zh) "加载中…" else "Loading…"
+                                        } else {
+                                            "${treeChildren[cat.key]?.size ?: 0} ${if (zh) "项" else "items"}"
+                                        },
+                                        icon = treeCatIcon(cat.key),
+                                        trailing = {
+                                            if (treeLoading == cat.key) {
+                                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                            } else {
+                                                Icon(
+                                                    if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            }
+                                        },
+                                        onClick = { onToggle(cat.key) },
+                                    )
+                                }
+                            }
+                            if (open) {
+                                val kids = treeChildren[cat.key]
+                                if (kids != null) {
+                                    items(kids.take(300)) { name ->
+                                        TreeLeafRow(name, treeSel == name) { onPickName(name) }
+                                    }
+                                    if (kids.size > 300) {
+                                        item(key = "more-${cat.key}") {
+                                            Text(
+                                                if (zh) "… 共 ${kids.size} 项" else "… ${kids.size} total",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(start = 62.dp, bottom = 6.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            item(key = "div-${cat.key}") { GroupDivider() }
+                        }
                     }
                 }
             }
@@ -346,23 +629,25 @@ internal fun AnalysisWorkspace(
     }
 }
 
-private val railIcons = listOf(
-    Icons.Default.Code, Icons.Default.LockOpen, Icons.Default.Memory,
-    Icons.Default.FlashOn, Icons.Default.MyLocation, Icons.Default.Inventory2,
-)
-
-/** 左导轨按钮（IDA 风格）。 */
 @Composable
-private fun IdaRail(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(30.dp)) {
-        Icon(
-            icon,
-            contentDescription = label,
-            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(15.dp),
+private fun TreeLeafRow(name: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .padding(start = 58.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outline))
+        Text(
+            name,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
+
 
 /** 地址栏组件：统一放在选文件下面，控制台上面 */
 @Composable
@@ -565,7 +850,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
     val curDef = toolDefs.firstOrNull { it.key == state.activeTool }
     val tl = curDef?.let { if (zh) it.labelZh else it.labelEn } ?: ""
 
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
         val bm = Modifier.heightIn(min = 40.dp); val bp = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
         when (state.activeTool) {
             "decompile" -> {

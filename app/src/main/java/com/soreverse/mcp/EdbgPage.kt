@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -292,8 +294,12 @@ internal fun EdbgPage(t: UiText) {
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (zh) "执行" else "Run", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(if (zh) "执行" else "Run", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
                     listOf("c", "s", "finish", "run", "bt").forEach { quick ->
                         FilterChip(
                             selected = false,
@@ -305,8 +311,12 @@ internal fun EdbgPage(t: UiText) {
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (zh) "断点" else "BP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(if (zh) "断点" else "BP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
                     FilterChip(
                         selected = false,
                         onClick = { if (sessionActive && brkInput.isNotBlank()) { cmdInput = "b ${brkInput.trim()}"; runAction("cmd") } },
@@ -340,6 +350,14 @@ internal fun EdbgPage(t: UiText) {
                 }
             }
             item {
+                Text(
+                    if (zh) "输出" else "Output",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Spacer(Modifier.height(4.dp))
                 SelectionContainer {
                     Text(
                         output.ifBlank { if (zh) "（eDBG 输出显示在这里。启动后先等待断点命中，再发调试命令）" else "(eDBG output appears here. Wait for the breakpoint, then send commands.)" },

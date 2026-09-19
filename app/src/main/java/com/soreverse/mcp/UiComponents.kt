@@ -111,9 +111,9 @@ internal fun GlassGroup(
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)), shape)
-                .padding(vertical = 2.dp),
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shape)
+                .padding(vertical = 4.dp),
             content = content,
         )
         if (!footer.isNullOrBlank()) {
@@ -249,5 +249,78 @@ internal fun IndexedBadge(index: Int) {
         contentAlignment = Alignment.Center,
     ) {
         Text("${index + 1}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/** Exbin 风卡片：圆角 + 1dp 描边 + 无阴影，可选标题/尾部。用于承载任意内容区。 */
+@Composable
+internal fun AppCard(
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    footer: String? = null,
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(0.dp),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val metrics = LocalUiMetrics.current
+    val shape = RoundedCornerShape(metrics.cardRadius)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!title.isNullOrBlank()) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 2.dp),
+            )
+        }
+        Column(
+            Modifier.fillMaxWidth().clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shape)
+                .padding(contentPadding),
+            content = content,
+        )
+        if (!footer.isNullOrBlank()) {
+            Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 2.dp))
+        }
+    }
+}
+
+/** Exbin 风列表项：36dp 图标 + 标题/副标题/元信息三行 + 可选尾部。 */
+@Composable
+internal fun CardRow(
+    title: String,
+    subtitle: String? = null,
+    meta: String? = null,
+    icon: ImageVector? = null,
+    iconTint: Color? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    val metrics = LocalUiMetrics.current
+    val tint = iconTint ?: MaterialTheme.colorScheme.primary
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 14.dp, vertical = metrics.rowPadV),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (icon != null) {
+            Box(
+                Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(tint.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(icon, null, tint = tint, modifier = Modifier.size(19.dp)) }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!subtitle.isNullOrBlank()) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (!meta.isNullOrBlank()) {
+                Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        trailing?.invoke()
     }
 }

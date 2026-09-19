@@ -79,11 +79,12 @@ internal fun uiMetrics(density: String, corner: String): UiMetrics {
         "spacious" -> 14.dp
         else -> 11.dp
     }
+    // Exbin 卡片风：列表项 12dp / 组卡 20dp，档位随之对齐
     val cardRadius = when (corner) {
-        "small" -> 10.dp
-        "large" -> 18.dp
+        "small" -> 12.dp
+        "large" -> 20.dp
         "xlarge" -> 24.dp
-        else -> 14.dp
+        else -> 16.dp
     }
     val controlRadius = when (corner) {
         "small" -> 8.dp

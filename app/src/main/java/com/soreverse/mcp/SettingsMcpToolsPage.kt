@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -79,13 +82,23 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
         }
 
         GlassGroup(title = if (t.zh) "签名密钥" else "Signing key") {
-            Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                KeySourceOption(if (t.zh) "默认" else "Default", keySource != "custom", AppPalette.indigo, Modifier.weight(1f)) {
-                    settings.apkSignKeySource = "default"; refresh++
-                }
-                KeySourceOption(if (t.zh) "其他密钥" else "Custom", keySource == "custom", AppPalette.orange, Modifier.weight(1f)) {
-                    settings.apkSignKeySource = "custom"; refresh++
-                }
+            FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FilterChip(
+                    selected = keySource != "custom",
+                    onClick = { settings.apkSignKeySource = "default"; refresh++ },
+                    label = { Text(if (t.zh) "默认密钥" else "Default key", fontSize = AppText.body) },
+                    leadingIcon = if (keySource != "custom") { { Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp)) } } else null,
+                )
+                FilterChip(
+                    selected = keySource == "custom",
+                    onClick = { settings.apkSignKeySource = "custom"; refresh++ },
+                    label = { Text(if (t.zh) "其他密钥" else "Custom key", fontSize = AppText.body) },
+                    leadingIcon = if (keySource == "custom") { { Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp)) } } else null,
+                )
             }
             if (keySource == "custom") {
                 GroupDivider()
@@ -102,18 +115,18 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
         }
 
         GlassGroup(title = if (t.zh) "签名方案" else "Signing scheme") {
-            SCHEME_OPTIONS.forEachIndexed { idx, (code, label) ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { settings.apkSignScheme = code; refresh++ }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = settings.apkSignScheme == code, onClick = { settings.apkSignScheme = code; refresh++ })
-                    Text(label, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyMedium)
+            FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                SCHEME_OPTIONS.forEach { (code, label) ->
+                    FilterChip(
+                        selected = settings.apkSignScheme == code,
+                        onClick = { settings.apkSignScheme = code; refresh++ },
+                        label = { Text(label, fontSize = AppText.body) },
+                    )
                 }
-                if (idx != SCHEME_OPTIONS.lastIndex) GroupDivider()
             }
         }
 
@@ -147,24 +160,6 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
 
     if (showImport) ImportKeyDialog(t, settings, onDismiss = { showImport = false })
     if (showManage) ManageKeysDialog(t, settings, onDismiss = { showManage = false })
-}
-
-@Composable
-private fun KeySourceOption(label: String, selected: Boolean, tint: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(AppShape.lg)
-    Row(
-        modifier
-            .clip(shape)
-            .background(if (selected) tint.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .border(1.dp, if (selected) tint.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), shape)
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Default.CheckCircle, null, tint = if (selected) tint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.padding(end = 6.dp))
-        Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-    }
 }
 
 @Composable

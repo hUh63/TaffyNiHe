@@ -1124,6 +1124,8 @@ object ToolCatalog {
         *JsAssetsTool.ALL.toTypedArray(),
         // 塔菲逆核: 独立动态分析网关(unidbg 模拟 + Frida 真机 hook/trace/内存)
         *DynamicApiTool.ALL.toTypedArray(),
+        // 塔菲逆核: 动态分析 AI(App 内 AI 对 dynamicRun 证据出报告)
+        *DynamicAnalyzeAiTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

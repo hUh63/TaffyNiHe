@@ -74,7 +74,17 @@ object DynamicApiTool {
                     if (a.has("dumpSize")) put("dumpSize", a.optInt("dumpSize"))
                     a.str("dumpAddress").takeIf(String::isNotBlank)?.let { put("dumpAddress", it) }
                 }
-                e.dynamicDispatch(workspaceId, editSessionId, "analyze", "", JSONArray().put(params))
+                val res = e.dynamicDispatch(workspaceId, editSessionId, "analyze", "", JSONArray().put(params))
+                if (res.optBoolean("ok", false)) {
+                    res.put(
+                        "aiAnalysisHint",
+                        "返回的 dynamicRun 可直接交给 MCP 客户端侧 AI 分析；"
+                            + "若要用 App 内 AI 直接出报告，调用 taffy_dynamic_analyze_ai（需先在「设置→AI」配置）。"
+                            + "The returned dynamicRun can be handed directly to a client-side AI; to have the "
+                            + "on-device AI produce the report, call taffy_dynamic_analyze_ai (configure Settings->AI first)."
+                    )
+                }
+                res
             }
             else -> e.dynamicDispatch(
                 workspaceId,

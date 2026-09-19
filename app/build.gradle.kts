@@ -22,7 +22,7 @@ android {
         applicationId = "com.taffynihe"
         minSdk = 26
         targetSdk = 36
-        versionCode = 126
+        versionCode = 127
         versionName = "1.3.15"
 
         // 逆核: 禁用 CMake native 编译, 完全使用从原版 SOMCP 提取的预编译 so(在 jniLibs/)。

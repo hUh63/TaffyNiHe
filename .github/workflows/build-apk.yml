@@ -129,6 +129,13 @@ jobs:
           PY
           ls -l "${SO_PATH}"
 
+      - name: 运行单元测试 (Run unit tests)
+        # 纯 JVM 单测(不依赖 Android 运行时/Compose), 作为构建前的质量门:
+        # 工具目录不变量、地址解析、补丁工具、请求字段等领域逻辑都在这里回归。
+        run: |
+          chmod +x gradlew
+          ./gradlew test --no-daemon --stacktrace
+
       - name: 构建 arm64-v8a APK (Build APK)
         run: |
           BUILD_TYPE="${{ steps.build_type.outputs.type }}"

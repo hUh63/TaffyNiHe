@@ -13,7 +13,7 @@
 //   8. 大图保护：块数 > 400 时自动关闭虚拟节点、迭代降到 2 轮；另有「简化视图」只画块骨架。
 //
 // 渲染：
-//   - 边为**正交折线**（下出→垂直→水平→垂直→上入）；实心箭头且随线宽缩放；
+//   - 边为**圆角正交折线**（拐角圆角 9dp，三次贝塞尔过渡；cap/join 亦为 Round）；实心箭头且随线宽缩放；
 //     jump=主题色实线 / fail=橙色虚线 / 回边=粉色加粗醒目（明显区分）。
 //   - 节点按角色分层描边 + 左侧色条：入口块(无前驱=绿) / 返回块(无后继=青) / 循环头(有回边指向=紫)
 //     / 普通块(描边色)；选中态高亮 + 加粗描边。
@@ -58,6 +58,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -710,6 +712,48 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float): CfgLayoutResult {
 
 // ───────────────────────── Canvas 绘制 ─────────────────────────
 
+/** 圆角正交折线：拐角用三次贝塞尔近似二次圆角（避免 quadraticTo/quadraticBezierTo 的版本差异）。 */
+private fun roundedOrthoPath(pts: List<Offset>, radius: Float): Path {
+    val path = Path()
+    if (pts.isEmpty()) return path
+    path.moveTo(pts[0].x, pts[0].y)
+    if (pts.size == 1) return path
+    if (pts.size == 2) {
+        path.lineTo(pts[1].x, pts[1].y)
+        return path
+    }
+    for (i in 1 until pts.size - 1) {
+        val p = pts[i - 1]
+        val c = pts[i]
+        val n = pts[i + 1]
+        val inLen = sqrt((c.x - p.x) * (c.x - p.x) + (c.y - p.y) * (c.y - p.y))
+        val outLen = sqrt((n.x - c.x) * (n.x - c.x) + (n.y - c.y) * (n.y - c.y))
+        if (inLen < 0.5f || outLen < 0.5f) {
+            path.lineTo(c.x, c.y)
+            continue
+        }
+        val r = min(radius, min(inLen / 2f, outLen / 2f))
+        if (r < 0.5f) {
+            path.lineTo(c.x, c.y)
+            continue
+        }
+        val ax = c.x - (c.x - p.x) / inLen * r
+        val ay = c.y - (c.y - p.y) / inLen * r
+        val bx = c.x + (n.x - c.x) / outLen * r
+        val by = c.y + (n.y - c.y) / outLen * r
+        path.lineTo(ax, ay)
+        // a -> c -> b 的二次圆角，用三次贝塞尔等价近似
+        path.cubicTo(
+            ax + (c.x - ax) * 2f / 3f, ay + (c.y - ay) * 2f / 3f,
+            bx + (c.x - bx) * 2f / 3f, by + (c.y - by) * 2f / 3f,
+            bx, by,
+        )
+    }
+    val last = pts[pts.size - 1]
+    path.lineTo(last.x, last.y)
+    return path
+}
+
 private fun DrawScope.arrowHead(tip: Offset, from: Offset, color: Color, sizePx: Float) {
     var dx = tip.x - from.x
     var dy = tip.y - from.y
@@ -898,14 +942,18 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                     }
                     val lineW = if (r.isBack) strokeW * 1.9f else strokeW
                     val effect = if (r.kind == "fail" && !r.isBack) dash else null
-                    val path = Path()
-                    val first = r.points.first()
-                    path.moveTo(px(first.x), py(first.y))
-                    for (i in 1 until r.points.size) {
-                        val pt = r.points[i]
-                        path.lineTo(px(pt.x), py(pt.y))
-                    }
-                    drawPath(path, color, style = Stroke(width = lineW, pathEffect = effect))
+                    val screenPts = r.points.map { Offset(px(it.x), py(it.y)) }
+                    val path = roundedOrthoPath(screenPts, 9f * density * scl)
+                    drawPath(
+                        path,
+                        color,
+                        style = Stroke(
+                            width = lineW,
+                            pathEffect = effect,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round,
+                        ),
+                    )
                     val tip = r.points[r.points.size - 1]
                     val prev = r.points[r.points.size - 2]
                     arrowHead(

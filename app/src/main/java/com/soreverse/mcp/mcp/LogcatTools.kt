@@ -54,7 +54,7 @@ object LogcatTools {
     @Volatile private var captureStartedAt: Long = 0L
 
     /** 采集 logcat 日志 */
-    val collect: ToolHandler = object : ToolHandler {
+    private val collect: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_logcat_collect",
             "【Logcat 采集】采集系统 logcat 日志。action=recent 获取最近 N 行(默认200); action=search 按关键字搜索; action=dump 一次性 dump 全部日志(小心输出过大)。支持按 tag/level/pid 过滤。需 root 或 ADB 才能读全系统日志,否则只能读自己应用的。",
             "Collect system logcat logs. action=recent gets last N lines; action=search filters by keyword; action=dump gets all. Supports tag/level/pid filtering. Root or ADB needed for system-wide logs.",
@@ -140,7 +140,7 @@ object LogcatTools {
     }
 
     /** 采集崩溃日志 */
-    val crash: ToolHandler = object : ToolHandler {
+    private val crash: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_logcat_crash",
             "【崩溃日志】采集最近的崩溃日志(JAVA/ANR/NATIVE CRASH)。自动过滤 crash/fatal/ANR/died 关键字。",
             "Collect recent crash logs (JAVA/ANR/NATIVE CRASH). Auto-filters crash/fatal/ANR/died keywords.",
@@ -227,7 +227,7 @@ object LogcatTools {
     }
 
     /** 后台持久 logcat 采集 — 参考 NexusBridge LogFox 的 start/stop/status */
-    val capture: ToolHandler = object : ToolHandler {
+    private val capture: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_logcat_capture",
             "【Logcat 后台录制】后台持久采集 logcat 日志到文件。action=start 启动后台采集(指定 tag/level/pid 过滤); action=stop 停止采集; action=status 查看采集状态; action=read 读取已采集的日志(支持关键字搜索); action=clear 清空已采集日志。参考 NexusBridge LogFox 的持久录制能力。",
             "Background persistent logcat capture. action=start (with tag/level/pid filter); stop; status; read (with keyword search); clear. Inspired by NexusBridge LogFox persistent recording.",
@@ -362,5 +362,41 @@ object LogcatTools {
         }
     }
 
-    val ALL = listOf(collect, crash, capture)
+
+    // ── v1.3.24 整合：原多个独立工具收敛为一个 action 网关（逐 action 转发原处理器，行为不变）──
+
+    val gateway: ToolHandler = object : ToolHandler {
+        override val meta: ToolMeta = ToolMeta(
+            "taffy_logcat",
+            "【Logcat 网关】读取系统日志与崩溃日志：采集（最近/搜索/全量 dump）、提取崩溃堆栈、后台持续采集（开始/停止/状态/读取/清空）。需 root / Shizuku / ADB 才能读全系统日志，否则只能读本应用。  action: collect(默认) | crash | capture",
+            "Unified logcat gateway: collect (recent/search/dump), crash stack extraction, and background capture (start/stop/status/read/clear). Root/Shizuku/ADB needed for system-wide logs. Actions: collect(default) | crash | capture",
+            "device", ToolClass.CORE,
+        ) { objectSchema(props {
+            "action".oneOf("日志采集", "collect", "crash", "capture")
+            "action" str "collect: recent|search|dump ; crash: 崩溃日志 ; capture: start|stop|status|read|clear"
+            "tag" str "按 tag 过滤"
+            "tags" str "多 tag（逗号分隔）"
+            "level" str "最低日志级别（V|D|I|W|E|F）"
+            "pid" int "按进程 pid 过滤"
+            "keyword" str "关键字过滤"
+            "regex" bool "关键字按正则处理"
+            "lines" int "返回行数（默认 200）"
+            "parse" bool "解析日志结构（时间/级别/tag）"
+            "maxLines" int "capture read：最多返回行数"
+        }, required = listOf("action")) }
+
+        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
+            var act = args.str("action", "collect")
+
+            val h: ToolHandler? = when (act) {
+                "collect" -> collect,
+                "crash" -> crash,
+                "capture" -> capture,
+                else -> null
+            }
+            return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_logcat action: $act")
+        }
+    }
+
+    val ALL = listOf(gateway)
 }

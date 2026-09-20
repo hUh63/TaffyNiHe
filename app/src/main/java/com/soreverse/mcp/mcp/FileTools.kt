@@ -20,7 +20,7 @@ import kotlin.math.min
 object FileTools {
 
     // ── taffy_file_list ──
-    val list = EngineToolHandler(
+    private val list = EngineToolHandler(
         ToolMeta("taffy_file_list",
             "【文件列表】列出目录内容（文件名/大小/修改时间/是目录还是文件）。支持 limit/cursor 分页和 filter 过滤。",
             "List directory contents: name, size, modification time, type. Supports pagination and filtering.",
@@ -90,7 +90,7 @@ object FileTools {
     }
 
     // ── taffy_file_read ──
-    val read = EngineToolHandler(
+    private val read = EngineToolHandler(
         ToolMeta("taffy_file_read",
             "【文件读取】读文件内容。文字模式按行范围返回; base64 模式把文件以 base64 编码返回（用于二进制/图片/so 等）; hex 模式返回十六进制转储。",
             "Read file content. Text mode (default) returns lines in range; base64 mode returns base64-encoded bytes; hex mode returns a hex dump.",
@@ -179,7 +179,7 @@ object FileTools {
     }
 
     // ── taffy_file_write ──
-    val write = EngineToolHandler(
+    private val write = EngineToolHandler(
         ToolMeta("taffy_file_write",
             "【文件写入】写入或追加内容到文件。自动创建不存在的父目录。mode=append 追加到文件末尾; mode=overwrite 覆盖; mode=create 仅新建（已存在报错）。支持 text/base64 两种输入格式。",
             "Write or append text/base64 content to a file. Auto-creates parent directories. mode=append appends; overwrite replaces; create only writes to new files.",
@@ -225,7 +225,7 @@ object FileTools {
     }
 
     // ── taffy_file_search ──
-    val search = EngineToolHandler(
+    private val search = EngineToolHandler(
         ToolMeta("taffy_file_search",
             "【文件内容搜索】在文本文件中搜索匹配 pattern 的行。支持正则和纯文本匹配, 可限制搜索范围和结果数量。",
             "Search text files for lines matching a pattern. Supports regex and plain text matching.",
@@ -280,7 +280,7 @@ object FileTools {
     }
 
     // ── taffy_file_replace ──
-    val replace = EngineToolHandler(
+    private val replace = EngineToolHandler(
         ToolMeta("taffy_file_replace",
             "【文件内容替换】在文本文件中查找并替换文本。支持正则捕获组替换（如 $1）。mode=all 替换所有匹配; mode=first 替换第一个; mode=lines 只替换指定行号。",
             "Find and replace text in a file. Supports regex capture groups ($1). mode=all replaces all matches; mode=first replaces only the first; mode=lines replaces on specific line numbers.",
@@ -421,7 +421,7 @@ object FileTools {
         }
     }
 
-    val diff = EngineToolHandler(
+    private val diff = EngineToolHandler(
         ToolMeta("taffy_file_diff",
             "【文本差异对比】对比两个文件的差异, 输出格式类似 diff -u。支持文本和 base64 两种输入方式。",
             "Compare two text files. Output format similar to diff -u. Supports file paths and direct text input.",
@@ -518,7 +518,7 @@ object FileTools {
     }
 
     // ── taffy_dir_diff ──
-    val dirDiff = EngineToolHandler(
+    private val dirDiff = EngineToolHandler(
         ToolMeta("taffy_dir_diff",
             "【目录差异对比】递归对比两个目录的文件树差异(新增/删除/修改), 支持通配过滤与 SHA-256 内容比对。用于整包/解包目录级比对, 补齐单文件 taffy_file_diff 的不足。",
             "Recursively compare two directory trees (added/removed/modified), with glob filter and optional SHA-256 content check. Package/dir-level diff to complement single-file taffy_file_diff.",
@@ -581,7 +581,7 @@ object FileTools {
     }
 
     // ── taffy_file_rename ──
-    val rename = EngineToolHandler(
+    private val rename = EngineToolHandler(
         ToolMeta("taffy_file_rename",
             "【文件重命名/移动】重命名或移动文件/目录。如果目标路径在不同目录则执行移动。",
             "Rename or move a file/directory. Moving across directories is supported.",
@@ -606,7 +606,7 @@ object FileTools {
     }
 
     // ── taffy_file_copy ──
-    val copy = EngineToolHandler(
+    private val copy = EngineToolHandler(
         ToolMeta("taffy_file_copy",
             "【文件复制】复制文件或目录（目录递归复制）。",
             "Copy a file or directory (recursive for directories).",
@@ -632,7 +632,7 @@ object FileTools {
     }
 
     // ── taffy_file_delete ──
-    val delete = EngineToolHandler(
+    private val delete = EngineToolHandler(
         ToolMeta("taffy_file_delete",
             "【文件删除】删除文件或空目录。目录非空时需设置 recursive=true。",
             "Delete a file or empty directory. Set recursive=true for non-empty directories.",
@@ -654,7 +654,7 @@ object FileTools {
     }
 
     // ── taffy_file_batch_rename ──
-    val batchRename = EngineToolHandler(
+    private val batchRename = EngineToolHandler(
         ToolMeta("taffy_file_batch_rename",
             "【批量重命名】按替换规则或正则批量重命名目录中的文件。支持前后缀添加、文本替换、正则替换、序号填充。dryRun=true 预览结果不执行。",
             "Batch rename files in a directory. Supports prefix/suffix, text replacement, regex replacement, and sequence numbering. dryRun previews without executing.",
@@ -776,5 +776,75 @@ object FileTools {
             .put("toRename", operations.length())
             .put("operations", operations)
             .apply { if (errors.length() > 0) put("errors", errors) })
+    }
+
+    // ── v1.3.24 整合：原多个独立工具收敛为一个 action 网关（逐 action 转发原处理器，行为不变）──
+
+    val gateway: ToolHandler = object : ToolHandler {
+        override val meta: ToolMeta = ToolMeta(
+            "taffy_file",
+            "【通用文件操作网关】工作区内任意文件的读写与批处理：列目录、读写 text/hex/base64、关键字与正则搜索、查找替换、单文件与目录 diff（Myers unified）、重命名/复制/删除、批量重命名（前缀/后缀/替换/序号，默认仅预览）。所有路径必须在工作区内。  action: list(默认) | read | write | search | replace | diff | dir_diff | rename | copy | delete | batch_rename",
+            "Unified file-operation gateway: list/read/write (text/hex/base64), keyword & regex search, find-replace, Myers unified diff (file & dir), rename/copy/delete, batch rename (prefix/suffix/replace/sequence, dry-run by default). All paths must stay inside the workspace. Actions: list(default) | read | write | search | replace | diff | dir_diff | rename | copy | delete | batch_rename",
+            "workspace", ToolClass.CORE,
+        ) { objectSchema(props {
+            "action".oneOf("文件操作", "list", "read", "write", "search", "replace", "diff", "dir_diff", "rename", "copy", "delete", "batch_rename")
+            "path" str "文件/目录绝对路径（多数 action 必填）"
+            "pathA" str "diff：左文件路径（或用 textA 直接给文本）"
+            "pathB" str "diff：右文件路径（或用 textB 直接给文本）"
+            "textA" str "diff：左文本内容"
+            "textB" str "diff：右文本内容"
+            "leftDir" str "dir_diff：左侧目录"
+            "rightDir" str "dir_diff：右侧目录"
+            "source" str "rename / copy：源路径"
+            "target" str "rename / copy：目标路径"
+            "content" str "write：写入内容"
+            "find" str "replace / batch_rename：查找内容"
+            "replace" str "replace / batch_rename：替换内容"
+            "pattern" str "search：搜索模式（regex=true 时为正则）"
+            "filter" str "文件名过滤（支持 * 通配符）"
+            "encoding" str "文本编码（默认 UTF-8）"
+            "mode" str "read: text|hex|base64 ; write: overwrite|append ; replace: all|first ; batch_rename: replace|prefix|suffix|sequence"
+            "inputFormat" str "write：text | base64"
+            "sortBy" str "list：排序字段（name|size|modified）"
+            "desc" bool "list：是否降序"
+            "limit" int "返回条数上限"
+            "offset" int "read：起始行号（从 1 开始）"
+            "maxBytes" int "最多读取字节数"
+            "contextLines" int "diff：上下文行数（默认 3）"
+            "regex" bool "search / replace：按正则匹配"
+            "ignoreCase" bool "忽略大小写"
+            "hash" bool "dir_diff：用内容哈希判定修改"
+            "backup" bool "replace：是否备份 .bak"
+            "overwrite" bool "write：是否覆盖已存在文件"
+            "recursive" bool "list：是否递归子目录"
+            "caseSensitive" bool "是否区分大小写"
+            "dryRun" bool "batch_rename：仅预览（默认 true）"
+            "prefix" str "batch_rename：前缀"
+            "suffix" str "batch_rename：后缀"
+            "startFrom" int "batch_rename：序号起始（默认 1）"
+            "padWidth" int "batch_rename：序号补零宽度"
+            "nameFormat" str "batch_rename：名称格式（默认 %d）"
+            "cursor" str "分页游标（上一次的 nextCursor）"
+        }, required = listOf("action")) }
+
+        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
+            var act = args.str("action", "list")
+
+            val h: ToolHandler? = when (act) {
+                "list" -> list,
+                "read" -> read,
+                "write" -> write,
+                "search" -> search,
+                "replace" -> replace,
+                "diff" -> diff,
+                "dir_diff" -> dirDiff,
+                "rename" -> rename,
+                "copy" -> copy,
+                "delete" -> delete,
+                "batch_rename" -> batchRename,
+                else -> null
+            }
+            return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_file action: $act")
+        }
     }
 }

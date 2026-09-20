@@ -212,7 +212,7 @@ object ArchiveTools {
     }
 
     // ── taffy_archive_list ──
-    val list = EngineToolHandler(
+    private val list = EngineToolHandler(
         ToolMeta("taffy_archive_list",
             "【压缩包列表】列出压缩包内的文件清单。支持 ZIP、TAR、TAR.GZ、GZip 格式。自动检测格式。",
             "List contents of an archive. Supports ZIP, TAR, TAR.GZ, GZip. Auto-detects format by magic bytes.",
@@ -324,7 +324,7 @@ object ArchiveTools {
         }
 
     // ── taffy_archive_extract ──
-    val extract = EngineToolHandler(
+    private val extract = EngineToolHandler(
         ToolMeta("taffy_archive_extract",
             "【压缩包解压】解压压缩包到指定目录。支持 ZIP、TAR、TAR.GZ。自动检测格式。",
             "Extract archive to a directory. Supports ZIP, TAR, TAR.GZ. Auto-detects format.",
@@ -458,7 +458,7 @@ object ArchiveTools {
     }
 
     // ── taffy_archive_create ──
-    val create = EngineToolHandler(
+    private val create = EngineToolHandler(
         ToolMeta("taffy_archive_create",
             "【压缩包创建】创建新的压缩包。支持 ZIP、TAR、TAR.GZ 格式。可添加多个文件/目录, 目录递归添加。支持压缩级别设置。",
             "Create a new archive. Supports ZIP, TAR, TAR.GZ. Add multiple files/directories (recursive).",
@@ -556,7 +556,7 @@ object ArchiveTools {
     // ── ZIP 修改工具 ──
 
     // taffy_archive_add: add files to existing ZIP
-    val add = EngineToolHandler(
+    private val add = EngineToolHandler(
         ToolMeta("taffy_archive_add",
             "【ZIP 添加文件】向已有的 ZIP 压缩包中添加新文件。如需更新已有文件请先 taffy_archive_delete 再 taffy_archive_add。",
             "Add new files to an existing ZIP archive. To update existing entries, delete first then add.",
@@ -642,7 +642,7 @@ object ArchiveTools {
     }
 
     // taffy_archive_delete: remove entries from ZIP
-    val delete = EngineToolHandler(
+    private val delete = EngineToolHandler(
         ToolMeta("taffy_archive_delete",
             "【ZIP 删除条目】从 ZIP 压缩包中删除指定文件/目录条目。支持通配符匹配。",
             "Delete entries from a ZIP archive. Supports wildcard patterns (*, ?).",
@@ -714,7 +714,7 @@ object ArchiveTools {
     }
 
     // taffy_archive_rename: rename entry inside ZIP
-    val rename = EngineToolHandler(
+    private val rename = EngineToolHandler(
         ToolMeta("taffy_archive_rename",
             "【ZIP 重命名条目】重命名 ZIP 压缩包中的条目（文件或目录）。支持单个条目重命名。",
             "Rename an entry inside a ZIP archive. Supports renaming individual files or directories.",
@@ -777,6 +777,48 @@ object ArchiveTools {
         } catch (e: Exception) {
             tmpFile.delete()
             err("ARCHIVE_ERROR", "重命名失败: ${e.message}", "path", path)
+        }
+    }
+
+    // ── v1.3.24 整合：原多个独立工具收敛为一个 action 网关（逐 action 转发原处理器，行为不变）──
+
+    val gateway: ToolHandler = object : ToolHandler {
+        override val meta: ToolMeta = ToolMeta(
+            "taffy_archive",
+            "【压缩包操作网关】查看/解压/创建/增删条目/重命名压缩包内容，支持 zip/tar/tgz/jar/apk/7z 等。  action: list(默认) | extract | create | add | delete | rename",
+            "Unified archive gateway: list/extract/create/add/delete/rename entries inside archives (zip/tar/tgz/jar/apk/7z…). Actions: list(default) | extract | create | add | delete | rename",
+            "file", ToolClass.CORE,
+        ) { objectSchema(props {
+            "action".oneOf("压缩包操作", "list", "extract", "create", "add", "delete", "rename")
+            "path" str "压缩包绝对路径（list/extract/add/delete/rename）"
+            "format" str "压缩格式（zip|tar|tgz|jar|apk|7z…，默认按扩展名识别）"
+            "outputDir" str "extract：解压目标目录"
+            "outputPath" str "create：输出压缩包路径"
+            "baseDir" str "create：打包基准目录"
+            "files" arr "create：要打包的文件列表"
+            "entries" arr "add：要加入的条目"
+            "oldName" str "rename：压缩包内原条目名"
+            "newName" str "rename：新条目名"
+            "filter" str "list / extract：条目名过滤（支持 * 通配符）"
+            "overwrite" bool "extract：是否覆盖已存在文件（默认 true）"
+            "compressionLevel" int "create：压缩级别"
+            "limit" int "list：返回条目上限（默认 1000）"
+            "cursor" str "list：分页游标"
+        }, required = listOf("action")) }
+
+        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
+            var act = args.str("action", "list")
+
+            val h: ToolHandler? = when (act) {
+                "list" -> list,
+                "extract" -> extract,
+                "create" -> create,
+                "add" -> add,
+                "delete" -> delete,
+                "rename" -> rename,
+                else -> null
+            }
+            return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_archive action: $act")
         }
     }
 }

@@ -653,8 +653,8 @@ object ToolCatalog {
 
     private val unidbgSession = EngineToolHandler(
         ToolMeta("taffy_unidbg_session",
-            "Unidbg 会话工具（open/list/close/call/dump/modules/exports/registers/maps）【模拟运行时会话，不修改任何文件；与 SO 编辑会话 taffy_session_open / PE 编辑会话 taffy_pe_edit_session 相互独立】",
-            "Typed Unidbg session tool for shell-friendly live emulator workflows: open/list/close/call/call_address/dump/modules/exports/registers/memory_maps. [EMULATION RUNTIME session — does NOT patch files; independent from SO edit session (taffy_session_open) and PE edit session (taffy_pe_edit_session).]",
+            "Unidbg 会话工具（open/list/close/call/dump/modules/exports/registers/maps）【模拟运行时会话，不修改任何文件；与 SO 编辑会话 taffy_session_open / PE 编辑会话 taffy_pe(action=session_open) 相互独立】",
+            "Typed Unidbg session tool for shell-friendly live emulator workflows: open/list/close/call/call_address/dump/modules/exports/registers/memory_maps. [EMULATION RUNTIME session — does NOT patch files; independent from SO edit session (taffy_session_open) and PE edit session (taffy_pe(action=session_open)).]",
             "emulate", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("Session action — open(默认,需workspaceId+editSessionId) | list(无参数) | close(需emulatorSessionId) | call(需emulatorSessionId+symbolName) | call_address(需emulatorSessionId+addr) | dump(需emulatorSessionId+addr) | modules(需emulatorSessionId) | exports(需emulatorSessionId) | registers(需emulatorSessionId) | memory_maps(需emulatorSessionId) | Session action — open(needs workspaceId+editSessionId) | list(no args) | close(session) | call(session+symbolName) | call_address(session+addr) | dump(session+addr) | modules/exports/registers/memory_maps(session)", "open", "list", "close", "call", "call_address", "dump", "modules", "exports", "registers", "memory_maps")
@@ -834,8 +834,8 @@ object ToolCatalog {
 
     private val sessionOpen = EngineToolHandler(
         ToolMeta("taffy_session_open",
-            "【SO 编辑会话】基于当前工作区 SO 创建可修改副本，配合 taffy_edit_hex/asm/symbol / taffy_build_so 进行补丁。注意区别于：taffy_unidbg_session（模拟运行，不改文件）、taffy_pe_edit_session（PE/DLL 编辑）",
-            "[SO EDIT SESSION] Open an edit session: creates a mutable copy of the workspace SO for patching. Use with taffy_edit_hex/asm/symbol / taffy_build_so. Distinguish from taffy_unidbg_session (emulation runtime, does NOT patch files) and taffy_pe_edit_session (PE/DLL editing).",
+            "【SO 编辑会话】基于当前工作区 SO 创建可修改副本，配合 taffy_edit_hex/asm/symbol / taffy_build_so 进行补丁。注意区别于：taffy_unidbg_session（模拟运行，不改文件）、taffy_pe(action=session_open)（PE/DLL 编辑）",
+            "[SO EDIT SESSION] Open an edit session: creates a mutable copy of the workspace SO for patching. Use with taffy_edit_hex/asm/symbol / taffy_build_so. Distinguish from taffy_unidbg_session (emulation runtime, does NOT patch files) and taffy_pe(action=session_open) (PE/DLL editing).",
             "session", ToolClass.CORE,
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"
@@ -1091,24 +1091,9 @@ object ToolCatalog {
         ApkDiffTool.diff,
         ApkExtractTool.extract,
         // 塔菲逆核: 通用文件操作
-        FileTools.list,
-        FileTools.read,
-        FileTools.write,
-        FileTools.search,
-        FileTools.replace,
-        FileTools.diff,
-        FileTools.dirDiff,
-        FileTools.rename,
-        FileTools.copy,
-        FileTools.delete,
-        FileTools.batchRename,
+        FileTools.gateway,
         // 塔菲逆核: 通用压缩解压
-        ArchiveTools.list,
-        ArchiveTools.extract,
-        ArchiveTools.create,
-        ArchiveTools.add,
-        ArchiveTools.delete,
-        ArchiveTools.rename,
+        ArchiveTools.gateway,
         *DotnetTools.ALL.toTypedArray(),
         // 塔菲逆核: 设备信息/系统/应用/通讯/网络/实用工具(参考mcp-server)
         *DeviceTools.ALL.toTypedArray(),

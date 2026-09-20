@@ -54,6 +54,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
@@ -306,7 +307,7 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float): CfgLayoutResult {
         }
     }
     val layers = ArrayList<MutableList<Int>>(maxLayer + 1)
-    for (l in 0..maxLayer) layers += mutableListOf()
+    for (l in 0..maxLayer) layers.add(mutableListOf())
     for (i in 0 until n) layers[layer[i].coerceIn(0, maxLayer)] += i
     layers.forEach { l -> l.sortBy { order[it] } }
     repeat(2) {

@@ -849,7 +849,7 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
 }
 
 @Composable
-private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String) -> Unit) {
+private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String) -> Unit, onShowCfg: () -> Unit) {
     val tools = state.tools; val scope = rememberCoroutineScope(); val ctx = LocalContext.current
     val curDef = toolDefs.firstOrNull { it.key == state.activeTool }
     val tl = curDef?.let { if (zh) it.labelZh else it.labelEn } ?: ""

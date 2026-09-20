@@ -303,6 +303,14 @@ jobs:
           test -f release/so-reverse-mcp-release.jks || { echo "::error::缺少签名密钥"; exit 1; }
           test -f release/keystore.properties || { echo "::error::缺少 keystore.properties"; exit 1; }
 
+      - name: 运行单元测试 (Run unit tests)
+        # 发版路径的质量门: 与 build-apk.yml 同一套纯 JVM 单元测试(不依赖 Android 运行时/Compose)。
+        # 放在打包之前 fail fast —— 测试不过就不产出、不发布 APK, 保证 tag 出来的版本一定有测试兜底。
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew test --no-daemon --stacktrace
+
       - name: 打包多 ABI APK
         run: |
           set -euo pipefail

@@ -2837,12 +2837,6 @@ private fun PseudoView(
                 onClick = onRefresh,
             )
             SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
-            if (body.isNotBlank()) {
-                SmallAction(if (zh) "原始 JSON" else "Raw JSON") {
-                    tools.addTab("伪C", if (zh) "JSON" else "JSON", body)
-                    tools.analysisView = "results"
-                }
-            }
         }
         Spacer(Modifier.size(6.dp))
         if (ws.isBlank() || target.isBlank()) {
@@ -2930,102 +2924,104 @@ private fun CfgView(
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
     val err = errMessageOf(tools.cfgJson)
     val hasGraph = tools.cfgJson.isNotBlank() && err.isBlank()
+    val fnLabel = tools.selectedFunctionName.ifBlank { tools.cfgTarget }
 
-    Column(Modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(
-                label = if (zh) "生成 / 刷新" else "Build",
-                enabled = ws.isNotBlank() && target.isNotBlank(),
-                loading = tools.cfgLoading,
-                onClick = { loadCfg(context, tools, zh, scope, target) },
-            )
-            // 兜底：一键定位入口点（ELF 入口 → 首个函数 → 列表第一项）
-            SmallAction(
-                label = if (zh) "入口点" else "Entry",
-                enabled = ws.isNotBlank(),
-                loading = tools.cfgLoading,
-                onClick = {
-                    scope.launch {
-                        tools.cfgLoading = true
-                        val p = resolveCfgEntry(context, tools)
-                        tools.cfgLoading = false
-                        if (p != null) {
-                            tools.selectedFunctionName = p.first
-                            tools.selectedFunctionVa = p.second
-                            tools.decompileTarget = p.first
-                            tools.disasmAddr = p.second.ifBlank { p.first }
-                            loadCfg(context, tools, zh, scope, p.second.ifBlank { p.first })
-                        } else {
-                            tools.cfgJson = errJson(
-                                if (zh) "无法自动定位入口点：未找到任何函数" else "Could not auto-locate an entry point",
-                            )
-                        }
-                    }
-                },
-            )
-            SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
-            if (tools.cfgJson.isNotBlank() && !hasGraph) {
-                SmallAction(if (zh) "原始 JSON" else "Raw JSON") {
-                    tools.addTab("CFG", if (zh) "JSON" else "JSON", tools.cfgJson)
-                    tools.analysisView = "results"
-                }
-            }
-            if (tools.cfgTarget.isNotBlank()) {
-                Text(
-                    tools.cfgTarget,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = AppText.label,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = cs.onSurfaceVariant,
+    // 兜底：一键定位入口点（ELF 入口 → 首个函数 → 列表第一项）
+    fun useEntryPoint() {
+        scope.launch {
+            tools.cfgLoading = true
+            val p = resolveCfgEntry(context, tools)
+            tools.cfgLoading = false
+            if (p != null) {
+                tools.selectedFunctionName = p.first
+                tools.selectedFunctionVa = p.second
+                tools.decompileTarget = p.first
+                tools.disasmAddr = p.second.ifBlank { p.first }
+                loadCfg(context, tools, zh, scope, p.second.ifBlank { p.first })
+            } else {
+                tools.cfgJson = errJson(
+                    if (zh) "无法自动定位入口点：未找到任何函数" else "Could not auto-locate an entry point",
                 )
             }
         }
-        Spacer(Modifier.size(6.dp))
+    }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                ws.isBlank() -> AnalysisEmptyState(
-                    title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
-                )
-                target.isBlank() -> AnalysisEmptyState(
-                    title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
-                    hint = if (zh) "控制流图以选中函数的入口地址为目标；也可以直接点「入口点」自动定位" else "CFG targets the selected function entry; or tap Entry",
-                    primaryLabel = if (zh) "去函数列表" else "Function list",
-                    onPrimary = onGoFunctions,
-                    secondaryLabel = if (zh) "入口点" else "Entry",
-                    onSecondary = {
-                        scope.launch {
-                            tools.cfgLoading = true
-                            val p = resolveCfgEntry(context, tools)
-                            tools.cfgLoading = false
-                            if (p != null) {
-                                tools.selectedFunctionName = p.first
-                                tools.selectedFunctionVa = p.second
-                                loadCfg(context, tools, zh, scope, p.second.ifBlank { p.first })
-                            } else {
-                                tools.cfgJson = errJson(
-                                    if (zh) "无法自动定位入口点：未找到任何函数" else "Could not auto-locate an entry point",
-                                )
-                            }
-                        }
-                    },
-                )
-                tools.cfgLoading -> AnalysisLoading()
-                tools.cfgJson.isBlank() -> AnalysisEmptyState(
-                    title = if (zh) "尚未生成控制流图" else "No CFG yet",
-                    hint = if (zh) "点「生成 / 刷新」为当前函数生成 CFG" else "Tap Build to generate a CFG for the current function",
-                    primaryLabel = if (zh) "生成 / 刷新" else "Build",
-                    onPrimary = { loadCfg(context, tools, zh, scope, target) },
-                )
-                else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (err.isNotBlank()) AnalysisErrorBanner(err)
-                    CfgCanvas(tools.cfgJson, zh, Modifier.weight(1f).fillMaxWidth())
+    // 蓝图页：控制流图独占整页，操作条悬浮其上（不占布局高度）。
+    // 刻意不提供任何「文本 / 原始 JSON」出口——CFG 只以图形呈现；
+    // 出错与为空时都用页内覆盖态说明，不跳到别处。
+    Box(Modifier.fillMaxSize()) {
+        when {
+            ws.isBlank() -> AnalysisEmptyState(
+                title = if (zh) "未打开工作区" else "No workspace",
+                hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
+            )
+            target.isBlank() -> AnalysisEmptyState(
+                title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
+                hint = if (zh) "控制流图以选中函数的入口地址为目标；也可以直接点「入口点」自动定位"
+                    else "CFG targets the selected function entry; or tap Entry",
+                primaryLabel = if (zh) "去函数列表" else "Function list",
+                onPrimary = onGoFunctions,
+                secondaryLabel = if (zh) "入口点" else "Entry",
+                onSecondary = { useEntryPoint() },
+            )
+            tools.cfgLoading -> AnalysisLoading()
+            tools.cfgJson.isBlank() -> AnalysisEmptyState(
+                title = if (zh) "尚未生成控制流图" else "No CFG yet",
+                hint = if (zh) "点「重新生成」为当前函数生成控制流图" else "Tap Rebuild to generate a CFG for the current function",
+                primaryLabel = if (zh) "重新生成" else "Rebuild",
+                onPrimary = { loadCfg(context, tools, zh, scope, target) },
+            )
+            !hasGraph -> AnalysisEmptyState(
+                title = if (zh) "无法生成控制流图" else "CFG unavailable",
+                hint = err.ifBlank { if (zh) "引擎未返回可用的基本块数据" else "No usable basic blocks were returned" },
+                primaryLabel = if (zh) "入口点" else "Entry",
+                onPrimary = { useEntryPoint() },
+                secondaryLabel = if (zh) "重试" else "Retry",
+                onSecondary = { loadCfg(context, tools, zh, scope, target) },
+            )
+            else -> CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize())
+        }
+
+        if (hasGraph) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = cs.surfaceContainerHigh.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, cs.outlineVariant),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+            ) {
+                Column(
+                    Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(
+                        text = if (fnLabel.isBlank()) (if (zh) "控制流图" else "Control Flow Graph") else fnLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = AppText.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = cs.primary,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        SmallAction(
+                            label = if (zh) "重新生成" else "Rebuild",
+                            enabled = ws.isNotBlank() && target.isNotBlank(),
+                            loading = tools.cfgLoading,
+                            onClick = { loadCfg(context, tools, zh, scope, target) },
+                        )
+                        SmallAction(
+                            label = if (zh) "入口点" else "Entry",
+                            enabled = ws.isNotBlank(),
+                            loading = tools.cfgLoading,
+                            onClick = { useEntryPoint() },
+                        )
+                        SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
+                    }
                 }
             }
         }

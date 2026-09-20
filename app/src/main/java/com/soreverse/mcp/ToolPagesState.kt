@@ -118,5 +118,51 @@ class ToolPagesState {
         selectedTabIndex = 0
     }
 
+    // ---- 分析页：信息架构（导航视图 / 全局选中函数 / 视图缓存） ----
+    /** 当前导航视图 key：functions / search / disasm / pseudo / cfg / strings / symbols / imports / sections / hex / results / tools */
+    var analysisView by mutableStateOf("functions")
+    /** 全页唯一选中的函数名（空 = 未选择）。反汇编 / 伪C / CFG 均以它为目标。 */
+    var selectedFunctionName by mutableStateOf("")
+    /** 选中函数的入口地址（hex 文本，可为空；为空时回退用函数名做 locator）。 */
+    var selectedFunctionVa by mutableStateOf("")
+    /** 函数列表的过滤关键字。 */
+    var functionQuery by mutableStateOf("")
+    /** 全局搜索关键字与检索范围。 */
+    var searchQuery by mutableStateOf("")
+    var searchScope by mutableStateOf("functions")
+    /** 刷新令牌：自增即让分析页各视图重新取数（配合 clearViewCaches）。 */
+    var reloadTick by mutableStateOf(0)
+
+    /** 列表视图缓存：key = "<view>|<ws>|<prefix>" -> 引擎原始 JSON 文本。 */
+    var viewCache by mutableStateOf<Map<String, String>>(emptyMap())
+    /** 当前正在加载的缓存 key（空 = 空闲）；用于显示局部加载态。 */
+    var viewLoading by mutableStateOf("")
+
+    /** 反汇编结果（disasm 原始 JSON）与其对应的缓存 key。 */
+    var disasmJson by mutableStateOf("")
+    var disasmKey by mutableStateOf("")
+    /** 伪 C 结果（rzDecompile 原始 JSON）与其对应的缓存 key。 */
+    var pseudoJson by mutableStateOf("")
+    var pseudoKey by mutableStateOf("")
+    /** CFG 是否正在查询。 */
+    var cfgLoading by mutableStateOf(false)
+
+    /** 写入一个列表视图缓存。 */
+    fun cacheView(key: String, json: String) {
+        viewCache = viewCache + (key to json)
+    }
+
+    /** 清空列表 / 反汇编 / 伪C / CFG 缓存，让下一次取数重新落到引擎。 */
+    fun clearViewCaches() {
+        viewCache = emptyMap()
+        viewLoading = ""
+        disasmJson = ""
+        disasmKey = ""
+        pseudoJson = ""
+        pseudoKey = ""
+        cfgJson = ""
+        cfgTarget = ""
+    }
+
     // ---- 模拟页 (Unidbg) 状态在 UnidbgPanel 内部；此处仅共享工作区 ----
 }

@@ -43,6 +43,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.DataObject
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.CoroutineScope
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FlashOn
@@ -130,6 +141,24 @@ internal val toolDefs = listOf(
 /** 需要地址栏的工具功能列表 */
 private val addrNeededTools = setOf("decompile", "emulate", "editor")
 
+/**
+ * 塔菲逆核 · 分析页（仿 Explorer So / Exbin 的信息架构重构）
+ *
+ * 布局（与 Exbin 的 NavigationRail + 内容区 一致）：
+ * ```
+ * ┌────┬──────────────────────────────────────────────┐
+ * │ 导 │ 顶部条：当前函数名(可点换) + 地址 + 刷新/对象树/输出 │
+ * │ 航 ├──────────────────────────────────────────────┤
+ * │ 栏 │               当前视图内容区                    │
+ * │56dp│                                              │
+ * └────┴──────────────────────────────────────────────┘
+ * ```
+ *
+ * 交互主线：左侧 56dp 图标导航切视图 → 「函数」列表里选中函数（全局唯一选中态）→
+ * 「反汇编 / 伪C / CFG」三个视图都以该选中函数为目标。
+ * 结果标签页（addTab / ResultStream）与工具控制台（ToolConsole）的原有机制不变，
+ * 分别挂在「结果」「工具」两个导航项上；对象树与输出面板并入对应视图与顶部条，能力不丢。
+ */
 @Composable
 internal fun AnalysisWorkspace(
     t: UiText,
@@ -141,15 +170,12 @@ internal fun AnalysisWorkspace(
 ) {
     val zh = t.zh
     val tools = state.tools
-    val metrics = LocalUiMetrics.current
 
-    // ── 标准 Material 结构：顶部信息/操作条 + 视图标签 + 内容区 + 底部输出面板 ──
-    var pane by remember { mutableStateOf("result") }
-    var bottomOpen by remember { mutableStateOf(true) }
+    // ── 弹层状态 ──
     var showToolPicker by remember { mutableStateOf(false) }
     var showTree by remember { mutableStateOf(false) }
 
-    // 对象树状态
+    // 对象树状态（沿用原 loadTree / extractNames 逻辑，只是入口搬到顶部条 + 函数视图）
     val treeScope = rememberCoroutineScope()
     var treeOpen by remember { mutableStateOf(setOf<String>()) }
     var treeChildren by remember { mutableStateOf(mapOf<String, List<String>>()) }
@@ -171,196 +197,132 @@ internal fun AnalysisWorkspace(
 
     fun pickName(name: String) {
         treeSel = name
-        runCatching {
-            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("taffy", name))
-        }
-        Toast.makeText(context, if (zh) "已复制：$name" else "Copied: $name", Toast.LENGTH_SHORT).show()
+        copyToClipboard(context, name, zh)
     }
+
+    /** 全局唯一的“当前函数”选中：反汇编 / 伪C / CFG 全部跟随它。 */
+    fun selectFunction(name: String, va: String) {
+        tools.selectedFunctionName = name
+        tools.selectedFunctionVa = va
+        tools.decompileTarget = name
+        tools.disasmAddr = va.ifBlank { name }
+        tools.analysisView = "disasm"
+    }
+
+    val refreshAll: () -> Unit = {
+        tools.clearViewCaches()
+        tools.reloadTick = tools.reloadTick + 1
+    }
+
+    val view = tools.analysisView
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        // ── 顶部任务/操作条：左侧任务名（点击换文件），右侧「工具 / 对象 / 输出」 ──
-        Row(
-            Modifier.fillMaxWidth().padding(start = metrics.pagePad, end = 6.dp, top = 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            val task = state.currentTask()
-            val chipShape = RoundedCornerShape(AppShape.md)
-            Row(
-                Modifier.weight(1f).clip(chipShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), chipShape)
-                    .clickable(onClick = onOpenTask)
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Filled.FolderOpen,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (task != null) (if (zh) "当前任务" else "Task") else (if (zh) "未选择文件" else "No file"),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = AppText.label,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        (task?.title ?: if (zh) "选择文件" else "Pick file").take(40),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = AppText.bodyStrong,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (task != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
-                    )
-                }
-                if (task != null && tools.sharedWorkspaceId.isBlank()) {
-                    Text("⚠", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                }
-            }
-            IconButton(onClick = { showToolPicker = true }) {
-                Icon(
-                    Icons.Filled.Build,
-                    contentDescription = if (zh) "工具" else "Tools",
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-            IconButton(onClick = { showTree = true }) {
-                Icon(
-                    Icons.Filled.ListAlt,
-                    contentDescription = if (zh) "对象" else "Objects",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = { bottomOpen = !bottomOpen }) {
-                Icon(
-                    Icons.Filled.Terminal,
-                    contentDescription = if (zh) "输出" else "Output",
-                    tint = if (bottomOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            // ── 左侧图标导航栏（Exbin NavigationRail 的等价物） ──
+            AnalysisNavRail(current = view, zh = zh) { tools.analysisView = it }
 
-        // ── 顶层视图标签 + 工作区选择（FlowRow：窄屏自动换行，不截断） ──
-        FlowRow(
-            Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            WbTab(if (zh) "工具控制台" else "Console", pane == "tool") { pane = "tool" }
-            WbTab(if (zh) "十六进制" else "Hex", pane == "hex") { pane = "hex" }
-            if (tools.cfgVisible) {
-                WbTab("CFG", pane == "cfg") { pane = "cfg" }
-            }
-            tools.resultTabs.forEachIndexed { idx, tb ->
-                WbTab(tb.label, pane == "result" && tools.selectedTabIndex == idx, onClose = {
-                    tools.closeTab(idx)
-                    if (tools.resultTabs.isEmpty()) pane = "tool"
-                }) {
-                    tools.selectedTabIndex = idx
-                    pane = "result"
-                }
-            }
-            WorkspacePicker(state, zh)
-        }
-        Spacer(Modifier.size(5.dp))
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                // ── 顶部条：当前函数（可点换）+ 地址 + 该视图相关操作 ──
+                AnalysisTopBar(
+                    state = state,
+                    tools = tools,
+                    zh = zh,
+                    view = view,
+                    onPickFunction = { tools.analysisView = "functions" },
+                    onRefresh = refreshAll,
+                    onOpenTree = { showTree = true },
+                    onOpenOutput = { tools.analysisView = "results" },
+                    onOpenTask = onOpenTask,
+                )
+                GroupDivider()
 
-        // ── 地址栏（仅需要地址的工具：反编译 / 模拟 / 编辑） ──
-        if (pane == "tool" && state.activeTool in addrNeededTools) {
-            Box(Modifier.padding(horizontal = metrics.pagePad)) { AddrBar(state, zh) }
-            Spacer(Modifier.size(5.dp))
-        }
+                // ── 当前视图内容区 ──
+                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    when (view) {
+                        "functions" -> FunctionsView(
+                            tools = tools, zh = zh, context = context,
+                            onRefresh = refreshAll, onOpenTree = { showTree = true },
+                        ) { n, v -> selectFunction(n, v) }
 
-        // ── 内容区：十六进制 / 结果 / 工具控制台 ──
-        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = metrics.pagePad)) {
-            when {
-                pane == "hex" -> AppCard(Modifier.fillMaxSize()) { HexPane(state, zh) }
-                pane == "cfg" && tools.cfgVisible -> AppCard(Modifier.fillMaxSize()) { CfgPane(tools, zh) { pane = "result" } }
-                pane == "result" -> AppCard(Modifier.fillMaxSize()) { ResultStream(tools, zh) }
-                state.activeTool.isNotBlank() -> AppCard(Modifier.fillMaxWidth()) { ToolConsole(state, zh, onAiAnalyze) { pane = "cfg" } }
-                else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        if (zh) "点顶部「工具」选择工具" else "Tap 「Tools」 above to pick a tool",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.size(6.dp))
+                        "search" -> SearchView(
+                            tools = tools, zh = zh, context = context,
+                        ) { n, v -> selectFunction(n, v) }
 
-        // ── 底部输出面板：默认可见，点标题栏折叠/展开（结果与输出同屏可达） ──
-        val outShape = RoundedCornerShape(AppShape.md)
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad)
-                .clip(outShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), outShape)
-                .clickable { bottomOpen = !bottomOpen }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(
-                if (bottomOpen) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                if (zh) "输出" else "Output",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                if (zh) "${tools.resultTabs.size} 个结果" else "${tools.resultTabs.size} results",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (bottomOpen) {
-            Spacer(Modifier.size(4.dp))
-            AppCard(
-                Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad).height(130.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                val tb = tools.resultTabs.getOrNull(tools.selectedTabIndex)
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    Text(
-                        tb?.text ?: (if (zh) {
-                            "暂无输出。执行工具后，结果会出现在这里，并同步到上方结果标签页。"
-                        } else {
-                            "No output yet. Run a tool — results show here and in the result tab above."
-                        }),
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                        "disasm" -> DisasmView(
+                            tools = tools, zh = zh, context = context,
+                            onRefresh = refreshAll,
+                            onGoFunctions = { tools.analysisView = "functions" },
+                        )
+
+                        "pseudo" -> PseudoView(
+                            tools = tools, zh = zh, context = context,
+                            onRefresh = refreshAll,
+                            onGoFunctions = { tools.analysisView = "functions" },
+                        )
+
+                        "cfg" -> CfgView(
+                            tools = tools, zh = zh, context = context,
+                            onGoFunctions = { tools.analysisView = "functions" },
+                        )
+
+                        "strings" -> ListView(
+                            tools = tools, zh = zh, context = context, view = "strings",
+                            onRefresh = refreshAll,
+                        ) { row -> copyToClipboard(context, row.text.ifBlank { row.title }, zh) }
+
+                        "symbols" -> ListView(
+                            tools = tools, zh = zh, context = context, view = "symbols",
+                            onRefresh = refreshAll,
+                        ) { row -> copyToClipboard(context, row.title, zh) }
+
+                        "imports" -> ListView(
+                            tools = tools, zh = zh, context = context, view = "imports",
+                            onRefresh = refreshAll,
+                        ) { row -> copyToClipboard(context, row.title, zh) }
+
+                        "sections" -> ListView(
+                            tools = tools, zh = zh, context = context, view = "sections",
+                            onRefresh = refreshAll,
+                        ) { row -> copyToClipboard(context, row.title, zh) }
+
+                        "hex" -> AppCard(Modifier.fillMaxSize()) { HexPane(state, zh) }
+
+                        "results" -> ResultsPane(tools, zh)
+
+                        "tools" -> ToolsPane(
+                            state = state, tools = tools, zh = zh,
+                            onAiAnalyze = onAiAnalyze,
+                            onPickTool = { showToolPicker = true },
+                            onShowCfg = { tools.analysisView = "cfg" },
+                        )
+
+                        else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                if (zh) "未知视图" else "Unknown view",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }
-        Spacer(Modifier.size(10.dp))
     }
 
-    // ── 工具选择弹层 ──
+    // ── 工具选择弹层（沿用原 ConsoleToolPickerDialog） ──
     if (showToolPicker) {
         ConsoleToolPickerDialog(
             zh = zh,
             onDismiss = { showToolPicker = false },
             onPick = { key ->
                 state.activeTool = key
-                pane = "tool"
+                tools.analysisView = "tools"
                 showToolPicker = false
             },
         )
     }
-    // ── 对象树弹层（原窄停靠面板迁移而来，保留 loadTree / extractNames 逻辑） ──
+
+    // ── 对象树弹层（沿用原 ObjectTreeDialog） ──
     if (showTree) {
         ObjectTreeDialog(
             zh = zh,
@@ -873,7 +835,7 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                     tools.addTab(tl, if (zh) "函数" else "Functions", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("Disasm", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr.ifBlank { "main" }, null, "auto") }.getOrNull() }
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr, null, "auto") }.getOrNull() }
                     tools.addTab(tl, "Disasm", r?.toString() ?: if (zh) "失败" else "failed")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank())
                 SmBtn("Hex", bm, bp, { scope.launch {
@@ -917,15 +879,25 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "dynsyms", "", 60) }.getOrNull() }
                     tools.addTab(tl, if (zh) "导出" else "Exports", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn("CFG", bm, bp, { scope.launch {
-                    val cfgTarget = tools.decompileTarget.ifBlank { "main" }
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", cfgTarget) }.getOrNull() }
-                    // 图形视图：不再把 JSON 丢进结果标签页，而是切到 CFG 画布
-                    tools.cfgTarget = cfgTarget
-                    tools.cfgJson = r?.toString() ?: ""
+                SmBtn("CFG", bm, bp, {
+                    // CFG 目标必须来自用户显式选择（函数列表选中 / 顶部条），不再有 "main" 这类魔法默认。
+                    // 未选中函数时只切到 CFG 视图，由视图自身给出「请先选择函数 / 入口点兜底」空态。
+                    val cfgTarget = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }.ifBlank { tools.decompileTarget.trim() }
                     tools.cfgVisible = true
                     onShowCfg()
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                    if (cfgTarget.isNotBlank()) {
+                        scope.launch {
+                            tools.cfgLoading = true
+                            tools.cfgTarget = cfgTarget
+                            tools.cfgJson = ""
+                            val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", cfgTarget) }.getOrNull() }
+                            tools.cfgLoading = false
+                            tools.cfgJson = r?.toString() ?: JSONObject().put("ok", false)
+                                .put("error", JSONObject().put("code", "TAFFY_UI_ERROR")
+                                    .put("message", if (zh) "CFG 查询失败：引擎无响应" else "CFG query failed: engine did not respond")).toString()
+                        }
+                    }
+                }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 // AI 深度分析：跳转 AI 对话页（MainActivity 挂载 DeepAiChatScreen 进行对话）
                 SmBtn(if (zh) "AI 深度" else "AI Deep", bm, bp, {
                     val taskPath = state.currentTask()?.mainPath
@@ -1900,36 +1872,1111 @@ private fun DisasmLine(line: String) {
     Text(out, style = monoStyle())
 }
 
-/**
- * CFG 图形视图容器（分析页「CFG」按钮的落点）。
- * 顶部：函数名/查询目标 + 「文本视图」返回入口；主体：自绘 CFG 画布。
- * 原有结果标签页机制不受影响——点「文本视图」会把本次 CFG JSON 追加为普通结果标签。
- */
+// ============================================================
+// 分析页 · 仿 Exbin 布局的导航栏 / 顶部条 / 各视图
+// ============================================================
+
+/** 左侧导航项：key 用英文短 id，short 是 56dp 栏里的短标签。 */
+private data class AnalysisNavItem(val key: String, val short: String, val en: String, val icon: ImageVector)
+
+/** 列表行（由引擎 JSON 归一化而来，供 CardRow 渲染）。 */
+private data class AnalysisRow(val key: String, val title: String, val meta: String, val va: String, val text: String)
+
+private val analysisNavItems = listOf(
+    AnalysisNavItem("functions", "函数", "Fns", Icons.Filled.Memory),
+    AnalysisNavItem("search", "搜索", "Find", Icons.Filled.Search),
+    AnalysisNavItem("disasm", "汇编", "Asm", Icons.Filled.Code),
+    AnalysisNavItem("pseudo", "伪C", "Pseudo", Icons.Filled.Description),
+    AnalysisNavItem("cfg", "CFG", "CFG", Icons.Filled.CompareArrows),
+    AnalysisNavItem("strings", "字符串", "Str", Icons.Filled.DataObject),
+    AnalysisNavItem("symbols", "符号", "Sym", Icons.Filled.ListAlt),
+    AnalysisNavItem("imports", "导入", "Imp", Icons.Filled.Link),
+    AnalysisNavItem("sections", "段节", "Sec", Icons.Filled.Inventory2),
+    AnalysisNavItem("hex", "HEX", "Hex", Icons.Filled.Storage),
+    AnalysisNavItem("results", "结果", "Out", Icons.Filled.Terminal),
+    AnalysisNavItem("tools", "工具", "Tools", Icons.Filled.Build),
+)
+
+private fun analysisViewLabel(view: String, zh: Boolean): String =
+    analysisNavItems.firstOrNull { it.key == view }?.let { if (zh) it.short else it.en } ?: view
+
+private fun analysisViewIcon(view: String): ImageVector =
+    analysisNavItems.firstOrNull { it.key == view }?.icon ?: Icons.Filled.ListAlt
+
+// ───────────────────────── 通用小工具 ─────────────────────────
+
+/** 小号动作按钮（Exbin 风：圆角 + 1dp 描边 + 无阴影）。 */
 @Composable
-private fun CfgPane(tools: ToolPagesState, zh: Boolean, onShowText: () -> Unit) {
+private fun SmallAction(
+    label: String,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    active: Boolean = false,
+    onClick: () -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxSize().padding(6.dp)) {
+    Surface(
+        onClick = { if (enabled) onClick() },
+        enabled = enabled,
+        shape = RoundedCornerShape(AppShape.sm),
+        color = if (active) cs.primary.copy(alpha = 0.16f) else cs.surfaceContainerHigh,
+        border = BorderStroke(1.dp, if (active) cs.primary.copy(alpha = 0.45f) else cs.outlineVariant),
+    ) {
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (tools.cfgTarget.isBlank()) (if (zh) "控制流图" else "Control Flow Graph") else tools.cfgTarget,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontSize = AppText.bodyStrong,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = cs.onSurface,
-                )
-                Text(
-                    if (zh) {
-                        "分层布局 · 点击节点看详情 · 双指缩放 / 单指平移"
-                    } else {
-                        "Layered layout · tap a node for details · pinch to zoom / drag to pan"
+            if (loading) {
+                CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 2.dp)
+            }
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                maxLines = 1,
+                color = if (enabled) cs.primary else cs.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnalysisLoading() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+    }
+}
+
+@Composable
+private fun AnalysisEmptyState(
+    title: String,
+    hint: String,
+    primaryLabel: String? = null,
+    onPrimary: (() -> Unit)? = null,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null,
+) {
+    val cs = MaterialTheme.colorScheme
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.Info, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(26.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                fontSize = AppText.title,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                hint,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = AppText.body,
+                color = cs.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (primaryLabel != null && onPrimary != null) SmallAction(primaryLabel, onClick = onPrimary)
+                if (secondaryLabel != null && onSecondary != null) SmallAction(secondaryLabel, onClick = onSecondary)
+            }
+        }
+    }
+}
+
+/** 错误横幅（把引擎 error.message 明确显示出来，而不是只留空白）。 */
+@Composable
+private fun AnalysisErrorBanner(message: String) {
+    if (message.isBlank()) return
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.sm))
+            .background(cs.errorContainer.copy(alpha = 0.55f))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Icons.Filled.Warning, null, tint = cs.error, modifier = Modifier.size(15.dp))
+        Text(
+            message,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            color = cs.onSurface,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun MonoScreen(text: String) {
+    Box(
+        Modifier.fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .horizontalScroll(rememberScrollState())
+            .padding(10.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+            color = MaterialTheme.colorScheme.onSurface,
+            lineHeight = 17.sp,
+        )
+    }
+}
+
+private fun copyToClipboard(context: android.content.Context, text: String, zh: Boolean) {
+    if (text.isBlank()) return
+    runCatching {
+        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("taffy", text))
+    }
+    val shown = text.take(60)
+    Toast.makeText(context, if (zh) "已复制：$shown" else "Copied: $shown", Toast.LENGTH_SHORT).show()
+}
+
+private fun errJson(message: String): String = JSONObject()
+    .put("ok", false)
+    .put("error", JSONObject().put("code", "TAFFY_UI_ERROR").put("message", message))
+    .toString()
+
+/** 从引擎返回的 JSON 里取出 error.message（无错返回空串）。 */
+private fun errMessageOf(json: String?): String {
+    if (json.isNullOrBlank()) return ""
+    val o = runCatching { JSONObject(json) }.getOrNull() ?: return ""
+    if (o.optBoolean("ok", true)) return ""
+    return o.optJSONObject("error")?.optString("message").orEmpty()
+        .ifBlank { o.optJSONObject("error")?.optString("code").orEmpty() }
+        .ifBlank { o.optString("message") }
+}
+
+private fun buildMeta(addr: String, size: Long, kind: String): String {
+    val parts = ArrayList<String>(3)
+    if (addr.isNotBlank()) parts.add(addr)
+    if (size >= 0L) parts.add("$size B")
+    if (kind.isNotBlank()) parts.add(kind)
+    return parts.joinToString(" · ")
+}
+
+/** 引擎 JSON → 归一化列表行（兼容 items / functions 两种数组字段）。 */
+private fun rowsOf(json: String?, view: String): List<AnalysisRow> {
+    if (json.isNullOrBlank()) return emptyList()
+    val o = runCatching { JSONObject(json) }.getOrNull() ?: return emptyList()
+    val arr = o.optJSONArray("items") ?: o.optJSONArray("functions") ?: return emptyList()
+    val out = ArrayList<AnalysisRow>(arr.length())
+    for (i in 0 until arr.length()) {
+        val it = arr.optJSONObject(i) ?: continue
+        val loc = it.optString("locator")
+        when (view) {
+            "functions" -> out.add(
+                AnalysisRow(
+                    key = "f$i|$loc",
+                    title = it.optString("name").ifBlank { it.optString("startAddr") }.ifBlank { "func $i" },
+                    meta = buildMeta(
+                        it.optString("startAddr").ifBlank { it.optString("addr") },
+                        it.optLong("size", -1L),
+                        it.optString("kind").ifBlank { it.optString("section") },
+                    ),
+                    va = it.optString("startAddr").ifBlank { it.optString("addr") },
+                    text = it.optString("name"),
+                ),
+            )
+            "strings" -> out.add(
+                AnalysisRow(
+                    key = "s$i|$loc",
+                    title = it.optString("value").ifBlank { "(空)" },
+                    meta = buildMeta(
+                        it.optString("offset"),
+                        it.optLong("length", -1L),
+                        it.optString("encoding").ifBlank { it.optString("section") },
+                    ),
+                    va = it.optString("offset"),
+                    text = it.optString("value"),
+                ),
+            )
+            "sections" -> out.add(
+                AnalysisRow(
+                    key = "sec$i|$loc",
+                    title = it.optString("name").ifBlank { "section $i" },
+                    meta = buildMeta(
+                        it.optString("addr").ifBlank { it.optString("virtualAddr") },
+                        it.optLong("size", -1L),
+                        it.optString("flags").ifBlank { it.optString("type") },
+                    ),
+                    va = it.optString("addr").ifBlank { it.optString("virtualAddr") },
+                    text = it.optString("name"),
+                ),
+            )
+            "imports" -> out.add(
+                AnalysisRow(
+                    key = "i$i|$loc",
+                    title = it.optString("symbol").ifBlank { it.optString("name") },
+                    meta = buildMeta(
+                        "",
+                        -1L,
+                        listOf(it.optString("type"), it.optString("bind"), it.optString("section"))
+                            .filter { s -> s.isNotBlank() }.joinToString(" / "),
+                    ),
+                    va = "",
+                    text = it.optString("symbol"),
+                ),
+            )
+            else -> out.add(
+                AnalysisRow(
+                    key = "g$i|$loc",
+                    title = it.optString("name").ifBlank { it.optString("symbol") }
+                        .ifBlank { it.optString("value") }.ifBlank { "item ${i + 1}" },
+                    meta = buildMeta(
+                        it.optString("value").ifBlank { it.optString("startAddr") },
+                        it.optLong("size", -1L),
+                        it.optString("type").ifBlank { it.optString("bind") }
+                            .ifBlank { it.optString("visibility") },
+                    ),
+                    va = it.optString("value").ifBlank { it.optString("startAddr") },
+                    text = it.optString("name").ifBlank { it.optString("symbol") },
+                ),
+            )
+        }
+    }
+    return out
+}
+
+/** CardRow 列表（12dp 圆角行 + 选中态高亮 + 分隔线）。 */
+@Composable
+private fun AnalysisRowList(
+    rows: List<AnalysisRow>,
+    zh: Boolean,
+    icon: ImageVector,
+    selectedTitle: String = "",
+    onPick: (AnalysisRow) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        items(rows, key = { r -> r.key }) { row ->
+            val selected = selectedTitle.isNotBlank() && row.title == selectedTitle
+            Box(
+                Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+                    .clip(RoundedCornerShape(AppShape.md))
+                    .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent),
+            ) {
+                CardRow(
+                    title = row.title,
+                    meta = row.meta.ifBlank { null },
+                    icon = icon,
+                    iconTint = if (selected) cs.primary else cs.onSurfaceVariant,
+                    trailing = {
+                        if (selected) {
+                            Text(
+                                if (zh) "已选" else "on",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = AppText.label,
+                                color = cs.primary,
+                            )
+                        }
                     },
+                    onClick = { onPick(row) },
+                )
+            }
+            GroupDivider()
+        }
+    }
+}
+
+// ───────────────────────── 取数（均在工作区内，失败一律落成 error JSON） ─────────────────────────
+
+private fun rawListCall(
+    context: android.content.Context,
+    ws: String,
+    view: String,
+    prefix: String,
+    limit: Int,
+): JSONObject = when (view) {
+    "functions" -> EngineProvider.get(context).rzFunctions(ws, "", limit)
+    else -> EngineProvider.get(context).list(ws, "", view, prefix, limit)
+}
+
+/** 列表视图统一取数（带 viewCache 去重：已有缓存则不发请求）。 */
+private suspend fun loadListCache(
+    context: android.content.Context,
+    tools: ToolPagesState,
+    view: String,
+    ws: String,
+    cacheKey: String,
+    limit: Int,
+    prefix: String = "",
+) {
+    if (ws.isBlank()) return
+    if (tools.viewCache.containsKey(cacheKey)) return
+    tools.viewLoading = cacheKey
+    val r = withContext(Dispatchers.IO) {
+        runCatching { rawListCall(context, ws, view, prefix, limit) }.getOrNull()
+    }
+    tools.viewLoading = ""
+    tools.cacheView(
+        cacheKey,
+        r?.toString() ?: errJson("失败：引擎无响应"),
+    )
+}
+
+private suspend fun fetchDisasm(
+    context: android.content.Context,
+    tools: ToolPagesState,
+    zh: Boolean,
+    ws: String,
+    target: String,
+    key: String,
+    limit: Int,
+) {
+    if (ws.isBlank() || target.isBlank()) return
+    tools.viewLoading = key
+    val r = withContext(Dispatchers.IO) {
+        runCatching {
+            EngineProvider.get(context).disasm(ws, "", target, limit, "", 0, 0, 65536, "", null, "auto")
+        }.getOrNull()
+    }
+    tools.viewLoading = ""
+    tools.disasmKey = key
+    tools.disasmJson = r?.toString()
+        ?: errJson(if (zh) "反汇编失败：引擎无响应" else "disassembly failed: engine did not respond")
+}
+
+private suspend fun fetchPseudo(
+    context: android.content.Context,
+    tools: ToolPagesState,
+    zh: Boolean,
+    ws: String,
+    target: String,
+    key: String,
+) {
+    if (ws.isBlank() || target.isBlank()) return
+    tools.viewLoading = key
+    val r = withContext(Dispatchers.IO) {
+        runCatching { EngineProvider.get(context).rzDecompile(ws, "", target, false) }.getOrNull()
+    }
+    tools.viewLoading = ""
+    tools.pseudoKey = key
+    tools.pseudoJson = r?.toString()
+        ?: errJson(if (zh) "反编译失败：引擎无响应" else "decompile failed: engine did not respond")
+}
+
+/** CFG 查询：locator 必须是函数入口（符号名或 hex VA）。错误 JSON 会原样透传给画布。 */
+private fun loadCfg(
+    context: android.content.Context,
+    tools: ToolPagesState,
+    zh: Boolean,
+    scope: CoroutineScope,
+    target: String,
+) {
+    val ws = tools.sharedWorkspaceId
+    if (ws.isBlank() || target.isBlank()) return
+    tools.cfgTarget = target
+    tools.cfgVisible = true
+    scope.launch {
+        tools.cfgLoading = true
+        tools.cfgJson = ""
+        val r = withContext(Dispatchers.IO) {
+            runCatching { EngineProvider.get(context).rzCfg(ws, "", target) }.getOrNull()
+        }
+        tools.cfgLoading = false
+        tools.cfgJson = r?.toString()
+            ?: errJson(if (zh) "CFG 查询失败：引擎无响应" else "CFG query failed: engine did not respond")
+    }
+}
+
+private fun funcVaAt(arr: JSONArray?, i: Int): String {
+    val o = arr?.optJSONObject(i) ?: return ""
+    return o.optString("startAddr").ifBlank { o.optString("addr") }
+}
+
+private fun funcNameAt(arr: JSONArray?, i: Int): String {
+    val o = arr?.optJSONObject(i) ?: return ""
+    return o.optString("name").ifBlank { funcVaAt(arr, i) }
+}
+
+/**
+ * 入口点兜底：优先「ELF 入口点恰好是某个函数入口 → 该函数」，
+ * 其次「ELF 入口点本身能被 rzCfg 接受」，再次「函数列表第一个」，最后「list(functions) 第一项」。
+ * 保证用户一键就能看到一张图，而不是空画布。
+ */
+private suspend fun resolveCfgEntry(
+    context: android.content.Context,
+    tools: ToolPagesState,
+): Pair<String, String>? = withContext<Pair<String, String>?>(Dispatchers.IO) {
+    val ws = tools.sharedWorkspaceId
+    if (ws.isBlank()) return@withContext null
+    val engine = EngineProvider.get(context)
+    val funcs = runCatching { engine.rzFunctions(ws, "", 160) }.getOrNull()?.optJSONArray("functions")
+    val entry = runCatching { engine.readElf(ws, "") }.getOrNull()?.optString("entryPoint").orEmpty()
+
+    if (entry.isNotBlank() && funcs != null) {
+        for (i in 0 until funcs.length()) {
+            val va = funcVaAt(funcs, i)
+            if (va.isNotBlank() && va.equals(entry, ignoreCase = true)) {
+                return@withContext (funcNameAt(funcs, i) to va)
+            }
+        }
+    }
+    if (entry.isNotBlank()) {
+        val r = runCatching { engine.rzCfg(ws, "", entry) }.getOrNull()
+        if (r != null && r.optBoolean("ok", false)) return@withContext (entry to entry)
+    }
+    if (funcs != null && funcs.length() > 0) {
+        val va = funcVaAt(funcs, 0)
+        if (va.isNotBlank()) return@withContext (funcNameAt(funcs, 0) to va)
+    }
+    val item = runCatching { engine.list(ws, "", "functions", "", 1) }.getOrNull()
+        ?.optJSONArray("items")?.optJSONObject(0)
+    if (item != null) {
+        val va = item.optString("startAddr")
+        return@withContext (item.optString("name").ifBlank { va } to va)
+    }
+    null
+}
+
+// ───────────────────────── 左侧导航栏 ─────────────────────────
+
+@Composable
+private fun AnalysisNavRail(current: String, zh: Boolean, onPick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier
+            .width(56.dp)
+            .fillMaxHeight()
+            .background(cs.surface.copy(alpha = 0.55f))
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        analysisNavItems.forEach { item ->
+            val selected = item.key == current
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).clickable { onPick(item.key) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Box(
+                        Modifier.align(Alignment.CenterStart)
+                            .width(3.dp)
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp))
+                            .background(cs.primary),
+                    )
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    Icon(
+                        item.icon,
+                        contentDescription = if (zh) item.short else item.en,
+                        tint = if (selected) cs.primary else cs.onSurfaceVariant,
+                        modifier = Modifier.size(19.dp),
+                    )
+                    Text(
+                        if (zh) item.short else item.en,
+                        fontSize = 9.sp,
+                        lineHeight = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        color = if (selected) cs.primary else cs.onSurfaceVariant,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 顶部条 ─────────────────────────
+
+@Composable
+private fun AnalysisTopBar(
+    state: WorkspaceState,
+    tools: ToolPagesState,
+    zh: Boolean,
+    view: String,
+    onPickFunction: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenTree: () -> Unit,
+    onOpenOutput: () -> Unit,
+    onOpenTask: () -> Unit,
+) {
+    val metrics = LocalUiMetrics.current
+    val cs = MaterialTheme.colorScheme
+    val fnName = tools.selectedFunctionName
+    val fnVa = tools.selectedFunctionVa
+    val chipShape = RoundedCornerShape(AppShape.md)
+    val busy = tools.viewLoading.isNotBlank() || tools.cfgLoading
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = metrics.pagePad, end = 6.dp, top = 6.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            // 当前函数（点一下 → 函数列表换一个）
+            Row(
+                Modifier.weight(1f).clip(chipShape)
+                    .background(cs.surfaceContainerHigh)
+                    .border(BorderStroke(1.dp, cs.outlineVariant), chipShape)
+                    .clickable(onClick = onPickFunction)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Filled.Memory, null, tint = cs.primary, modifier = Modifier.size(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (fnName.isBlank()) (if (zh) "未选择函数" else "No function") else fnName,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = AppText.bodyStrong,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (fnName.isBlank()) cs.primary else cs.onSurface,
+                    )
+                    Text(
+                        if (fnName.isBlank()) {
+                            if (zh) "点这里去函数列表" else "tap to open function list"
+                        } else {
+                            "${fnVa.ifBlank { "--" }} · ${analysisViewLabel(view, zh)}"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = cs.onSurfaceVariant,
+                    )
+                }
+            }
+            IconButton(onClick = onRefresh) {
+                if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Filled.Refresh, contentDescription = if (zh) "刷新" else "Refresh", tint = cs.primary)
+            }
+            IconButton(onClick = onOpenTree) {
+                Icon(Icons.Filled.ListAlt, contentDescription = if (zh) "对象树" else "Objects", tint = cs.onSurfaceVariant)
+            }
+            IconButton(onClick = onOpenOutput) {
+                Icon(Icons.Filled.Terminal, contentDescription = if (zh) "输出" else "Output", tint = cs.onSurfaceVariant)
+            }
+        }
+
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            WorkspacePicker(state, zh)
+            TaskChip(state, zh, onOpenTask)
+        }
+        Spacer(Modifier.size(6.dp))
+    }
+}
+
+/** 当前任务小条（点击 → 任务页）。 */
+@Composable
+private fun TaskChip(state: WorkspaceState, zh: Boolean, onOpenTask: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val task = state.currentTask()
+    val shape = RoundedCornerShape(AppShape.sm)
+    Row(
+        Modifier.clip(shape)
+            .background(cs.surfaceVariant.copy(alpha = 0.45f))
+            .clickable(onClick = onOpenTask)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(Icons.Filled.FolderOpen, null, tint = cs.primary, modifier = Modifier.size(13.dp))
+        Text(
+            (task?.title ?: (if (zh) "选择任务" else "Pick task")).take(14),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = if (task != null) cs.onSurface else cs.primary,
+        )
+        if (task != null && state.tools.sharedWorkspaceId.isBlank()) {
+            Text("⚠", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.error)
+        }
+    }
+}
+
+// ───────────────────────── 函数列表（默认视图 / 页面入口） ─────────────────────────
+
+@Composable
+private fun FunctionsView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onOpenTree: () -> Unit,
+    onSelect: (String, String) -> Unit,
+) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val cacheKey = "functions|$ws|"
+
+    LaunchedEffect(cacheKey, tools.reloadTick) {
+        loadListCache(context, tools, "functions", ws, cacheKey, 300)
+    }
+
+    val rows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], "functions") }
+    val query = tools.functionQuery
+    val shown = remember(rows, query) {
+        if (query.isBlank()) rows
+        else rows.filter { it.title.contains(query, ignoreCase = true) || it.meta.contains(query, ignoreCase = true) }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { tools.functionQuery = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            placeholder = {
+                Text(
+                    if (zh) "按函数名过滤" else "filter by name",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    color = cs.onSurfaceVariant,
+                )
+            },
+        )
+        Spacer(Modifier.size(6.dp))
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "对象树" else "Objects", onClick = onOpenTree)
+            Text(
+                if (zh) "${shown.size} 个函数" else "${shown.size} functions",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "未打开工作区" else "No workspace",
+                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
+                )
+                tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
+                rows.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> {
+                    val err = errMessageOf(tools.viewCache[cacheKey])
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AnalysisErrorBanner(err.ifBlank { if (zh) "函数列表加载失败" else "failed to load functions" })
+                        Text(
+                            if (zh) "点「刷新」重试" else "Tap Refresh to retry",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = AppText.body,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
+                }
+                shown.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无匹配函数" else "No match",
+                    hint = if (zh) "换个关键字，或点「刷新」重新拉取" else "Try another keyword, or Refresh",
+                    primaryLabel = if (zh) "刷新" else "Refresh",
+                    onPrimary = onRefresh,
+                )
+                else -> AnalysisRowList(
+                    rows = shown,
+                    zh = zh,
+                    icon = Icons.Filled.Memory,
+                    selectedTitle = tools.selectedFunctionName,
+                    onPick = { row -> onSelect(row.title, row.va) },
+                )
+            }
+        }
+    }
+}
+
+// ───────────────────────── 搜索 ─────────────────────────
+
+private val searchScopes = listOf(
+    "functions" to ("函数" to "Fns"),
+    "symbols" to ("符号" to "Sym"),
+    "strings" to ("字符串" to "Str"),
+    "imports" to ("导入" to "Imp"),
+)
+
+@Composable
+private fun SearchView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onSelect: (String, String) -> Unit,
+) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = tools.searchScope
+    val query = tools.searchQuery
+    val cacheKey = "search|$ws|$scope|$query"
+    val icon = analysisViewIcon(scope)
+
+    LaunchedEffect(cacheKey, tools.reloadTick) {
+        if (query.isNotBlank()) loadListCache(context, tools, scope, ws, cacheKey, 120, query)
+    }
+
+    val rows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], scope) }
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { tools.searchQuery = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            placeholder = {
+                Text(
+                    if (zh) "搜索函数 / 符号 / 字符串 / 导入" else "search functions / symbols / strings / imports",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    color = cs.onSurfaceVariant,
+                )
+            },
+        )
+        Spacer(Modifier.size(6.dp))
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            searchScopes.forEach { (key, label) ->
+                SmallAction(
+                    label = if (zh) label.first else label.second,
+                    active = key == scope,
+                    onClick = { tools.searchScope = key },
+                )
+            }
+            Text(
+                if (zh) "范围：${analysisViewLabel(scope, zh)}" else "scope: ${analysisViewLabel(scope, zh)}",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "未打开工作区" else "No workspace",
+                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
+                )
+                query.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "输入关键字开始搜索" else "Type a keyword",
+                    hint = if (zh) "当前范围：${analysisViewLabel(scope, zh)}" else "Scope: ${analysisViewLabel(scope, zh)}",
+                )
+                tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
+                rows.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无结果" else "No results",
+                    hint = errMessageOf(tools.viewCache[cacheKey]).ifBlank {
+                        if (zh) "换个关键字或切换范围" else "Try another keyword or scope"
+                    },
+                )
+                else -> AnalysisRowList(
+                    rows = rows,
+                    zh = zh,
+                    icon = icon,
+                    selectedTitle = if (scope == "functions") tools.selectedFunctionName else "",
+                    onPick = { row ->
+                        if (scope == "functions") onSelect(row.title, row.va)
+                        else copyToClipboard(context, row.text.ifBlank { row.title }, zh)
+                    },
+                )
+            }
+        }
+    }
+}
+
+// ───────────────────────── 反汇编 ─────────────────────────
+
+@Composable
+private fun DisasmView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onGoFunctions: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val ws = tools.sharedWorkspaceId
+    val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    val key = "disasm|$ws|$target"
+
+    LaunchedEffect(key, tools.reloadTick) {
+        if (tools.disasmKey != key || tools.disasmJson.isBlank()) {
+            fetchDisasm(context, tools, zh, ws, target, key, 120)
+        }
+    }
+
+    val body = tools.disasmJson
+    val err = errMessageOf(body)
+    val obj = remember(body) { runCatching { JSONObject(body) }.getOrNull() }
+    val text = remember(body) { obj?.optJSONObject("textWindow")?.optString("text").orEmpty() }
+    val lines = remember(text) { if (text.isBlank()) emptyList() else text.split("\n") }
+    val addr = obj?.optString("addr").orEmpty()
+    val count = obj?.optInt("instructionCount", lines.size) ?: lines.size
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(
+                label = if (zh) "更多指令" else "More",
+                enabled = ws.isNotBlank() && target.isNotBlank(),
+                loading = tools.viewLoading == key,
+                onClick = {
+                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 400) }
+                },
+            )
+            SmallAction(if (zh) "重新加载" else "Reload", onClick = onRefresh)
+            SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
+            if (addr.isNotBlank()) {
+                Text(
+                    "$addr · $count",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        if (ws.isBlank() || target.isBlank()) {
+            AnalysisEmptyState(
+                title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
+                hint = if (zh) "反汇编以当前选中函数为目标" else "Disassembly follows the selected function",
+                primaryLabel = if (zh) "去函数列表" else "Function list",
+                onPrimary = onGoFunctions,
+            )
+        } else if (tools.viewLoading == key && lines.isEmpty()) {
+            AnalysisLoading()
+        } else if (err.isNotBlank()) {
+            AnalysisErrorBanner(err)
+        } else if (lines.isEmpty()) {
+            AnalysisEmptyState(
+                title = if (zh) "无指令输出" else "No instructions",
+                hint = if (zh) "该地址可能不是可执行代码，换个函数或点「刷新」" else "Address may not be executable code",
+                primaryLabel = if (zh) "函数列表" else "Function list",
+                onPrimary = onGoFunctions,
+            )
+        } else {
+            Box(
+                Modifier.weight(1f).fillMaxWidth()
+                    .clip(RoundedCornerShape(AppShape.md))
+                    .background(cs.surfaceContainerHigh)
+                    .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+            ) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 4.dp)) {
+                    items(lines) { line -> DisasmLine(line) }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 伪 C ─────────────────────────
+
+@Composable
+private fun PseudoView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onGoFunctions: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val ws = tools.sharedWorkspaceId
+    val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    val key = "pseudo|$ws|$target"
+
+    LaunchedEffect(key, tools.reloadTick) {
+        if (tools.pseudoKey != key || tools.pseudoJson.isBlank()) {
+            fetchPseudo(context, tools, zh, ws, target, key)
+        }
+    }
+
+    val body = tools.pseudoJson
+    val err = errMessageOf(body)
+    val obj = remember(body) { runCatching { JSONObject(body) }.getOrNull() }
+    val pseudo = remember(body) { obj?.optString("pseudocode").orEmpty() }
+    val bounds = remember(body) { obj?.optJSONObject("functionBounds") }
+    val coverage = remember(body) { obj?.optJSONObject("pseudocodeCoverage") }
+    val typeInf = remember(body) { obj?.optJSONObject("typeInference") }
+    val warn = remember(body) { obj?.optString("boundaryWarning").orEmpty() }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(
+                label = if (zh) "重新生成" else "Re-run",
+                enabled = ws.isNotBlank() && target.isNotBlank(),
+                loading = tools.viewLoading == key,
+                onClick = onRefresh,
+            )
+            SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
+            if (body.isNotBlank()) {
+                SmallAction(if (zh) "原始 JSON" else "Raw JSON") {
+                    tools.addTab("伪C", if (zh) "JSON" else "JSON", body)
+                    tools.analysisView = "results"
+                }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        if (ws.isBlank() || target.isBlank()) {
+            AnalysisEmptyState(
+                title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
+                hint = if (zh) "伪代码以当前选中函数为目标" else "Pseudocode follows the selected function",
+                primaryLabel = if (zh) "去函数列表" else "Function list",
+                onPrimary = onGoFunctions,
+            )
+        } else if (tools.viewLoading == key && pseudo.isBlank()) {
+            AnalysisLoading()
+        } else if (err.isNotBlank()) {
+            AnalysisErrorBanner(err)
+        } else if (pseudo.isBlank()) {
+            AnalysisEmptyState(
+                title = if (zh) "无伪代码输出" else "No pseudocode",
+                hint = if (zh) "该地址可能不是函数入口，换个函数或点「重新生成」" else "Address may not be a function entry",
+                primaryLabel = if (zh) "函数列表" else "Function list",
+                onPrimary = onGoFunctions,
+            )
+        } else {
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 小字元信息：函数边界 / 覆盖范围 / 边界警告 / 类型推断
+                val meta = ArrayList<String>(4)
+                if (bounds != null) {
+                    val s = bounds.optString("startAddr")
+                    val e = bounds.optString("endAddr")
+                    val sz = bounds.optLong("size", -1L)
+                    if (s.isNotBlank()) meta.add("${if (zh) "范围" else "range"} $s - $e")
+                    if (sz >= 0L) meta.add("$sz B")
+                }
+                if (coverage != null) {
+                    val d0 = coverage.optString("declaredStart")
+                    val d1 = coverage.optString("declaredEnd")
+                    val oob = coverage.optJSONArray("outOfBoundsAddrs")?.length() ?: 0
+                    if (d0.isNotBlank()) meta.add("${if (zh) "声明" else "declared"} $d0 - $d1")
+                    if (oob > 0) meta.add(if (zh) "越界地址 $oob" else "oob $oob")
+                }
+                if (typeInf != null) {
+                    val keys = typeInf.keys()
+                    val parts = ArrayList<String>()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        parts.add("$k=${typeInf.opt(k)}")
+                    }
+                    if (parts.isNotEmpty()) meta.add(parts.joinToString(" · "))
+                }
+                if (meta.isNotEmpty()) {
+                    Text(
+                        meta.joinToString("  |  "),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (warn.isNotBlank()) AnalysisErrorBanner(warn)
+
+                Box(
+                    Modifier.weight(1f).fillMaxWidth()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+                ) {
+                    MonoScreen(pseudo)
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── CFG ─────────────────────────
+
+@Composable
+private fun CfgView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onGoFunctions: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val ws = tools.sharedWorkspaceId
+    val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    val err = errMessageOf(tools.cfgJson)
+    val hasGraph = tools.cfgJson.isNotBlank() && err.isBlank()
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(
+                label = if (zh) "生成 / 刷新" else "Build",
+                enabled = ws.isNotBlank() && target.isNotBlank(),
+                loading = tools.cfgLoading,
+                onClick = { loadCfg(context, tools, zh, scope, target) },
+            )
+            // 兜底：一键定位入口点（ELF 入口 → 首个函数 → 列表第一项）
+            SmallAction(
+                label = if (zh) "入口点" else "Entry",
+                enabled = ws.isNotBlank(),
+                loading = tools.cfgLoading,
+                onClick = {
+                    scope.launch {
+                        tools.cfgLoading = true
+                        val p = resolveCfgEntry(context, tools)
+                        tools.cfgLoading = false
+                        if (p != null) {
+                            tools.selectedFunctionName = p.first
+                            tools.selectedFunctionVa = p.second
+                            tools.decompileTarget = p.first
+                            tools.disasmAddr = p.second.ifBlank { p.first }
+                            loadCfg(context, tools, zh, scope, p.second.ifBlank { p.first })
+                        } else {
+                            tools.cfgJson = errJson(
+                                if (zh) "无法自动定位入口点：未找到任何函数" else "Could not auto-locate an entry point",
+                            )
+                        }
+                    }
+                },
+            )
+            SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
+            if (tools.cfgJson.isNotBlank() && !hasGraph) {
+                SmallAction(if (zh) "原始 JSON" else "Raw JSON") {
+                    tools.addTab("CFG", if (zh) "JSON" else "JSON", tools.cfgJson)
+                    tools.analysisView = "results"
+                }
+            }
+            if (tools.cfgTarget.isNotBlank()) {
+                Text(
+                    tools.cfgTarget,
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = AppText.label,
                     maxLines = 1,
@@ -1937,15 +2984,201 @@ private fun CfgPane(tools: ToolPagesState, zh: Boolean, onShowText: () -> Unit) 
                     color = cs.onSurfaceVariant,
                 )
             }
-            TextButton(onClick = {
-                tools.addTab("CFG", if (zh) "文本" else "Text", tools.cfgJson)
-                tools.cfgVisible = false
-                onShowText()
-            }) {
-                Text(if (zh) "文本视图" else "Text view", fontSize = AppText.body)
+        }
+        Spacer(Modifier.size(6.dp))
+
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "未打开工作区" else "No workspace",
+                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
+                )
+                target.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
+                    hint = if (zh) "控制流图以选中函数的入口地址为目标；也可以直接点「入口点」自动定位" else "CFG targets the selected function entry; or tap Entry",
+                    primaryLabel = if (zh) "去函数列表" else "Function list",
+                    onPrimary = onGoFunctions,
+                    secondaryLabel = if (zh) "入口点" else "Entry",
+                    onSecondary = {
+                        scope.launch {
+                            tools.cfgLoading = true
+                            val p = resolveCfgEntry(context, tools)
+                            tools.cfgLoading = false
+                            if (p != null) {
+                                tools.selectedFunctionName = p.first
+                                tools.selectedFunctionVa = p.second
+                                loadCfg(context, tools, zh, scope, p.second.ifBlank { p.first })
+                            } else {
+                                tools.cfgJson = errJson(
+                                    if (zh) "无法自动定位入口点：未找到任何函数" else "Could not auto-locate an entry point",
+                                )
+                            }
+                        }
+                    },
+                )
+                tools.cfgLoading -> AnalysisLoading()
+                tools.cfgJson.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "尚未生成控制流图" else "No CFG yet",
+                    hint = if (zh) "点「生成 / 刷新」为当前函数生成 CFG" else "Tap Build to generate a CFG for the current function",
+                    primaryLabel = if (zh) "生成 / 刷新" else "Build",
+                    onPrimary = { loadCfg(context, tools, zh, scope, target) },
+                )
+                else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (err.isNotBlank()) AnalysisErrorBanner(err)
+                    CfgCanvas(tools.cfgJson, zh, Modifier.weight(1f).fillMaxWidth())
+                }
             }
         }
-        Spacer(Modifier.size(4.dp))
-        CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize())
+    }
+}
+
+// ───────────────────────── 列表视图（字符串 / 符号 / 导入导出 / 段节） ─────────────────────────
+
+@Composable
+private fun ListView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    view: String,
+    onRefresh: () -> Unit,
+    onPick: (AnalysisRow) -> Unit,
+) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val cacheKey = "$view|$ws|"
+    val icon = analysisViewIcon(view)
+
+    LaunchedEffect(cacheKey, tools.reloadTick) {
+        loadListCache(context, tools, view, ws, cacheKey, 400)
+    }
+
+    val rows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], view) }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "函数列表" else "Functions") { tools.analysisView = "functions" }
+            Text(
+                if (zh) "${rows.size} 项" else "${rows.size} items",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "未打开工作区" else "No workspace",
+                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
+                )
+                tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
+                rows.isEmpty() && !tools.viewCache.containsKey(cacheKey) ->
+                    AnalysisErrorBanner(errMessageOf(tools.viewCache[cacheKey]).ifBlank {
+                        if (zh) "加载失败，点「刷新」重试" else "Load failed, tap Refresh"
+                    })
+                rows.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无数据" else "No data",
+                    hint = if (zh) "该视图没有可显示的条目" else "This view has no entries",
+                    primaryLabel = if (zh) "刷新" else "Refresh",
+                    onPrimary = onRefresh,
+                )
+                else -> AnalysisRowList(rows = rows, zh = zh, icon = icon, onPick = onPick)
+            }
+        }
+    }
+}
+
+// ───────────────────────── 结果 / 工具 ─────────────────────────
+
+/** 结果视图：保留 addTab / ResultStream 机制，补回标签切换与关闭。 */
+@Composable
+private fun ResultsPane(tools: ToolPagesState, zh: Boolean) {
+    Column(Modifier.fillMaxSize()) {
+        if (tools.resultTabs.isNotEmpty()) {
+            FlowRow(
+                Modifier.fillMaxWidth().padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                tools.resultTabs.forEachIndexed { idx, tb ->
+                    WbTab(
+                        label = tb.label,
+                        selected = tools.selectedTabIndex == idx,
+                        onClose = { tools.closeTab(idx) },
+                    ) { tools.selectedTabIndex = idx }
+                }
+                WbTab(if (zh) "清空" else "Clear", false) { tools.clearTabs() }
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            ResultStream(tools, zh)
+        }
+    }
+}
+
+/** 工具视图：保留工具控制台（ToolConsole）与工具选择弹层。 */
+@Composable
+private fun ToolsPane(
+    state: WorkspaceState,
+    tools: ToolPagesState,
+    zh: Boolean,
+    onAiAnalyze: (String) -> Unit,
+    onPickTool: () -> Unit,
+    onShowCfg: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val curDef = toolDefs.firstOrNull { it.key == state.activeTool }
+    val title = curDef?.let { if (zh) it.labelZh else it.labelEn } ?: ""
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(
+                label = if (state.activeTool.isBlank()) {
+                    if (zh) "选择工具" else "Pick tool"
+                } else {
+                    (if (zh) "换工具 · " else "Switch · ") + title
+                },
+                onClick = onPickTool,
+            )
+            if (state.activeTool.isNotBlank()) {
+                SmallAction(if (zh) "结果" else "Results") { tools.analysisView = "results" }
+                SmallAction(if (zh) "清空结果" else "Clear") { tools.clearTabs() }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+
+        if (state.activeTool.isBlank()) {
+            AnalysisEmptyState(
+                title = if (zh) "未选择工具" else "No tool selected",
+                hint = if (zh) "从工具列表里挑一个：反编译 / 脱壳 / SO 分析 / 模拟 / Frida / 回编 / 编辑" else "Pick one: decompile / unpack / SO / emulate / frida / rebuild / editor",
+                primaryLabel = if (zh) "选择工具" else "Pick tool",
+                onPrimary = onPickTool,
+            )
+        } else {
+            // 需要地址的工具：地址栏（与原实现一致）
+            if (state.activeTool in addrNeededTools) {
+                AddrBar(state, zh)
+                Spacer(Modifier.size(6.dp))
+            }
+            AppCard(Modifier.fillMaxWidth()) {
+                ToolConsole(state, zh, onAiAnalyze, onShowCfg)
+            }
+            Spacer(Modifier.size(6.dp))
+            Text(
+                if (zh) "工具输出会进入「结果」标签页" else "Tool output goes to the Results tabs",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+            )
+        }
     }
 }

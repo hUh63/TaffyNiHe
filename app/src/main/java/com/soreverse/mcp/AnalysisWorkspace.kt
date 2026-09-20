@@ -4319,10 +4319,10 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
         scope.launch {
             patching = true
             patchErr = ""; patchMsg = ""
+            var sid = sessionId
             val r = withContext(Dispatchers.IO) {
                 runCatching {
                     val eng = EngineProvider.get(context)
-                    var sid = sessionId
                     if (sid.isBlank()) {
                         val eo = eng.editOpen(ws)
                         sid = eo.optString("editSessionId")
@@ -4490,3 +4490,358 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
         }
     }
 }
+
+// ───────────────────────── rizin 结构视图（ELF 头 / 段 / 重定位 / 动态 / 依赖库 / 哈希 / 版本 / 入口） ─────────────────────────
+//
+// 这些视图统一由 rizin 的只读 JSON 命令驱动（rzCommand），不依赖 native 侧 list(view) 扩展：
+//   ihj  → 二进制字段(ELF 头)      iSSj → 段(programs)     irj  → 重定位
+//   iHj  → 结构化数据(动态)        ilj  → 依赖库           iTj  → 文件哈希
+//   iVj  → 版本信息                iej  → 入口点
+
+/** rizin 表格列定义（width=null 表示弹性列）。 */
+private data class RzCol(
+    val key: String,
+    val zh: String,
+    val en: String,
+    val width: androidx.compose.ui.unit.Dp?,
+    val end: Boolean = false,
+)
+
+/** 跑一条 rizin 只读命令并解析成 JSON（返回 值 to 错误）。 */
+private suspend fun rzFetch(
+    context: android.content.Context,
+    ws: String,
+    cmd: String,
+): Pair<Any?, String> = withContext(Dispatchers.IO) {
+    runCatching {
+        val r = EngineProvider.get(context).rzCommand(ws, "", cmd)
+        val err = errMessageOf(r.toString())
+        if (err.isNotBlank()) return@runCatching (null as Any?) to err
+        val out = r.optString("stdout").ifBlank { r.optString("text") }.trim()
+        if (out.isBlank()) return@runCatching (null as Any?) to ""
+        val parsed: Any = runCatching {
+            if (out.startsWith("[")) JSONArray(out) as Any else JSONObject(out) as Any
+        }.getOrElse { return@runCatching (null as Any?) to "输出不是 JSON：${out.take(120)}" }
+        parsed to ""
+    }.getOrElse { (null as Any?) to (it.message ?: "command failed") }
+}
+
+/** JSON 值 → 展示字符串（数组/对象做紧凑处理）。 */
+private fun jsonScalar(v: Any?): String = when (v) {
+    null, JSONObject.NULL -> ""
+    is String -> v
+    is Double -> if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
+    is JSONArray -> (0 until v.length()).joinToString(", ") { jsonScalar(v.opt(it)) }
+    else -> v.toString()
+}
+
+/** 从行对象取列值（支持 "a.b" 点路径）。 */
+private fun jsonField(o: JSONObject, key: String): String {
+    if (!key.contains('.')) return jsonScalar(o.opt(key))
+    var cur: Any? = o
+    for (part in key.split('.')) {
+        cur = (cur as? JSONObject)?.opt(part) ?: return ""
+    }
+    return jsonScalar(cur)
+}
+
+/** 通用 rizin 视图外壳：取数 + 状态分支 + 表格 / 键值 / 列表。 */
+@Composable
+private fun RzViewScaffold(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    view: String,
+    cmd: String,
+    cols: List<RzCol>,
+    onRefresh: () -> Unit,
+) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val tick = tools.reloadTick
+    var data by remember(view, ws, tick) { androidx.compose.runtime.mutableStateOf<Any?>(null) }
+    var error by remember(view, ws, tick) { androidx.compose.runtime.mutableStateOf("") }
+    var loading by remember(view, ws, tick) { androidx.compose.runtime.mutableStateOf(false) }
+
+    LaunchedEffect(view, ws, tick) {
+        if (ws.isBlank()) return@LaunchedEffect
+        loading = true
+        val (d, e) = rzFetch(context, ws, cmd)
+        data = d
+        error = e
+        loading = false
+    }
+
+    val rows: List<JSONObject> = remember(data) {
+        when (val d = data) {
+            is JSONArray -> (0 until d.length()).mapNotNull { d.optJSONObject(it) }
+            else -> emptyList()
+        }
+    }
+    val strList: List<String> = remember(data) {
+        when (val d = data) {
+            is JSONArray -> (0 until d.length()).mapNotNull { i ->
+                when (val v = d.opt(i)) {
+                    is String -> v
+                    is JSONObject -> jsonScalar(v.opt("name")).ifBlank { v.toString() }
+                    else -> jsonScalar(v).ifBlank { null }
+                }
+            }
+            else -> emptyList()
+        }
+    }
+    val kv: JSONObject? = remember(data) { data as? JSONObject }
+    val count = if (rows.isNotEmpty()) rows.size else strList.size
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "函数列表" else "Functions") { tools.analysisView = "functions" }
+            if (count > 0) {
+                Text(
+                    if (zh) "$count 项" else "$count items",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                )
+            }
+            Text(
+                cmd,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                fontFamily = FontFamily.Monospace,
+                color = cs.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "未打开工作区" else "No workspace",
+                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
+                )
+                loading -> AnalysisLoading()
+                error.isNotBlank() -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AnalysisErrorBanner(error)
+                    Text(
+                        if (zh) "点「刷新」重试" else "Tap Refresh to retry",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = AppText.body,
+                        color = cs.onSurfaceVariant,
+                    )
+                }
+                data == null -> AnalysisEmptyState(
+                    title = if (zh) "无数据" else "No data",
+                    hint = if (zh) "引擎未返回内容，点「刷新」重试" else "Engine returned nothing; tap Refresh",
+                    primaryLabel = if (zh) "刷新" else "Refresh",
+                    onPrimary = onRefresh,
+                )
+                kv != null -> RzKeyValueTable(kv, zh)
+                strList.isNotEmpty() && rows.isEmpty() -> RzStringList(strList)
+                rows.isNotEmpty() -> RzObjectTable(rows, cols, zh, context)
+                else -> AnalysisEmptyState(
+                    title = if (zh) "空清单" else "Empty list",
+                    hint = if (zh) "该文件可能不含这一类内容" else "This file may not contain this kind of data",
+                )
+            }
+        }
+    }
+}
+
+/** 键/值表（ELF 头、哈希等）。 */
+@Composable
+private fun RzKeyValueTable(obj: JSONObject, zh: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val keys = remember(obj) {
+        val ks = ArrayList<String>()
+        val it = obj.keys()
+        while (it.hasNext()) ks.add(it.next())
+        ks.sorted()
+    }
+    Column(
+        Modifier.fillMaxSize()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
+            Text(if (zh) "字段" else "FIELD", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(150.dp))
+            Text(if (zh) "值" else "VALUE", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+        }
+        GroupDivider()
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+            items(keys) { k ->
+                val v = jsonScalar(obj.opt(k))
+                if (v.isBlank()) return@items
+                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
+                    Text(
+                        k,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        color = cs.onSurfaceVariant,
+                        modifier = Modifier.width(150.dp),
+                    )
+                    Text(
+                        v,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        color = cs.onSurface,
+                    )
+                }
+                GroupDivider()
+            }
+        }
+    }
+}
+
+/** 字符串列表（依赖库等）。 */
+@Composable
+private fun RzStringList(items0: List<String>) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxSize()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+    ) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 4.dp)) {
+            items(items0) { s ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Filled.Link, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(13.dp))
+                    Text(
+                        s,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        color = cs.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                GroupDivider()
+            }
+        }
+    }
+}
+
+/** 对象表格（列由各视图指定）。 */
+@Composable
+private fun RzObjectTable(rows: List<JSONObject>, cols: List<RzCol>, zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxSize()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            cols.forEach { c ->
+                Text(
+                    if (zh) c.zh else c.en,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    textAlign = if (c.end) TextAlign.End else TextAlign.Start,
+                    modifier = if (c.width == null) Modifier.weight(1f) else Modifier.width(c.width),
+                )
+            }
+        }
+        GroupDivider()
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+            items(rows) { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    cols.forEach { c ->
+                        val v = jsonField(row, c.key)
+                        Text(
+                            v.ifBlank { "--" },
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                            color = if (c.key == "perm" || c.key == "type") cs.tertiary else cs.onSurface,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = if (c.end) TextAlign.End else TextAlign.Start,
+                            modifier = if (c.width == null) Modifier.weight(1f) else Modifier.width(c.width),
+                        )
+                    }
+                }
+                GroupDivider()
+            }
+        }
+    }
+}
+
+// ── 各视图（列定义即页面的“字段设计”，互不共用） ──
+
+@Composable
+private fun ElfHeaderView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(tools, zh, context, "elfhdr", "ihj", emptyList(), onRefresh)
+
+@Composable
+private fun SegmentsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(
+        tools, zh, context, "segments", "iSSj",
+        listOf(
+            RzCol("name", "名称", "NAME", 110.dp),
+            RzCol("vaddr", "虚拟地址", "VADDR", 86.dp),
+            RzCol("size", "大小", "SIZE", 64.dp, end = true),
+            RzCol("perm", "权限", "PERM", 52.dp),
+            RzCol("align", "对齐", "ALIGN", null),
+        ),
+        onRefresh,
+    )
+
+@Composable
+private fun RelocsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(
+        tools, zh, context, "relocs", "irj",
+        listOf(
+            RzCol("vaddr", "地址", "VADDR", 88.dp),
+            RzCol("type", "类型", "TYPE", 66.dp),
+            RzCol("name", "符号", "SYMBOL", null),
+        ),
+        onRefresh,
+    )
+
+@Composable
+private fun DynamicView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(tools, zh, context, "dynamic", "iHj", emptyList(), onRefresh)
+
+@Composable
+private fun LibrariesView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(tools, zh, context, "libraries", "ilj", emptyList(), onRefresh)
+
+@Composable
+private fun HashesView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(tools, zh, context, "hashes", "iTj", emptyList(), onRefresh)
+
+@Composable
+private fun VersionsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(
+        tools, zh, context, "versions", "iVj",
+        listOf(
+            RzCol("name", "名称", "NAME", null),
+            RzCol("version", "版本", "VERSION", 90.dp),
+        ),
+        onRefresh,
+    )
+
+@Composable
+private fun EntriesView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
+    RzViewScaffold(
+        tools, zh, context, "entries", "iej",
+        listOf(
+            RzCol("vaddr", "虚拟地址", "VADDR", 88.dp),
+            RzCol("type", "类型", "TYPE", 66.dp),
+            RzCol("name", "名称", "NAME", null),
+        ),
+        onRefresh,
+    )
+

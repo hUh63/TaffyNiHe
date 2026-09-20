@@ -45,191 +45,167 @@ object DeviceTools {
 
     val deviceInfo = object : ToolHandler {
         override val meta = ToolMeta("taffy_device_info",
-            "获取手机硬件与系统信息（品牌、型号、Android 版本、指纹等）",
-            "Get device hardware and system info (brand, model, Android version, fingerprint, etc.)",
-            "device", ToolClass.EXTRA,
-        ) { SchemaBuilder.emptyObject() }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject = ok(JSONObject().apply {
-            put("manufacturer", Build.MANUFACTURER)
-            put("brand", Build.BRAND)
-            put("model", Build.MODEL)
-            put("device", Build.DEVICE)
-            put("product", Build.PRODUCT)
-            put("androidVersion", Build.VERSION.RELEASE)
-            put("sdkInt", Build.VERSION.SDK_INT)
-            put("hardware", Build.HARDWARE)
-            put("board", Build.BOARD)
-            put("fingerprint", Build.FINGERPRINT)
-            put("buildId", Build.ID)
-            put("buildTime", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(Build.TIME)))
-            put("serial", try { Build.getSerial() } catch (_: Exception) { "unknown" })
-            put("abi", Build.SUPPORTED_ABIS.joinToString(","))
-            put("bootloader", Build.BOOTLOADER)
-            put("radioVersion", Build.getRadioVersion() ?: "unknown")
-            put("host", Build.HOST)
-            put("tags", Build.TAGS)
-        })
-    }
-
-    val battery = object : ToolHandler {
-        override val meta = ToolMeta("taffy_battery",
-            "获取电池状态（电量、充电状态、温度、电压、健康度等）",
-            "Get battery status (level, charging state, temperature, voltage, health, etc.)",
-            "device", ToolClass.EXTRA,
-        ) { SchemaBuilder.emptyObject() }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val intent = ctx.context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-            val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-            val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-            val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1) ?: -1
-            val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
-            val voltage = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
-            val health = intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1
-            return ok(JSONObject().apply {
-                put("level", level)
-                put("scale", scale)
-                put("percent", if (scale > 0) level * 100 / scale else -1)
-                put("status", when (status) {
-                    BatteryManager.BATTERY_STATUS_CHARGING -> "charging"
-                    BatteryManager.BATTERY_STATUS_DISCHARGING -> "discharging"
-                    BatteryManager.BATTERY_STATUS_FULL -> "full"
-                    BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "not_charging"
-                    else -> "unknown"
-                })
-                put("plugged", when (plugged) {
-                    BatteryManager.BATTERY_PLUGGED_AC -> "ac"
-                    BatteryManager.BATTERY_PLUGGED_USB -> "usb"
-                    BatteryManager.BATTERY_PLUGGED_WIRELESS -> "wireless"
-                    else -> "none"
-                })
-                put("charging", status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
-                put("temperatureCelsius", if (temp > 0) temp / 10.0 else -1.0)
-                put("voltageMillivolts", voltage)
-                put("health", when (health) {
-                    BatteryManager.BATTERY_HEALTH_GOOD -> "good"
-                    BatteryManager.BATTERY_HEALTH_OVERHEAT -> "overheat"
-                    BatteryManager.BATTERY_HEALTH_DEAD -> "dead"
-                    BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "over_voltage"
-                    BatteryManager.BATTERY_HEALTH_COLD -> "cold"
-                    else -> "unknown"
-                })
-            })
-        }
-    }
-
-    val storageInfo = object : ToolHandler {
-        override val meta = ToolMeta("taffy_storage_info",
-            "获取内部/外部存储空间使用情况（字节）",
-            "Get internal/external storage space usage in bytes",
-            "device", ToolClass.EXTRA,
-        ) { SchemaBuilder.emptyObject() }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject = ok(JSONObject().apply {
-            fun stat(path: File): JSONObject? = try {
-                val sf = StatFs(path.absolutePath)
-                JSONObject().apply {
-                    put("path", path.absolutePath)
-                    put("total", sf.totalBytes)
-                    put("available", sf.availableBytes)
-                    put("free", sf.freeBytes)
-                    put("used", sf.totalBytes - sf.availableBytes)
-                }
-            } catch (_: Exception) { null }
-            put("internal", stat(Environment.getDataDirectory()))
-            val ext = Environment.getExternalStorageDirectory()
-            if (ext != null) put("external", stat(ext))
-        })
-    }
-
-    val screenInfo = object : ToolHandler {
-        override val meta = ToolMeta("taffy_screen_info",
-            "获取屏幕信息（分辨率、密度、刷新率、亮度等）",
-            "Get screen info (resolution, density, refresh rate, brightness, etc.)",
-            "device", ToolClass.EXTRA,
-        ) { SchemaBuilder.emptyObject() }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val wm = ctx.context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            val metrics = android.util.DisplayMetrics()
-            @Suppress("DEPRECATION")
-            wm.defaultDisplay.getRealMetrics(metrics)
-            val refresh = try { wm.defaultDisplay.mode.refreshRate } catch (_: Exception) { -1.0 }
-            val brightness = try {
-                Settings.System.getInt(ctx.context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1)
-            } catch (_: Exception) { -1 }
-            return ok(JSONObject().apply {
-                put("widthPixels", metrics.widthPixels)
-                put("heightPixels", metrics.heightPixels)
-                put("densityDpi", metrics.densityDpi)
-                put("density", metrics.density)
-                put("scaledDensity", metrics.scaledDensity)
-                put("xdpi", metrics.xdpi)
-                put("ydpi", metrics.ydpi)
-                put("refreshRate", refresh)
-                put("brightness", brightness)
-            })
-        }
-    }
-
-    val localeInfo = object : ToolHandler {
-        override val meta = ToolMeta("taffy_locale_info",
-            "获取系统语言与时区信息",
-            "Get system language and timezone info",
-            "device", ToolClass.EXTRA,
-        ) { SchemaBuilder.emptyObject() }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val loc = Locale.getDefault()
-            return ok(JSONObject().apply {
-                put("language", loc.language)
-                put("country", loc.country)
-                put("displayLanguage", loc.displayLanguage)
-                put("displayCountry", loc.displayCountry)
-                put("timezone", java.util.TimeZone.getDefault().id)
-                put("timezoneOffsetMinutes", java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000)
-            })
-        }
-    }
-
-    val systemProperties = object : ToolHandler {
-        override val meta = ToolMeta("taffy_system_properties",
-            "读取系统属性（build 相关等），可按 filter 过滤",
-            "Read system properties (build-related), optional filter",
+            "获取设备信息（用 action 选择）：device(默认：品牌/型号/Android 版本/指纹/ABI 等) | battery(电池状态) | storage(内部/外部存储空间) | screen(屏幕分辨率/密度/刷新率/亮度) | locale(系统语言与时区) | properties(系统属性, 可用 filter 过滤)",
+            "Get device info via action: device (default: brand/model/Android version/fingerprint/ABI) | battery | storage | screen | locale | properties (optional filter).",
             "device", ToolClass.EXTRA,
         ) {
             objectSchema(props {
-                "filter" str "属性名过滤关键词"
+                "action".oneOf("查询类别", "device", "battery", "storage", "screen", "locale", "properties")
+                "filter" str "属性名过滤关键词（仅 action=properties 生效）"
             })
         }
 
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val filter = args.str("filter")
-            val keys = listOf(
-                "ro.build.version.release", "ro.build.version.sdk", "ro.build.version.security_patch",
-                "ro.product.model", "ro.product.manufacturer", "ro.product.brand",
-                "ro.product.device", "ro.hardware", "ro.bootloader", "ro.build.fingerprint",
-                "ro.build.type", "ro.build.tags", "ro.build.id", "ro.build.date",
-                "ro.serialno", "ro.product.cpu.abi", "ro.secure", "ro.debuggable",
-                "persist.sys.timezone", "ro.config.ringtone", "gsm.version.baseband",
-            )
-            return ok(JSONObject().apply {
-                for (k in keys) {
-                    if (filter.isNotBlank() && !k.contains(filter)) continue
-                    val v = readSystemProperty(k)
-                    if (!v.isNullOrEmpty()) put(k, v)
-                }
-            })
-        }
-
-        private fun readSystemProperty(key: String): String? = try {
-            val clazz = Class.forName("android.os.SystemProperties")
-            val method = clazz.getMethod("get", String::class.java)
-            method.invoke(null, key) as? String
-        } catch (_: Exception) { null }
+        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject =
+            when (args.str("action", "device").lowercase()) {
+                "battery" -> batteryJson(ctx)
+                "storage" -> storageJson()
+                "screen" -> screenJson(ctx)
+                "locale" -> localeJson()
+                "properties" -> systemPropertiesJson(args.str("filter"))
+                else -> deviceJson()
+            }
     }
+
+    /** action=device：手机硬件与系统信息。 */
+    private fun deviceJson(): JSONObject = ok(JSONObject().apply {
+        put("manufacturer", Build.MANUFACTURER)
+        put("brand", Build.BRAND)
+        put("model", Build.MODEL)
+        put("device", Build.DEVICE)
+        put("product", Build.PRODUCT)
+        put("androidVersion", Build.VERSION.RELEASE)
+        put("sdkInt", Build.VERSION.SDK_INT)
+        put("hardware", Build.HARDWARE)
+        put("board", Build.BOARD)
+        put("fingerprint", Build.FINGERPRINT)
+        put("buildId", Build.ID)
+        put("buildTime", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(Build.TIME)))
+        put("serial", try { Build.getSerial() } catch (_: Exception) { "unknown" })
+        put("abi", Build.SUPPORTED_ABIS.joinToString(","))
+        put("bootloader", Build.BOOTLOADER)
+        put("radioVersion", Build.getRadioVersion() ?: "unknown")
+        put("host", Build.HOST)
+        put("tags", Build.TAGS)
+    })
+
+    /** action=battery：电池状态。 */
+    private fun batteryJson(ctx: ToolContext): JSONObject {
+        val intent = ctx.context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1) ?: -1
+        val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        val voltage = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+        val health = intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1
+        return ok(JSONObject().apply {
+            put("level", level)
+            put("scale", scale)
+            put("percent", if (scale > 0) level * 100 / scale else -1)
+            put("status", when (status) {
+                BatteryManager.BATTERY_STATUS_CHARGING -> "charging"
+                BatteryManager.BATTERY_STATUS_DISCHARGING -> "discharging"
+                BatteryManager.BATTERY_STATUS_FULL -> "full"
+                BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "not_charging"
+                else -> "unknown"
+            })
+            put("plugged", when (plugged) {
+                BatteryManager.BATTERY_PLUGGED_AC -> "ac"
+                BatteryManager.BATTERY_PLUGGED_USB -> "usb"
+                BatteryManager.BATTERY_PLUGGED_WIRELESS -> "wireless"
+                else -> "none"
+            })
+            put("charging", status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
+            put("temperatureCelsius", if (temp > 0) temp / 10.0 else -1.0)
+            put("voltageMillivolts", voltage)
+            put("health", when (health) {
+                BatteryManager.BATTERY_HEALTH_GOOD -> "good"
+                BatteryManager.BATTERY_HEALTH_OVERHEAT -> "overheat"
+                BatteryManager.BATTERY_HEALTH_DEAD -> "dead"
+                BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "over_voltage"
+                BatteryManager.BATTERY_HEALTH_COLD -> "cold"
+                else -> "unknown"
+            })
+        })
+    }
+
+    /** action=storage：内部/外部存储空间。 */
+    private fun storageJson(): JSONObject = ok(JSONObject().apply {
+        fun stat(path: File): JSONObject? = try {
+            val sf = StatFs(path.absolutePath)
+            JSONObject().apply {
+                put("path", path.absolutePath)
+                put("total", sf.totalBytes)
+                put("available", sf.availableBytes)
+                put("free", sf.freeBytes)
+                put("used", sf.totalBytes - sf.availableBytes)
+            }
+        } catch (_: Exception) { null }
+        put("internal", stat(Environment.getDataDirectory()))
+        val ext = Environment.getExternalStorageDirectory()
+        if (ext != null) put("external", stat(ext))
+    })
+
+    /** action=screen：屏幕信息。 */
+    private fun screenJson(ctx: ToolContext): JSONObject {
+        val wm = ctx.context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        val metrics = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(metrics)
+        val refresh = try { wm.defaultDisplay.mode.refreshRate } catch (_: Exception) { -1.0 }
+        val brightness = try {
+            Settings.System.getInt(ctx.context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+        } catch (_: Exception) { -1 }
+        return ok(JSONObject().apply {
+            put("widthPixels", metrics.widthPixels)
+            put("heightPixels", metrics.heightPixels)
+            put("densityDpi", metrics.densityDpi)
+            put("density", metrics.density)
+            put("scaledDensity", metrics.scaledDensity)
+            put("xdpi", metrics.xdpi)
+            put("ydpi", metrics.ydpi)
+            put("refreshRate", refresh)
+            put("brightness", brightness)
+        })
+    }
+
+    /** action=locale：系统语言与时区。 */
+    private fun localeJson(): JSONObject {
+        val loc = Locale.getDefault()
+        return ok(JSONObject().apply {
+            put("language", loc.language)
+            put("country", loc.country)
+            put("displayLanguage", loc.displayLanguage)
+            put("displayCountry", loc.displayCountry)
+            put("timezone", java.util.TimeZone.getDefault().id)
+            put("timezoneOffsetMinutes", java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000)
+        })
+    }
+
+    /** action=properties：系统属性（可按 filter 过滤）。 */
+    private fun systemPropertiesJson(filter: String): JSONObject {
+        val keys = listOf(
+            "ro.build.version.release", "ro.build.version.sdk", "ro.build.version.security_patch",
+            "ro.product.model", "ro.product.manufacturer", "ro.product.brand",
+            "ro.product.device", "ro.hardware", "ro.bootloader", "ro.build.fingerprint",
+            "ro.build.type", "ro.build.tags", "ro.build.id", "ro.build.date",
+            "ro.serialno", "ro.product.cpu.abi", "ro.secure", "ro.debuggable",
+            "persist.sys.timezone", "ro.config.ringtone", "gsm.version.baseband",
+        )
+        return ok(JSONObject().apply {
+            for (k in keys) {
+                if (filter.isNotBlank() && !k.contains(filter)) continue
+                val v = readSystemProperty(k)
+                if (!v.isNullOrEmpty()) put(k, v)
+            }
+        })
+    }
+
+    private fun readSystemProperty(key: String): String? = try {
+        val clazz = Class.forName("android.os.SystemProperties")
+        val method = clazz.getMethod("get", String::class.java)
+        method.invoke(null, key) as? String
+    } catch (_: Exception) { null }
 
     // ══════════════════════════════════════════════════════════════
     //  应用管理
@@ -693,65 +669,82 @@ object DeviceTools {
         }
     }
 
-    val jsonFormat = object : ToolHandler {
-        override val meta = ToolMeta("taffy_json_format",
-            "格式化、压缩或验证 JSON 字符串。operation=pretty（默认）/ minify / validate",
-            "Format, minify, or validate a JSON string. operation: pretty (default) / minify / validate",
+    val textConvert = object : ToolHandler {
+        override val meta = ToolMeta("taffy_text_convert",
+            "文本/编码转换（用 action 选择）：convert(默认：文本转换, 见 operation) | base64(Base64 编解码, decode=true 解码) | json(JSON 格式化/压缩/校验, 见 operation)",
+            "Text/codec conversion via action: convert (default: operation = upper/lower/trim/trim_lines/remove_empty_lines/normalize_newlines/reverse/count) | base64 (encode/decode, decode=true to decode) | json (pretty/minify/validate).",
             "device", ToolClass.EXTRA, generic = true,
         ) {
             objectSchema(props {
-                "json" str "待处理的 JSON 字符串"
-                "operation".oneOf("处理方式", "pretty", "minify", "validate")
+                "action".oneOf("操作类别", "convert", "base64", "json")
+                "text" str "待处理的文本（action=convert）"
+                "operation".oneOf("convert: 转换方式 | json: pretty/minify/validate", "upper", "lower", "trim", "trim_lines", "remove_empty_lines", "normalize_newlines", "reverse", "count", "pretty", "minify", "validate")
+                "data" str "待编码/解码的文本（action=base64）"
+                "decode" bool "action=base64：true 时进行 base64 解码"
+                "json" str "待处理的 JSON 字符串（action=json）"
             })
         }
 
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val input = args.str("json")
-            if (input.isBlank()) return err("INVALID_ARGUMENT", "json 不能为空", "json", input)
-            val op = args.str("operation", "pretty").lowercase()
-            return try {
-                val obj = if (input.trimStart().startsWith("[")) JSONArray(input) else JSONObject(input)
-                when (op) {
-                    "validate" -> ok(JSONObject().put("valid", true).put("type", if (obj is JSONObject) "object" else "array"))
-                    "minify" -> ok(JSONObject().put("result", obj.toString()))
-                    else -> ok(JSONObject().put("result", if (obj is JSONObject) obj.toString(2) else (obj as JSONArray).toString(2)))
-                }
-            } catch (e: Exception) {
-                ok(JSONObject().put("valid", false).put("error", "JSON 无效: ${e.message}"))
+        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject =
+            when (args.str("action", "convert").lowercase()) {
+                "base64" -> base64Json(args)
+                "json" -> jsonFormatJson(args)
+                else -> textConvertJson(args)
             }
+    }
+
+    /** action=convert：文本转换。 */
+    private fun textConvertJson(args: JSONObject): JSONObject {
+        val text = args.str("text")
+        val op = args.str("operation", "trim").lowercase()
+        if (op == "count") return ok(JSONObject()
+            .put("chars", text.length)
+            .put("words", text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.size)
+            .put("lines", text.lines().size))
+        val result = when (op) {
+            "upper" -> text.uppercase()
+            "lower" -> text.lowercase()
+            "trim" -> text.trim()
+            "trim_lines" -> text.lines().joinToString("\n") { it.trim() }
+            "remove_empty_lines" -> text.lines().filter { it.isNotBlank() }.joinToString("\n")
+            "normalize_newlines" -> text.replace("\r\n", "\n").replace("\r", "\n")
+            "reverse" -> text.reversed()
+            else -> return err("INVALID_ARGUMENT", "未知 operation: $op", "operation", op, "allowedValues" to "upper, lower, trim, trim_lines, remove_empty_lines, normalize_newlines, reverse, count")
+        }
+        return ok(JSONObject().put("operation", op).put("result", result))
+    }
+
+    /** action=json：JSON 格式化/压缩/校验。 */
+    private fun jsonFormatJson(args: JSONObject): JSONObject {
+        val input = args.str("json")
+        if (input.isBlank()) return err("INVALID_ARGUMENT", "json 不能为空", "json", input)
+        val op = args.str("operation", "pretty").lowercase()
+        return try {
+            val obj = if (input.trimStart().startsWith("[")) JSONArray(input) else JSONObject(input)
+            when (op) {
+                "validate" -> ok(JSONObject().put("valid", true).put("type", if (obj is JSONObject) "object" else "array"))
+                "minify" -> ok(JSONObject().put("result", obj.toString()))
+                else -> ok(JSONObject().put("result", if (obj is JSONObject) obj.toString(2) else (obj as JSONArray).toString(2)))
+            }
+        } catch (e: Exception) {
+            ok(JSONObject().put("valid", false).put("error", "JSON 无效: ${e.message}"))
         }
     }
 
-    val textConvert = object : ToolHandler {
-        override val meta = ToolMeta("taffy_text_convert",
-            "文本格式转换。operation: upper/lower/trim/trim_lines/remove_empty_lines/normalize_newlines/reverse/count",
-            "Text conversion. operation: upper/lower/trim/trim_lines/remove_empty_lines/normalize_newlines/reverse/count",
-            "device", ToolClass.EXTRA, generic = true,
-        ) {
-            objectSchema(props {
-                "text" str "待处理的文本"
-                "operation".oneOf("转换方式", "upper", "lower", "trim", "trim_lines", "remove_empty_lines", "normalize_newlines", "reverse", "count")
-            })
-        }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val text = args.str("text")
-            val op = args.str("operation", "trim").lowercase()
-            if (op == "count") return ok(JSONObject()
-                .put("chars", text.length)
-                .put("words", text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.size)
-                .put("lines", text.lines().size))
-            val result = when (op) {
-                "upper" -> text.uppercase()
-                "lower" -> text.lowercase()
-                "trim" -> text.trim()
-                "trim_lines" -> text.lines().joinToString("\n") { it.trim() }
-                "remove_empty_lines" -> text.lines().filter { it.isNotBlank() }.joinToString("\n")
-                "normalize_newlines" -> text.replace("\r\n", "\n").replace("\r", "\n")
-                "reverse" -> text.reversed()
-                else -> return err("INVALID_ARGUMENT", "未知 operation: $op", "operation", op, "allowedValues" to "upper, lower, trim, trim_lines, remove_empty_lines, normalize_newlines, reverse, count")
+    /** action=base64：Base64 编解码。 */
+    private fun base64Json(args: JSONObject): JSONObject {
+        val data = args.str("data")
+        if (data.isEmpty()) return err("INVALID_ARGUMENT", "data 不能为空", "data", data)
+        return if (args.bool("decode", false)) {
+            try {
+                val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+                ok(JSONObject().put("operation", "decode").put("result", String(bytes, Charsets.UTF_8)))
+            } catch (e: Exception) {
+                err("INVALID_FORMAT", "Base64 解码失败: ${e.message}", "data", data)
             }
-            return ok(JSONObject().put("operation", op).put("result", result))
+        } else {
+            ok(JSONObject().put("operation", "encode")
+                .put("result", android.util.Base64.encodeToString(data.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)))
         }
     }
 
@@ -793,35 +786,6 @@ object DeviceTools {
                 .put("keyLength", keyBytes.size)
                 .put("result", if (wantBase64) android.util.Base64.encodeToString(out, android.util.Base64.NO_WRAP) else String(out, Charsets.UTF_8))
                 .put("resultHex", out.joinToString("") { "%02x".format(it) }))
-        }
-    }
-
-    val base64Encode = object : ToolHandler {
-        override val meta = ToolMeta("taffy_base64_encode",
-            "Base64 编码/解码。decode=true 时解码",
-            "Base64 encode/decode. Set decode=true to decode",
-            "device", ToolClass.EXTRA, generic = true,
-        ) {
-            objectSchema(props {
-                "data" str "待编码/解码的文本"
-                "decode" bool "true 时进行 base64 解码"
-            })
-        }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val data = args.str("data")
-            if (data.isEmpty()) return err("INVALID_ARGUMENT", "data 不能为空", "data", data)
-            return if (args.bool("decode", false)) {
-                try {
-                    val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-                    ok(JSONObject().put("operation", "decode").put("result", String(bytes, Charsets.UTF_8)))
-                } catch (e: Exception) {
-                    err("INVALID_FORMAT", "Base64 解码失败: ${e.message}", "data", data)
-                }
-            } else {
-                ok(JSONObject().put("operation", "encode")
-                    .put("result", android.util.Base64.encodeToString(data.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)))
-            }
         }
     }
 
@@ -923,12 +887,12 @@ object DeviceTools {
     // ══════════════════════════════════════════════════════════════
 
     val ALL: List<ToolHandler> = listOf(
-        deviceInfo, battery, storageInfo, screenInfo, localeInfo, systemProperties,
+        deviceInfo,
         installedApps, appInfo, runningProcesses, stopApp,
         clipboard, sendNotification,
         checkPermission, permissionState,
         httpRequest, shortenUrl, webDownload,
-        timeNow, jsonFormat, textConvert, decryptXor, base64Encode,
+        timeNow, textConvert, decryptXor,
         fileInfo, createDirectory, touch,
     )
 }

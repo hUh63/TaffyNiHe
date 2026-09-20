@@ -1,12 +1,25 @@
 // 塔菲逆核: 分析页 CFG 图形化画布（纯 Compose Canvas 自绘，无 ELK/dagre 依赖）。
 //
-// 设计要点（对标 Exbin 自绘 CFG）：
-//   1. 解析 rizin rzCfg 的 JSON（basicBlocks/blocks + edges/jump/fail，地址均为 hex 字符串）。
-//   2. 自实现 Sugiyama 式分层布局：建图 → BFS 最短距离分层 → DFS 前序定序 → barycenter 降交叉
-//      → 层间距 90dp / 同层间距 140dp 计算坐标 → 整图居中（世界坐标原点 = 图中心）。
-//   3. Canvas 自绘：圆角矩形节点 + 折线箭头（jump 实线 / fail 虚线 / 回边醒目色）。
-//   4. 交互：双指缩放 + 单指平移、点击节点高亮并在下方信息条展示块详情、「适应屏幕」复位。
-//   5. 空图 / 单块 / 孤立块 / 环 均不崩、不除零。
+// 布局（Sugiyama 简化版，v1.3.18 精致化升级）：
+//   1. 解析 rizin rzCfg 的 JSON（basicBlocks/blocks + jump/fail + edges，地址为 hex 字符串）。
+//   2. BFS 最短距离分层；孤立/不可达块在主图下方单独成行。
+//   3. 跨层长边拆分为虚拟节点（dummy node），使每条边只连接相邻层 —— 消除「边斜穿节点」。
+//   4. 层内定序：DFS 前序初值 → median 启发式（相邻层邻居位置的中位数），4~8 轮上下交替迭代，
+//      稳定排序（java.util.Collections.sort）保证同输入结果可重复。
+//   5. 端口分配：下出边按目标 x 排序均分到节点底边，上入边按源 x 排序均分到顶边，
+//      回边走右侧端口并按目标 y 分散 —— 多条边不再重叠在同一像素点。
+//   6. 坐标细化：层分配（y）与 x 坐标分离；x 用相邻层已定位节点的中位数迭代收敛 + 重叠消除。
+//   7. 节点宽度按内容自适应（Paint.measureText 量地址与摘要），摘要支持 1~2 行。
+//   8. 大图保护：块数 > 400 时自动关闭虚拟节点、迭代降到 2 轮；另有「简化视图」只画块骨架。
+//
+// 渲染：
+//   - 边为**正交折线**（下出→垂直→水平→垂直→上入）；实心箭头且随线宽缩放；
+//     jump=主题色实线 / fail=橙色虚线 / 回边=粉色加粗醒目（明显区分）。
+//   - 节点按角色分层描边 + 左侧色条：入口块(无前驱=绿) / 返回块(无后继=青) / 循环头(有回边指向=紫)
+//     / 普通块(描边色)；选中态高亮 + 加粗描边。
+//   - 背景细点阵网格（随缩放淡出）；缩放很小时隐藏块内文字只留色块。
+//   - 交互：双指缩放 / 单指拖拽平移 / 点击选中 / 适应屏幕 / 缩放到 100% / 定位入口块；
+//     下方信息条显示选中块的地址范围与后继列表（jump→ / fail→ 目标地址）。
 package com.soreverse.mcp
 
 import android.graphics.Paint
@@ -20,7 +33,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,12 +76,22 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
-private const val NODE_W_DP = 124f
-private const val NODE_H_DP = 48f
-private const val LAYER_GAP_DP = 90f
-private const val LANE_GAP_DP = 140f
-private const val BACK_CHANNEL_DP = 30f
-private const val MAX_SUMMARY_CHARS = 48
+private const val NODE_W_MIN_DP = 98f
+private const val NODE_W_MAX_DP = 300f
+private const val NODE_H_MIN_DP = 40f
+private const val LAYER_GAP_DP = 74f
+private const val LANE_GAP_DP = 30f
+private const val BACK_CHANNEL_DP = 24f
+private const val PAD_X_DP = 8f
+private const val PAD_Y_DP = 7f
+private const val ADDR_LINE_DP = 15f
+private const val SUM_LINE_DP = 13f
+private const val DUMMY_W_DP = 8f
+private const val MAX_SUMMARY_CHARS = 140
+private const val DUMMY_NODE_LIMIT = 400
+private const val LAYOUT_ITERATIONS_SMALL = 8
+private const val LAYOUT_ITERATIONS_LARGE = 2
+private const val TEXT_HIDE_SCALE = 0.42f
 
 // ───────────────────────── 数据模型 ─────────────────────────
 
@@ -92,26 +115,73 @@ internal data class CfgGraph(
     val edges: List<CfgEdge>,
 )
 
-/** 布局后的节点矩形（世界坐标，单位 px；原点 = 图中心）。 */
+/**
+ * 布局后的节点矩形（世界坐标，单位 px；原点 = 图中心）。
+ * index < 0 表示虚拟节点（dummy node，仅参与分层排序与边路由，不绘制、不可点选）。
+ */
 internal class CfgNodeBox(
     val index: Int,
     val cx: Float,
     val cy: Float,
     val w: Float,
     val h: Float,
+    val addrText: String = "",
+    val lines: List<String> = emptyList(),
 ) {
+    val isDummy: Boolean get() = index < 0
     val left: Float get() = cx - w / 2f
     val right: Float get() = cx + w / 2f
     val top: Float get() = cy - h / 2f
     val bottom: Float get() = cy + h / 2f
 
-    fun contains(x: Float, y: Float): Boolean = x in left..right && y in top..bottom
+    fun contains(x: Float, y: Float): Boolean = !isDummy && x in left..right && y in top..bottom
 }
 
+/** 一条已经算好端口的边路由（世界坐标折线）。 */
+internal class CfgRoute(
+    val from: Int,
+    val to: Int,
+    val kind: String,
+    val isBack: Boolean,
+    val isSelf: Boolean,
+    val points: List<Offset>,
+)
+
+/** 布局结果：节点盒（含虚拟节点）+ 边路由 + 尺寸 + 角色集合。 */
 internal class CfgLayoutResult(
     val boxes: List<CfgNodeBox>,
+    val routes: List<CfgRoute>,
     val width: Float,
     val height: Float,
+    val entryIndex: Int,
+    val loopHeadIndices: Set<Int>,
+    val returnIndices: Set<Int>,
+)
+
+/** 布局过程中的可变节点。 */
+private class LNode(val index: Int, var key: Int) {
+    var layer = 0
+    var x = 0f
+    var y = 0f
+    var w = 0f
+    var h = 0f
+    val out = ArrayList<LNode>()
+    val inc = ArrayList<LNode>()
+}
+
+private val LNode.left: Float get() = x - w / 2f
+private val LNode.right: Float get() = x + w / 2f
+private val LNode.top: Float get() = y - h / 2f
+private val LNode.bottom: Float get() = y + h / 2f
+
+/** 一条待路由的边（真实端点 + 可选虚拟节点链）。 */
+private class RouteSeed(
+    val from: Int,
+    val to: Int,
+    val kind: String,
+    val isBack: Boolean,
+    val isSelf: Boolean,
+    val chain: List<LNode>,
 )
 
 // ───────────────────────── JSON 解析 ─────────────────────────
@@ -133,7 +203,7 @@ private fun firstNonBlankText(o: JSONObject, vararg keys: String): String {
     return ""
 }
 
-/** 解析 "0x1234" / "1234" / "1234" 形式的地址；失败返回 -1。 */
+/** 解析 "0x1234" / "1234" 形式的地址；失败返回 -1。 */
 internal fun parseCfgAddr(text: String): Long {
     val t = text.trim()
     if (t.isEmpty()) return -1L
@@ -218,45 +288,97 @@ internal fun parseCfgGraph(json: String): CfgGraph {
     }
 }
 
-// ───────────────────────── 分层布局（Sugiyama 简化版） ─────────────────────────
+// ───────────────────────── 文本度量 ─────────────────────────
 
-/** 按 DFS 前序 + barycenter（2 轮）给同层节点定序，减少交叉。 */
-private fun reorderLayer(
-    layer: MutableList<Int>,
-    reference: List<Int>,
-    neighbors: Array<out List<Int>>,
-    fallbackOrder: IntArray,
-) {
-    if (layer.size <= 1) return
-    val refIndex = HashMap<Int, Int>(reference.size)
-    reference.forEachIndexed { i, node -> refIndex[node] = i }
-    val bary = HashMap<Int, Float>(layer.size)
-    layer.forEach { node ->
-        val positions = neighbors[node].mapNotNull { refIndex[it] }
-        bary[node] = if (positions.isEmpty()) -1f else positions.sum().toFloat() / positions.size
+/** 贪心按像素宽度把摘要折成 1..maxLines 行；最后一行超宽时截断并加省略号。 */
+private fun wrapSummary(text: String, paint: Paint, avail: Float, maxLines: Int): List<String> {
+    val src = text.trim()
+    if (src.isEmpty() || avail <= 8f || maxLines <= 0) return emptyList()
+    val lines = ArrayList<String>(maxLines)
+    var rest = src
+    while (rest.isNotEmpty() && lines.size < maxLines) {
+        if (paint.measureText(rest) <= avail || lines.size == maxLines - 1) {
+            var s: String = rest
+            if (paint.measureText(s) > avail) {
+                var end = s.length
+                while (end > 1 && paint.measureText(s.substring(0, end) + "…") > avail) end--
+                s = s.substring(0, end).trimEnd() + "…"
+            }
+            lines.add(s)
+            rest = ""
+        } else {
+            var end = 1
+            while (end < rest.length && paint.measureText(rest.substring(0, end + 1)) <= avail) end++
+            var cut = end
+            for (j in end downTo max(1, end - 12)) {
+                val c = rest[j - 1]
+                if (c == ' ' || c == ',' || c == ';' || c == ')' || c == ']' || c == '>') {
+                    cut = j
+                    break
+                }
+            }
+            lines.add(rest.substring(0, cut).trim())
+            rest = rest.substring(cut).trimStart()
+        }
     }
-    layer.sortWith(
-        compareBy(
-            { node ->
-                val b = bary[node] ?: -1f
-                if (b < 0f) Float.MAX_VALUE else b
-            },
-            { node -> fallbackOrder[node] },
-        ),
-    )
+    return lines
 }
 
-/** BFS 分层 + 层内定序 + 坐标计算；空图返回空布局。 */
+// ───────────────────────── 分层布局（Sugiyama 简化版） ─────────────────────────
+
+/**
+ * 分层 → 层内定序（median+barycenter 多轮迭代）→ 端口分配 → x 坐标收敛 → 边路由。
+ * 空图 / 非法输入返回空布局；块数超过阈值自动关闭虚拟节点并降低迭代轮数。
+ */
 internal fun layoutCfgGraph(graph: CfgGraph, density: Float): CfgLayoutResult {
     val n = graph.blocks.size
-    if (n == 0 || density <= 0f) return CfgLayoutResult(emptyList(), 0f, 0f)
-    val succ = Array(n) { mutableListOf<Int>() }
-    val pred = Array(n) { mutableListOf<Int>() }
+    if (n == 0 || density <= 0f) {
+        return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
+    }
+    val useDummies = n <= DUMMY_NODE_LIMIT
+    val iterations = if (useDummies) LAYOUT_ITERATIONS_SMALL else LAYOUT_ITERATIONS_LARGE
+
+    val padX = PAD_X_DP * density
+    val padY = PAD_Y_DP * density
+    val addrLine = ADDR_LINE_DP * density
+    val sumLine = SUM_LINE_DP * density
+    val minW = NODE_W_MIN_DP * density
+    val maxW = NODE_W_MAX_DP * density
+    val minH = NODE_H_MIN_DP * density
+    val laneGap = LANE_GAP_DP * density
+    val layerGap = LAYER_GAP_DP * density
+
+    val paintAddr = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 10.5f * density }
+    val paintSum = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 9f * density }
+
+    // ── 1. 真实节点尺寸：按内容自适应 ──
+    val widths = FloatArray(n)
+    val heights = FloatArray(n)
+    val summaries = arrayOfNulls<List<String>>(n)
+    for (i in 0 until n) {
+        val b = graph.blocks[i]
+        val addrW = paintAddr.measureText(b.addrText)
+        val sumW = paintSum.measureText(b.summary)
+        val desired = max(addrW, min(sumW, maxW - padX * 2f)) + padX * 2f
+        var w = desired.coerceIn(minW, maxW)
+        var lines = wrapSummary(b.summary, paintSum, w - padX * 2f, 2)
+        var maxLineW = addrW
+        lines.forEach { maxLineW = max(maxLineW, paintSum.measureText(it)) }
+        w = (maxLineW + padX * 2f).coerceIn(minW, maxW)
+        lines = wrapSummary(b.summary, paintSum, w - padX * 2f, 2)
+        widths[i] = w
+        heights[i] = max(padY * 2f + addrLine + lines.size * sumLine, minH)
+        summaries[i] = lines
+    }
+
+    // ── 2. 真实节点邻接 + BFS 分层 ──
+    val succ = Array(n) { ArrayList<Int>() }
+    val pred = Array(n) { ArrayList<Int>() }
     graph.edges.forEach { e ->
         if (e.from == e.to) return@forEach
         if (e.from !in 0 until n || e.to !in 0 until n) return@forEach
-        if (!succ[e.from].contains(e.to)) succ[e.from] += e.to
-        if (!pred[e.to].contains(e.from)) pred[e.to] += e.from
+        if (!succ[e.from].contains(e.to)) succ[e.from].add(e.to)
+        if (!pred[e.to].contains(e.from)) pred[e.to].add(e.from)
     }
     val layer = IntArray(n) { -1 }
     val roots = (0 until n).filter { pred[it].isEmpty() }
@@ -276,7 +398,6 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float): CfgLayoutResult {
         }
     }
     var maxLayer = layer.filter { it >= 0 }.maxOrNull() ?: 0
-    // 孤立块 / 不可达块：主图下方单独成行（每行 <=4 个），避免与主图重叠。
     var orphan = 0
     for (i in 0 until n) {
         if (layer[i] < 0) {
@@ -286,65 +407,305 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float): CfgLayoutResult {
     }
     maxLayer = layer.maxOrNull() ?: maxLayer
     if (maxLayer < 0) maxLayer = 0
-    // DFS 前序作为层内初始顺序（环用 visited 短路，不会死循环）。
+
+    // ── 3. DFS 前序作为层内初始顺序（环用 visited 短路）──
     val order = IntArray(n)
-    var ord = 0
-    val visited = BooleanArray(n)
-    val stack = ArrayDeque<Int>()
-    val seeds = ArrayList<Int>(n + starts.size)
-    seeds += starts
-    for (i in 0 until n) seeds += i
-    seeds.forEach { s ->
-        if (visited[s]) return@forEach
-        stack.addLast(s)
-        while (stack.isNotEmpty()) {
-            val c = stack.removeLast()
-            if (visited[c]) continue
-            visited[c] = true
-            order[c] = ord++
-            val next = succ[c].filter { !visited[it] }
-            for (k in next.indices.reversed()) stack.addLast(next[k])
+    var ordCount = 0
+    run {
+        val visited = BooleanArray(n)
+        val stack = ArrayDeque<Int>()
+        val seeds = ArrayList<Int>(2 * n)
+        seeds += starts
+        for (i in 0 until n) seeds += i
+        seeds.forEach { s ->
+            if (visited[s]) return@forEach
+            stack.addLast(s)
+            while (stack.isNotEmpty()) {
+                val c = stack.removeLast()
+                if (visited[c]) continue
+                visited[c] = true
+                order[c] = ordCount++
+                val next = succ[c].filter { !visited[it] }
+                for (k in next.indices.reversed()) stack.addLast(next[k])
+            }
         }
     }
-    val layers = ArrayList<MutableList<Int>>(maxLayer + 1)
-    for (l in 0..maxLayer) layers.add(mutableListOf())
-    for (i in 0 until n) layers[layer[i].coerceIn(0, maxLayer)] += i
-    layers.forEach { l -> l.sortBy { order[it] } }
-    repeat(2) {
-        for (li in 1 until layers.size) reorderLayer(layers[li], layers[li - 1], pred, order)
-        for (li in layers.size - 2 downTo 0) reorderLayer(layers[li], layers[li + 1], succ, order)
+
+    // ── 4. 建立节点表（真实 + 跨层长边拆出的虚拟节点）──
+    val nodes = ArrayList<LNode>(n)
+    for (i in 0 until n) {
+        val ln = LNode(i, order[i])
+        ln.layer = layer[i].coerceIn(0, maxLayer)
+        ln.w = widths[i]
+        ln.h = heights[i]
+        nodes.add(ln)
     }
-    val nodeW = NODE_W_DP * density
-    val nodeH = NODE_H_DP * density
-    val laneGap = LANE_GAP_DP * density
-    val layerGap = LAYER_GAP_DP * density
-    val cx = FloatArray(n)
-    val cy = FloatArray(n)
-    layers.forEachIndexed { li, l ->
-        if (l.isEmpty()) return@forEachIndexed
-        val total = (l.size - 1).coerceAtLeast(0) * laneGap
-        l.forEachIndexed { i, node ->
-            cx[node] = i * laneGap - total / 2f
-            cy[node] = li * layerGap
+    val realNodes: List<LNode> = nodes.toList()
+    var ordSeq = n
+    val seeds = ArrayList<RouteSeed>(graph.edges.size)
+    graph.edges.forEach { e ->
+        if (e.from !in 0 until n || e.to !in 0 until n) return@forEach
+        if (e.from == e.to) {
+            seeds += RouteSeed(e.from, e.to, e.kind, false, true, emptyList())
+            return@forEach
+        }
+        val a = realNodes[e.from]
+        val b = realNodes[e.to]
+        val isBack = b.layer <= a.layer
+        if (useDummies && b.layer > a.layer + 1) {
+            val chain = ArrayList<LNode>(b.layer - a.layer - 1)
+            var prev = a
+            for (li in a.layer + 1 until b.layer) {
+                val d = LNode(-1, ordSeq++)
+                d.layer = li
+                d.w = DUMMY_W_DP * density
+                d.h = 0f
+                nodes.add(d)
+                chain.add(d)
+                prev.out.add(d)
+                d.inc.add(prev)
+                prev = d
+            }
+            prev.out.add(b)
+            b.inc.add(prev)
+            seeds += RouteSeed(e.from, e.to, e.kind, false, false, chain)
+        } else {
+            a.out.add(b)
+            b.inc.add(a)
+            seeds += RouteSeed(e.from, e.to, e.kind, isBack, false, emptyList())
         }
     }
+
+    val maxL = nodes.maxOf { it.layer }
+    val layers = ArrayList<MutableList<LNode>>(maxL + 1)
+    for (l in 0..maxL) layers.add(ArrayList())
+    nodes.forEach { layers[it.layer.coerceIn(0, maxL)].add(it) }
+    layers.forEach { l -> l.sortBy { it.key } }
+
+    // ── 5. 层内定序：median 启发式 + 多轮上下交替迭代（稳定排序）──
+    fun positionsOf(l: List<LNode>): HashMap<LNode, Int> {
+        val m = HashMap<LNode, Int>(l.size * 2)
+        l.forEachIndexed { i, nd -> m[nd] = i }
+        return m
+    }
+
+    fun orderLayer(l: MutableList<LNode>, ref: Map<LNode, Int>, useIn: Boolean) {
+        if (l.size <= 1) return
+        val scored = ArrayList<Triple<LNode, Float, Int>>(l.size)
+        l.forEach { nd ->
+            val nb = (if (useIn) nd.inc else nd.out).mapNotNull { ref[it] }.sorted()
+            val med = when {
+                nb.isEmpty() -> -1f
+                nb.size % 2 == 1 -> nb[nb.size / 2].toFloat()
+                else -> (nb[nb.size / 2 - 1] + nb[nb.size / 2]) / 2f
+            }
+            scored.add(Triple(nd, med, nd.key))
+        }
+        scored.sortWith(Comparator { x, y ->
+            val mx = if (x.second < 0f) Float.MAX_VALUE else x.second
+            val my = if (y.second < 0f) Float.MAX_VALUE else y.second
+            val c = mx.compareTo(my)
+            if (c != 0) c else x.third.compareTo(y.third)
+        })
+        l.clear()
+        scored.forEach { l.add(it.first) }
+    }
+
+    repeat(iterations) {
+        for (li in 1 until layers.size) orderLayer(layers[li], positionsOf(layers[li - 1]), true)
+        for (li in layers.size - 2 downTo 0) orderLayer(layers[li], positionsOf(layers[li + 1]), false)
+    }
+
+    // ── 6. x 坐标：中位数迭代收敛 + 重叠消除（层分配与 x 分离）──
+    layers.forEach { l ->
+        var cursor = 0f
+        l.forEach { nd ->
+            nd.x = cursor + nd.w / 2f
+            cursor += nd.w + laneGap
+        }
+    }
+
+    fun placeLayer(l: List<LNode>, desired: HashMap<LNode, Float>) {
+        var prevRight: Float? = null
+        l.forEach { nd ->
+            val want = desired[nd] ?: nd.x
+            val minCenter = prevRight?.let { it + laneGap + nd.w / 2f }
+            nd.x = if (minCenter == null) want else max(want, minCenter)
+            prevRight = nd.x + nd.w / 2f
+        }
+    }
+
+    fun medianNeighborX(nd: LNode, useIn: Boolean): Float? {
+        val xs = (if (useIn) nd.inc else nd.out).map { it.x }.sorted()
+        if (xs.isEmpty()) return null
+        return if (xs.size % 2 == 1) xs[xs.size / 2] else (xs[xs.size / 2 - 1] + xs[xs.size / 2]) / 2f
+    }
+
+    repeat(4) {
+        for (li in 1 until layers.size) {
+            val desired = HashMap<LNode, Float>()
+            layers[li].forEach { nd -> medianNeighborX(nd, true)?.let { desired[nd] = it } }
+            placeLayer(layers[li], desired)
+        }
+        for (li in layers.size - 2 downTo 0) {
+            val desired = HashMap<LNode, Float>()
+            layers[li].forEach { nd -> medianNeighborX(nd, false)?.let { desired[nd] = it } }
+            placeLayer(layers[li], desired)
+        }
+    }
+
+    // ── 7. y 坐标：按层高累计 ──
+    val layerH = FloatArray(layers.size) { 0f }
+    layers.forEachIndexed { li, l -> layerH[li] = l.maxOfOrNull { it.h } ?: 0f }
+    val layerTop = FloatArray(layers.size)
+    var acc = 0f
+    for (li in layers.indices) {
+        layerTop[li] = acc
+        acc += layerH[li] + layerGap
+    }
+    nodes.forEach { it.y = layerTop[it.layer] + layerH[it.layer] / 2f }
+
+    // ── 8. 整图居中（世界坐标原点 = 图中心）──
     var minX = Float.MAX_VALUE
     var maxX = -Float.MAX_VALUE
     var minY = Float.MAX_VALUE
     var maxY = -Float.MAX_VALUE
-    for (i in 0 until n) {
-        minX = min(minX, cx[i] - nodeW / 2f)
-        maxX = max(maxX, cx[i] + nodeW / 2f)
-        minY = min(minY, cy[i] - nodeH / 2f)
-        maxY = max(maxY, cy[i] + nodeH / 2f)
+    nodes.forEach { nd ->
+        minX = min(minX, nd.left)
+        maxX = max(maxX, nd.right)
+        minY = min(minY, nd.y - nd.h / 2f)
+        maxY = max(maxY, nd.y + nd.h / 2f)
     }
-    if (minX > maxX || minY > maxY) return CfgLayoutResult(emptyList(), 0f, 0f)
+    if (minX > maxX || minY > maxY) {
+        return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
+    }
     val offX = (minX + maxX) / 2f
     val offY = (minY + maxY) / 2f
-    val boxes = (0 until n).map { i ->
-        CfgNodeBox(i, cx[i] - offX, cy[i] - offY, nodeW, nodeH)
+    nodes.forEach {
+        it.x -= offX
+        it.y -= offY
     }
-    return CfgLayoutResult(boxes, maxX - minX, maxY - minY)
+
+    // ── 9. 端口分配：下出/上入均分，回边走右侧端口 ──
+    val bottomOut = HashMap<LNode, ArrayList<RouteSeed>>()
+    val topIn = HashMap<LNode, ArrayList<RouteSeed>>()
+    val rightOut = HashMap<LNode, ArrayList<RouteSeed>>()
+    val rightIn = HashMap<LNode, ArrayList<RouteSeed>>()
+    seeds.forEach { sd ->
+        if (sd.isSelf) return@forEach
+        val a = realNodes[sd.from]
+        val b = realNodes[sd.to]
+        if (sd.isBack) {
+            rightOut.getOrPut(a) { ArrayList() }.add(sd)
+            rightIn.getOrPut(b) { ArrayList() }.add(sd)
+        } else {
+            bottomOut.getOrPut(a) { ArrayList() }.add(sd)
+            topIn.getOrPut(b) { ArrayList() }.add(sd)
+        }
+    }
+    fun firstTargetX(sd: RouteSeed): Float = sd.chain.firstOrNull()?.x ?: realNodes[sd.to].x
+    bottomOut.forEach { (_, list) -> list.sortBy { firstTargetX(it) } }
+    topIn.forEach { (_, list) -> list.sortBy { realNodes[it.from].x } }
+    rightOut.forEach { (_, list) -> list.sortBy { realNodes[it.to].y } }
+    rightIn.forEach { (_, list) -> list.sortBy { realNodes[it.from].y } }
+
+    fun bottomPortX(nd: LNode, sd: RouteSeed): Float {
+        val list = bottomOut[nd] ?: return nd.x
+        val k = list.size
+        val i = list.indexOfFirst { it === sd }
+        val usable = (nd.w - padX * 2f).coerceAtLeast(6f)
+        return nd.left + padX + usable * (i + 1) / (k + 1)
+    }
+
+    fun topPortX(nd: LNode, sd: RouteSeed): Float {
+        val list = topIn[nd] ?: return nd.x
+        val k = list.size
+        val i = list.indexOfFirst { it === sd }
+        val usable = (nd.w - padX * 2f).coerceAtLeast(6f)
+        return nd.left + padX + usable * (i + 1) / (k + 1)
+    }
+
+    fun sidePortY(nd: LNode, sd: RouteSeed, outgoing: Boolean): Float {
+        val list = (if (outgoing) rightOut[nd] else rightIn[nd]) ?: return nd.y
+        val k = list.size
+        val i = list.indexOfFirst { it === sd }
+        val usable = (nd.h - padY * 2f).coerceAtLeast(6f)
+        return nd.top + padY + usable * (i + 1) / (k + 1)
+    }
+
+    // ── 10. 生成正交折线路由 ──
+    val maxRight = nodes.maxOf { it.right }
+    var backIdx = 0
+    val routes = ArrayList<CfgRoute>(seeds.size)
+    seeds.forEach { sd ->
+        val a = realNodes[sd.from]
+        val b = realNodes[sd.to]
+        val pts: MutableList<Offset> = ArrayList(8)
+        when {
+            sd.isSelf -> {
+                val lift = 15f * density
+                val ex = a.x + a.w * 0.30f
+                val en = a.x - a.w * 0.30f
+                pts.add(Offset(ex, a.top))
+                pts.add(Offset(ex, a.top - lift))
+                pts.add(Offset(en, a.top - lift))
+                pts.add(Offset(en, a.top))
+            }
+            sd.isBack -> {
+                backIdx++
+                val channel = maxRight + BACK_CHANNEL_DP * density * backIdx
+                val exitY = sidePortY(a, sd, true)
+                val entryY = sidePortY(b, sd, false)
+                pts.add(Offset(a.right, exitY))
+                pts.add(Offset(channel, exitY))
+                pts.add(Offset(channel, entryY))
+                pts.add(Offset(b.right + 2f, entryY))
+            }
+            else -> {
+                val exitX = bottomPortX(a, sd)
+                val entryX = topPortX(b, sd)
+                pts.add(Offset(exitX, a.bottom))
+                var prevX = exitX
+                var prevBottom = a.bottom
+                sd.chain.forEach { d ->
+                    val my = (prevBottom + d.y) / 2f
+                    pts.add(Offset(prevX, my))
+                    pts.add(Offset(d.x, my))
+                    prevX = d.x
+                    prevBottom = d.y
+                }
+                val my = (prevBottom + b.top) / 2f
+                pts.add(Offset(prevX, my))
+                pts.add(Offset(entryX, my))
+                pts.add(Offset(entryX, b.top))
+            }
+        }
+        routes.add(CfgRoute(sd.from, sd.to, sd.kind, sd.isBack, sd.isSelf, pts))
+    }
+
+    // ── 11. 角色集合 + 节点盒 ──
+    val entryIndex = (0 until n).filter { pred[it].isEmpty() }.minByOrNull { layer[it] } ?: -1
+    val loopHeads = LinkedHashSet<Int>()
+    val returns = LinkedHashSet<Int>()
+    graph.edges.forEach { e ->
+        if (e.from == e.to || e.from !in 0 until n || e.to !in 0 until n) return@forEach
+        if (layer[e.to] <= layer[e.from]) loopHeads.add(e.to)
+    }
+    for (i in 0 until n) if (succ[i].isEmpty()) returns.add(i)
+
+    val boxes = nodes.map { nd ->
+        val real = nd.index
+        CfgNodeBox(
+            real,
+            nd.x,
+            nd.y,
+            nd.w,
+            nd.h,
+            addrText = if (real >= 0) graph.blocks[real].addrText else "",
+            lines = if (real >= 0) (summaries[real] ?: emptyList()) else emptyList(),
+        )
+    }
+    return CfgLayoutResult(boxes, routes, maxX - minX, maxY - minY, entryIndex, loopHeads, returns)
 }
 
 // ───────────────────────── Canvas 绘制 ─────────────────────────
@@ -384,6 +745,24 @@ private fun fitText(paint: Paint, text: String, maxWidth: Float): String {
     return ""
 }
 
+@Composable
+private fun CfgChip(text: String, tint: Color, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(AppShape.xs),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.80f),
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = tint,
+            maxLines = 1,
+        )
+    }
+}
+
 // ───────────────────────── 组合视图 ─────────────────────────
 
 /**
@@ -407,12 +786,16 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     var selected by remember(graph) { mutableStateOf(-1) }
     var fitted by remember(graph) { mutableStateOf(false) }
+    // 大图自动进入简化视图（只画块骨架），也可手动切换。
+    var simpleView by remember(graph) { mutableStateOf(graph.blocks.size > 260) }
 
     val colors = MaterialTheme.colorScheme
     val jumpColor = colors.primary
     val failColor = AppPalette.orange
     val backColor = AppPalette.pink
-    val selColor = colors.primary
+    val entryColor = AppPalette.green
+    val loopColor = AppPalette.purple
+    val returnColor = AppPalette.teal
 
     fun applyFit() {
         if (viewport.width <= 0 || viewport.height <= 0) return
@@ -421,10 +804,23 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
             pan = Offset.Zero
             return
         }
-        val w = layout.width.coerceAtLeast(1f) + 72f
-        val h = layout.height.coerceAtLeast(1f) + 72f
-        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.15f, 2.5f)
+        val w = layout.width.coerceAtLeast(1f) + 80f
+        val h = layout.height.coerceAtLeast(1f) + 80f
+        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.12f, 2.5f)
         pan = Offset.Zero
+    }
+
+    fun zoomReset() {
+        scale = 1f
+        pan = Offset.Zero
+        fitted = true
+    }
+
+    fun focusEntry() {
+        val box = layout.boxes.firstOrNull { it.index == layout.entryIndex } ?: return
+        if (viewport.width <= 0 || viewport.height <= 0) return
+        pan = Offset(-box.cx * scale, -box.cy * scale)
+        selected = box.index
     }
 
     LaunchedEffect(layout, viewport) {
@@ -455,7 +851,7 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                 }
                 .pointerInput(Unit) {
                     detectTransformGestures { _, panChange, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(0.15f, 6f)
+                        scale = (scale * zoom).coerceIn(0.12f, 6f)
                         pan += panChange
                     }
                 },
@@ -467,17 +863,18 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                 fun px(v: Float) = v * sc + originX
                 fun py(v: Float) = v * sc + originY
 
-                // ── 背景点阵网格（步长随缩放变化，迭代次数有上限） ──
-                val step = 48f * density * sc
-                if (step in 8f..size.width.coerceAtLeast(64f)) {
-                    val dotColor = colors.outlineVariant.copy(alpha = 0.35f)
+                // ── 背景细点阵网格（随缩放淡出；迭代次数有上限）──
+                val step = 42f * density * sc
+                if (step >= 10f && step <= max(size.width, size.height) * 2f) {
+                    val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
+                    val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
                     var gx = ((originX % step) + step) % step
                     var guard = 0
                     while (gx < size.width && guard < 400) {
                         var gy = ((originY % step) + step) % step
                         var guardY = 0
                         while (gy < size.height && guardY < 400) {
-                            drawCircle(dotColor, radius = 1f, center = Offset(gx, gy))
+                            drawCircle(dotColor, radius = 0.9f, center = Offset(gx, gy))
                             gy += step
                             guardY++
                         }
@@ -486,127 +883,109 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                     }
                 }
 
-                // ── 边 ──
-                val strokeW = max(1f, 1.4f * density * sc.coerceIn(0.5f, 2f))
-                val dash = PathEffect.dashPathEffect(
-                    floatArrayOf(9f * sc.coerceIn(0.5f, 2f), 6f * sc.coerceIn(0.5f, 2f)),
-                    0f,
-                )
-                val arrowSize = max(5f, 8f * density * sc.coerceIn(0.4f, 2f))
-                graph.edges.forEach { e ->
-                    val a = layout.boxes.getOrNull(e.from) ?: return@forEach
-                    val b = layout.boxes.getOrNull(e.to) ?: return@forEach
-                    val isBack = b.cy <= a.cy + 0.5f
+                val scl = sc.coerceIn(0.5f, 2f)
+                val strokeW = max(1f, 1.35f * density * scl)
+                val arrowSize = max(4.5f, 7.5f * density * scl)
+                val dash = PathEffect.dashPathEffect(floatArrayOf(9f * scl, 6f * scl), 0f)
+
+                // ── 边（正交折线）──
+                layout.routes.forEach { r ->
+                    if (r.points.size < 2) return@forEach
                     val color = when {
-                        isBack -> backColor
-                        e.kind == "fail" -> failColor
+                        r.isBack -> backColor
+                        r.kind == "fail" -> failColor
                         else -> jumpColor
                     }
-                    val effect = if (e.kind == "fail" && !isBack) dash else null
-                    if (e.from == e.to) {
-                        // 自环：节点上方画一个矩形环绕。
-                        val lift = 18f * density * sc.coerceIn(0.5f, 1.6f)
-                        val p1 = Offset(px(a.right), py(a.top))
-                        val p2 = Offset(px(a.right) + lift, py(a.top) - lift)
-                        val p3 = Offset(px(a.left) - lift, py(a.top) - lift)
-                        val p4 = Offset(px(a.left), py(a.top))
-                        val loop = Path()
-                        loop.moveTo(p1.x, p1.y)
-                        loop.lineTo(p2.x, p2.y)
-                        loop.lineTo(p3.x, p3.y)
-                        loop.lineTo(p4.x, p4.y)
-                        drawPath(loop, color, style = Stroke(width = strokeW, pathEffect = effect))
-                        arrowHead(p4, p3, color, arrowSize)
-                        return@forEach
+                    val lineW = if (r.isBack) strokeW * 1.9f else strokeW
+                    val effect = if (r.kind == "fail" && !r.isBack) dash else null
+                    val path = Path()
+                    val first = r.points.first()
+                    path.moveTo(px(first.x), py(first.y))
+                    for (i in 1 until r.points.size) {
+                        val pt = r.points[i]
+                        path.lineTo(px(pt.x), py(pt.y))
                     }
-                    if (isBack) {
-                        // 回边：从源节点侧面绕行到目标节点侧面（醒目色）。
-                        val gap = BACK_CHANNEL_DP * density
-                        val channel = max(a.right, b.right) + gap
-                        val p0 = Offset(px(a.right), py(a.cy))
-                        val p1 = Offset(px(channel), py(a.cy))
-                        val p2 = Offset(px(channel), py(b.cy))
-                        val p3 = Offset(px(b.right) + strokeW, py(b.cy))
-                        val path = Path().apply {
-                            moveTo(p0.x, p0.y)
-                            lineTo(p1.x, p1.y)
-                            lineTo(p2.x, p2.y)
-                            lineTo(p3.x, p3.y)
-                        }
-                        drawPath(path, color, style = Stroke(width = strokeW))
-                        arrowHead(p3, p2, color, arrowSize)
-                    } else {
-                        val exit = a.bottom
-                        val entry = b.top
-                        val midY = (exit + entry) / 2f
-                        val p0 = Offset(px(a.cx), py(exit))
-                        val p1 = Offset(px(a.cx), py(midY))
-                        val p2 = Offset(px(b.cx), py(midY))
-                        val p3 = Offset(px(b.cx), py(entry))
-                        val path = Path().apply {
-                            moveTo(p0.x, p0.y)
-                            lineTo(p1.x, p1.y)
-                            lineTo(p2.x, p2.y)
-                            lineTo(p3.x, p3.y)
-                        }
-                        drawPath(path, color, style = Stroke(width = strokeW, pathEffect = effect))
-                        arrowHead(p3, p2, color, arrowSize)
-                    }
+                    drawPath(path, color, style = Stroke(width = lineW, pathEffect = effect))
+                    val tip = r.points[r.points.size - 1]
+                    val prev = r.points[r.points.size - 2]
+                    arrowHead(
+                        Offset(px(tip.x), py(tip.y)),
+                        Offset(px(prev.x), py(prev.y)),
+                        color,
+                        arrowSize * (if (r.isBack) 1.35f else 1f),
+                    )
                 }
 
-                // ── 节点 ──
-                val nodeStrokeW = max(1f, 1f * density * sc.coerceIn(0.5f, 2f))
-                val radius = CornerRadius(9f * density * sc.coerceIn(0.4f, 2f))
+                // ── 节点（按角色分层：入口/返回/循环头/普通/选中）──
+                val showText = !simpleView && sc >= TEXT_HIDE_SCALE
+                val nodeStroke = max(1f, 1f * density * scl)
+                val radius = CornerRadius(8f * density * scl)
+                val barW = 3.5f * density * scl
                 val paintAddr = Paint().apply {
                     isAntiAlias = true
                     typeface = Typeface.MONOSPACE
-                    textSize = (10.5f * density * sc).coerceIn(8f, 34f)
+                    textSize = (10.5f * density * sc).coerceIn(7f, 30f)
                 }
-                val paintSummary = Paint().apply {
+                val paintSum = Paint().apply {
                     isAntiAlias = true
                     typeface = Typeface.MONOSPACE
-                    textSize = (9f * density * sc).coerceIn(7f, 30f)
+                    textSize = (9f * density * sc).coerceIn(6f, 26f)
                 }
                 layout.boxes.forEach { box ->
+                    if (box.isDummy) return@forEach
                     val isSel = box.index == selected
+                    val roleColor = when {
+                        isSel -> colors.primary
+                        layout.loopHeadIndices.contains(box.index) -> loopColor
+                        box.index == layout.entryIndex -> entryColor
+                        layout.returnIndices.contains(box.index) -> returnColor
+                        else -> colors.outlineVariant
+                    }
+                    val hasRole = isSel || box.index == layout.entryIndex ||
+                        layout.returnIndices.contains(box.index) || layout.loopHeadIndices.contains(box.index)
                     val topLeft = Offset(px(box.left), py(box.top))
                     val rectSize = Size(box.w * sc, box.h * sc)
+                    val fill = when {
+                        isSel -> colors.primary.copy(alpha = 0.16f)
+                        !showText -> roleColor.copy(alpha = 0.16f)
+                        else -> colors.surfaceContainerHigh
+                    }
+                    drawRoundRect(color = fill, topLeft = topLeft, size = rectSize, cornerRadius = radius)
+                    if (hasRole) {
+                        val inset = 3f * density * sc
+                        val barH = (box.h * sc - inset * 4f).coerceAtLeast(2f)
+                        drawRoundRect(
+                            color = roleColor.copy(alpha = 0.95f),
+                            topLeft = Offset(topLeft.x + inset, topLeft.y + inset * 2f),
+                            size = Size(barW, barH),
+                            cornerRadius = CornerRadius(barW / 2f),
+                        )
+                    }
                     drawRoundRect(
-                        color = if (isSel) colors.primary.copy(alpha = 0.16f) else colors.surfaceContainerHigh,
+                        color = roleColor,
                         topLeft = topLeft,
                         size = rectSize,
                         cornerRadius = radius,
+                        style = Stroke(width = if (isSel) nodeStroke * 2f else nodeStroke),
                     )
-                    drawRoundRect(
-                        color = if (isSel) selColor else colors.outlineVariant,
-                        topLeft = topLeft,
-                        size = rectSize,
-                        cornerRadius = radius,
-                        style = Stroke(width = if (isSel) nodeStrokeW * 2f else nodeStrokeW),
-                    )
-                    val block = graph.blocks.getOrNull(box.index) ?: return@forEach
+                    if (!showText) return@forEach
                     val maxTextW = box.w * sc - 12f * density
                     if (maxTextW <= 10f) return@forEach
-                    val showSummary = block.summary.isNotBlank() && sc >= 0.45f
-                    paintAddr.color = if (isSel) selColor.toArgb() else colors.onSurface.toArgb()
-                    paintSummary.color = colors.onSurfaceVariant.toArgb()
-                    val addrText = fitText(paintAddr, block.addrText, maxTextW)
-                    val summaryText = if (showSummary) fitText(paintSummary, block.summary, maxTextW) else ""
-                    val lineGap = 3f * density * sc.coerceIn(0.5f, 1.5f)
-                    val totalH = if (summaryText.isNotEmpty()) paintAddr.textSize + lineGap + paintSummary.textSize else paintAddr.textSize
-                    val startY = py(box.cy) - totalH / 2f
+                    paintAddr.color = if (isSel) colors.primary.toArgb() else colors.onSurface.toArgb()
+                    paintSum.color = colors.onSurfaceVariant.toArgb()
+                    val addrText = fitText(paintAddr, box.addrText, maxTextW)
+                    val lines = box.lines.map { fitText(paintSum, it, maxTextW) }
+                    val gapY = 2.5f * density * sc
+                    val sumH = paintSum.textSize
+                    val totalH = paintAddr.textSize + (if (lines.isEmpty()) 0f else gapY * lines.size + lines.size * sumH)
+                    val baseline = py(box.cy) - totalH / 2f + paintAddr.textSize
                     drawIntoCanvas { canvas ->
                         val nc = canvas.nativeCanvas
-                        val aW = paintAddr.measureText(addrText)
-                        nc.drawText(addrText, px(box.cx) - aW / 2f, startY + paintAddr.textSize, paintAddr)
-                        if (summaryText.isNotEmpty()) {
-                            val sW = paintSummary.measureText(summaryText)
-                            nc.drawText(
-                                summaryText,
-                                px(box.cx) - sW / 2f,
-                                startY + paintAddr.textSize + lineGap + paintSummary.textSize,
-                                paintSummary,
-                            )
+                        nc.drawText(addrText, px(box.cx) - paintAddr.measureText(addrText) / 2f, baseline, paintAddr)
+                        var y = baseline
+                        lines.forEach { ln ->
+                            y += gapY + sumH
+                            nc.drawText(ln, px(box.cx) - paintSum.measureText(ln) / 2f, y, paintSum)
                         }
                     }
                 }
@@ -637,25 +1016,10 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                 }
             }
 
-            // 右上角：适应屏幕
-            Surface(
-                onClick = { applyFit() },
-                shape = RoundedCornerShape(AppShape.xs),
-                color = colors.surfaceVariant.copy(alpha = 0.75f),
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
-            ) {
-                Text(
-                    if (zh) "适应屏幕" else "Fit",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Medium,
-                    color = colors.primary,
-                )
-            }
             // 左上角：统计
             Surface(
                 shape = RoundedCornerShape(AppShape.xs),
-                color = colors.surfaceVariant.copy(alpha = 0.6f),
+                color = colors.surfaceVariant.copy(alpha = 0.60f),
                 modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
             ) {
                 Text(
@@ -665,11 +1029,27 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                     color = colors.onSurfaceVariant,
                 )
             }
+
+            // 右上角：视图工具（FlowRow 窄屏自动换行）
+            Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    CfgChip(if (zh) "适应屏幕" else "Fit", colors.primary) { applyFit() }
+                    CfgChip("100%", colors.primary) { zoomReset() }
+                    CfgChip(if (zh) "定位入口" else "Entry", entryColor) { focusEntry() }
+                    CfgChip(
+                        if (simpleView) (if (zh) "完整视图" else "Full") else (if (zh) "简化视图" else "Simple"),
+                        colors.onSurfaceVariant,
+                    ) { simpleView = !simpleView }
+                }
+            }
         }
 
         Spacer(Modifier.size(6.dp))
 
-        // ── 下方信息条 ──
+        // ── 下方信息条：选中块的地址范围 + 后继列表 ──
         Surface(
             shape = RoundedCornerShape(AppShape.sm),
             color = colors.surfaceVariant.copy(alpha = 0.45f),

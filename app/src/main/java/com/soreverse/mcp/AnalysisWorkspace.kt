@@ -254,6 +254,9 @@ internal fun AnalysisWorkspace(
         ) {
             WbTab(if (zh) "工具控制台" else "Console", pane == "tool") { pane = "tool" }
             WbTab(if (zh) "十六进制" else "Hex", pane == "hex") { pane = "hex" }
+            if (tools.cfgVisible) {
+                WbTab("CFG", pane == "cfg") { pane = "cfg" }
+            }
             tools.resultTabs.forEachIndexed { idx, tb ->
                 WbTab(tb.label, pane == "result" && tools.selectedTabIndex == idx, onClose = {
                     tools.closeTab(idx)
@@ -277,8 +280,9 @@ internal fun AnalysisWorkspace(
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = metrics.pagePad)) {
             when {
                 pane == "hex" -> AppCard(Modifier.fillMaxSize()) { HexPane(state, zh) }
+                pane == "cfg" && tools.cfgVisible -> AppCard(Modifier.fillMaxSize()) { CfgPane(tools, zh) { pane = "result" } }
                 pane == "result" -> AppCard(Modifier.fillMaxSize()) { ResultStream(tools, zh) }
-                state.activeTool.isNotBlank() -> AppCard(Modifier.fillMaxWidth()) { ToolConsole(state, zh, onAiAnalyze) }
+                state.activeTool.isNotBlank() -> AppCard(Modifier.fillMaxWidth()) { ToolConsole(state, zh, onAiAnalyze) { pane = "cfg" } }
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         if (zh) "点顶部「工具」选择工具" else "Tap 「Tools」 above to pick a tool",
@@ -914,8 +918,13 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                     tools.addTab(tl, if (zh) "导出" else "Exports", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("CFG", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", tools.decompileTarget.ifBlank { "main" }) }.getOrNull() }
-                    tools.addTab(tl, "CFG", r?.toString() ?: if (zh) "无" else "none")
+                    val cfgTarget = tools.decompileTarget.ifBlank { "main" }
+                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", cfgTarget) }.getOrNull() }
+                    // 图形视图：不再把 JSON 丢进结果标签页，而是切到 CFG 画布
+                    tools.cfgTarget = cfgTarget
+                    tools.cfgJson = r?.toString() ?: ""
+                    tools.cfgVisible = true
+                    onShowCfg()
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 // AI 深度分析：跳转 AI 对话页（MainActivity 挂载 DeepAiChatScreen 进行对话）
                 SmBtn(if (zh) "AI 深度" else "AI Deep", bm, bp, {
@@ -1871,4 +1880,54 @@ private fun DisasmLine(line: String) {
         }
     }
     Text(out, style = monoStyle())
+}
+
+/**
+ * CFG 图形视图容器（分析页「CFG」按钮的落点）。
+ * 顶部：函数名/查询目标 + 「文本视图」返回入口；主体：自绘 CFG 画布。
+ * 原有结果标签页机制不受影响——点「文本视图」会把本次 CFG JSON 追加为普通结果标签。
+ */
+@Composable
+private fun CfgPane(tools: ToolPagesState, zh: Boolean, onShowText: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxSize().padding(6.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (tools.cfgTarget.isBlank()) (if (zh) "控制流图" else "Control Flow Graph") else tools.cfgTarget,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontSize = AppText.bodyStrong,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = cs.onSurface,
+                )
+                Text(
+                    if (zh) {
+                        "分层布局 · 点击节点看详情 · 双指缩放 / 单指平移"
+                    } else {
+                        "Layered layout · tap a node for details · pinch to zoom / drag to pan"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = cs.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = {
+                tools.addTab("CFG", if (zh) "文本" else "Text", tools.cfgJson)
+                tools.cfgVisible = false
+                onShowText()
+            }) {
+                Text(if (zh) "文本视图" else "Text view", fontSize = AppText.body)
+            }
+        }
+        Spacer(Modifier.size(4.dp))
+        CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize())
+    }
 }

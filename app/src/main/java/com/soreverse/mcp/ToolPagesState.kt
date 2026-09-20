@@ -49,6 +49,14 @@ class ToolPagesState {
     /** SO 分析页的额外功能结果（段信息/导入导出表等） */
     var soExtra by mutableStateOf("")
 
+    // ---- 分析页 CFG 图形视图 ----
+    /** 最近一次 CFG 查询的原始 JSON（rzCfg 输出）；空串表示尚未查询。 */
+    var cfgJson by mutableStateOf("")
+    /** CFG 图形视图是否激活（内容区切到画布）。 */
+    var cfgVisible by mutableStateOf(false)
+    /** 最近一次 CFG 查询目标（函数名/地址），用于画布标题。 */
+    var cfgTarget by mutableStateOf("")
+
     // ---- 回编页 ----
     var rebuildCheck by mutableStateOf("")
     var rebuildResult by mutableStateOf("")

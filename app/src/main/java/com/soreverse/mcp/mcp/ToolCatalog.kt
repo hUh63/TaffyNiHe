@@ -354,8 +354,8 @@ object ToolCatalog {
 
     private val editSymbol = EngineToolHandler(
         ToolMeta("taffy_edit_symbol",
-            "符号管理（rename 重命名 / add 添加导出函数 / remove 移除符号）。rename 也用于重命名导入(import)符号：将调用重定向到同长/更短的另一个符号，实现 import 级补丁（对标 soedit 编辑导入表）。",
-            "Symbol management: rename (same-or-shorter, also redirects imports by renaming the UNDEF symbol), add exported function via LIEF, or remove symbol via LIEF.",
+            "符号管理（rename 重命名 / add 添加导出函数 / remove 移除符号）。rename 支持变长：优先复用字符串表内已存在的同名/后缀字符串，其次等长原地覆盖，最后在字符串表尾部空闲填充区原地追加（同步 sh_size/st_name，必要时同步 DT_STRSZ）；布局不允许时明确返回 UNSUPPORTED_LAYOUT 并给出替代方案。rename 也用于重命名导入(import)符号：将调用重定向到另一个符号，实现 import 级补丁（对标 soedit 编辑导入表）。",
+            "Symbol management: rename (in place — same-or-shorter, reuse of an existing string in the same string table, or in-place append into zero padding right after the string table when the layout allows; otherwise UNSUPPORTED_LAYOUT is returned. Also redirects imports by renaming the UNDEF symbol), add exported function via LIEF, or remove symbol via LIEF.",
             "edit", ToolClass.EXTRA, heavy = true,
         ) { objectSchema(props {
             "workspaceId" str "工作区 ID"
@@ -1128,6 +1128,8 @@ object ToolCatalog {
         *DynamicAnalyzeAiTool.ALL.toTypedArray(),
         // 塔菲逆核: SO 深度分析(C++ 虚表/符号还原/函数签名/JNI 还原/批量伪C)
         *SoDeepTools.ALL.toTypedArray(),
+        // 塔菲逆核: 把编辑会话字节就地写回原始 SO（写前备份 + 回读 sha256 校验）
+        *SoSyncOriginalTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

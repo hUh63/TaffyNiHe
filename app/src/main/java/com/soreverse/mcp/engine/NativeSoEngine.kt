@@ -77,6 +77,7 @@ class NativeSoEngine(context: Context) {
     fun liefPatchAddress(workspaceId: String, editSessionId: String, va: Long, patch: ByteArray): JSONObject = runtime.liefPatchAddress(workspaceId, editSessionId, va, patch)
     fun liefAddExportedFunction(workspaceId: String, editSessionId: String, addr: Long, name: String): JSONObject = runtime.liefAddExportedFunction(workspaceId, editSessionId, addr, name)
     fun liefRemoveSymbol(workspaceId: String, editSessionId: String, name: String): JSONObject = runtime.liefRemoveSymbol(workspaceId, editSessionId, name)
+    fun soSyncOriginal(workspaceId: String, editSessionId: String, dryRun: Boolean = true, backup: Boolean = true): JSONObject = runtime.soSyncOriginal(workspaceId, editSessionId, dryRun, backup)
     fun emulationStatus(): JSONObject = runtime.emulationStatus()
     fun emulate(workspaceId: String, editSessionId: String, symbolName: String, args: JSONArray, trace: Boolean): JSONObject = runtime.emulate(workspaceId, editSessionId, symbolName, args, trace)
     fun dumpMemory(workspaceId: String, editSessionId: String, addr: Long, size: Int): JSONObject = runtime.dumpMemory(workspaceId, editSessionId, addr, size)

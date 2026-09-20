@@ -68,10 +68,10 @@ object SchemaBuilder {
         .put("required", JSONArray().put("byteOffset"))
 
     fun editsSymbolSchema(): JSONObject = JSONObject().put("type", "object")
-        .put("description", "One symbol edit. rename: same-or-shorter rename. add: add exported function at addr. remove: remove symbol by name.")
+        .put("description", "One symbol edit. rename: in-place rename — allowed for equal/shorter names, for names that already exist in the same string table (reused, zero layout change), and for longer names when a zero-padding gap right after the string table can absorb the new string (sh_size/st_name, and DT_STRSZ for .dynstr, are updated). If the layout forbids it the call fails with UNSUPPORTED_LAYOUT and suggests alternatives. add: add exported function at addr. remove: remove symbol by name.")
         .put("properties", JSONObject()
             .put("op", strProp("rename (default) | add | remove"))
-            .put("newName", strProp("New symbol name (for rename: must be <= original length)."))
+            .put("newName", strProp("New symbol name (for rename: any length — see the edits schema description for the in-place constraints)."))
             .put("addr", strProp("Hex virtual address for the new exported function (add op only)."))
             .put("name", strProp("Symbol name to remove (remove op only).")))
         .put("required", JSONArray().put("op"))

@@ -245,39 +245,73 @@ internal fun EngineRuntime.editSymbol(workspaceId: String, editSessionId: String
         val previews = JSONArray()
         val nextData = session.data.copyOf()
         val nextPatches = mutableListOf<PatchRecord>()
+        var planDetail: JSONObject? = null
+        var legacyAny = false
         for (i in 0 until edits.length()) {
             val edit = edits.getJSONObject(i)
-            if (edit.optString("op", "rename") == "rename") {
-                val newName = edit.optString("newName", name)
-                if (newName.length > name.length) return@guarded err("SYMTAB_OVERFLOW", "Rename to longer symbol is not supported in native Android build")
+            val op = edit.optString("op", "rename")
+            if (op != "rename") {
+                return@guarded err("UNSUPPORTED_OPERATION", "taffy_edit_symbol(edits[].op) 仅支持 rename；新增/移除符号请改用 op=add / op=remove 快捷方式（LIEF 实现）。", "edits[$i].op", op)
+            }
+            val newName = edit.optString("newName", name)
+            if (newName.isBlank()) return@guarded err("INVALID_ARGUMENT", "newName 不能为空", "edits[$i].newName", newName)
+            if (newName == name) return@guarded err("INVALID_ARGUMENT", "newName 与当前符号名相同，无需改名", "edits[$i].newName", newName)
+            if (newName.contains('\u0000')) return@guarded err("INVALID_ARGUMENT", "newName 不能包含 NUL 字符", "edits[$i].newName", newName)
+            // 变长改名：复用已有串 / 原地等长覆盖 / 原地追加到字符串表尾部空闲区（绝不改变文件大小）
+            val plan = planSymbolRename(nextData, name, newName)
+            var legacy = false
+            val effective: List<RenamePatch>
+            if (plan.ok) {
+                effective = plan.patches
+                planDetail = plan.detail
+            } else if (plan.errorCode == "SYMBOL_NOT_FOUND" && newName.toByteArray().size <= name.toByteArray().size) {
+                // 退化路径（保持旧行为）：符号表里找不到该名字时，退回「等长/更短」的全文件字节搜索。
                 val oldBytes = name.toByteArray()
                 val newBytes = newName.toByteArray()
                 val pos = indexOf(nextData, oldBytes)
-                if (pos < 0) return@guarded err("SYMBOL_NOT_FOUND", "Symbol string not found in SO bytes")
-                val replacement = ByteArray(oldBytes.size) { if (it < newBytes.size) newBytes[it] else 0 }
+                if (pos < 0) return@guarded plan.error!!
+                legacy = true
+                legacyAny = true
+                effective = listOf(RenamePatch(pos, oldBytes, ByteArray(oldBytes.size) { if (it < newBytes.size) newBytes[it] else 0 }, "legacy-byte-search"))
+            } else {
+                return@guarded plan.error!!
+            }
+            for ((pi, patch) in effective.withIndex()) {
+                if (patch.fileOffset < 0 || patch.newBytes.size != patch.oldBytes.size || patch.fileOffset + patch.newBytes.size > nextData.size) {
+                    return@guarded err("OFFSET_OUT_OF_RANGE", "符号改名补丁越界或长度不一致：offset=${hex(patch.fileOffset.toLong())} old=${patch.oldBytes.size} new=${patch.newBytes.size} file=${nextData.size}", "locator", locator)
+                }
                 val preview = JSONObject()
                     .put("index", i)
-                    .put("fileOffset", hex(pos.toLong()))
-                    .put("oldHex", PatchByteUtils.hexBytes(oldBytes))
-                    .put("newHex", PatchByteUtils.hexBytes(replacement))
-                    .put("asm", "rename $name -> $newName")
-                    .put("length", oldBytes.size)
+                    .put("patchIndex", pi)
+                    .put("fileOffset", hex(patch.fileOffset.toLong()))
+                    .put("oldHex", PatchByteUtils.hexBytes(patch.oldBytes))
+                    .put("newHex", PatchByteUtils.hexBytes(patch.newBytes))
+                    .put("asm", "rename $name -> $newName (${patch.note})")
+                    .put("note", patch.note)
+                    .put("length", patch.newBytes.size)
                 if (dryRun) {
                     previews.put(preview)
                     continue
                 }
-                nextPatches += PatchRecord(System.currentTimeMillis(), "symbol", locator, pos, PatchByteUtils.hexBytes(oldBytes), PatchByteUtils.hexBytes(replacement), "rename $name -> $newName")
-                for (j in oldBytes.indices) nextData[pos + j] = if (j < newBytes.size) newBytes[j] else 0
-            } else {
-                return@guarded err("UNSUPPORTED_OPERATION", "Only same-or-shorter rename is supported")
+                nextPatches += PatchRecord(System.currentTimeMillis(), "symbol", locator, patch.fileOffset, PatchByteUtils.hexBytes(patch.oldBytes), PatchByteUtils.hexBytes(patch.newBytes), "rename $name -> $newName (${patch.note})")
+                System.arraycopy(patch.newBytes, 0, nextData, patch.fileOffset, patch.newBytes.size)
+            }
+            if (!dryRun && !legacy) {
+                // 写后自检：重新规划必须因找不到旧名而失败，否则说明改名未生效。
+                val verify = planSymbolRename(nextData, name, newName)
+                if (verify.ok) {
+                    return@guarded err("SYMBOL_VERIFY_FAILED", "改名后自检失败：符号 '$name' 仍可被定位，newName '$newName' 未生效", "edits[$i].newName", newName)
+                }
             }
         }
         if (dryRun) {
-            return@guarded ok(JSONObject()
+            val planned = JSONObject()
                 .put("dryRun", true)
                 .put("preview", previews)
                 .put("previewCount", previews.length())
-                .put("targetVersion", sha256(session.data)))
+                .put("targetVersion", sha256(session.data))
+            planDetail?.let { planned.put("plan", it) }
+            return@guarded ok(planned)
         }
         if (nextPatches.isNotEmpty()) {
             maybeAutoSnapshot(session, "symbol", settings)
@@ -288,7 +322,13 @@ internal fun EngineRuntime.editSymbol(workspaceId: String, editSessionId: String
             pageStore.clear()
             searchCache.clear()
         }
-        val resSym = JSONObject().put("newTargetVersion", sha256(session.data)).put("editCount", session.revision).put("patchCount", session.patches.size).put("applied", nextPatches.size)
+        val resSym = JSONObject()
+            .put("newTargetVersion", sha256(session.data))
+            .put("editCount", session.revision)
+            .put("patchCount", session.patches.size)
+            .put("applied", nextPatches.size)
+            .put("legacyByteSearch", legacyAny)
+        planDetail?.let { resSym.put("plan", it) }
         if (nextPatches.isNotEmpty()) maybeAutoPersist(workspaceId, session, settings)?.let { resSym.put("autoPersist", it) }
         ok(resSym)
         }

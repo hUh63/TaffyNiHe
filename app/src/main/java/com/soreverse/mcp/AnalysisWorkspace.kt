@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Build
@@ -49,6 +50,9 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Transform
+import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
@@ -265,25 +269,31 @@ internal fun AnalysisWorkspace(
                             onGoFunctions = { tools.analysisView = "functions" },
                         )
 
-                        "strings" -> ListView(
-                            tools = tools, zh = zh, context = context, view = "strings",
+                        "strings" -> StringsView(
+                            tools = tools, zh = zh, context = context,
                             onRefresh = refreshAll,
                         ) { row -> copyToClipboard(context, row.text.ifBlank { row.title }, zh) }
 
-                        "symbols" -> ListView(
-                            tools = tools, zh = zh, context = context, view = "symbols",
+                        "symbols" -> SymbolsView(
+                            tools = tools, zh = zh, context = context,
                             onRefresh = refreshAll,
                         ) { row -> copyToClipboard(context, row.title, zh) }
 
-                        "imports" -> ListView(
-                            tools = tools, zh = zh, context = context, view = "imports",
+                        "imports" -> ImportsView(
+                            tools = tools, zh = zh, context = context,
                             onRefresh = refreshAll,
                         ) { row -> copyToClipboard(context, row.title, zh) }
 
-                        "sections" -> ListView(
-                            tools = tools, zh = zh, context = context, view = "sections",
+                        "sections" -> SectionsView(
+                            tools = tools, zh = zh, context = context,
                             onRefresh = refreshAll,
                         ) { row -> copyToClipboard(context, row.title, zh) }
+
+                        "demangle" -> DemangleView(zh = zh, context = context)
+
+                        "base" -> BaseConvertView(zh = zh, context = context)
+
+                        "asm" -> AsmEditorView(tools = tools, zh = zh, context = context)
 
                         "hex" -> AppCard(Modifier.fillMaxSize()) { HexPane(state, zh) }
 
@@ -1893,6 +1903,9 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("imports", "导入", "Imp", Icons.Filled.Link),
     AnalysisNavItem("sections", "段节", "Sec", Icons.Filled.Inventory2),
     AnalysisNavItem("hex", "HEX", "Hex", Icons.Filled.Storage),
+    AnalysisNavItem("demangle", "C++", "C++", Icons.Filled.Transform),
+    AnalysisNavItem("base", "进制", "Base", Icons.Filled.Calculate),
+    AnalysisNavItem("asm", "汇编器", "Asm+", Icons.Filled.SwapHoriz),
     AnalysisNavItem("results", "结果", "Out", Icons.Filled.Terminal),
     AnalysisNavItem("tools", "工具", "Tools", Icons.Filled.Build),
 )
@@ -2512,6 +2525,65 @@ private fun TaskChip(state: WorkspaceState, zh: Boolean, onOpenTask: () -> Unit)
 
 // ───────────────────────── 函数列表（默认视图 / 页面入口） ─────────────────────────
 
+/** 函数行的结构化数据（直接来自引擎 functions 数组，不再经 meta 字符串拆解）。 */
+private data class FnItem(val addr: String, val name: String, val size: Long, val kind: String)
+
+private fun parseFunctions(json: String?): List<FnItem> {
+    if (json.isNullOrBlank()) return emptyList()
+    val o = runCatching { JSONObject(json) }.getOrNull() ?: return emptyList()
+    val arr = o.optJSONArray("functions") ?: o.optJSONArray("items") ?: return emptyList()
+    val out = ArrayList<FnItem>(arr.length())
+    for (i in 0 until arr.length()) {
+        val it = arr.optJSONObject(i) ?: continue
+        val addr = it.optString("startAddr").ifBlank { it.optString("addr") }
+        val name = it.optString("name").ifBlank { it.optString("locator") }.ifBlank { "sub_$addr" }
+        out.add(FnItem(addr, name, it.optLong("size", -1L), it.optString("kind").ifBlank { it.optString("type") }))
+    }
+    return out
+}
+
+/** 十六进制地址 → Long（排序用；解析不了按 0）。 */
+private fun hexVal(s: String): Long = runCatching {
+    val v = s.trim()
+    if (v.startsWith("0x", true)) v.substring(2).toLong(16) else v.toLong()
+}.getOrDefault(0L)
+
+/** 表头单元格：可点排序，当前排序列显示箭头。 */
+@Composable
+private fun SortHeader(
+    label: String,
+    active: Boolean,
+    asc: Boolean,
+    alignEnd: Boolean = false,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        modifier.clickable { onClick() }.padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (active) cs.primary else cs.onSurfaceVariant,
+            maxLines = 1,
+        )
+        if (active) {
+            Icon(
+                if (asc) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                null,
+                tint = cs.primary,
+                modifier = Modifier.size(13.dp),
+            )
+        }
+    }
+}
+
+/** 函数表：地址(等宽，点击复制) | 名称 + 类型 | 大小；表头可点排序。 */
 @Composable
 private fun FunctionsView(
     tools: ToolPagesState,
@@ -2529,11 +2601,24 @@ private fun FunctionsView(
         loadListCache(context, tools, "functions", ws, cacheKey, 300)
     }
 
-    val rows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], "functions") }
+    val all = remember(tools.viewCache[cacheKey]) { parseFunctions(tools.viewCache[cacheKey]) }
     val query = tools.functionQuery
-    val shown = remember(rows, query) {
-        if (query.isBlank()) rows
-        else rows.filter { it.title.contains(query, ignoreCase = true) || it.meta.contains(query, ignoreCase = true) }
+    var sortBy by remember { mutableStateOf("addr") }
+    var asc by remember { mutableStateOf(true) }
+
+    val shown = remember(all, query, sortBy, asc) {
+        val fl = if (query.isBlank()) all
+        else all.filter { it.name.contains(query, true) || it.addr.contains(query, true) }
+        val sorted = when (sortBy) {
+            "name" -> fl.sortedBy { it.name.lowercase() }
+            "size" -> fl.sortedBy { it.size }
+            else -> fl.sortedBy { hexVal(it.addr) }
+        }
+        if (asc) sorted else sorted.reversed()
+    }
+
+    fun toggleSort(key: String) {
+        if (sortBy == key) asc = !asc else { sortBy = key; asc = !(key == "size") }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -2547,7 +2632,7 @@ private fun FunctionsView(
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
             placeholder = {
                 Text(
-                    if (zh) "按函数名过滤" else "filter by name",
+                    if (zh) "按函数名 / 地址过滤" else "filter by name / address",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
                     color = cs.onSurfaceVariant,
                 )
@@ -2575,8 +2660,8 @@ private fun FunctionsView(
                     title = if (zh) "未打开工作区" else "No workspace",
                     hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
                 )
-                tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
-                rows.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> {
+                tools.viewLoading == cacheKey && all.isEmpty() -> AnalysisLoading()
+                all.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> {
                     val err = errMessageOf(tools.viewCache[cacheKey])
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         AnalysisErrorBanner(err.ifBlank { if (zh) "函数列表加载失败" else "failed to load functions" })
@@ -2594,13 +2679,71 @@ private fun FunctionsView(
                     primaryLabel = if (zh) "刷新" else "Refresh",
                     onPrimary = onRefresh,
                 )
-                else -> AnalysisRowList(
-                    rows = shown,
-                    zh = zh,
-                    icon = Icons.Filled.Memory,
-                    selectedTitle = tools.selectedFunctionName,
-                    onPick = { row -> onSelect(row.title, row.va) },
-                )
+                else -> Column(
+                    Modifier.fillMaxSize()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+                ) {
+                    // 表头
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SortHeader(if (zh) "地址" else "ADDR", sortBy == "addr", asc, modifier = Modifier.width(90.dp)) { toggleSort("addr") }
+                        SortHeader(if (zh) "名称" else "NAME", sortBy == "name", asc, modifier = Modifier.weight(1f)) { toggleSort("name") }
+                        SortHeader(if (zh) "大小" else "SIZE", sortBy == "size", asc, alignEnd = true, modifier = Modifier.width(58.dp)) { toggleSort("size") }
+                    }
+                    GroupDivider()
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+                        items(shown, key = { r -> r.addr + "|" + r.name }) { r ->
+                            val selected = r.name == tools.selectedFunctionName
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
+                                    .clickable { onSelect(r.name, r.addr) }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    r.addr.ifBlank { "--" },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = if (selected) cs.primary else cs.onSurfaceVariant,
+                                    maxLines = 1,
+                                    modifier = Modifier.width(90.dp).clickable { copyToClipboard(context, r.addr, zh) },
+                                )
+                                Column(Modifier.weight(1f).padding(end = 4.dp)) {
+                                    Text(
+                                        r.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selected) cs.primary else cs.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (r.kind.isNotBlank()) {
+                                        Text(
+                                            r.kind,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = AppText.label,
+                                            color = cs.onSurfaceVariant,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                                Text(
+                                    if (r.size >= 0L) "${r.size}" else "--",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = cs.onSurfaceVariant,
+                                    maxLines = 1,
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.width(58.dp),
+                                )
+                            }
+                            GroupDivider()
+                        }
+                    }
+                }
             }
         }
     }
@@ -2615,6 +2758,7 @@ private val searchScopes = listOf(
     "imports" to ("导入" to "Imp"),
 )
 
+/** 全库搜索：输入框 + 范围切换 + 结果表格（地址/内容两列，按范围自适应列名）。 */
 @Composable
 private fun SearchView(
     tools: ToolPagesState,
@@ -2627,13 +2771,17 @@ private fun SearchView(
     val scope = tools.searchScope
     val query = tools.searchQuery
     val cacheKey = "search|$ws|$scope|$query"
-    val icon = analysisViewIcon(scope)
 
     LaunchedEffect(cacheKey, tools.reloadTick) {
         if (query.isNotBlank()) loadListCache(context, tools, scope, ws, cacheKey, 120, query)
     }
 
     val rows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], scope) }
+    val secondCol = when (scope) {
+        "strings" -> if (zh) "内容" else "VALUE"
+        "imports" -> if (zh) "名称" else "NAME"
+        else -> if (zh) "名称" else "NAME"
+    }
 
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -2646,9 +2794,11 @@ private fun SearchView(
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
             placeholder = {
                 Text(
-                    if (zh) "搜索函数 / 符号 / 字符串 / 导入" else "search functions / symbols / strings / imports",
+                    if (zh) "在函数 / 符号 / 字符串 / 导入里搜索" else "search across functions / symbols / strings / imports",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
                     color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             },
         )
@@ -2658,48 +2808,107 @@ private fun SearchView(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            searchScopes.forEach { (key, label) ->
-                SmallAction(
-                    label = if (zh) label.first else label.second,
-                    active = key == scope,
-                    onClick = { tools.searchScope = key },
+            searchScopes.forEach { (key, labels) ->
+                val active = key == scope
+                SmallAction(if (zh) labels.first else labels.second, active = active) { tools.searchScope = key }
+            }
+            if (rows.isNotEmpty()) {
+                Text(
+                    if (zh) "${rows.size} 条" else "${rows.size} hits",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
                 )
             }
-            Text(
-                if (zh) "范围：${analysisViewLabel(scope, zh)}" else "scope: ${analysisViewLabel(scope, zh)}",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                color = cs.onSurfaceVariant,
-            )
         }
         Spacer(Modifier.size(6.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
+                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
                 )
                 query.isBlank() -> AnalysisEmptyState(
-                    title = if (zh) "输入关键字开始搜索" else "Type a keyword",
-                    hint = if (zh) "当前范围：${analysisViewLabel(scope, zh)}" else "Scope: ${analysisViewLabel(scope, zh)}",
+                    title = if (zh) "输入关键字开始搜索" else "Type a keyword to search",
+                    hint = if (zh) "范围：${analysisViewLabel(scope, zh)}" else "Scope: ${analysisViewLabel(scope, zh)}",
                 )
                 tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
-                rows.isEmpty() -> AnalysisEmptyState(
-                    title = if (zh) "无结果" else "No results",
-                    hint = errMessageOf(tools.viewCache[cacheKey]).ifBlank {
-                        if (zh) "换个关键字或切换范围" else "Try another keyword or scope"
-                    },
-                )
-                else -> AnalysisRowList(
-                    rows = rows,
-                    zh = zh,
-                    icon = icon,
-                    selectedTitle = if (scope == "functions") tools.selectedFunctionName else "",
-                    onPick = { row ->
-                        if (scope == "functions") onSelect(row.title, row.va)
-                        else copyToClipboard(context, row.text.ifBlank { row.title }, zh)
-                    },
-                )
+                rows.isEmpty() -> {
+                    val err = errMessageOf(tools.viewCache[cacheKey])
+                    if (err.isNotBlank()) AnalysisErrorBanner(err)
+                    else AnalysisEmptyState(
+                        title = if (zh) "无匹配结果" else "No results",
+                        hint = if (zh) "换个关键字或切换范围" else "Try another keyword or scope",
+                    )
+                }
+                else -> Column(
+                    Modifier.fillMaxSize()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (zh) "地址" else "ADDR",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier.width(90.dp),
+                        )
+                        Text(
+                            secondCol,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    GroupDivider()
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+                        items(rows, key = { r -> r.key }) { row ->
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable {
+                                        if (scope == "functions") onSelect(row.title, row.va)
+                                        else copyToClipboard(context, row.text.ifBlank { row.title }, zh)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    row.va.ifBlank { "--" },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = cs.onSurfaceVariant,
+                                    maxLines = 1,
+                                    modifier = Modifier.width(90.dp),
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        row.text.ifBlank { row.title },
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                                        color = cs.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (row.meta.isNotBlank()) {
+                                        Text(
+                                            row.meta,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = AppText.label,
+                                            color = cs.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                            GroupDivider()
+                        }
+                    }
+                }
             }
         }
     }
@@ -2707,6 +2916,61 @@ private fun SearchView(
 
 // ───────────────────────── 反汇编 ─────────────────────────
 
+/** 拆一行反汇编：地址 / 机器码 / 指令。机器码判定保守（连续十六进制字节）。 */
+private fun splitDisasmLine(line: String): Triple<String, String, String> {
+    val trimmed = line.trimStart()
+    if (trimmed.isEmpty()) return Triple("", "", "")
+    val m = Regex("^(0x[0-9a-fA-F]+)\\s+(.*)$").find(trimmed)
+    if (m == null) return Triple("", "", trimmed)
+    val addrOut = m.groupValues[1]
+    var rest = m.groupValues[2]
+    // 机器码：形如 "e0030091" 或 "e0 03 00 91"（≥2 个字节才认为是指令编码，避免把 1 字节误吸）
+    val bytesRe = Regex("^([0-9a-fA-F]{2}(?:\\s+[0-9a-fA-F]{2})*)\\s+(.*)$")
+    val joined = Regex("^([0-9a-fA-F]{6,})\\s+(.*)$").find(rest)
+    if (joined != null && joined.groupValues[1].length % 2 == 0) {
+        return Triple(addrOut, joined.groupValues[1].chunked(2).joinToString(" "), joined.groupValues[2])
+    }
+    val bm = bytesRe.find(rest)
+    if (bm != null && bm.groupValues[1].split(Regex("\\s+")).size >= 2) {
+        return Triple(addrOut, bm.groupValues[1], bm.groupValues[2])
+    }
+    return Triple(addrOut, "", rest)
+}
+
+/** 指令文本按 token 分色（助记符 primary / 寄存器 tertiary / 立即数 secondary / 注释弱化）。 */
+private fun disasmInstrAnnotated(instr: String, cs: androidx.compose.material3.ColorScheme): AnnotatedString {
+    val ci = instr.indexOf(';')
+    val code = if (ci >= 0) instr.substring(0, ci) else instr
+    val comment = if (ci >= 0) instr.substring(ci) else ""
+    return buildAnnotatedString {
+        var first = true
+        code.split(" ").forEachIndexed { ti, tk ->
+            if (ti > 0) append(" ")
+            if (tk.isEmpty()) return@forEachIndexed
+            val isAlpha = tk.matches(Regex("[a-z][a-z0-9.]*"))
+            val color = when {
+                tk.startsWith("#") || tk.matches(Regex("0x[0-9a-fA-F]+")) -> cs.secondary
+                tk.matches(Regex("(x|w|q|d|s|v)[0-9]{1,2}|sp|lr|pc|wzr|xzr|fp|rax|rbx|rcx|rdx|rsi|rdi")) -> cs.tertiary
+                first && isAlpha -> cs.primary
+                else -> cs.onSurface
+            }
+            withStyle(
+                SpanStyle(
+                    color = color,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = AppText.label,
+                    fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+            ) { append(tk) }
+            if (isAlpha) first = false
+        }
+        if (comment.isNotEmpty()) {
+            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) { append(comment) }
+        }
+    }
+}
+
+/** 反汇编：三列对齐（地址可点复制 | 机器码 | 指令与操作数），整体可横滚不换行。 */
 @Composable
 private fun DisasmView(
     tools: ToolPagesState,
@@ -2731,9 +2995,11 @@ private fun DisasmView(
     val err = errMessageOf(body)
     val obj = remember(body) { runCatching { JSONObject(body) }.getOrNull() }
     val text = remember(body) { obj?.optJSONObject("textWindow")?.optString("text").orEmpty() }
-    val lines = remember(text) { if (text.isBlank()) emptyList() else text.split("\n") }
+    val lines = remember(text) { if (text.isBlank()) emptyList() else text.split("\n").filter { it.isNotBlank() } }
     val addr = obj?.optString("addr").orEmpty()
     val count = obj?.optInt("instructionCount", lines.size) ?: lines.size
+    val parsed = remember(lines) { lines.map { splitDisasmLine(it) } }
+    val hs = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
         FlowRow(
@@ -2745,9 +3011,7 @@ private fun DisasmView(
                 label = if (zh) "更多指令" else "More",
                 enabled = ws.isNotBlank() && target.isNotBlank(),
                 loading = tools.viewLoading == key,
-                onClick = {
-                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 400) }
-                },
+                onClick = { scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 400) } },
             )
             SmallAction(if (zh) "重新加载" else "Reload", onClick = onRefresh)
             SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
@@ -2775,19 +3039,59 @@ private fun DisasmView(
         } else if (lines.isEmpty()) {
             AnalysisEmptyState(
                 title = if (zh) "无指令输出" else "No instructions",
-                hint = if (zh) "该地址可能不是可执行代码，换个函数或点「刷新」" else "Address may not be executable code",
+                hint = if (zh) "该地址可能不是可执行代码，换个函数或点「重新加载」" else "Address may not be executable code",
                 primaryLabel = if (zh) "函数列表" else "Function list",
                 onPrimary = onGoFunctions,
             )
         } else {
-            Box(
+            Column(
                 Modifier.weight(1f).fillMaxWidth()
                     .clip(RoundedCornerShape(AppShape.md))
                     .background(cs.surfaceContainerHigh)
                     .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
             ) {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 4.dp)) {
-                    items(lines) { line -> DisasmLine(line) }
+                // 表头
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(hs).padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(if (zh) "地址" else "ADDR", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(96.dp))
+                    Text(if (zh) "机器码" else "BYTES", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(150.dp))
+                    Text(if (zh) "指令" else "INSTRUCTION", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                }
+                GroupDivider()
+                // 横滚 + 竖滚：Column 用 IntrinsicSize.Max 让所有行同宽，列起点据此对齐。
+                val vs = rememberScrollState()
+                Box(Modifier.weight(1f).fillMaxWidth().horizontalScroll(hs)) {
+                    Column(
+                        Modifier.fillMaxHeight().verticalScroll(vs).width(IntrinsicSize.Max)
+                            .padding(bottom = 10.dp),
+                    ) {
+                        parsed.forEach { (a, bytes, instr) ->
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    a,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = cs.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.width(96.dp).clickable { if (a.isNotBlank()) copyToClipboard(context, a, zh) },
+                                )
+                                Text(
+                                    bytes.ifBlank { " " },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = cs.primary.copy(alpha = 0.75f),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.width(150.dp),
+                                )
+                                Text(disasmInstrAnnotated(instr, cs), maxLines = 1, softWrap = false)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2796,6 +3100,56 @@ private fun DisasmView(
 
 // ───────────────────────── 伪 C ─────────────────────────
 
+/** C 风格伪代码的轻量高亮（关键字 / 类型 / 字符串 / 数字 / 注释 / 函数调用）。 */
+private val cKeywords = setOf(
+    "if", "else", "while", "for", "do", "return", "switch", "case", "default", "break",
+    "continue", "goto", "sizeof", "static", "const", "extern", "struct", "union", "enum",
+    "typedef", "register", "volatile", "inline", "null", "NULL", "true", "false",
+)
+private val cTypes = setOf(
+    "void", "char", "short", "int", "long", "float", "double", "unsigned", "signed", "bool",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t", "int8_t", "int16_t", "int32_t", "int64_t",
+    "size_t", "ssize_t", "byte", "word", "qword",
+)
+
+private fun highlightPseudo(line: String, cs: androidx.compose.material3.ColorScheme): AnnotatedString {
+    val ci = line.indexOf("//")
+    val code = if (ci >= 0) line.substring(0, ci) else line
+    val comment = if (ci >= 0) line.substring(ci) else ""
+    val mono = SpanStyle(fontFamily = FontFamily.Monospace, fontSize = AppText.label)
+    return buildAnnotatedString {
+        val re = Regex("(\"(?:\\\\.|[^\"\\\\])*\")|('(?:\\\\.|[^'\\\\])*')|(0x[0-9a-fA-F]+)|(\\b\\d+\\b)|([A-Za-z_][A-Za-z0-9_]*)")
+        var last = 0
+        for (m in re.findAll(code)) {
+            if (m.range.first > last) {
+                withStyle(mono.copy(color = cs.onSurface)) { append(code.substring(last, m.range.first)) }
+            }
+            val tok = m.value
+            val color = when {
+                tok.startsWith("\"") || tok.startsWith("'") -> cs.secondary
+                tok.startsWith("0x") -> cs.secondary
+                tok[0].isDigit() -> cs.secondary
+                tok in cKeywords -> cs.primary
+                tok in cTypes -> cs.tertiary
+                else -> {
+                    val after = code.substring(m.range.last + 1)
+                    if (after.trimStart().startsWith("(")) cs.primary else cs.onSurface
+                }
+            }
+            val weight = if (tok in cKeywords) FontWeight.SemiBold else FontWeight.Normal
+            withStyle(mono.copy(color = color, fontWeight = weight)) { append(tok) }
+            last = m.range.last + 1
+        }
+        if (last < code.length) {
+            withStyle(mono.copy(color = cs.onSurface)) { append(code.substring(last)) }
+        }
+        if (comment.isNotEmpty()) {
+            withStyle(mono.copy(color = cs.onSurfaceVariant.copy(alpha = 0.6f))) { append(comment) }
+        }
+    }
+}
+
+/** 伪 C 代码视图：行号槽 + 轻量高亮；顶部显示签名/范围/覆盖率等元信息。 */
 @Composable
 private fun PseudoView(
     tools: ToolPagesState,
@@ -2822,7 +3176,13 @@ private fun PseudoView(
     val bounds = remember(body) { obj?.optJSONObject("functionBounds") }
     val coverage = remember(body) { obj?.optJSONObject("pseudocodeCoverage") }
     val typeInf = remember(body) { obj?.optJSONObject("typeInference") }
-    val warn = remember(body) { obj?.optString("boundaryWarning").orEmpty() }
+    val warn = obj?.optString("boundaryWarning").orEmpty()
+
+    val allLines = remember(pseudo) { if (pseudo.isBlank()) emptyList() else pseudo.split("\n") }
+    val truncated = allLines.size > 3000
+    val lines = remember(allLines) { if (truncated) allLines.take(3000) else allLines }
+    val hs = rememberScrollState()
+    val vs = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
         FlowRow(
@@ -2837,6 +3197,11 @@ private fun PseudoView(
                 onClick = onRefresh,
             )
             SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
+            SmallAction(
+                label = if (zh) "复制全部" else "Copy",
+                enabled = pseudo.isNotBlank(),
+                onClick = { copyToClipboard(context, pseudo, zh) },
+            )
         }
         Spacer(Modifier.size(6.dp))
         if (ws.isBlank() || target.isBlank()) {
@@ -2859,20 +3224,20 @@ private fun PseudoView(
             )
         } else {
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // 小字元信息：函数边界 / 覆盖范围 / 边界警告 / 类型推断
+                // 元信息：范围 / 声明 / 越界 / 类型推断 —— 以 chip 形式固定在上方（不随代码滚动）
                 val meta = ArrayList<String>(4)
                 if (bounds != null) {
                     val s = bounds.optString("startAddr")
                     val e = bounds.optString("endAddr")
                     val sz = bounds.optLong("size", -1L)
-                    if (s.isNotBlank()) meta.add("${if (zh) "范围" else "range"} $s - $e")
+                    if (s.isNotBlank()) meta.add("${if (zh) "范围" else "range"} $s-$e")
                     if (sz >= 0L) meta.add("$sz B")
                 }
                 if (coverage != null) {
                     val d0 = coverage.optString("declaredStart")
                     val d1 = coverage.optString("declaredEnd")
                     val oob = coverage.optJSONArray("outOfBoundsAddrs")?.length() ?: 0
-                    if (d0.isNotBlank()) meta.add("${if (zh) "声明" else "declared"} $d0 - $d1")
+                    if (d0.isNotBlank()) meta.add("${if (zh) "声明" else "declared"} $d0-$d1")
                     if (oob > 0) meta.add(if (zh) "越界地址 $oob" else "oob $oob")
                 }
                 if (typeInf != null) {
@@ -2884,25 +3249,65 @@ private fun PseudoView(
                     }
                     if (parts.isNotEmpty()) meta.add(parts.joinToString(" · "))
                 }
-                if (meta.isNotEmpty()) {
-                    Text(
-                        meta.joinToString("  |  "),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = AppText.label,
-                        color = cs.onSurfaceVariant,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                if (meta.isNotEmpty() || lines.isNotEmpty()) {
+                    FlowRow(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        meta.forEach { m ->
+                            Text(
+                                m,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = AppText.label,
+                                fontFamily = FontFamily.Monospace,
+                                color = cs.onSurfaceVariant,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(AppShape.sm))
+                                    .background(cs.surfaceContainerHigh)
+                                    .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.sm))
+                                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
                 }
                 if (warn.isNotBlank()) AnalysisErrorBanner(warn)
 
                 Box(
-                    Modifier.weight(1f).fillMaxWidth()
+                    Modifier.weight(1f).fillMaxWidth().horizontalScroll(hs)
                         .clip(RoundedCornerShape(AppShape.md))
                         .background(cs.surfaceContainerHigh)
                         .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
                 ) {
-                    MonoScreen(pseudo)
+                    Column(
+                        Modifier.fillMaxHeight().verticalScroll(vs).width(IntrinsicSize.Max).padding(vertical = 8.dp),
+                    ) {
+                        lines.forEachIndexed { idx, line ->
+                            Row(Modifier.padding(horizontal = 8.dp)) {
+                                Text(
+                                    "${idx + 1}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = cs.onSurfaceVariant.copy(alpha = 0.5f),
+                                    textAlign = TextAlign.End,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.width(40.dp).padding(end = 8.dp),
+                                )
+                                Text(highlightPseudo(line, cs), maxLines = 1, softWrap = false)
+                            }
+                        }
+                        if (truncated) {
+                            Text(
+                                if (zh) "… 已截断，仅显示前 3000 行（完整内容点「复制全部」）"
+                                else "… truncated to first 3000 lines (use Copy for full text)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = AppText.label,
+                                color = cs.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -3028,27 +3433,85 @@ private fun CfgView(
     }
 }
 
-// ───────────────────────── 列表视图（字符串 / 符号 / 导入导出 / 段节） ─────────────────────────
+// ───────────────────────── 列表视图（字符串 / 符号 / 导入 / 段节） ─────────────────────────
 
+/** 列表视图共用的小表头（各视图自定义列）. */
 @Composable
-private fun ListView(
+private fun ListCols(vararg cols: Pair<String, androidx.compose.ui.unit.Dp?>) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        cols.forEach { (label, w) ->
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                modifier = if (w == null) Modifier.weight(1f) else Modifier.width(w),
+            )
+        }
+    }
+}
+
+/** 列表视图共用的外壳：表头 + 分割线 + 行内容（内部横滚不换行）。 */
+@Composable
+private fun ListShell(
+    headers: List<Pair<String, androidx.compose.ui.unit.Dp?>>,
+    rows: kotlin.collections.List<AnalysisRow>,
+    expandedKey: String?,
+    onPick: (AnalysisRow) -> Unit,
+    cell: @Composable (AnalysisRow) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxSize()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+    ) {
+        ListCols(*headers.toTypedArray())
+        GroupDivider()
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+            items(rows, key = { r -> r.key }) { row ->
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(if (row.key == expandedKey) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
+                        .clickable { onPick(row) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    cell(row)
+                }
+                GroupDivider()
+            }
+        }
+    }
+}
+
+/** 列表视图通用外壳（取数 + 状态分支）。 */
+@Composable
+private fun ListScaffold(
     tools: ToolPagesState,
     zh: Boolean,
     context: android.content.Context,
     view: String,
+    limit: Int,
     onRefresh: () -> Unit,
+    headers: List<Pair<String, androidx.compose.ui.unit.Dp?>>,
+    rowsFromJson: (String?) -> kotlin.collections.List<AnalysisRow>,
     onPick: (AnalysisRow) -> Unit,
+    cell: @Composable (AnalysisRow) -> Unit,
 ) {
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
     val cacheKey = "$view|$ws|"
-    val icon = analysisViewIcon(view)
 
     LaunchedEffect(cacheKey, tools.reloadTick) {
-        loadListCache(context, tools, view, ws, cacheKey, 400)
+        loadListCache(context, tools, view, ws, cacheKey, limit)
     }
-
-    val rows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], view) }
+    val rows = remember(tools.viewCache[cacheKey]) { rowsFromJson(tools.viewCache[cacheKey]) }
 
     Column(Modifier.fillMaxSize()) {
         FlowRow(
@@ -3070,23 +3533,331 @@ private fun ListView(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
+                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
                 )
                 tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
-                rows.isEmpty() && !tools.viewCache.containsKey(cacheKey) ->
-                    AnalysisErrorBanner(errMessageOf(tools.viewCache[cacheKey]).ifBlank {
+                rows.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> AnalysisErrorBanner(
+                    errMessageOf(tools.viewCache[cacheKey]).ifBlank {
                         if (zh) "加载失败，点「刷新」重试" else "Load failed, tap Refresh"
-                    })
+                    },
+                )
                 rows.isEmpty() -> AnalysisEmptyState(
-                    title = if (zh) "无数据" else "No data",
-                    hint = if (zh) "该视图没有可显示的条目" else "This view has no entries",
+                    title = if (zh) "暂无数据" else "No data",
+                    hint = if (zh) "该文件可能不含这一类内容" else "This file may not contain this kind of data",
                     primaryLabel = if (zh) "刷新" else "Refresh",
                     onPrimary = onRefresh,
                 )
-                else -> AnalysisRowList(rows = rows, zh = zh, icon = icon, onPick = onPick)
+                else -> ListShell(
+                    headers = headers,
+                    rows = rows,
+                    expandedKey = null,
+                    onPick = onPick,
+                    cell = cell,
+                )
             }
         }
     }
+}
+
+/** 字符串：地址 | 长度 | 内容（点行复制内容）。 */
+@Composable
+private fun StringsView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onPick: (AnalysisRow) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    ListScaffold(
+        tools = tools, zh = zh, context = context, view = "strings", limit = 400,
+        onRefresh = onRefresh,
+        headers = listOf(
+            (if (zh) "地址" else "ADDR") to 86.dp,
+            (if (zh) "长度" else "LEN") to 46.dp,
+            (if (zh) "内容" else "VALUE") to null,
+        ),
+        rowsFromJson = { json ->
+            val arr = itemsArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val it = arr.optJSONObject(i) ?: return@mapNotNull null
+                val off = it.optString("offset").ifBlank { it.optString("addr") }
+                val len = it.optLong("length", -1L)
+                val enc = it.optString("encoding").ifBlank { it.optString("section") }
+                val value = it.optString("value")
+                AnalysisRow(
+                    key = "s$i|$off",
+                    title = value,
+                    meta = listOf("${if (len >= 0) len else "-"}", enc).filter { t -> t.isNotBlank() }.joinToString(" · "),
+                    va = off,
+                    text = value,
+                )
+            }
+        },
+        onPick = onPick,
+    ) { row ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                row.va.ifBlank { "--" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(86.dp),
+            )
+            Text(
+                row.meta.substringBefore(" · ").ifBlank { "-" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(46.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    row.title,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                    color = cs.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val enc = row.meta.substringAfter(" · ", "")
+                if (enc.isNotBlank()) {
+                    Text(enc, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+/** 符号：地址 | 类型 | 绑定 | 名称（demangled 优先）。 */
+@Composable
+private fun SymbolsView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onPick: (AnalysisRow) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    ListScaffold(
+        tools = tools, zh = zh, context = context, view = "symbols", limit = 400,
+        onRefresh = onRefresh,
+        headers = listOf(
+            (if (zh) "地址" else "ADDR") to 86.dp,
+            (if (zh) "类型" else "TYPE") to 58.dp,
+            (if (zh) "名称" else "NAME") to null,
+        ),
+        rowsFromJson = { json ->
+            val arr = itemsArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val it = arr.optJSONObject(i) ?: return@mapNotNull null
+                val va = it.optString("value").ifBlank { it.optString("addr") }.ifBlank { it.optString("startAddr") }
+                val name = it.optString("demangled").ifBlank { it.optString("name") }.ifBlank { it.optString("symbol") }
+                val type = it.optString("type")
+                val bind = it.optString("bind").ifBlank { it.optString("visibility") }
+                val size = it.optLong("size", -1L)
+                AnalysisRow(
+                    key = "y$i|$va|$name",
+                    title = name,
+                    meta = listOf(type, bind, if (size >= 0) "$size B" else "").filter { t -> t.isNotBlank() }.joinToString(" · "),
+                    va = va,
+                    text = name,
+                )
+            }
+        },
+        onPick = onPick,
+    ) { row ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                row.va.ifBlank { "--" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(86.dp),
+            )
+            Text(
+                row.meta.substringBefore(" · ").ifBlank { "-" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.tertiary,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(58.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    row.title,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                    color = cs.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val rest = row.meta.substringAfter(" · ", "")
+                if (rest.isNotBlank()) {
+                    Text(rest, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** 导入：名称 | 类型 | 绑定 | 库/节。 */
+@Composable
+private fun ImportsView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onPick: (AnalysisRow) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    ListScaffold(
+        tools = tools, zh = zh, context = context, view = "imports", limit = 400,
+        onRefresh = onRefresh,
+        headers = listOf(
+            (if (zh) "类型" else "TYPE") to 58.dp,
+            (if (zh) "名称" else "NAME") to null,
+        ),
+        rowsFromJson = { json ->
+            val arr = itemsArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val it = arr.optJSONObject(i) ?: return@mapNotNull null
+                val name = it.optString("symbol").ifBlank { it.optString("name") }
+                val type = it.optString("type")
+                val bind = it.optString("bind")
+                val lib = it.optString("library").ifBlank { it.optString("section") }
+                AnalysisRow(
+                    key = "m$i|$name",
+                    title = name,
+                    meta = listOf(type, bind, lib).filter { t -> t.isNotBlank() }.joinToString(" · "),
+                    va = it.optString("value").ifBlank { it.optString("addr") },
+                    text = name,
+                )
+            }
+        },
+        onPick = onPick,
+    ) { row ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                row.meta.substringBefore(" · ").ifBlank { "-" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.tertiary,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(58.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    row.title,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                    color = cs.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val rest = row.meta.substringAfter(" · ", "")
+                if (rest.isNotBlank()) {
+                    Text(rest, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** 段节：名称 | 地址 | 大小 | 权限徽标。 */
+@Composable
+private fun SectionsView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onPick: (AnalysisRow) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    ListScaffold(
+        tools = tools, zh = zh, context = context, view = "sections", limit = 400,
+        onRefresh = onRefresh,
+        headers = listOf(
+            (if (zh) "名称" else "NAME") to 120.dp,
+            (if (zh) "地址" else "ADDR") to 86.dp,
+            (if (zh) "大小" else "SIZE") to 62.dp,
+            (if (zh) "权限" else "PERM") to 56.dp,
+        ),
+        rowsFromJson = { json ->
+            val arr = itemsArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val it = arr.optJSONObject(i) ?: return@mapNotNull null
+                val name = it.optString("name")
+                val addr = it.optString("addr").ifBlank { it.optString("virtualAddr") }
+                val size = it.optLong("size", -1L)
+                val flags = it.optString("flags").ifBlank { it.optString("perm") }
+                AnalysisRow(
+                    key = "c$i|$name",
+                    title = name,
+                    meta = listOf(if (size >= 0) "$size" else "-", flags).joinToString(" · "),
+                    va = addr,
+                    text = name,
+                )
+            }
+        },
+        onPick = onPick,
+    ) { row ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                row.title,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(120.dp),
+            )
+            Text(
+                row.va.ifBlank { "--" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(86.dp),
+            )
+            Text(
+                row.meta.substringBefore(" · ").ifBlank { "-" },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                textAlign = TextAlign.End,
+                modifier = Modifier.width(62.dp),
+            )
+            val perm = row.meta.substringAfter(" · ", "")
+            Row(Modifier.width(56.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                permChars(perm).forEach { (ch, on) ->
+                    Text(
+                        ch,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (on) cs.primary else cs.onSurfaceVariant.copy(alpha = 0.35f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun permChars(perm: String): List<Pair<String, Boolean>> {
+    val p = perm.uppercase()
+    return listOf(
+        "R" to (p.contains("R")),
+        "W" to (p.contains("W")),
+        "X" to (p.contains("X")),
+    )
+}
+
+/** 从列表 JSON 里取数组（items 优先，functions 兼容）。 */
+private fun itemsArray(json: String?): JSONArray {
+    if (json.isNullOrBlank()) return JSONArray()
+    val o = runCatching { JSONObject(json) }.getOrNull() ?: return JSONArray()
+    return o.optJSONArray("items") ?: o.optJSONArray("functions") ?: JSONArray()
 }
 
 // ───────────────────────── 结果 / 工具 ─────────────────────────
@@ -3178,3 +3949,416 @@ private fun ToolsPane(
         }
     }
 }
+
+// ───────────────────────── C++ 符号（demangle） ─────────────────────────
+
+/** C++ 符号：输入 Itanium mangled 名 → 还原可读签名；也可扫描当前工作区批量还原。 */
+@Composable
+private fun DemangleView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var input by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf("") }
+    var original by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var working by remember { mutableStateOf(false) }
+
+    fun run() {
+        val sym = input.trim()
+        if (sym.isBlank()) return
+        scope.launch {
+            working = true
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val handler = com.soreverse.mcp.mcp.ToolCatalog.byName["taffy_so_demangle"]
+                        ?: return@runCatching null
+                    val tcx = com.soreverse.mcp.mcp.ToolContext(
+                        context,
+                        com.soreverse.mcp.core.SettingsStore(context),
+                        EngineProvider.get(context),
+                        null,
+                    )
+                    handler.handle(tcx, JSONObject().put("symbol", sym))
+                }.getOrNull()
+            }
+            working = false
+            if (res == null) {
+                original = sym
+                result = ""
+                note = if (zh) "引擎未就绪（native 库未加载）" else "engine not ready (native lib not loaded)"
+            } else {
+                original = res.optString("mangled").ifBlank { sym }
+                result = res.optString("demangled")
+                note = res.optString("note")
+                if (res.optBoolean("ok", false) && result == original) {
+                    note = if (zh) "已是最可读形式（可能不是 Itanium 编码）" else "already readable (not Itanium?)"
+                }
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = input,
+            onValueChange = { input = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Transform, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            placeholder = {
+                Text(
+                    if (zh) "粘贴 mangled 符号，如 _ZN4Test3fooEi" else "paste a mangled symbol, e.g. _ZN4Test3fooEi",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
+        Spacer(Modifier.size(6.dp))
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(
+                label = if (zh) "还原" else "Demangle",
+                enabled = input.isNotBlank(),
+                loading = working,
+                onClick = { run() },
+            )
+            SmallAction(
+                label = if (zh) "清空" else "Clear",
+                enabled = input.isNotBlank() || result.isNotBlank(),
+                onClick = { input = ""; result = ""; original = ""; note = "" },
+            )
+            SmallAction(
+                label = if (zh) "复制结果" else "Copy",
+                enabled = result.isNotBlank(),
+                onClick = { copyToClipboard(context, result, zh) },
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        if (result.isBlank() && original.isBlank()) {
+            AnalysisEmptyState(
+                title = if (zh) "C++ 符号还原" else "C++ symbol demangle",
+                hint = if (zh) "输入 Itanium ABI 的 mangled 名（通常以 _Z 开头），还原成可读的类名/函数名/参数表。"
+                    else "Enter an Itanium ABI mangled name (usually starting with _Z) to get a readable signature.",
+            )
+        } else {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ResultCard(if (zh) "Mangled（输入）" else "Mangled (input)") { original }
+                if (result.isNotBlank()) ResultCard(if (zh) "Demangled（还原）" else "Demangled") { result }
+                if (note.isNotBlank()) {
+                    AnalysisErrorBanner(note)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultCard(label: String, mono: Boolean = true, value: () -> String) {
+    val cs = MaterialTheme.colorScheme
+    val v = value()
+    if (v.isBlank()) return
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+        Text(
+            v,
+            style = if (mono) MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body)
+            else MaterialTheme.typography.bodyMedium.copy(fontSize = AppText.bodyStrong),
+            color = cs.onSurface,
+        )
+    }
+}
+
+// ───────────────────────── 进制转换 ─────────────────────────
+
+/** 把任意进制的输入解析成 BigInteger（去前缀/下划线/空格；自动识别 0x/0b/0o）。 */
+private fun parseBaseValue(raw: String, base: Int): java.math.BigInteger? {
+    var t = raw.trim().replace("_", "").replace(" ", "")
+    if (t.isEmpty()) return null
+    var neg = false
+    if (t.startsWith("-")) { neg = true; t = t.substring(1) }
+    var b = base
+    if (b == 0) {
+        val low = t.lowercase()
+        b = when {
+            low.startsWith("0x") -> { t = t.substring(2); 16 }
+            low.startsWith("0b") -> { t = t.substring(2); 2 }
+            low.startsWith("0o") -> { t = t.substring(2); 8 }
+            else -> 10
+        }
+    } else {
+        val low = t.lowercase()
+        if (b == 16 && low.startsWith("0x")) t = t.substring(2)
+        if (b == 2 && low.startsWith("0b")) t = t.substring(2)
+        if (b == 8 && low.startsWith("0o")) t = t.substring(2)
+    }
+    val v = runCatching { java.math.BigInteger(t, b) }.getOrNull() ?: return null
+    return if (neg) v.negate() else v
+}
+
+/** 进制转换：数值 ↔ 2/8/10/16 进制 + ASCII + 常见字节序。 */
+@Composable
+private fun BaseConvertView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    var input by remember { mutableStateOf("") }
+    var base by remember { mutableStateOf(0) } // 0=自动
+    val parsed = remember(input, base) { parseBaseValue(input, base) }
+
+    val baseLabels = listOf(0 to "Auto", 16 to "HEX", 10 to "DEC", 8 to "OCT", 2 to "BIN")
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = input,
+            onValueChange = { input = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Calculate, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            placeholder = {
+                Text(
+                    if (zh) "输入数值，如 0x1F / 255 / 0b1111" else "value, e.g. 0x1F / 255 / 0b1111",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
+        Spacer(Modifier.size(6.dp))
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            baseLabels.forEach { (b, label) ->
+                SmallAction(label, active = base == b) { base = b }
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+        if (parsed == null) {
+            AnalysisEmptyState(
+                title = if (zh) "进制转换" else "Base converter",
+                hint = if (zh) "输入一个数值，选择来源进制（或自动识别 0x / 0o / 0b 前缀），即可得到 HEX / DEC / OCT / BIN 以及字节序表示。"
+                    else "Enter a value and pick its base (auto-detects 0x / 0o / 0b) to get HEX / DEC / OCT / BIN and endianness views.",
+            )
+        } else {
+            val v = parsed
+            val hex = v.toString(16)
+            val bits = (v.bitLength() + 7) / 8
+            val bytes = ((bits + 7) / 8) * 8 / 8
+            val beHex = padBytes(hex, bytes, bigEndian = true)
+            val leHex = padBytes(hex, bytes, bigEndian = false)
+            val ascii = hexToAscii(hex, bytes)
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                KeyValueCard(zh, listOf(
+                    ("HEX" to "0x" + hex.uppercase()),
+                    ("DEC" to v.toString(10)),
+                    ("OCT" to "0o" + v.toString(8)),
+                    ("BIN" to "0b" + v.toString(2)),
+                ))
+                KeyValueCard(zh, listOf(
+                    (if (zh) "字节数" else "bytes") to "$bytes",
+                    (if (zh) "大端" else "BE") to ("0x" + beHex.uppercase()),
+                    (if (zh) "小端" else "LE") to ("0x" + leHex.uppercase()),
+                    ("ASCII" to ascii),
+                ))
+                SmallAction(if (zh) "复制 HEX" else "Copy HEX") { copyToClipboard(context, "0x" + hex, zh) }
+            }
+        }
+    }
+}
+
+/** 把 hex 串按字节数左侧补零（可选字节序翻转）。 */
+private fun padBytes(hex: String, byteCount: Int, bigEndian: Boolean): String {
+    var h = hex.lowercase()
+    if (h.length % 2 == 1) h = "0$h"
+    val padded = h.padStart(byteCount * 2, '0')
+    if (bigEndian) return padded
+    return padded.chunked(2).reversed().joinToString("")
+}
+
+/** hex（按字节）→ 可打印 ASCII，非可打印显示 '.'。 */
+private fun hexToAscii(hex: String, byteCount: Int): String {
+    var h = hex.lowercase()
+    if (h.length % 2 == 1) h = "0$h"
+    val padded = h.padStart(byteCount * 2, '0')
+    val sb = StringBuilder()
+    padded.chunked(2).forEach { b ->
+        val code = runCatching { b.toInt(16) }.getOrDefault(0)
+        sb.append(if (code in 32..126) code.toChar() else '.')
+    }
+    return sb.toString()
+}
+
+@Composable
+private fun KeyValueCard(zh: Boolean, pairs: List<Pair<String, String>>) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        pairs.forEach { (k, v) ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Text(
+                    k,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.width(64.dp),
+                )
+                Text(
+                    v,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                    color = cs.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+// ───────────────────────── 汇编器 ─────────────────────────
+
+private val asmArchs = listOf("arm64" to "AArch64", "arm32" to "ARM", "x86" to "x86", "x86_64" to "x86_64")
+
+/** 汇编器：汇编 → 机器码（Rizin/keystone 编码），可指定架构与地址。 */
+@Composable
+private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var asm by remember { mutableStateOf("") }
+    var arch by remember { mutableStateOf("arm64") }
+    var addrText by remember { mutableStateOf("0x1000") }
+    var outHex by remember { mutableStateOf("") }
+    var outSize by remember { mutableStateOf(-1) }
+    var status by remember { mutableStateOf("") }
+    var working by remember { mutableStateOf(false) }
+
+    fun assemble() {
+        val src = asm.trim()
+        if (src.isBlank()) return
+        val addr = hexVal(addrText.ifBlank { "0" })
+        scope.launch {
+            working = true
+            status = ""
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = com.soreverse.mcp.nativecore.NativeEngine.active()
+                    if (!eng.available()) return@runCatching null
+                    eng.assemble(src, arch, addr, false)
+                }.getOrNull()
+            }
+            working = false
+            if (r == null) {
+                outHex = ""; outSize = -1
+                status = if (zh) "native 汇编引擎不可用" else "native assembler unavailable"
+            } else if (r.isEmpty()) {
+                outHex = ""; outSize = 0
+                status = if (zh) "无法编码该指令（检查架构/语法）" else "could not encode (check arch / syntax)"
+            } else {
+                outHex = r.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+                outSize = r.size
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // 架构选择
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            asmArchs.forEach { (key, label) ->
+                SmallAction(label, active = arch == key) { arch = key }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = addrText,
+                onValueChange = { addrText = it },
+                singleLine = true,
+                label = { Text(if (zh) "地址" else "addr", fontSize = AppText.label) },
+                modifier = Modifier.width(130.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                shape = RoundedCornerShape(AppShape.sm),
+            )
+            OutlinedTextField(
+                value = asm,
+                onValueChange = { asm = it },
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                label = { Text(if (zh) "汇编指令" else "assembly", fontSize = AppText.label) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                shape = RoundedCornerShape(AppShape.sm),
+                placeholder = {
+                    Text(
+                        if (zh) "mov x0, x1" else "mov x0, x1",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        color = cs.onSurfaceVariant,
+                    )
+                },
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(
+                label = if (zh) "汇编" else "Assemble",
+                enabled = asm.isNotBlank(),
+                loading = working,
+                onClick = { assemble() },
+            )
+            SmallAction(
+                label = if (zh) "清空" else "Clear",
+                enabled = asm.isNotBlank() || outHex.isNotBlank(),
+                onClick = { asm = ""; outHex = ""; outSize = -1; status = "" },
+            )
+            SmallAction(
+                label = if (zh) "复制机器码" else "Copy bytes",
+                enabled = outHex.isNotBlank(),
+                onClick = { copyToClipboard(context, outHex, zh) },
+            )
+            if (outSize >= 0) {
+                Text(
+                    "$outSize ${if (zh) "字节" else "bytes"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+        if (outHex.isBlank()) {
+            if (status.isNotBlank()) AnalysisErrorBanner(status)
+            else AnalysisEmptyState(
+                title = if (zh) "汇编器" else "Assembler",
+                hint = if (zh) "输入一条或多条汇编指令（用分号或换行分隔），选择目标架构，输出机器码字节。"
+                    else "Enter one or more instructions (separate with ';' or newlines), pick the target arch, and get machine-code bytes.",
+            )
+        } else {
+            ResultCard(if (zh) "机器码" else "Machine code") { outHex }
+        }
+    }
+}
+

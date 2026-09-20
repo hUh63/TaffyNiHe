@@ -295,6 +295,22 @@ internal fun AnalysisWorkspace(
 
                         "asm" -> AsmEditorView(tools = tools, zh = zh, context = context)
 
+                        "elfhdr" -> ElfHeaderView(tools, zh, context, refreshAll)
+
+                        "segments" -> SegmentsView(tools, zh, context, refreshAll)
+
+                        "relocs" -> RelocsView(tools, zh, context, refreshAll)
+
+                        "dynamic" -> DynamicView(tools, zh, context, refreshAll)
+
+                        "libraries" -> LibrariesView(tools, zh, context, refreshAll)
+
+                        "hashes" -> HashesView(tools, zh, context, refreshAll)
+
+                        "versions" -> VersionsView(tools, zh, context, refreshAll)
+
+                        "entries" -> EntriesView(tools, zh, context, refreshAll)
+
                         "hex" -> AppCard(Modifier.fillMaxSize()) { HexPane(state, zh) }
 
                         "results" -> ResultsPane(tools, zh)
@@ -1902,6 +1918,14 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("symbols", "符号", "Sym", Icons.Filled.ListAlt),
     AnalysisNavItem("imports", "导入", "Imp", Icons.Filled.Link),
     AnalysisNavItem("sections", "段节", "Sec", Icons.Filled.Inventory2),
+    AnalysisNavItem("elfhdr", "ELF头", "ELF", Icons.Filled.Info),
+    AnalysisNavItem("segments", "程序段", "Seg", Icons.Filled.Inventory2),
+    AnalysisNavItem("relocs", "重定位", "Rel", Icons.Filled.Link),
+    AnalysisNavItem("dynamic", "动态", "Dyn", Icons.Filled.FlashOn),
+    AnalysisNavItem("libraries", "依赖库", "Lib", Icons.Filled.FolderOpen),
+    AnalysisNavItem("hashes", "哈希", "Hash", Icons.Filled.LockOpen),
+    AnalysisNavItem("versions", "版本", "Ver", Icons.Filled.Refresh),
+    AnalysisNavItem("entries", "入口点", "Ent", Icons.Filled.MyLocation),
     AnalysisNavItem("hex", "HEX", "Hex", Icons.Filled.Storage),
     AnalysisNavItem("demangle", "C++", "C++", Icons.Filled.Transform),
     AnalysisNavItem("base", "进制", "Base", Icons.Filled.Calculate),
@@ -4234,131 +4258,235 @@ private fun KeyValueCard(zh: Boolean, pairs: List<Pair<String, String>>) {
     }
 }
 
-// ───────────────────────── 汇编器 ─────────────────────────
+// ───────────────────────── 汇编工作台（实时编码 + 写回编辑会话） ─────────────────────────
 
 private val asmArchs = listOf("arm64" to "AArch64", "arm32" to "ARM", "x86" to "x86", "x86_64" to "x86_64")
 
-/** 汇编器：汇编 → 机器码（Rizin/keystone 编码），可指定架构与地址。 */
+/** 汇编工作台：本地实时编码预览（不依赖工作区）+ 把汇编写入工作区编辑会话（可预览/校验/导出）。 */
 @Composable
 private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
+    val ws = tools.sharedWorkspaceId
+
     var asm by remember { mutableStateOf("") }
     var arch by remember { mutableStateOf("arm64") }
     var addrText by remember { mutableStateOf("0x1000") }
+
+    // 本地编码预览（实时）
     var outHex by remember { mutableStateOf("") }
     var outSize by remember { mutableStateOf(-1) }
     var status by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
 
-    fun assemble() {
+    // 写回编辑会话
+    var locator by remember { mutableStateOf("") }
+    var sessionId by remember { mutableStateOf("") }
+    var patchMsg by remember { mutableStateOf("") }
+    var patchErr by remember { mutableStateOf("") }
+    var patching by remember { mutableStateOf(false) }
+
+    val addr = remember(addrText) { hexVal(addrText.ifBlank { "0" }) }
+
+    // 实时预览：文本/架构/地址变化 400ms 后自动编码
+    LaunchedEffect(asm, arch, addr) {
+        if (asm.isBlank()) { outHex = ""; outSize = -1; status = ""; return@LaunchedEffect }
+        kotlinx.coroutines.delay(400)
         val src = asm.trim()
-        if (src.isBlank()) return
-        val addr = hexVal(addrText.ifBlank { "0" })
-        scope.launch {
-            working = true
+        val r = withContext(Dispatchers.IO) {
+            runCatching {
+                val eng = com.soreverse.mcp.nativecore.NativeEngine.active()
+                if (!eng.available()) return@runCatching null
+                eng.assemble(src, arch, addr, false)
+            }.getOrNull()
+        }
+        if (r == null) {
+            outHex = ""; outSize = -1
+            status = if (zh) "native 汇编引擎不可用" else "native assembler unavailable"
+        } else if (r.isEmpty()) {
+            outHex = ""; outSize = 0
+            status = if (zh) "无法编码该指令（检查架构 / 语法）" else "could not encode (check arch / syntax)"
+        } else {
+            outHex = r.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+            outSize = r.size
             status = ""
+        }
+    }
+
+    fun applyToSession(dryRun: Boolean) {
+        if (ws.isBlank()) { patchErr = if (zh) "需先打开工作区才能写回" else "open a workspace first"; return }
+        if (asm.isBlank() || locator.isBlank()) { patchErr = if (zh) "需要汇编内容与目标地址" else "need assembly + target address"; return }
+        scope.launch {
+            patching = true
+            patchErr = ""; patchMsg = ""
             val r = withContext(Dispatchers.IO) {
                 runCatching {
-                    val eng = com.soreverse.mcp.nativecore.NativeEngine.active()
-                    if (!eng.available()) return@runCatching null
-                    eng.assemble(src, arch, addr, false)
-                }.getOrNull()
+                    val eng = EngineProvider.get(context)
+                    var sid = sessionId
+                    if (sid.isBlank()) {
+                        val eo = eng.editOpen(ws)
+                        sid = eo.optString("editSessionId")
+                            .ifBlank { eo.optJSONObject("data")?.optString("editSessionId").orEmpty() }
+                        if (sid.isNotBlank()) sessionId = sid
+                    }
+                    if (sid.isBlank()) return@runCatching JSONObject()
+                        .put("error", JSONObject().put("message", if (zh) "无法创建编辑会话" else "could not open edit session"))
+                    val edit = JSONObject()
+                        .put("writeAsm", asm.trim())
+                        .put("mode", "replace_instructions")
+                        .put("instructionIndex", 0)
+                    eng.editAsm(ws, sid, locator.trim(), JSONArray().put(edit), dryRun)
+                }.getOrElse { JSONObject().put("error", JSONObject().put("message", it.message ?: "failed")) }
             }
-            working = false
-            if (r == null) {
-                outHex = ""; outSize = -1
-                status = if (zh) "native 汇编引擎不可用" else "native assembler unavailable"
-            } else if (r.isEmpty()) {
-                outHex = ""; outSize = 0
-                status = if (zh) "无法编码该指令（检查架构/语法）" else "could not encode (check arch / syntax)"
+            patching = false
+            val err = errMessageOf(r.toString())
+            if (err.isNotBlank()) {
+                patchErr = err
             } else {
-                outHex = r.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
-                outSize = r.size
+                val cnt = r.optJSONArray("previews")?.length()
+                    ?: r.optJSONArray("patches")?.length()
+                    ?: r.optInt("patchCount", -1)
+                val applied = r.optBoolean("dryRun", dryRun) == false
+                patchMsg = buildString {
+                    append(if (dryRun) (if (zh) "预览通过" else "preview ok") else (if (zh) "已写入编辑会话" else "written to edit session"))
+                    if (cnt >= 0) append(" · $cnt ${if (zh) "处改动" else "edits"}")
+                    if (sid.isNotBlank()) append("\nsession: $sid")
+                }
+                tools.clearViewCaches()
+                tools.reloadTick = tools.reloadTick + 1
+                if (!dryRun && applied) Unit
             }
         }
     }
 
     Column(Modifier.fillMaxSize()) {
-        // 架构选择
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            asmArchs.forEach { (key, label) ->
-                SmallAction(label, active = arch == key) { arch = key }
-            }
+            asmArchs.forEach { (key, label) -> SmallAction(label, active = arch == key) { arch = key } }
         }
         Spacer(Modifier.size(6.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedTextField(
+                    value = asm,
+                    onValueChange = { asm = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
+                    label = { Text(if (zh) "汇编指令（分号或换行分隔）" else "assembly (';' or newline)", fontSize = AppText.label) },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                    shape = RoundedCornerShape(AppShape.sm),
+                    placeholder = {
+                        Text(
+                            if (zh) "mov x0, x1" else "mov x0, x1",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                            color = cs.onSurfaceVariant,
+                        )
+                    },
+                )
+                OutlinedTextField(
+                    value = addrText,
+                    onValueChange = { addrText = it },
+                    singleLine = true,
+                    label = { Text(if (zh) "编码地址" else "encode addr", fontSize = AppText.label) },
+                    modifier = Modifier.width(160.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                    shape = RoundedCornerShape(AppShape.sm),
+                )
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+
+        // 实时编码结果
+        if (outHex.isNotBlank()) {
+            ResultCard(if (zh) "机器码（实时）" else "Machine code (live)") { "$outHex" }
+            Spacer(Modifier.size(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (outSize >= 0) "$outSize ${if (zh) "字节" else "bytes"}" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                )
+                SmallAction(if (zh) "复制机器码" else "Copy bytes") { copyToClipboard(context, outHex, zh) }
+            }
+        } else if (status.isNotBlank()) {
+            AnalysisErrorBanner(status)
+        } else if (asm.isBlank()) {
+            AnalysisEmptyState(
+                title = if (zh) "汇编工作台" else "Assembly workshop",
+                hint = if (zh) "输入汇编即实时看到机器码；打开工作区后还能把改动写回（先预览、再写入编辑会话）。"
+                    else "Type assembly to see machine code live; with a workspace open you can also write the change back (preview first).",
+            )
+        }
+
+        Spacer(Modifier.size(10.dp))
+        GroupDivider()
+        Spacer(Modifier.size(10.dp))
+
+        // 写回编辑会话
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                if (zh) "写回工作区" else "Write back to workspace",
+                style = MaterialTheme.typography.labelMedium,
+                fontSize = AppText.label,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurface,
+            )
             OutlinedTextField(
-                value = addrText,
-                onValueChange = { addrText = it },
+                value = locator,
+                onValueChange = { locator = it },
                 singleLine = true,
-                label = { Text(if (zh) "地址" else "addr", fontSize = AppText.label) },
-                modifier = Modifier.width(130.dp),
+                enabled = ws.isNotBlank(),
+                label = { Text(if (zh) "目标函数/地址（如 sub_1234 或 0x1234）" else "target function / address", fontSize = AppText.label) },
+                modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                 shape = RoundedCornerShape(AppShape.sm),
             )
-            OutlinedTextField(
-                value = asm,
-                onValueChange = { asm = it },
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                label = { Text(if (zh) "汇编指令" else "assembly", fontSize = AppText.label) },
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
-                shape = RoundedCornerShape(AppShape.sm),
-                placeholder = {
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                SmallAction(
+                    label = if (zh) "预览改动" else "Preview",
+                    enabled = ws.isNotBlank() && asm.isNotBlank() && locator.isNotBlank(),
+                    loading = patching,
+                    onClick = { applyToSession(true) },
+                )
+                SmallAction(
+                    label = if (zh) "写入编辑会话" else "Apply",
+                    enabled = ws.isNotBlank() && asm.isNotBlank() && locator.isNotBlank(),
+                    loading = patching,
+                    onClick = { applyToSession(false) },
+                )
+                if (sessionId.isNotBlank()) {
                     Text(
-                        if (zh) "mov x0, x1" else "mov x0, x1",
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        "session ${sessionId.take(12)}…",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        fontFamily = FontFamily.Monospace,
                         color = cs.onSurfaceVariant,
                     )
-                },
-            )
-        }
-        Spacer(Modifier.size(6.dp))
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(
-                label = if (zh) "汇编" else "Assemble",
-                enabled = asm.isNotBlank(),
-                loading = working,
-                onClick = { assemble() },
-            )
-            SmallAction(
-                label = if (zh) "清空" else "Clear",
-                enabled = asm.isNotBlank() || outHex.isNotBlank(),
-                onClick = { asm = ""; outHex = ""; outSize = -1; status = "" },
-            )
-            SmallAction(
-                label = if (zh) "复制机器码" else "Copy bytes",
-                enabled = outHex.isNotBlank(),
-                onClick = { copyToClipboard(context, outHex, zh) },
-            )
-            if (outSize >= 0) {
+                }
+            }
+            if (ws.isBlank()) {
                 Text(
-                    "$outSize ${if (zh) "字节" else "bytes"}",
+                    if (zh) "未打开工作区：编码预览仍可用，写回不可用。" else "No workspace: encode preview works, write-back disabled.",
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = AppText.label,
                     color = cs.onSurfaceVariant,
                 )
             }
-        }
-        Spacer(Modifier.size(8.dp))
-        if (outHex.isBlank()) {
-            if (status.isNotBlank()) AnalysisErrorBanner(status)
-            else AnalysisEmptyState(
-                title = if (zh) "汇编器" else "Assembler",
-                hint = if (zh) "输入一条或多条汇编指令（用分号或换行分隔），选择目标架构，输出机器码字节。"
-                    else "Enter one or more instructions (separate with ';' or newlines), pick the target arch, and get machine-code bytes.",
-            )
-        } else {
-            ResultCard(if (zh) "机器码" else "Machine code") { outHex }
+            if (patchErr.isNotBlank()) AnalysisErrorBanner(patchErr)
+            if (patchMsg.isNotBlank()) {
+                Text(
+                    patchMsg,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                    color = cs.primary,
+                )
+            }
         }
     }
 }
-

@@ -17,65 +17,14 @@ import java.util.zip.ZipFile
  * / patch_bytes / taffy_apk_search 等高级工具, 包装塔菲逆核已有的 rizin 引擎能力)。
  *
  * 这些工具把 rizin 的底层能力暴露为 AI 友好的高层 MCP 工具, 补齐 MT管理器有但塔菲逆核缺少的:
- *  - taffy_so_xref: 交叉引用(谁调用了某地址/函数) — 包装 rzXrefs
- *  - taffy_so_cfg: 函数控制流图 — 通过 rzCommand 执行 agf
  *  - taffy_so_addr_map: VA↔FileOffset 地址映射 — 通过 rzCommand
- *  - taffy_so_search_bytes: 字节模式搜索 — 包装 rzSearchBytes
+ *    （v1.3.18: 重复的 taffy_so_xref / taffy_so_cfg / taffy_so_search_bytes 已删除，
+ *     等价主入口分别是 taffy_analyze_xrefs / taffy_analyze_cfg / taffy_search_bytes）
  *  - taffy_apk_search: APK 统一搜索(跨 dex/native/资源/ZIP条目)
  *  - taffy_apk_patch_bytes: APK 内 ZIP 条目级原始字节读写
  *  - taffy_apk_resource_list: 列出 APK 内资源文件
  */
 object AdvancedTools {
-
-    /** 交叉引用: 查谁引用了某地址/函数, 或某地址引用了谁 */
-    val soXref: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta("taffy_so_xref",
-            "【SO 交叉引用】查找谁调用了某函数/地址(to), 或某函数/地址调用了什么(from)。输入 workspaceId + locator(函数名/VA/符号), direction=to 查[被谁调用](逆向最常用, 定位关键函数的调用者), direction=from 查[调用了谁]。包装 rizin rzXrefs。",
-            "Cross-reference search. direction=to finds who calls a function/address (most useful for locating callers); direction=from finds what it calls. Wraps rizin rzXrefs.",
-            "analyze", ToolClass.EXTRA, heavy = false,
-        ) {
-            objectSchema(props {
-                "workspaceId" str "SO 工作区 ID(engine.open 返回)"
-                "locator" str "目标定位: 函数名/符号/虚拟地址(如 0x1234)"
-                "direction".oneOf("to=被谁调用(默认) | from=调用了谁", "to", "from")
-            })
-        }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val ws = args.str("workspaceId")
-            val locator = args.str("locator")
-            if (ws.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 workspaceId", "workspaceId", "")
-            if (locator.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 locator(函数名/VA/符号)", "locator", "")
-            val direction = args.str("direction", "to")
-            val engine = EngineProvider.get(ctx.context)
-            return engine.rzXrefs(ws, "", locator, direction)
-        }
-    }
-
-    /** 函数控制流图 */
-    val soCfg: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta("taffy_so_cfg",
-            "【SO 控制流图】生成指定函数的控制流图(CFG), 展示基本块和跳转关系。输入 workspaceId + locator(函数名/VA)。通过 rizin agf 命令生成, 返回图的 JSON 描述(节点=基本块, 边=跳转)。用于分析函数分支逻辑、循环结构。",
-            "Control flow graph for a function. Generates CFG via rizin agf command. Returns JSON with nodes (basic blocks) and edges (jumps). Useful for analyzing branching and loop structure.",
-            "analyze", ToolClass.EXTRA, heavy = false,
-        ) {
-            objectSchema(props {
-                "workspaceId" str "SO 工作区 ID"
-                "locator" str "目标函数: 函数名/符号/虚拟地址"
-            })
-        }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val ws = args.str("workspaceId")
-            val locator = args.str("locator")
-            if (ws.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 workspaceId", "workspaceId", "")
-            if (locator.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 locator(函数名/VA)", "locator", "")
-            val engine = EngineProvider.get(ctx.context)
-            // rizin: seek to locator, then agfj (graph json)
-            val cmd = "s $locator; agfj"
-            return engine.rzCommand(ws, "", cmd, false)
-        }
-    }
 
     /** VA↔FileOffset 地址映射 */
     val soAddrMap: ToolHandler = object : ToolHandler {
@@ -114,32 +63,6 @@ object AdvancedTools {
     }
 
     /** 字节模式搜索 */
-    val soSearchBytes: ToolHandler = object : ToolHandler {
-        override val meta = ToolMeta("taffy_so_search_bytes",
-            "【SO 字节搜索】在 SO 文件中搜索十六进制字节模式(支持通配符 ??)。如搜索 90 31 FF 6B 找到指令位置, 搜索 48 8B ?? ?? 找到寄存器加载。返回匹配的虚拟地址和偏移。包装 rizin rzSearchBytes。",
-            "Hex byte pattern search in SO file (supports ?? wildcards). Returns matched virtual addresses and offsets. Wraps rizin rzSearchBytes.",
-            "search", ToolClass.EXTRA, heavy = false,
-        ) {
-            objectSchema(props {
-                "workspaceId" str "SO 工作区 ID"
-                "pattern" str "十六进制字节模式, 空格分隔, ?? 为通配(如 '90 31 ?? 6B')"
-                "fromVa" str "起始虚拟地址(可选, hex 如 0x1000, 0=从头)"
-                "toVa" str "结束虚拟地址(可选, hex 如 0x2000, 0=到尾)"
-            })
-        }
-
-        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val ws = args.str("workspaceId")
-            val pattern = args.str("pattern")
-            if (ws.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 workspaceId", "workspaceId", "")
-            if (pattern.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 pattern(十六进制模式)", "pattern", "")
-            val fromVa = if (args.has("fromVa")) (HexCodec.long(args.str("fromVa")) ?: return err("INVALID_ARGUMENT", "fromVa must be a hex virtual address", "fromVa", args.str("fromVa"))) else 0L
-            val toVa = if (args.has("toVa")) (HexCodec.long(args.str("toVa")) ?: return err("INVALID_ARGUMENT", "toVa must be a hex virtual address", "toVa", args.str("toVa"))) else 0L
-            val engine = EngineProvider.get(ctx.context)
-            return engine.rzSearchBytes(ws, "", pattern, fromVa, toVa)
-        }
-    }
-
     /** APK 统一搜索: 跨 ZIP条目/DEX/资源 搜索 */
     val apkSearch: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_apk_search",
@@ -461,5 +384,5 @@ object AdvancedTools {
         }
     }
 
-    val ALL = listOf(soXref, soCfg, soAddrMap, soSearchBytes, apkSearch, apkPatchBytes, apkResourceList)
+    val ALL = listOf(soAddrMap, apkSearch, apkPatchBytes, apkResourceList)
 }

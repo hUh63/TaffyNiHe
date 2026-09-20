@@ -15,12 +15,45 @@ object ToolCatalog {
 
     private val pathArg: JSONObject.() -> String = { str("path").ifBlank { str("filePath").ifBlank { str("inputPath").ifBlank { str("soPath") } } } }
 
+    /**
+     * 任务①「SO 工具去重收敛」：保留已删除的 taffy_so_standalone_* 的独特价值
+     * ——「只传 path 就能用，不需要先 taffy_so_open」。
+     * 当缺少 workspaceId 但提供了 path/filePath 时，内部自动 open(path, temporary = true)。
+     * fail 非 null 表示自动打开失败，应直接把该对象返回给调用方。
+     */
+    private class WsAutoOpen(
+        val workspaceId: String,
+        val autoOpened: Boolean,
+        val entryPoint: String,
+        val fail: JSONObject?,
+    )
+
+    private fun resolveWorkspace(engine: com.soreverse.mcp.engine.NativeSoEngine, args: JSONObject): WsAutoOpen {
+        val explicit = args.str("workspaceId").trim()
+        if (explicit.isNotBlank()) return WsAutoOpen(explicit, false, "", null)
+        val path = args.str("path").ifBlank { args.str("filePath") }.trim()
+        if (path.isBlank()) return WsAutoOpen("", false, "", null)
+        val opened = engine.open(path, true)
+        if (!opened.optBoolean("ok", false)) return WsAutoOpen("", true, "", opened)
+        val id = opened.optString("workspaceId")
+        if (id.isBlank()) return WsAutoOpen("", true, "", opened)
+        return WsAutoOpen(id, true, opened.optString("entryPoint"), null)
+    }
+
+    /** 自动打开临时工作区时，把 workspaceId 与提示附到返回体上。 */
+    private fun JSONObject.withAutoOpen(r: WsAutoOpen): JSONObject {
+        if (!r.autoOpened || r.workspaceId.isBlank()) return this
+        put("autoOpenedWorkspaceId", r.workspaceId)
+        put("autoOpenHint", "已按 path 自动打开临时工作区(temporary)；如需复用请传 workspaceId=" + r.workspaceId)
+        return this
+    }
+
     // ── WORKSPACE ──
 
     private val soOpen = EngineToolHandler(
         ToolMeta("taffy_so_open",
-            "【SO 分析入口】打开 SO 文件并创建工作区（action=list 列出可用 SO）。所有 .so/.ELF 文件操作必须从 taffy_so_open 开始，不要使用 mt_apk_* 或 np_*。",
-            "【PRIMARY SO ENTRY POINT】Open a SO file and create a workspace. Use action=list to discover available SO files. Use action=open_url to download a http(s) SO into the selected work directory, then open and analyze it. All .so/ELF tasks MUST start from taffy_so_open — do NOT use mt_apk_* or np_* for SO files.",
+            "【SO 分析入口】打开 SO 文件并创建工作区（action=list 列出可用 SO）。也可以跳过本工具：taffy_analyze_elf / taffy_read_disasm / taffy_read_hexdump / taffy_so_decompile 支持直接传 path 自动打开临时工作区。不要用 mt_apk_* 或 np_* 处理 SO。",
+            "【PRIMARY SO ENTRY POINT】Open a SO file and create a workspace. Use action=list to discover available SO files. Use action=open_url to download a http(s) SO into the selected work directory, then open and analyze it. You may also skip this tool — taffy_analyze_elf / taffy_read_disasm / taffy_read_hexdump / taffy_so_decompile accept a bare path and auto-open a temporary workspace. Do NOT use mt_apk_* or np_* for SO files.",
             "workspace", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
             "action".oneOf("open (默认) | list | open_url", "open", "list", "open_url")
@@ -104,20 +137,25 @@ object ToolCatalog {
             "Full ELF structure and triage stats via LIEF: sections, symbols, relocations, program headers, dynamic entries.",
             "analyze", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "工作区 ID"
+            "workspaceId" str "工作区 ID（与 path 二选一）"
+            "path" str "SO 文件绝对路径：未提供 workspaceId 时自动打开临时工作区（免 taffy_so_open）"
+            "filePath" str "path 的别名"
             "editSessionId" str "编辑会话 ID（可选，为空则用原始 SO）"
             "view".oneOf("full（默认）| stats | list", "full", "stats", "list")
             "subView".oneOf("view=list 时的子视图", "sections", "symbols", "dynsyms", "functions", "relocations", "strings", "imports")
             "prefix" str "名称前缀过滤（view=list）"
             "limit" int "返回条数上限（view=list）"
-        }, required = listOf("workspaceId")) }
+        }) }
     ) { e, a, s ->
-        val view = a.str("view", "full")
-        when (view) {
-            "stats" -> e.readStats(a.str("workspaceId"), a.str("editSessionId"))
-            "list" -> e.list(a.str("workspaceId"), a.str("editSessionId"), a.str("subView", "sections"), a.str("prefix"), a.intValue("limit", s.defaultLimit))
-            else -> e.readElf(a.str("workspaceId"), a.str("editSessionId"))
+        val r = resolveWorkspace(e, a)
+        if (r.fail != null) return@EngineToolHandler r.fail
+        if (r.workspaceId.isBlank()) return@EngineToolHandler err("INVALID_ARGUMENT", "缺少 workspaceId（或提供 path 自动打开临时工作区）", "workspaceId", "")
+        val out = when (a.str("view", "full")) {
+            "stats" -> e.readStats(r.workspaceId, a.str("editSessionId"))
+            "list" -> e.list(r.workspaceId, a.str("editSessionId"), a.str("subView", "sections"), a.str("prefix"), a.intValue("limit", s.defaultLimit))
+            else -> e.readElf(r.workspaceId, a.str("editSessionId"))
         }
+        out.withAutoOpen(r)
     }
 
     private val readStats = EngineToolHandler(
@@ -277,7 +315,9 @@ object ToolCatalog {
             "Disassemble via Rizin and include rizin-ghidra pseudocode when the Android native backend has pdg available.",
             "read", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "工作区 ID"
+            "workspaceId" str "工作区 ID（与 path 二选一）"
+            "path" str "SO 文件绝对路径：未提供 workspaceId 时自动打开临时工作区（免 taffy_so_open）"
+            "filePath" str "path 的别名"
             "editSessionId" str "编辑会话 ID（可选）"
             "locator" str "函数定位符：可接受 taffy_analyze_functions 的完整定位符或短函数名"
             "limit" int "指令条数上限"
@@ -288,8 +328,17 @@ object ToolCatalog {
             "addr" str "十六进制虚拟地址兜底；ARM32 Thumb 可用奇数地址或 thumb=true"
             "thumb" bool "强制 ARM32 Thumb 模式"
             "mode".oneOf("指令模式", "auto", "arm", "thumb")
-        }, required = listOf("workspaceId")) }
-    ) { e, a, s -> e.disasm(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), a.str("addr"), if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")) }
+        }) }
+    ) { e, a, s ->
+        val r = resolveWorkspace(e, a)
+        if (r.fail != null) return@EngineToolHandler r.fail
+        if (r.workspaceId.isBlank()) return@EngineToolHandler err("INVALID_ARGUMENT", "缺少 workspaceId（或提供 path 自动打开临时工作区）", "workspaceId", "")
+        val locator = a.str("locator")
+        val addr = a.str("addr")
+        // 只传 path 且既无 locator 也无 addr 时，从 ELF 入口点开始反汇编。
+        val effectiveLocator = if (r.autoOpened && locator.isBlank() && addr.isBlank()) r.entryPoint else locator
+        e.disasm(r.workspaceId, a.str("editSessionId"), effectiveLocator, a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), addr, if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")).withAutoOpen(r)
+    }
 
     private val readHexdump = EngineToolHandler(
         ToolMeta("taffy_read_hexdump",
@@ -297,13 +346,23 @@ object ToolCatalog {
             "Hex dump: read raw bytes at a given offset or address.",
             "read", ToolClass.CORE, heavy = true,
         ) { objectSchema(props {
-            "workspaceId" str "工作区 ID"
+            "workspaceId" str "工作区 ID（与 path 二选一）"
+            "path" str "SO 文件绝对路径：未提供 workspaceId 时自动打开临时工作区（免 taffy_so_open）"
+            "filePath" str "path 的别名"
             "editSessionId" str "编辑会话 ID（可选）"
-            "locator" str "节区定位符：可接受 taffy_analyze_elf 的完整定位符、so_section:.text 或类似 .text 的短节区名"
+            "locator" str "节区定位符：可接受 taffy_analyze_elf 的完整定位符、so_section:.text 或类似 .text 的短节区名（只传 path 且未给 locator 时默认 .text）"
             "byteOffset" int "节区内字节偏移"
             "maxBytes" int "最多转储的字节数"
-        }, required = listOf("workspaceId")) }
-    ) { e, a, _ -> e.hexdump(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096)) }
+        }) }
+    ) { e, a, _ ->
+        val r = resolveWorkspace(e, a)
+        if (r.fail != null) return@EngineToolHandler r.fail
+        if (r.workspaceId.isBlank()) return@EngineToolHandler err("INVALID_ARGUMENT", "缺少 workspaceId（或提供 path 自动打开临时工作区）", "workspaceId", "")
+        val locator = a.str("locator")
+        // 只传 path 且没给节区时默认 .text（对齐已收敛的 taffy_so_standalone_hexdump 行为）。
+        val effectiveLocator = if (r.autoOpened && locator.isBlank()) ".text" else locator
+        e.hexdump(r.workspaceId, a.str("editSessionId"), effectiveLocator, a.intValue("byteOffset"), a.intValue("maxBytes", 4096)).withAutoOpen(r)
+    }
 
     // ── EDIT ──
 
@@ -1007,7 +1066,7 @@ object ToolCatalog {
         soOpen, soClose, apkAnalyze, flutterBlutter,
         analyzeElf, readStats, analysisReport, analyzeFunctions, analyzeCfg, analyzeCrypto, analyzeXrefs, analyzeEsil, ArscTool.analyze, AnalyzeGuideTool.guide,
         searchBytes, searchStrings,
-        readDisasm, readHexdump,
+        readDisasm, readHexdump, SoDecompileTool.decompile,
         editHex, editAsm, editSymbol, editFixSections,
         emulateCall, emulateDump,
         unidbgSession, unidbgMemory, unidbgDebug, unidbgBatch,
@@ -1051,10 +1110,6 @@ object ToolCatalog {
         ArchiveTools.delete,
         ArchiveTools.rename,
         *DotnetTools.ALL.toTypedArray(),
-        // 塔菲逆核: 纯 Java SO 分析工具(SO逆向分析工具移植)
-        SoStandaloneTools.disasm,
-        SoStandaloneTools.elf,
-        SoStandaloneTools.hexdump,
         // 塔菲逆核: 设备信息/系统/应用/通讯/网络/实用工具(参考mcp-server)
         *DeviceTools.ALL.toTypedArray(),
         // 塔菲逆核: APK 细粒度编辑(参考"我的工具"APK) + Frida 内置打包

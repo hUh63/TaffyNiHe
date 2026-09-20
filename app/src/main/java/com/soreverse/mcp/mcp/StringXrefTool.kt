@@ -98,7 +98,7 @@ object StringXrefTool {
                     .put("truncated", truncated)
                     .put("references", hits)
                     .put("hint", if (hits.length() == 0)
-                        "没有方法引用该字符串(可能来自资源/原生 so, 或为运行时拼接)。可换 taffy_string_scan 或对 so 用 taffy_so_xref。"
+                        "没有方法引用该字符串(可能来自资源/原生 so, 或为运行时拼接)。可换 taffy_string_scan 或对 so 用 taffy_analyze_xrefs。"
                     else "这些方法就是该字符串的使用点；配合 taffy_dex_method_code 看它们的字节码/逻辑。"))
             }.getOrElse { e ->
                 err("STRING_XREF_FAILED", "字符串反查失败: ${e.message ?: e.javaClass.simpleName}", "path", path)

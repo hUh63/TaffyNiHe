@@ -1737,8 +1737,26 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
             val len = (lengthText.trim().toIntOrNull() ?: 512).coerceIn(16, 65536)
             val res = withContext(Dispatchers.IO) {
                 runCatching {
-                    val tc = com.soreverse.mcp.mcp.ToolContext(ctx, com.soreverse.mcp.core.SettingsStore(ctx), EngineProvider.get(ctx))
-                    com.soreverse.mcp.mcp.SoStandaloneTools.hexdump.handle(tc, JSONObject().put("path", p).put("offset", off).put("length", len))
+                    // v1.3.18: 原独立 hexdump 工具已收敛删除，这里直接用内置纯 Java HexDump。
+                    val file = java.io.File(p)
+                    if (!file.isFile) {
+                        JSONObject().put("error", "file not found: " + p)
+                    } else {
+                        val size = file.length()
+                        if (size > 128L * 1024 * 1024) {
+                            JSONObject().put("error", "file too large for hex view: " + size + " bytes (max 128MiB)")
+                        } else {
+                            val data = file.readBytes()
+                            val from = off.coerceIn(0, data.size)
+                            val actual = len.coerceAtMost(data.size - from)
+                            JSONObject()
+                                .put("file", file.name)
+                                .put("fileSize", data.size)
+                                .put("offset", from)
+                                .put("length", actual)
+                                .put("hexdump", com.soreverse.mcp.engine.standalone.HexDump.dump(data, 0L, from, actual))
+                        }
+                    }
                 }.getOrElse { e -> JSONObject().put("error", e.message ?: "hexdump failed") }
             }
             val e = res.optString("error")

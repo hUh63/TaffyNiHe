@@ -810,12 +810,12 @@ object ArchiveTools {
             var act = args.str("action", "list")
 
             val h: ToolHandler? = when (act) {
-                "list" -> list,
-                "extract" -> extract,
-                "create" -> create,
-                "add" -> add,
-                "delete" -> delete,
-                "rename" -> rename,
+                "list" -> list
+                "extract" -> extract
+                "create" -> create
+                "add" -> add
+                "delete" -> delete
+                "rename" -> rename
                 else -> null
             }
             return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_archive action: $act")

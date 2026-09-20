@@ -831,17 +831,17 @@ object FileTools {
             var act = args.str("action", "list")
 
             val h: ToolHandler? = when (act) {
-                "list" -> list,
-                "read" -> read,
-                "write" -> write,
-                "search" -> search,
-                "replace" -> replace,
-                "diff" -> diff,
-                "dir_diff" -> dirDiff,
-                "rename" -> rename,
-                "copy" -> copy,
-                "delete" -> delete,
-                "batch_rename" -> batchRename,
+                "list" -> list
+                "read" -> read
+                "write" -> write
+                "search" -> search
+                "replace" -> replace
+                "diff" -> diff
+                "dir_diff" -> dirDiff
+                "rename" -> rename
+                "copy" -> copy
+                "delete" -> delete
+                "batch_rename" -> batchRename
                 else -> null
             }
             return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_file action: $act")

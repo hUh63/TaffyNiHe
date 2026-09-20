@@ -389,9 +389,9 @@ object LogcatTools {
             var act = args.str("action", "collect")
 
             val h: ToolHandler? = when (act) {
-                "collect" -> collect,
-                "crash" -> crash,
-                "capture" -> capture,
+                "collect" -> collect
+                "crash" -> crash
+                "capture" -> capture
                 else -> null
             }
             return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_logcat action: $act")

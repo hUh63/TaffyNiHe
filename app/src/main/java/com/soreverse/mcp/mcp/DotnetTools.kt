@@ -426,26 +426,26 @@ object DotnetTools {
             var act = args.str("action", "open")
             if (act.startsWith("session_")) act = act.removePrefix("session_")
             val h: ToolHandler? = when (act) {
-                "open" -> peOpen,
-                "list" -> peOpen,
-                "close" -> peClose,
-                "analyze" -> peAnalyze,
-                "health" -> peHealth,
-                "read_section" -> peReadSection,
-                "read_hex" -> peReadHex,
-                "search_bytes" -> peSearchBytes,
-                "list_outputs" -> peListOutputs,
-                "build" -> peBuild,
-                "edit_hex" -> peEditHex,
-                "edit_va" -> peEditVa,
-                "edit_section" -> peEditSection,
-                "session_open" -> peEditSession,
-                "session_snapshot" -> peEditSession,
-                "session_undo" -> peEditSession,
-                "session_redo" -> peEditSession,
-                "session_rollback" -> peEditSession,
-                "session_reset" -> peEditSession,
-                "session_history" -> peEditSession,
+                "open" -> peOpen
+                "list" -> peOpen
+                "close" -> peClose
+                "analyze" -> peAnalyze
+                "health" -> peHealth
+                "read_section" -> peReadSection
+                "read_hex" -> peReadHex
+                "search_bytes" -> peSearchBytes
+                "list_outputs" -> peListOutputs
+                "build" -> peBuild
+                "edit_hex" -> peEditHex
+                "edit_va" -> peEditVa
+                "edit_section" -> peEditSection
+                "session_open" -> peEditSession
+                "session_snapshot" -> peEditSession
+                "session_undo" -> peEditSession
+                "session_redo" -> peEditSession
+                "session_rollback" -> peEditSession
+                "session_reset" -> peEditSession
+                "session_history" -> peEditSession
                 else -> null
             }
             return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_pe action: $act")
@@ -479,15 +479,15 @@ object DotnetTools {
             var act = args.str("action", "detect")
 
             val h: ToolHandler? = when (act) {
-                "detect" -> dotnetDetect,
-                "list_types" -> dotnetListTypes,
-                "list_methods" -> dotnetListMethods,
-                "list_strings" -> dotnetListStrings,
-                "dump_il" -> dotnetDumpIl,
-                "disasm" -> dotnetDisasm,
-                "resolve_token" -> dotnetResolveToken,
-                "edit_il" -> dotnetEditIl,
-                "edit_string" -> dotnetEditString,
+                "detect" -> dotnetDetect
+                "list_types" -> dotnetListTypes
+                "list_methods" -> dotnetListMethods
+                "list_strings" -> dotnetListStrings
+                "dump_il" -> dotnetDumpIl
+                "disasm" -> dotnetDisasm
+                "resolve_token" -> dotnetResolveToken
+                "edit_il" -> dotnetEditIl
+                "edit_string" -> dotnetEditString
                 else -> null
             }
             return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_dotnet action: $act")

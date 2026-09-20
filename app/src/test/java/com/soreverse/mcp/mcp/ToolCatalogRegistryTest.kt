@@ -3,7 +3,6 @@ package com.soreverse.mcp.mcp
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -117,10 +116,19 @@ class ToolCatalogRegistryTest {
     }
 
     @Test
-    fun rejectsDuplicateNames() {
-        assertThrows(IllegalArgumentException::class.java) {
-            ToolCatalogRegistry(listOf(handler("duplicate"), handler("duplicate")))
-        }
+    fun duplicateNamesAreDroppedInsteadOfThrowing() {
+        // 实现**有意**选择「去重 + 告警」而非抛异常：目录是在 <clinit> 阶段构建的，
+        // 那里抛出异常会以 ExceptionInInitializerError 拖垮整个应用。
+        // 本测试锁定这个防崩语义（保留先出现者，且不抛）。
+        val first = handler("duplicate")
+        val second = handler("duplicate")
+        val registry = ToolCatalogRegistry(listOf(first, second))
+
+        assertEquals(listOf("duplicate"), registry.names)
+        assertEquals(1, registry.handlers.size)
+        assertSame(first, registry.byName["duplicate"])
+        assertEquals(first, registry.handlers.first())
+        assertEquals(second.meta.name, first.meta.name)
     }
 
     @Test

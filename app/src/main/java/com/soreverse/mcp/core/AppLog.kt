@@ -18,7 +18,9 @@ object AppLog {
     private val lines = ArrayDeque<String>(MAX_LINES)
     private val formatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
     private var app: Context? = null
-    private val mainHandler = Handler(Looper.getMainLooper())
+    // 延迟 + 容错：部分运行环境（纯 JVM 单元测试、极早期初始化）没有 Android Looper。
+    // 此时 mainHandler 为 null，分发退回同步路径 —— 日志设施绝不在初始化阶段抛错拖垮上层。
+    private val mainHandler: Handler? by lazy { runCatching { Handler(Looper.getMainLooper()) }.getOrNull() }
     private val listeners = mutableListOf<(String) -> Unit>()
     @Volatile private var lastDelivered: String? = null
 
@@ -86,10 +88,12 @@ object AppLog {
         }
         if (line != "__CLEAR__" && line == lastDelivered) return
         lastDelivered = line
-        if (Looper.myLooper() == Looper.getMainLooper()) {
+        val onMainThread = runCatching { Looper.myLooper() == Looper.getMainLooper() }.getOrDefault(false)
+        val handler = mainHandler
+        if (onMainThread || handler == null) {
             snapshot.forEach { runCatching { it(line) } }
         } else {
-            mainHandler.post {
+            handler.post {
                 snapshot.forEach { runCatching { it(line) } }
             }
         }

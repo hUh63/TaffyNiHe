@@ -24,7 +24,7 @@ object DotnetTools {
 
     // ── PE 工作区管理 ──
 
-    private val peOpen = BinaryEngineToolHandler(
+    val peOpen = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_open",
             "【PE/.NET 分析入口】打开 PE/DLL/EXE 文件并创建工作区（自动检测格式，也支持 ELF）。所有 PE/.NET 文件操作必须从 taffy_pe_open 开始。",
             "Open a PE (.dll/.exe) or ELF (.so) file and create a BinaryEngine workspace. Auto-detects file format. All PE/.NET operations MUST start from taffy_pe_open. Use action=list to see open workspaces.",
@@ -42,7 +42,7 @@ object DotnetTools {
         }
     }
 
-    private val peClose = BinaryEngineToolHandler(
+    val peClose = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_close",
             "关闭 PE 工作区（action=list 列出已打开工作区）",
             "Close a PE workspace. Use action=list to see open workspaces.",
@@ -60,7 +60,7 @@ object DotnetTools {
 
     // ── PE 结构分析 ──
 
-    private val peAnalyze = BinaryEngineToolHandler(
+    val peAnalyze = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_analyze",
             "PE 结构分析（节区/导入/导出/资源）",
             "Full PE structure analysis: sections, imports, exports, resources via native parser.",
@@ -73,7 +73,7 @@ object DotnetTools {
 
     // ── .NET 分析 ──
 
-    private val dotnetDetect = BinaryEngineToolHandler(
+    val dotnetDetect = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_detect",
             "检测 .NET/Mono 程序集并返回诊断信息（MZ/PE/CLR 头、BSJB 签名、流信息）",
             "Detect .NET/Mono assembly and return diagnostics: MZ/PE/CLR headers, BSJB signature, stream info.",
@@ -84,7 +84,7 @@ object DotnetTools {
         }) }
     ) { e, a, _ -> e.dotnetDetect(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }) }
 
-    private val dotnetListTypes = BinaryEngineToolHandler(
+    val dotnetListTypes = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_list_types",
             "列出 .NET 程序集中的所有类型（类名/命名空间/类型标记）",
             "List all .NET types in the assembly (class name, namespace, type token).",
@@ -95,7 +95,7 @@ object DotnetTools {
         }) }
     ) { e, a, _ -> e.dotnetListTypes(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }) }
 
-    private val dotnetListMethods = BinaryEngineToolHandler(
+    val dotnetListMethods = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_list_methods",
             "列出 .NET 类型的方法（方法名/标记/IL 偏移/RVA）",
             "List .NET methods (name, token, IL offset, RVA). Use typeFilter to narrow to a specific type token.",
@@ -107,7 +107,7 @@ object DotnetTools {
         }) }
     ) { e, a, _ -> e.dotnetListMethods(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.intValue("typeFilter", 0)) }
 
-    private val dotnetListStrings = BinaryEngineToolHandler(
+    val dotnetListStrings = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_list_strings",
             "列出 .NET 用户字符串（US 堆内容）",
             "List .NET user strings from the #US heap.",
@@ -119,7 +119,7 @@ object DotnetTools {
         }) }
     ) { e, a, _ -> e.dotnetListStrings(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.intValue("maxCount", 5000)) }
 
-    private val dotnetDumpIl = BinaryEngineToolHandler(
+    val dotnetDumpIl = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_dump_il",
             "转储 .NET 方法的 IL 字节码（hex + 操作码解析）",
             "Dump IL bytecode for a .NET method (hex bytes + opcode disassembly).",
@@ -139,7 +139,7 @@ object DotnetTools {
         }
     }
 
-    private val dotnetDisasm = BinaryEngineToolHandler(
+    val dotnetDisasm = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_disasm",
             "反汇编 .NET 方法 IL（指令级反汇编 + 可选伪代码）",
             "Disassemble .NET method IL (instruction-level disassembly + optional pseudocode).",
@@ -160,7 +160,7 @@ object DotnetTools {
         }
     }
 
-    private val dotnetResolveToken = BinaryEngineToolHandler(
+    val dotnetResolveToken = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_resolve_token",
             "解析 .NET 元数据标记（类型/方法/字段/字符串引用）",
             "Resolve a .NET metadata token to its referenced entity (type/method/field/string).",
@@ -182,7 +182,7 @@ object DotnetTools {
 
     // ── .NET 编辑 ──
 
-    private val dotnetEditIl = BinaryEngineToolHandler(
+    val dotnetEditIl = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_edit_il",
             "修改 .NET 方法的 IL 字节码（按 IL 偏移写入 hex 补丁）",
             "Patch IL bytecode of a .NET method at a given IL offset. Requires an edit session.",
@@ -209,7 +209,7 @@ object DotnetTools {
         }
     }
 
-    private val dotnetEditString = BinaryEngineToolHandler(
+    val dotnetEditString = BinaryEngineToolHandler(
         ToolMeta("taffy_dotnet_edit_string",
             "修改 .NET 用户字符串（US 堆偏移写入新字符串）",
             "Patch a .NET user string at the given US heap offset. Requires an edit session.",
@@ -230,7 +230,7 @@ object DotnetTools {
 
     // ── PE 原始编辑（补充 somcp edit_* 仅支持 ELF 的缺口）──
 
-    private val peEditHex = BinaryEngineToolHandler(
+    val peEditHex = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_edit_hex",
             "按文件偏移写入 hex 补丁到 PE/DLL 文件（需要编辑会话）",
             "Patch raw hex bytes at a file offset in a PE/DLL file. Requires an edit session. Use this for PE files where taffy_edit_hex (ELF-only) does not apply.",
@@ -251,7 +251,7 @@ object DotnetTools {
         }
     }
 
-    private val peEditVa = BinaryEngineToolHandler(
+    val peEditVa = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_edit_va",
             "按虚拟地址写入 hex 补丁到 PE/DLL 文件（需要编辑会话，自动 VA→offset 转换）",
             "Patch raw hex bytes at a virtual address in a PE/DLL file. Auto-resolves VA to file offset. Requires an edit session.",
@@ -272,7 +272,7 @@ object DotnetTools {
         }
     }
 
-    private val peEditSection = BinaryEngineToolHandler(
+    val peEditSection = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_edit_section",
             "按节区名写入 hex 补丁到 PE/DLL 文件的指定节区（需要编辑会话）",
             "Patch hex bytes into a named section of a PE/DLL file. Requires an edit session.",
@@ -290,7 +290,7 @@ object DotnetTools {
 
     // ── PE 搜索与读取 ──
 
-    private val peSearchBytes = BinaryEngineToolHandler(
+    val peSearchBytes = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_search_bytes",
             "在 PE/DLL 文件中搜索十六进制字节模式",
             "Search for a hex byte pattern in a PE/DLL file. Returns match offsets.",
@@ -302,7 +302,7 @@ object DotnetTools {
         }) }
     ) { e, a, _ -> e.searchBytes(a.str("workspaceId"), a.str("editSessionId").ifBlank { null }, a.str("pattern")) }
 
-    private val peReadSection = BinaryEngineToolHandler(
+    val peReadSection = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_read_section",
             "读取 PE/DLL 文件指定节区的内容（返回 hex 预览）",
             "Read a named section from a PE/DLL file. Returns hex preview and size info.",
@@ -316,7 +316,7 @@ object DotnetTools {
 
     // ── PE 编辑会话 ──
 
-    private val peEditSession = BinaryEngineToolHandler(
+    val peEditSession = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_edit_session",
             "PE 编辑会话管理（action=open|snapshot|undo|redo|reset|history）【PE/DLL 文件编辑会话；区别于 SO 编辑会话 taffy_session_open / Unidbg 模拟会话 taffy_unidbg_session】",
             "Manage PE edit sessions: open, snapshot, undo, redo, reset, history. [PE/DLL FILE EDIT session — independent from SO edit session (taffy_session_open) and Unidbg emulation session (taffy_unidbg_session).]",
@@ -346,7 +346,7 @@ object DotnetTools {
 
     // ── PE 构建与输出 ──
 
-    private val peBuild = BinaryEngineToolHandler(
+    val peBuild = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_build",
             "构建输出补丁后的 PE/DLL 文件",
             "Build and export the patched PE/DLL file from an edit session.",
@@ -358,7 +358,7 @@ object DotnetTools {
         }) }
     ) { e, a, _ -> e.build(a.str("workspaceId"), a.str("editSessionId"), a.str("outputName")) }
 
-    private val peListOutputs = BinaryEngineToolHandler(
+    val peListOutputs = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_list_outputs",
             "列出所有已构建的 PE/DLL 输出文件",
             "List all built PE/DLL output files from previous build operations.",
@@ -368,7 +368,7 @@ object DotnetTools {
 
     // ── PE 读取 ──
 
-    private val peReadHex = BinaryEngineToolHandler(
+    val peReadHex = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_read_hex",
             "读取 PE 文件的十六进制转储",
             "Read a hex dump from a PE file at the given offset.",
@@ -383,7 +383,7 @@ object DotnetTools {
 
     // ── 诊断 ──
 
-    private val peHealth = BinaryEngineToolHandler(
+    val peHealth = BinaryEngineToolHandler(
         ToolMeta("taffy_pe_health",
             "PE/.NET 引擎健康检查（native 库状态、工作区/会话/输出数量、输出目录）",
             "PE/.NET engine health check: native library status, workspace/session/output counts, output directory.",

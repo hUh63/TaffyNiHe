@@ -360,6 +360,12 @@ internal fun AnalysisWorkspace(
 
                         "funcinfo" -> FuncInfoView(tools, zh, context, refreshAll)
 
+                        "comments" -> CommentsView(tools, zh, context, refreshAll)
+
+                        "analyze" -> AnalyzeModeView(tools, zh, context, refreshAll)
+
+                        "rootdrill" -> RootDrillView(tools, zh, context, refreshAll)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -1989,6 +1995,9 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
     AnalysisNavItem("data", "数据", "Data", Icons.Filled.Inventory2),
     AnalysisNavItem("funcinfo", "函数详情", "Detail", Icons.Filled.Description),
+    AnalysisNavItem("comments", "注释", "Note", Icons.Filled.Description),
+    AnalysisNavItem("analyze", "分析", "Ana", Icons.Filled.FlashOn),
+    AnalysisNavItem("rootdrill", "根下钻", "Root", Icons.Filled.Transform),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -8037,6 +8046,367 @@ private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.co
                     }
                     SmallAction(if (zh) "看引用" else "XRefs") {
                         tools.analysisView = "xrefs"
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  注释存储 + 分析档位（快速/全量）+ 交叉引用根下钻
+//  对齐 Exbin：CommentStore（§5.1 注释）、showAnalysisModeDialog（§3.2 双档分析）、
+//  GlobalXRefFragment 的「根下钻」（§6.5）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 函数/地址注释的本地存储（SharedPreferences，仅落本地注释库，不写 SO）。 */
+private object AnalysisComments {
+    private const val PREF = "taffy_analysis_comments"
+    private const val KEY = "items"
+
+    data class Entry(val key: String, val text: String)
+
+    fun load(context: android.content.Context): List<Entry> {
+        val sp = context.getSharedPreferences(PREF, android.content.Context.MODE_PRIVATE)
+        val raw = sp.getString(KEY, "[]") ?: "[]"
+        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val k = o.optString("key")
+            if (k.isBlank()) null else Entry(k, o.optString("text"))
+        }
+    }
+
+    fun save(context: android.content.Context, list: List<Entry>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("key", it.key).put("text", it.text)) }
+        context.getSharedPreferences(PREF, android.content.Context.MODE_PRIVATE)
+            .edit().putString(KEY, arr.toString()).apply()
+    }
+
+    fun put(context: android.content.Context, key: String, text: String): List<Entry> {
+        val list = load(context).filter { it.key != key }.toMutableList()
+        if (text.isNotBlank()) list.add(0, Entry(key, text))
+        save(context, list)
+        return list
+    }
+
+    fun remove(context: android.content.Context, key: String): List<Entry> {
+        val list = load(context).filter { it.key != key }
+        save(context, list)
+        return list
+    }
+}
+
+@Composable
+private fun CommentsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var items by remember { mutableStateOf(AnalysisComments.load(context)) }
+    var target by remember { mutableStateOf("") }
+    var body by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf("") }
+
+    LaunchedEffect(tools.reloadTick) { items = AnalysisComments.load(context) }
+    LaunchedEffect(tools.sharedWorkspaceId) {
+        if (target.isBlank()) target = tools.selectedFunctionName.ifBlank { tools.selectedFunctionVa }
+    }
+
+    val shown = remember(items, filter) {
+        if (filter.isBlank()) items else items.filter { it.key.contains(filter, true) || it.text.contains(filter, true) }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionName.isNotBlank() || tools.selectedFunctionVa.isNotBlank()) {
+                target = tools.selectedFunctionName.ifBlank { tools.selectedFunctionVa }
+            }
+            SmallAction(if (zh) "复制全部" else "Copy all", enabled = items.isNotEmpty()) {
+                copyToClipboard(context, items.joinToString("\n") { "${it.key}\t${it.text}" }, zh)
+            }
+            SmallAction(if (zh) "清空全部" else "Clear all", enabled = items.isNotEmpty()) {
+                AnalysisComments.save(context, emptyList()); items = emptyList()
+            }
+            Text(if (zh) "${items.size} 条注释" else "${items.size} comments",
+                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = target, onValueChange = { target = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            label = { Text(if (zh) "目标（函数名 / 地址）" else "target (fn / addr)", fontSize = AppText.label) },
+            placeholder = { Text("sub_1234 或 0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+        )
+        Spacer(Modifier.size(6.dp))
+        ToolMonoField(
+            value = body, onValueChange = { body = it },
+            label = if (zh) "注释内容" else "comment",
+            placeholder = if (zh) "记录你的分析结论（只落本地，不写入 SO）" else "your note (local only)",
+            minHeight = 64.dp,
+        )
+        Spacer(Modifier.size(6.dp))
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "保存注释" else "Save", enabled = target.isNotBlank() && body.isNotBlank()) {
+                items = AnalysisComments.put(context, target.trim(), body.trim())
+                body = ""
+            }
+            SmallAction(if (zh) "删除该条" else "Delete", enabled = target.isNotBlank()) {
+                items = AnalysisComments.remove(context, target.trim())
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+        }
+        Spacer(Modifier.size(8.dp))
+        OutlinedTextField(
+            value = filter, onValueChange = { filter = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
+            placeholder = { Text(if (zh) "过滤目标 / 内容" else "filter", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        )
+        Spacer(Modifier.size(8.dp))
+        when {
+            shown.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "暂无注释" else "No comments",
+                hint = if (zh) "给函数或地址写一条注释（例如「这里是签名校验」），只保存在本地注释库，不会修改 SO 文件。"
+                    else "Write a note for a function/address; stored locally only, the SO is never modified.",
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                shown.forEach { e ->
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(AppShape.md))
+                            .background(cs.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MonoLine(e.key, cs.primary, AppText.label)
+                            Spacer(Modifier.weight(1f))
+                            SmallAction(if (zh) "编辑" else "Edit") { target = e.key; body = e.text }
+                            SmallAction(if (zh) "删除" else "Del") { items = AnalysisComments.remove(context, e.key) }
+                        }
+                        Text(e.text, style = MaterialTheme.typography.bodySmall, fontSize = AppText.body, color = cs.onSurface, lineHeight = 16.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 分析档位（快速 / 全量） ─────────────────────────
+
+@Composable
+private fun AnalyzeModeView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var running by remember { mutableStateOf("") }
+    var stats by remember(ws) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var log by remember(ws) { mutableStateOf("") }
+
+    fun collectStats() {
+        if (ws.isBlank()) return
+        scope.launch {
+            val s = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    val fns = rzArray(eng.rzCommand(ws, "", "aflj")).size
+                    val strs = rzArray(eng.rzCommand(ws, "", "izj")).size
+                    val syms = rzArray(eng.rzCommand(ws, "", "isj")).size
+                    val xrs = rzArray(eng.rzCommand(ws, "", "axtj @ entry0")).size
+                    listOf(
+                        (if (zh) "函数" else "functions") to "$fns",
+                        (if (zh) "字符串" else "strings") to "$strs",
+                        (if (zh) "符号" else "symbols") to "$syms",
+                        ("entry0 xrefs") to "$xrs",
+                    )
+                }.getOrNull() ?: emptyList()
+            }
+            stats = s
+        }
+    }
+
+    fun run(mode: String) {
+        if (ws.isBlank()) return
+        scope.launch {
+            running = mode
+            log = ""
+            val cmd = if (mode == "full") "aaaa" else "aa"
+            val r = withContext(Dispatchers.IO) {
+                runCatching { EngineProvider.get(context).rzCommand(ws, "", cmd) }.getOrNull()
+            }
+            running = ""
+            log = if (r == null) (if (zh) "分析命令失败" else "analysis failed")
+                else (if (zh) "已执行 $cmd（${if (mode == "full") "全量" else "快速"}分析）" else "ran $cmd")
+            collectStats()
+        }
+    }
+
+    LaunchedEffect(ws) { if (ws.isNotBlank()) collectStats() }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.md))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(if (zh) "分析模式" else "Analysis mode", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+            MonoLine(
+                if (zh) "快速分析：只做 ELF 结构 / 函数 / 符号（aa），大文件内存紧张时用。"
+                else "Quick: ELF structure / functions / symbols only (aa).",
+                cs.onSurface, AppText.label,
+            )
+            MonoLine(
+                if (zh) "全量分析：额外做字符串 / 匿名函数 / 交叉引用 / 签名（aaaa），更慢更全。"
+                else "Full: also strings / anonymous functions / xrefs / signatures (aaaa).",
+                cs.onSurface, AppText.label,
+            )
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallAction(if (zh) "快速分析 (aa)" else "Quick (aa)", loading = running == "quick", onClick = { run("quick") })
+                SmallAction(if (zh) "全量分析 (aaaa)" else "Full (aaaa)", loading = running == "full", onClick = { run("full") })
+                SmallAction(if (zh) "刷新统计" else "Refresh", onClick = { collectStats(); onRefresh() })
+            }
+            if (log.isNotBlank()) MonoLine(log, cs.primary, AppText.label)
+        }
+        if (stats.isNotEmpty()) {
+            KeyValueCard(zh, stats)
+        }
+        AnalysisEmptyState(
+            title = if (zh) "分析档位" else "Analysis depth",
+            hint = if (zh) "打开 SO 后默认已做基础分析；数据不全时可在此补跑全量分析，再回到各页刷新。"
+                else "Basic analysis runs on open; run full analysis here when data looks incomplete.",
+        )
+    }
+}
+
+// ───────────────────────── 交叉引用：根下钻 ─────────────────────────
+
+@Composable
+private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var root by remember { mutableStateOf("") }
+    var depth by remember { mutableStateOf("2") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var levels by remember { mutableStateOf<List<Pair<String, List<String>>>>(emptyList()) }
+    var ran by remember { mutableStateOf(false) }
+
+    LaunchedEffect(ws) {
+        if (root.isBlank()) root = "JNI_OnLoad"
+    }
+
+    fun drill() {
+        val r0 = root.trim()
+        if (r0.isBlank() || ws.isBlank()) return
+        val maxDepth = depth.toIntOrNull()?.coerceIn(1, 4) ?: 2
+        scope.launch {
+            loading = true; error = ""; ran = true; levels = emptyList()
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    val out = mutableListOf<Pair<String, List<String>>>()
+                    var frontier = listOf(r0)
+                    val seen = HashSet<String>(frontier)
+                    for (d in 0 until maxDepth) {
+                        val next = LinkedHashSet<String>()
+                        frontier.forEach { node ->
+                            val arr = parseRzArray(eng.rzCommand(ws, "", "s $node; axfj")) ?: return@forEach
+                            arr.forEach { e ->
+                                val t = e.optString("to")
+                                if (t.isNotBlank() && seen.add(t)) next.add(t)
+                            }
+                        }
+                        out.add((if (zh) "第 ${d + 1} 层" else "level ${d + 1}") to next.toList())
+                        if (next.isEmpty()) break
+                        frontier = next.toList()
+                    }
+                    out
+                }.getOrNull()
+            }
+            loading = false
+            if (res == null) error = if (zh) "下钻失败（根节点无法解析）" else "drill failed"
+            levels = res ?: emptyList()
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "开始下钻" else "Drill", loading = loading, onClick = { drill() })
+            SmallAction("JNI_OnLoad") { root = "JNI_OnLoad"; drill() }
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionName.isNotBlank()) {
+                root = tools.selectedFunctionName; drill()
+            }
+            SmallAction(if (zh) "复制树" else "Copy", enabled = levels.isNotEmpty()) {
+                val sb = StringBuilder()
+                levels.forEach { (lvl, list) -> sb.append("$lvl (${list.size})\n"); list.forEach { sb.append("  $it\n") } }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+        }
+        Spacer(Modifier.size(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(
+                value = root, onValueChange = { root = it }, singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "根节点" else "root", fontSize = AppText.label) },
+                placeholder = { Text("JNI_OnLoad", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+            )
+            OutlinedTextField(
+                value = depth, onValueChange = { depth = it }, singleLine = true,
+                modifier = Modifier.width(80.dp).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "层数" else "depth", fontSize = AppText.label) },
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            !ran -> AnalysisEmptyState(
+                title = if (zh) "根下钻" else "Root drill",
+                hint = if (zh) "从一个根节点（如 JNI_OnLoad）出发，逐层展开它调用的函数，快速摸清主流程。"
+                    else "From a root (e.g. JNI_OnLoad), expand callees level by level to map the main flow.",
+                primaryLabel = if (zh) "从 JNI_OnLoad 开始" else "From JNI_OnLoad",
+                onPrimary = { root = "JNI_OnLoad"; drill() },
+            )
+            levels.isEmpty() || levels.all { it.second.isEmpty() } -> AnalysisEmptyState(
+                title = if (zh) "无调用关系" else "No calls",
+                hint = if (zh) "根节点没有出边（可能是叶子函数，或需先跑全量分析）。" else "Root has no outgoing edges (leaf, or run full analysis first).",
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MonoLine((if (zh) "根：$root" else "root: $root"), cs.primary, AppText.bodyStrong)
+                levels.forEach { (lvl, list) ->
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("$lvl · ${list.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(AppShape.md))
+                                .background(cs.surfaceContainerHigh)
+                                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            if (list.isEmpty()) MonoLine(if (zh) "（无）" else "(none)", cs.onSurfaceVariant, AppText.label)
+                            list.take(80).forEach { nm ->
+                                MonoLine("→ $nm", cs.onSurface, AppText.label)
+                            }
+                            if (list.size > 80) MonoLine(if (zh) "… 共 ${list.size} 个" else "… ${list.size} total", cs.onSurfaceVariant, AppText.label)
+                        }
                     }
                 }
             }

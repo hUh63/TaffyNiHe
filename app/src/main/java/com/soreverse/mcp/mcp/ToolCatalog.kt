@@ -1168,6 +1168,8 @@ object ToolCatalog {
         *DynamicAnalyzeAiTool.ALL.toTypedArray(),
         // 塔菲逆核: SO 深度分析(C++ 虚表/符号还原/函数签名/JNI 还原/批量伪C)
         *SoDeepTools.ALL.toTypedArray(),
+        // 塔菲逆核: SO 数据段分析(常量/全局变量/指针分类)
+        *SoDataTool.ALL.toTypedArray(),
         // 塔菲逆核: 把编辑会话字节就地写回原始 SO（写前备份 + 回读 sha256 校验）
         *SoSyncOriginalTool.ALL.toTypedArray(),
     )

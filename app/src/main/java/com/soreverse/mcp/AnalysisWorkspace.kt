@@ -356,6 +356,8 @@ internal fun AnalysisWorkspace(
 
                         "unpack" -> UnpackView(tools, zh, context, refreshAll)
 
+                        "data" -> DataView(tools, zh, context, refreshAll)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -1983,6 +1985,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("callgraph", "调用图", "Calls", Icons.Filled.CompareArrows),
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
+    AnalysisNavItem("data", "数据", "Data", Icons.Filled.Inventory2),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -2831,6 +2834,10 @@ private val searchScopes = listOf(
     "symbols" to ("符号" to "Sym"),
     "strings" to ("字符串" to "Str"),
     "imports" to ("导入" to "Imp"),
+    "sections" to ("节区" to "Sec"),
+    "relocs" to ("重定位" to "Rel"),
+    "dynamic" to ("动态" to "Dyn"),
+    "entries" to ("入口点" to "Ent"),
 )
 
 /** 全库搜索：输入框 + 范围切换 + 结果表格（地址/内容两列，按范围自适应列名）。 */
@@ -2845,13 +2852,37 @@ private fun SearchView(
     val cs = MaterialTheme.colorScheme
     val scope = tools.searchScope
     val query = tools.searchQuery
-    val cacheKey = "search|$ws|$scope|$query"
+    var regexOn by remember { mutableStateOf(false) }
+    var caseOn by remember { mutableStateOf(false) }
+    val cacheKey = if (regexOn) "search|$ws|$scope|__all__" else "search|$ws|$scope|$query"
 
     LaunchedEffect(cacheKey, tools.reloadTick) {
-        if (query.isNotBlank()) loadListCache(context, tools, scope, ws, cacheKey, 120, query)
+        if (query.isNotBlank()) {
+            if (regexOn) loadListCache(context, tools, scope, ws, cacheKey, 3000, "")
+            else loadListCache(context, tools, scope, ws, cacheKey, 120, query)
+        }
     }
 
-    val rows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], scope) }
+    val rawRows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], scope) }
+    val regexErr = remember(query, regexOn, caseOn) {
+        if (!regexOn || query.isBlank()) ""
+        else runCatching { Regex(query, if (caseOn) emptySet() else setOf(RegexOption.IGNORE_CASE)); "" }
+            .getOrElse { it.message ?: "regex error" }
+    }
+    val rows = remember(rawRows, query, regexOn, caseOn, regexErr) {
+        when {
+            query.isBlank() -> emptyList()
+            regexOn -> {
+                if (regexErr.isNotBlank()) emptyList()
+                else {
+                    val re = runCatching { Regex(query, if (caseOn) emptySet() else setOf(RegexOption.IGNORE_CASE)) }.getOrNull()
+                    if (re == null) emptyList() else rawRows.filter { re.containsMatchIn(it.title) || re.containsMatchIn(it.text) }
+                }
+            }
+            caseOn -> rawRows.filter { it.title.contains(query) || it.text.contains(query) }
+            else -> rawRows
+        }
+    }
     val secondCol = when (scope) {
         "strings" -> if (zh) "内容" else "VALUE"
         "imports" -> if (zh) "名称" else "NAME"
@@ -2887,6 +2918,8 @@ private fun SearchView(
                 val active = key == scope
                 SmallAction(if (zh) labels.first else labels.second, active = active) { tools.searchScope = key }
             }
+            SmallAction(".*", active = regexOn) { regexOn = !regexOn }
+            SmallAction("Aa", active = caseOn) { caseOn = !caseOn }
             if (rows.isNotEmpty()) {
                 Text(
                     if (zh) "${rows.size} 条" else "${rows.size} hits",
@@ -2909,7 +2942,8 @@ private fun SearchView(
                 )
                 tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
                 rows.isEmpty() -> {
-                    val err = errMessageOf(tools.viewCache[cacheKey])
+                    val err = if (regexErr.isNotBlank()) (if (zh) "正则表达式错误：$regexErr" else "regex error: $regexErr")
+                        else errMessageOf(tools.viewCache[cacheKey])
                     if (err.isNotBlank()) AnalysisErrorBanner(err)
                     else AnalysisEmptyState(
                         title = if (zh) "无匹配结果" else "No results",
@@ -7679,6 +7713,116 @@ private fun UnpackView(tools: ToolPagesState, zh: Boolean, context: android.cont
                     val all = buildDumpScript(module.trim(), outPath.trim(), dumpAll) + "\n\n" +
                         fixSteps.joinToString("\n") { "${it.first}\n  ${it.second}" }
                     copyToClipboard(context, all, zh)
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 数据段（常量 / 全局变量） ─────────────────────────
+
+@Composable
+private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val tick = tools.reloadTick
+    val cs = MaterialTheme.colorScheme
+    var action by remember { mutableStateOf("all") }
+    var data by remember(ws, tick, action) { mutableStateOf<JSONObject?>(null) }
+    var loading by remember(ws, tick, action) { mutableStateOf(false) }
+    var error by remember(ws, tick, action) { mutableStateOf("") }
+    var filter by remember { mutableStateOf("") }
+
+    LaunchedEffect(ws, tick, action) {
+        if (ws.isBlank()) return@LaunchedEffect
+        loading = true; error = ""
+        val r = callMcpTool(context, "taffy_so_data",
+            JSONObject().put("workspaceId", ws).put("action", action).put("limit", 600))
+        loading = false
+        data = r
+        if (r == null) error = if (zh) "引擎未就绪（native 库未加载）" else "engine not ready"
+        else if (!r.optBoolean("ok", true)) error = r.optString("error").ifBlank { r.optString("note") }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    val entries = remember(data) {
+        val a = data?.optJSONArray("entries") ?: JSONArray()
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+    }
+    val shown = remember(entries, filter) {
+        if (filter.isBlank()) entries else entries.filter {
+            it.optString("type").contains(filter, true) || it.optString("value").contains(filter, true) ||
+                it.optString("addr").contains(filter, true) || it.optString("target").contains(filter, true)
+        }
+    }
+    val byType = remember(data) {
+        val o = data?.optJSONObject("byType")
+        if (o == null) emptyList() else o.keys().asSequence().map { it to o.optInt(it) }.sortedByDescending { it.second }.toList()
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "全部" else "All", active = action == "all") { action = "all" }
+            SmallAction(if (zh) "常量" else "Constants", active = action == "constants") { action = "constants" }
+            SmallAction(if (zh) "全局变量" else "Globals", active = action == "globals") { action = "globals" }
+            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
+            SmallAction(if (zh) "复制" else "Copy", enabled = shown.isNotEmpty()) {
+                val sb = StringBuilder("addr\toffset\tsize\ttype\tvalue\ttarget\n")
+                shown.forEach { e -> sb.append(e.optString("addr")).append('\t').append(e.optString("offset")).append('\t')
+                    .append(e.optString("size")).append('\t').append(e.optString("type")).append('\t')
+                    .append(e.optString("value")).append('\t').append(e.optString("target")).append('\n') }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            byType.forEach { (t, c) -> TypeBadge("$t $c", cs.primary) }
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = filter, onValueChange = { filter = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
+            placeholder = { Text(if (zh) "过滤类型 / 值 / 地址 / 目标" else "filter type / value / addr / target", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        )
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading && data == null -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            entries.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "无数据段条目" else "No data entries",
+                hint = if (zh) "未在 .rodata/.data/.got 等节区里识别出常量或全局变量。可换 action 或确认 SO 未被 strip/加密。"
+                    else "No constants/globals recognized in .rodata/.data/.got. Try another action, or the SO may be stripped/encrypted.",
+                primaryLabel = if (zh) "重新扫描" else "Rescan", onPrimary = onRefresh,
+            )
+            else -> Column(
+                Modifier.fillMaxSize()
+                    .clip(RoundedCornerShape(AppShape.md))
+                    .background(cs.surfaceContainerHigh)
+                    .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
+                    listOf(("ADDR" to 84.dp), ("TYPE" to 56.dp), ("VALUE" to 0.dp), ("TARGET" to 0.dp)).forEach { (t, w) ->
+                        Text(t, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
+                            modifier = if (w != 0.dp) Modifier.width(w) else Modifier.weight(1f))
+                    }
+                }
+                GroupDivider()
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+                    items(shown.size, key = { it }) { idx ->
+                        val e = shown[idx]
+                        Row(Modifier.fillMaxWidth().clickable {
+                            copyToClipboard(context, e.optString("value"), zh)
+                        }.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(e.optString("addr"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                fontSize = AppText.label, color = cs.primary, modifier = Modifier.width(84.dp), maxLines = 1)
+                            Text(e.optString("type"), style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                fontSize = AppText.label, color = cs.tertiary, modifier = Modifier.width(56.dp), maxLines = 1)
+                            Text(e.optString("value"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                fontSize = AppText.label, color = cs.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(e.optString("target").ifBlank { "--" }, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
             }
         }

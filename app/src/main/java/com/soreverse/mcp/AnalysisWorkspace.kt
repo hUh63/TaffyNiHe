@@ -8844,7 +8844,7 @@ private fun DetailBlock(title: String, body: String) {
 //  缩点 → 分层布局 → Compose Canvas 绘制；支持拖动/缩放/点选。
 // ═══════════════════════════════════════════════════════════════════════════
 
-private data class SccNode(val id: Int, val members: List<String>, val level: Int, var x: Float = 0f, var y: Float = 0f)
+private data class SccNode(val id: Int, val members: List<String>, var level: Int, var x: Float = 0f, var y: Float = 0f)
 
 @Composable
 private fun SccGraphCanvas(

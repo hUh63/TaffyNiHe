@@ -3151,10 +3151,6 @@ private fun DisasmView(
                 onClick = { scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 400) } },
             )
             SmallAction(if (zh) "重新加载" else "Reload", onClick = onRefresh)
-            SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
-            listOf("auto" to "Auto", "ghidra" to "Ghidra", "native" to "Native", "java" to "Java").forEach { (k, l) ->
-                SmallAction(l, active = engineMode == k) { engineMode = k }
-            }
             if (addr.isNotBlank()) {
                 Text(
                     "$addr · $count",
@@ -3337,6 +3333,9 @@ private fun PseudoView(
                 onClick = onRefresh,
             )
             SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
+            listOf("auto" to "Auto", "ghidra" to "Ghidra", "native" to "Native", "java" to "Java").forEach { (k, l) ->
+                SmallAction(l, active = engineMode == k) { engineMode = k }
+            }
             SmallAction(
                 label = if (zh) "复制全部" else "Copy",
                 enabled = pseudo.isNotBlank(),

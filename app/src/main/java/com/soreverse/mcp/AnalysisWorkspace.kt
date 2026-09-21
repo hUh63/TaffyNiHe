@@ -8,6 +8,16 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -7316,6 +7326,14 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     (if (zh) "环状簇(>1)" else "cyclic (>1)") to "${cyclic.size}",
                     (if (zh) "最大簇" else "largest") to "${sccs.firstOrNull()?.size ?: 0}",
                 ))
+                if (sccs.isNotEmpty()) {
+                    SccGraphCanvas(
+                        comps = sccs,
+                        edges = edges,
+                        zh = zh,
+                        modifier = Modifier.fillMaxWidth().height(360.dp),
+                    )
+                }
                 if (cyclic.isEmpty()) {
                     AnalysisEmptyState(
                         title = if (zh) "无环状调用簇" else "No cyclic clusters",
@@ -8819,4 +8837,174 @@ private fun DetailBlock(title: String, body: String) {
             Text(body, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), fontSize = AppText.label, color = cs.onSurface, lineHeight = 15.sp)
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SCC 图形画布（自绘，对齐 Exbin §6.5 GlobalXRefFragment 的「SCC 鸟瞰」）
+//  缩点 → 分层布局 → Compose Canvas 绘制；支持拖动/缩放/点选。
+// ═══════════════════════════════════════════════════════════════════════════
+
+private data class SccNode(val id: Int, val members: List<String>, val level: Int, var x: Float = 0f, var y: Float = 0f)
+
+@Composable
+private fun SccGraphCanvas(
+    comps: List<List<String>>,
+    edges: List<Pair<String, String>>,
+    zh: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val cs = MaterialTheme.colorScheme
+    // 1) 缩点：节点名 → 分量 id
+    val owner = HashMap<String, Int>()
+    comps.forEachIndexed { i, c -> c.forEach { owner[it] = i } }
+    val nodes = comps.mapIndexed { i, c -> SccNode(i, c, 0) }
+    // 2) 缩点边（去自环、去重）
+    val ceSet = LinkedHashSet<Pair<Int, Int>>()
+    edges.forEach { (f, t) ->
+        val a = owner[f] ?: return@forEach
+        val b = owner[t] ?: return@forEach
+        if (a != b) ceSet.add(a to b)
+    }
+    val ce = ceSet.toList()
+    // 3) 拓扑分层（Kahn）
+    run {
+        val indeg = HashMap<Int, Int>()
+        nodes.forEach { indeg[it.id] = 0 }
+        ce.forEach { indeg[it.second] = (indeg[it.second] ?: 0) + 1 }
+        val level = HashMap<Int, Int>()
+        nodes.forEach { level[it.id] = 0 }
+        var guard = 0
+        var changed = true
+        while (changed && guard++ < comps.size + 5) {
+            changed = false
+            ce.forEach { (a, b) ->
+                val la = level[a] ?: 0
+                val lb = level[b] ?: 0
+                if (lb < la + 1 && (indeg[b] ?: 0) > 0) { level[b] = la + 1; changed = true }
+            }
+        }
+        nodes.forEach { it.level = minOf(level[it.id] ?: 0, 12) }
+    }
+    // 4) 布局：层内水平等距，层间垂直等距
+    val byLevel = nodes.groupBy { it.level }.toSortedMap()
+    val cellW = 170f
+    val cellH = 96f
+    byLevel.forEach { (lvl, list) ->
+        list.forEachIndexed { i, n -> n.x = i * cellW; n.y = lvl * cellH }
+    }
+    val maxCols = byLevel.values.maxOfOrNull { it.size } ?: 1
+    val contentW = maxCols * cellW
+    val contentH = (byLevel.keys.maxOrNull() ?: 0) * cellH + cellH
+
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var selected by remember { mutableStateOf(-1) }
+    val tm = rememberTextMeasurer()
+
+    val nodeColor = cs.primary
+    val cyclic = remember(comps) { comps.map { it.size > 1 } }
+
+    Box(
+        modifier
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    scale = (scale * zoom).coerceIn(0.4f, 3.0f)
+                    offset += pan
+                }
+            }
+            .pointerInput(nodes, scale, offset) {
+                detectTapGestures { pos ->
+                    val px = (pos.x - offset.x) / scale
+                    val py = (pos.y - offset.y) / scale
+                    val hit = nodes.firstOrNull { n ->
+                        px >= n.x + 8f && px <= n.x + cellW - 26f && py >= n.y + 12f && py <= n.y + cellH - 34f
+                    }
+                    selected = hit?.id ?: -1
+                }
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val ox = offset.x + 16f
+            val oy = offset.y + 16f
+            fun nx(x: Float) = ox + x * scale
+            fun ny(y: Float) = oy + y * scale
+
+            // 边
+            ce.forEach { (a, b) ->
+                val na = nodes[a]; val nb = nodes[b]
+                if (na == null || nb == null) return@forEach
+                val sx = nx(na.x + (cellW - 34f) * scale / 2f)
+                val sy = ny(na.y + (cellH * scale) - 26f * scale)
+                val ex = nx(nb.x + (cellW - 34f) * scale / 2f)
+                val ey = ny(nb.y + 12f * scale)
+                val path = Path().apply {
+                    moveTo(sx, sy)
+                    cubicTo(sx, (sy + ey) / 2f, ex, (sy + ey) / 2f, ex, ey)
+                }
+                drawPath(path, cs.onSurfaceVariant.copy(alpha = 0.42f), style = Stroke(width = 1.4f * scale))
+                // 箭头
+                val ang = kotlin.math.atan2((ey - sy).toDouble(), (ex - sx).toDouble())
+                val ax = ex - (kotlin.math.cos(ang) * 7.0 * scale).toFloat()
+                val ay = ey - (kotlin.math.sin(ang) * 7.0 * scale).toFloat()
+                val p2 = Path().apply {
+                    moveTo(ex, ey)
+                    lineTo(ax - (kotlin.math.sin(ang) * 4.0 * scale).toFloat(), ay + (kotlin.math.cos(ang) * 4.0 * scale).toFloat())
+                    lineTo(ax + (kotlin.math.sin(ang) * 4.0 * scale).toFloat(), ay - (kotlin.math.cos(ang) * 4.0 * scale).toFloat())
+                    close()
+                }
+                drawPath(p2, cs.onSurfaceVariant.copy(alpha = 0.6f))
+            }
+            // 节点
+            nodes.forEach { n ->
+                val x = nx(n.x + 8f)
+                val y = ny(n.y + 12f)
+                val w = (cellW - 34f) * scale
+                val h = (cellH - 44f) * scale
+                val sel = n.id == selected
+                val cyc = cyclic.getOrElse(n.id) { false }
+                val fill = when {
+                    sel -> cs.primary.copy(alpha = 0.28f)
+                    cyc -> cs.tertiary.copy(alpha = 0.20f)
+                    else -> cs.surfaceContainerHighest
+                }
+                drawRoundRect(
+                    color = fill,
+                    topLeft = Offset(x, y),
+                    size = androidx.compose.ui.geometry.Size(w, h),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f * scale, 10f * scale),
+                )
+                drawRoundRect(
+                    color = if (sel) cs.primary else if (cyc) cs.tertiary else cs.outlineVariant,
+                    topLeft = Offset(x, y),
+                    size = androidx.compose.ui.geometry.Size(w, h),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f * scale, 10f * scale),
+                    style = Stroke(width = if (sel) 2f else 1f),
+                )
+                val label = "#${n.id} · ${n.members.size}"
+                val tl = tm.measure(label, TextStyle(fontSize = (11 * scale).coerceIn(7f, 20f).sp, color = cs.onSurface))
+                drawText(tl, topLeft = Offset(x + 7f * scale, y + 5f * scale))
+                val first = n.members.firstOrNull()?.take(14) ?: ""
+                if (first.isNotBlank()) {
+                    val t2 = tm.measure(first, TextStyle(fontSize = (9 * scale).coerceIn(6f, 16f).sp, color = cs.onSurfaceVariant))
+                    drawText(t2, topLeft = Offset(x + 7f * scale, y + 20f * scale))
+                }
+                if (cyc) {
+                    val t3 = tm.measure("SCC", TextStyle(fontSize = (8 * scale).coerceIn(6f, 14f).sp, color = cs.tertiary))
+                    drawText(t3, topLeft = Offset(x + w - 30f * scale, y + 5f * scale))
+                }
+            }
+        }
+        // 图例
+        Row(
+            Modifier.align(Alignment.BottomStart).padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MonoLine(if (zh) "拖动平移 · 双指缩放 · 点按选中" else "drag / pinch / tap", cs.onSurfaceVariant, AppText.label)
+        }
+    }
+    LaunchedEffect(contentW, contentH) { /* 尺寸变化时保留当前手势状态 */ }
 }

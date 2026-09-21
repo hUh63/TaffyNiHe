@@ -100,6 +100,9 @@ private fun TaskCard(task: TaskRecord, zh: Boolean, onContinue: () -> Unit, onCl
                 }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
             Text(task.mainName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val sizeText = remember(task.mainPath) { taskFileSize(task.mainPath) }
+            val stateText = remember(task.mainPath) { taskFileState(task.mainPath, zh) }
+            Text("$sizeText  ·  $stateText", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(if (zh) "更新于 ${formatTaskTime(task.updatedAt)} · ${if (task.status == "active") "进行中" else "已完成"}" else "Updated ${formatTaskTime(task.updatedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.size(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -107,6 +110,30 @@ private fun TaskCard(task: TaskRecord, zh: Boolean, onContinue: () -> Unit, onCl
                 OutlinedButton(onClick = onClear, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)) { Text(if (zh) "清除" else "Clear") }
             }
         }
+    }
+}
+
+/** 历史记录：读取主文件大小（绝对路径可直接读；content:// 或网络 URI 返回占位）。 */
+private fun taskFileSize(path: String): String {
+    if (path.isBlank() || path.startsWith("content://") || path.startsWith("http")) return "--"
+    val f = runCatching { java.io.File(path) }.getOrNull() ?: return "--"
+    if (!f.exists() || !f.isFile) return "--"
+    val n = f.length()
+    return when {
+        n >= (1L shl 20) -> "%.1f MB".format(n / 1048576.0)
+        n >= 1024L -> "%.1f KB".format(n / 1024.0)
+        else -> "$n B"
+    }
+}
+
+/** 历史记录：缓存状态（文件是否仍存在 / 是否为 URI 引用）。 */
+private fun taskFileState(path: String, zh: Boolean): String {
+    if (path.isBlank()) return if (zh) "无路径" else "no path"
+    if (path.startsWith("content://") || path.startsWith("http")) return if (zh) "URI 引用" else "URI"
+    val f = runCatching { java.io.File(path) }.getOrNull() ?: return if (zh) "无效路径" else "invalid"
+    return when {
+        f.exists() && f.isFile -> if (zh) "文件就绪" else "ready"
+        else -> if (zh) "文件已失效" else "missing"
     }
 }
 

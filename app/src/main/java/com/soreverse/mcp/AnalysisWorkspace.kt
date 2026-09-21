@@ -68,6 +68,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -365,6 +366,8 @@ internal fun AnalysisWorkspace(
                         "analyze" -> AnalyzeModeView(tools, zh, context, refreshAll)
 
                         "rootdrill" -> RootDrillView(tools, zh, context, refreshAll)
+
+                        "edit" -> EditCenterView(tools, zh, context, refreshAll)
 
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
@@ -1998,6 +2001,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("comments", "注释", "Note", Icons.Filled.Description),
     AnalysisNavItem("analyze", "分析", "Ana", Icons.Filled.FlashOn),
     AnalysisNavItem("rootdrill", "根下钻", "Root", Icons.Filled.Transform),
+    AnalysisNavItem("edit", "编辑", "Edit", Icons.Filled.Build),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -8411,5 +8415,166 @@ private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.c
                 }
             }
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  编辑中心（对齐 Exbin §5.1「能改什么」）
+//    · 函数符号重命名  → taffy_edit_symbol(op=rename)
+//    · 字符串内容替换  → taffy_native_patch_string
+//    · 单条指令重汇编  → taffy_native_patch_instructions
+//  一律先 dryRun / CAS 校验，破坏性写入前二次确认。
+// ═══════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var tab by remember { mutableStateOf("symbol") }
+
+    // 函数改名
+    var symLocator by remember { mutableStateOf("") }
+    var symNew by remember { mutableStateOf("") }
+    var symOut by remember { mutableStateOf("") }
+
+    // 字符串
+    var strAddr by remember { mutableStateOf("") }
+    var strNew by remember { mutableStateOf("") }
+    var strOld by remember { mutableStateOf("") }
+    var strPad by remember { mutableStateOf("null_pad") }
+    var strOut by remember { mutableStateOf("") }
+
+    // 指令
+    var insAddr by remember { mutableStateOf("") }
+    var insAsm by remember { mutableStateOf("") }
+    var insOld by remember { mutableStateOf("") }
+    var insThumb by remember { mutableStateOf(false) }
+    var insOut by remember { mutableStateOf("") }
+
+    var busy by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    LaunchedEffect(ws) {
+        if (symLocator.isBlank()) symLocator = tools.selectedFunctionName.ifBlank { tools.selectedFunctionVa }
+        if (insAddr.isBlank()) insAddr = tools.selectedFunctionVa.ifBlank { tools.disasmAddr }
+    }
+
+    fun run(block: suspend () -> JSONObject?, set: (String) -> Unit) {
+        scope.launch {
+            busy = true
+            val r = block()
+            busy = false
+            set(r?.toString(2) ?: (if (zh) "调用失败" else "call failed"))
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "函数改名" else "Rename", active = tab == "symbol") { tab = "symbol" }
+            SmallAction(if (zh) "字符串" else "String", active = tab == "string") { tab = "string" }
+            SmallAction(if (zh) "指令" else "Insn", active = tab == "insn") { tab = "insn" }
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank() || tools.selectedFunctionName.isNotBlank()) {
+                symLocator = tools.selectedFunctionName.ifBlank { tools.selectedFunctionVa }
+                insAddr = tools.selectedFunctionVa.ifBlank { tools.disasmAddr }
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            if (busy) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
+        }
+        Spacer(Modifier.size(8.dp))
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AnalysisErrorBanner(if (zh) "写入会修改工作区副本；请先「dryRun 预览」确认，再执行实际写入。破坏性操作会弹二次确认。" else "Writes modify the workspace copy. Preview with dryRun first; destructive ops ask for confirmation.")
+
+            when (tab) {
+                "symbol" -> {
+                    ToolMonoField(symLocator, { symLocator = it }, if (zh) "符号 / 函数名" else "symbol", "sub_1234", 46.dp)
+                    ToolMonoField(symNew, { symNew = it }, if (zh) "新名称" else "new name", "check_license", 46.dp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SmallAction("Dry run", enabled = symLocator.isNotBlank() && symNew.isNotBlank(), loading = busy) {
+                            run({
+                                callMcpTool(context, "taffy_edit_symbol", JSONObject()
+                                    .put("workspaceId", ws).put("op", "rename").put("locator", symLocator.trim())
+                                    .put("name", symNew.trim()).put("dryRun", true))
+                            }) { symOut = it }
+                        }
+                        SmallAction(if (zh) "执行改名" else "Apply", enabled = symLocator.isNotBlank() && symNew.isNotBlank()) {
+                            pending = {
+                                run({
+                                    callMcpTool(context, "taffy_edit_symbol", JSONObject()
+                                        .put("workspaceId", ws).put("op", "rename").put("locator", symLocator.trim())
+                                        .put("name", symNew.trim()).put("dryRun", false))
+                                }) { symOut = it }
+                            }
+                        }
+                    }
+                    if (symOut.isNotBlank()) ToolResultBlock(if (zh) "结果" else "Result", symOut, zh = zh, onCopy = { copyToClipboard(context, symOut, zh) })
+                }
+                "string" -> {
+                    ToolMonoField(strAddr, { strAddr = it }, if (zh) "字符串地址 (0x…)" else "string addr", "0x1234", 46.dp)
+                    ToolMonoField(strOld, { strOld = it }, if (zh) "当前字符串（CAS 校验，可空）" else "expected (CAS)", "旧内容", 46.dp)
+                    ToolMonoField(strNew, { strNew = it }, if (zh) "新字符串" else "new text", "新内容", 46.dp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("null_pad" to (if (zh) "NUL 填充" else "NUL pad"), "space_pad" to (if (zh) "空格填充" else "space pad"), "none" to (if (zh) "不填充" else "none")).forEach { (k, l) ->
+                            SmallAction(l, active = strPad == k) { strPad = k }
+                        }
+                    }
+                    SmallAction(if (zh) "写入字符串" else "Apply", enabled = strAddr.isNotBlank() && strNew.isNotBlank()) {
+                        pending = {
+                            run({
+                                callMcpTool(context, "taffy_native_patch_string", JSONObject()
+                                    .put("workspaceId", ws).put("address", strAddr.trim()).put("newText", strNew)
+                                    .put("expectedText", strOld).put("padMode", strPad))
+                            }) { strOut = it }
+                        }
+                    }
+                    if (strOut.isNotBlank()) ToolResultBlock(if (zh) "结果" else "Result", strOut, zh = zh, onCopy = { copyToClipboard(context, strOut, zh) })
+                }
+                else -> {
+                    ToolMonoField(insAddr, { insAddr = it }, if (zh) "指令地址 (0x…)" else "insn addr", "0x1234", 46.dp)
+                    ToolMonoField(insOld, { insOld = it }, if (zh) "当前字节 hex（CAS，强烈建议填）" else "expected hex (CAS)", "D2800540", 46.dp)
+                    ToolMonoField(insAsm, { insAsm = it }, if (zh) "新汇编（; 分隔多条）" else "new asm", "mov x0, #0; ret", 64.dp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SmallAction("Thumb", active = insThumb) { insThumb = !insThumb }
+                        SmallAction(if (zh) "重汇编并写入" else "Apply", enabled = insAddr.isNotBlank() && insAsm.isNotBlank()) {
+                            pending = {
+                                run({
+                                    callMcpTool(context, "taffy_native_patch_instructions", JSONObject()
+                                        .put("workspaceId", ws).put("address", insAddr.trim()).put("asm", insAsm)
+                                        .put("expectedHex", insOld).put("thumb", insThumb))
+                                }) { insOut = it }
+                            }
+                        }
+                    }
+                    if (insOut.isNotBlank()) ToolResultBlock(if (zh) "结果" else "Result", insOut, zh = zh, onCopy = { copyToClipboard(context, insOut, zh) })
+                }
+            }
+
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(AppShape.md))
+                    .background(cs.surfaceContainerHigh)
+                    .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(if (zh) "写入约束" else "Write constraints", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                MonoLine(if (zh) "· 改名：优先复用字符串表内同名/等长覆盖/尾部空闲区追加，布局不允许时返回 UNSUPPORTED_LAYOUT。" else "· rename: reuse/shorten/in-place append; UNSUPPORTED_LAYOUT otherwise.", cs.onSurface, AppText.label)
+                MonoLine(if (zh) "· 字符串：新内容更长会覆盖后续数据，请先确认空间（参照 Exbin 提示）。" else "· string: longer text overwrites following data — verify space first.", cs.onSurface, AppText.label)
+                MonoLine(if (zh) "· 指令：重汇编后按 CAS 校验原字节，不匹配则拒绝写入，避免破坏后续指令。" else "· insn: CAS-checked; mismatched bytes are refused.", cs.onSurface, AppText.label)
+            }
+        }
+    }
+
+    val p = pending
+    if (p != null) {
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text(if (zh) "确认写入？" else "Confirm write?") },
+            text = { Text(if (zh) "该操作会修改工作区中的 SO 副本，可能不可逆。确认继续？" else "This modifies the workspace SO copy and may be irreversible. Continue?") },
+            confirmButton = { TextButton(onClick = { p(); pending = null }) { Text(if (zh) "写入" else "Write", color = cs.error) } },
+            dismissButton = { TextButton(onClick = { pending = null }) { Text(if (zh) "取消" else "Cancel") } },
+        )
     }
 }

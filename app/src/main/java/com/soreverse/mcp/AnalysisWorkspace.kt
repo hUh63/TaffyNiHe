@@ -369,6 +369,8 @@ internal fun AnalysisWorkspace(
 
                         "edit" -> EditCenterView(tools, zh, context, refreshAll)
 
+                        "globalc" -> GlobalPseudoCView(tools, zh, context, refreshAll)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -2002,6 +2004,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("analyze", "分析", "Ana", Icons.Filled.FlashOn),
     AnalysisNavItem("rootdrill", "根下钻", "Root", Icons.Filled.Transform),
     AnalysisNavItem("edit", "编辑", "Edit", Icons.Filled.Build),
+    AnalysisNavItem("globalc", "全局伪C", "GpC", Icons.Filled.Description),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -8537,6 +8540,15 @@ private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.
                     ToolMonoField(insAsm, { insAsm = it }, if (zh) "新汇编（; 分隔多条）" else "new asm", "mov x0, #0; ret", 64.dp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         SmallAction("Thumb", active = insThumb) { insThumb = !insThumb }
+                        SmallAction(if (zh) "NOP 填充" else "NOP fill", enabled = insAddr.isNotBlank()) {
+                            pending = {
+                                run({
+                                    callMcpTool(context, "taffy_native_patch_instructions", JSONObject()
+                                        .put("workspaceId", ws).put("address", insAddr.trim()).put("asm", "nop")
+                                        .put("expectedHex", insOld).put("thumb", insThumb))
+                                }) { insOut = it }
+                            }
+                        }
                         SmallAction(if (zh) "重汇编并写入" else "Apply", enabled = insAddr.isNotBlank() && insAsm.isNotBlank()) {
                             pending = {
                                 run({
@@ -8576,5 +8588,118 @@ private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.
             confirmButton = { TextButton(onClick = { p(); pending = null }) { Text(if (zh) "写入" else "Write", color = cs.error) } },
             dismissButton = { TextButton(onClick = { pending = null }) { Text(if (zh) "取消" else "Cancel") } },
         )
+    }
+}
+
+// ───────────────────────── 全局伪 C（批量反编译） ─────────────────────────
+
+@Composable
+private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var count by remember { mutableStateOf("5") }
+    var startIndex by remember { mutableStateOf("0") }
+    var filter by remember { mutableStateOf("") }
+    var outFile by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf("") }
+    var okCount by remember { mutableStateOf(0) }
+    var failCount by remember { mutableStateOf(0) }
+
+    fun gen() {
+        if (ws.isBlank()) return
+        scope.launch {
+            loading = true; error = ""; text = ""
+            val r = callMcpTool(context, "taffy_so_pseudoc_batch", JSONObject()
+                .put("workspaceId", ws)
+                .put("count", count.toIntOrNull()?.coerceIn(1, 30) ?: 5)
+                .put("startIndex", startIndex.toIntOrNull()?.coerceIn(0, 100000) ?: 0)
+                .put("filter", filter.trim())
+                .put("outFile", outFile.trim()))
+            loading = false
+            if (r == null) { error = if (zh) "引擎未就绪" else "engine not ready"; return@launch }
+            if (!r.optBoolean("ok", true)) { error = r.optString("error").ifBlank { r.optString("note") }; return@launch }
+            okCount = r.optInt("succeeded", r.optInt("okCount", 0))
+            failCount = r.optInt("failed", r.optInt("failCount", 0))
+            text = r.optString("combined").ifBlank { r.optString("text") }.ifBlank {
+                r.optString("outFile").let { if (it.isNotBlank()) (if (zh) "已写入文件：$it" else "written to $it") else "" }
+            }
+            if (text.isBlank()) error = if (zh) "未生成内容（可能全部函数失败）" else "nothing generated"
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "生成伪C" else "Generate", loading = loading, onClick = { gen() })
+            SmallAction(if (zh) "复制" else "Copy", enabled = text.isNotBlank()) { copyToClipboard(context, text, zh) }
+            if (okCount > 0 || failCount > 0) {
+                TypeBadge(if (zh) "成功 $okCount" else "ok $okCount", cs.primary)
+                if (failCount > 0) TypeBadge(if (zh) "失败 $failCount" else "fail $failCount", cs.error)
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+        }
+        Spacer(Modifier.size(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(
+                value = count, onValueChange = { count = it }, singleLine = true,
+                modifier = Modifier.width(84.dp).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "个数" else "count", fontSize = AppText.label) },
+            )
+            OutlinedTextField(
+                value = startIndex, onValueChange = { startIndex = it }, singleLine = true,
+                modifier = Modifier.width(84.dp).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "起始" else "start", fontSize = AppText.label) },
+            )
+            OutlinedTextField(
+                value = filter, onValueChange = { filter = it }, singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "函数名过滤" else "filter", fontSize = AppText.label) },
+                placeholder = { Text("JNI_", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = outFile, onValueChange = { outFile = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            label = { Text(if (zh) "输出文件名（可选，写入 pseudoc-out/）" else "out file (optional)", fontSize = AppText.label) },
+            placeholder = { Text("all_functions.c", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+        )
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            text.isBlank() -> AnalysisEmptyState(
+                title = if (zh) "全局伪 C" else "Global pseudo-C",
+                hint = if (zh) "批量把多个函数反编译为伪 C（默认前 5 个，上限 30），用于快速通读 SO 主要逻辑；可用函数名子串过滤，或指定文件名把结果合并落盘。"
+                    else "Batch-decompile functions to pseudo-C (default 5, max 30) to read a SO quickly; filter by name or write merged output to a file.",
+                primaryLabel = if (zh) "生成前 5 个" else "First 5", onPrimary = { gen() },
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolResultBlock(if (zh) "合并伪 C" else "Merged pseudo-C", text, zh = zh, onCopy = { copyToClipboard(context, text, zh) })
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    MonoLine(if (zh) "· 单个函数失败不会中断整体（结果里会标注失败项）。" else "· A failing function does not abort the batch.", cs.onSurface, AppText.label)
+                    MonoLine(if (zh) "· 需要 rizin-ghidra 后端支持 pdg；不可用时个别函数会失败。" else "· Requires the rizin-ghidra (pdg) backend.", cs.onSurface, AppText.label)
+                }
+            }
+        }
     }
 }

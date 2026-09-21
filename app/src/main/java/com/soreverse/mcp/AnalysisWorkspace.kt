@@ -4948,7 +4948,7 @@ private fun ToolsHubView(zh: Boolean, onOpen: (String) -> Unit) {
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Icon(androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -5421,7 +5421,7 @@ private fun StringDecodeView(zh: Boolean, context: android.content.Context) {
                     if (hexText != null) ToolResultBlock("HEX → Text", hexText, zh = zh, onCopy = { copyToClipboard(context, hexText, zh) })
                     if (b64Text != null) ToolResultBlock("Base64 → Text", b64Text, zh = zh, onCopy = { copyToClipboard(context, b64Text, zh) })
                     if (urlText != null && urlText != trimmed) ToolResultBlock("URL → Text", urlText, zh = zh, onCopy = { copyToClipboard(context, urlText, zh) })
-                    if (uniText != null && uniText != trimmed) ToolResultBlock(if (zh) "Unicode 转义 → Text" else "\u escape → Text", uniText, zh = zh, onCopy = { copyToClipboard(context, uniText, zh) })
+                    if (uniText != null && uniText != trimmed) ToolResultBlock(if (zh) "Unicode 转义 → Text" else "\\u escape → Text", uniText, zh = zh, onCopy = { copyToClipboard(context, uniText, zh) })
                     if (hexOfInput != null) ToolResultBlock("Text → HEX", hexOfInput, zh = zh, onCopy = { copyToClipboard(context, hexOfInput, zh) })
                     if (b64OfInput != null) ToolResultBlock("Text → Base64", b64OfInput, zh = zh, onCopy = { copyToClipboard(context, b64OfInput, zh) })
                     if (urlOfInput != null) ToolResultBlock("Text → URL", urlOfInput, zh = zh, onCopy = { copyToClipboard(context, urlOfInput, zh) })
@@ -5474,7 +5474,7 @@ private fun ByteDiffView(zh: Boolean, context: android.content.Context) {
                 ToolMonoField(aText, { aText = it }, "A (hex)", if (zh) "原始数据的十六进制" else "original hex", 84.dp)
                 ToolMonoField(bText, { bText = it }, "B (hex)", if (zh) "对比数据的十六进制" else "patched hex", 84.dp)
                 when {
-                    a == null || b == null -> AnalysisEmptyState(
+                    a == null || b == null || diffs == null -> AnalysisEmptyState(
                         title = if (zh) "字节差分对比" else "Byte diff",
                         hint = if (zh) "在 A / B 里分别粘贴两段 hex 数据（偶数长度），逐字节比较并列出所有差异偏移。"
                             else "Paste two even-length hex blobs into A / B; every differing byte is listed with its offset.",

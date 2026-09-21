@@ -38,6 +38,7 @@ object SoDecompileTool {
                 "filePath" str "path 的别名"
                 "locator" str "函数定位符：函数名/符号/0x 十六进制线性地址；留空时由引擎回退到 ELF 入口点"
                 "strict" bool "true（默认）：Ghidra 不可用时返回错误；false：尽量降级返回可用结果"
+                "engine".oneOf("反编译引擎: auto(自动降级) | ghidra(rizin-ghidra pdg) | native(rizin 内置 pdc) | java(纯 Kotlin 启发式引擎)", "auto", "ghidra", "native", "java")
             })
         }
 
@@ -69,7 +70,49 @@ object SoDecompileTool {
 
             val locator = args.str("locator").trim()
             val strict = args.bool("strict", true)
-            val raw = engine.rzDecompile(workspaceId, "", locator, strict)
+            val wantEngine = args.str("engine", "auto").ifBlank { "auto" }
+
+            // ── 引擎分发：ghidra(pdg) / native(pdc) / java(纯 Kotlin 启发式) / auto 依次降级 ──
+            fun runNativePdc(): JSONObject? {
+                val r = engine.rzCommand(workspaceId, "", "s $locator; pdc")
+                val txt = r.optString("stdout").ifBlank { r.optString("text") }.trim()
+                if (txt.isBlank() || txt.startsWith("ERROR")) return null
+                return JSONObject().put("ok", true).put("pseudocode", txt).put("engine", "native-pdc")
+                    .put("engineNote", "rizin 内置 pdc（native 管线，非 Ghidra SLEIGH）")
+            }
+
+            fun runJavaHeuristic(): JSONObject? {
+                val rj = engine.rzCommand(workspaceId, "", "s $locator; pdfj")
+                val txt = rj.optString("stdout").ifBlank { rj.optString("text") }.trim()
+                if (txt.isBlank() || !txt.startsWith("[")) return null
+                val arr = runCatching { org.json.JSONArray(txt) }.getOrNull() ?: return null
+                val insns = com.soreverse.mcp.engine.HeuristicDecompiler.parse(arr)
+                if (insns.isEmpty()) return null
+                val fnName = "sub_" + java.lang.Long.toHexString(insns.first().addr)
+                val code = com.soreverse.mcp.engine.HeuristicDecompiler.decompile(insns, fnName, true)
+                if (code.isBlank()) return null
+                return JSONObject().put("ok", true).put("pseudocode", code).put("engine", "java-heuristic")
+                    .put("instructionCount", insns.size)
+                    .put("engineNote", "纯 Kotlin 启发式引擎（对标 r2dec 纯 Java 移植思路）；非编译器级反编译")
+            }
+
+            if (wantEngine == "native") {
+                val r = runNativePdc()
+                if (r == null) return err("DECOMPILER_UNAVAILABLE", "native(pdc) 引擎无输出（该 rizin 构建可能未启用 pdc）", "engine", "native")
+                return ok(r.put("workspaceId", workspaceId).put("locator", locator))
+            }
+            if (wantEngine == "java") {
+                val r = runJavaHeuristic()
+                if (r == null) return err("DECOMPILER_UNAVAILABLE", "java 引擎无输出（地址无法反汇编或指令为空）", "engine", "java")
+                return ok(r.put("workspaceId", workspaceId).put("locator", locator))
+            }
+
+            var raw = engine.rzDecompile(workspaceId, "", locator, strict)
+            var usedEngine = "ghidra-pdg"
+            if (wantEngine == "auto" && !raw.optBoolean("ok", false)) {
+                val alt = runNativePdc() ?: runJavaHeuristic()
+                if (alt != null) { raw = alt; usedEngine = alt.optString("engine") }
+            }
 
             if (!raw.optBoolean("ok", false)) {
                 val e = raw.optJSONObject("error")
@@ -91,6 +134,7 @@ object SoDecompileTool {
             val lineCount = if (pseudo.isBlank()) 0 else pseudo.trimEnd().lineSequence().count()
             val out = JSONObject(raw.toString())
             out.put("tool", "taffy_so_decompile")
+            if (!out.has("engine")) out.put("engine", usedEngine)
             out.put("workspaceId", workspaceId)
             out.put("pseudocodeLineCount", lineCount)
             for (k in DIAGNOSTIC_KEYS) {

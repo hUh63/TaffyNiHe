@@ -2370,12 +2370,16 @@ private suspend fun fetchPseudo(
     ws: String,
     target: String,
     key: String,
+    engineMode: String = "auto",
 ) {
     if (ws.isBlank() || target.isBlank()) return
     tools.viewLoading = key
-    val r = withContext(Dispatchers.IO) {
-        runCatching { EngineProvider.get(context).rzDecompile(ws, "", target, false) }.getOrNull()
-    }
+    // 统一走 taffy_so_decompile 工具：支持 ghidra(pdg) / native(pdc) / java(纯 Kotlin 启发式) / auto 降级
+    val r = callMcpTool(context, "taffy_so_decompile", JSONObject()
+        .put("workspaceId", ws)
+        .put("locator", target)
+        .put("strict", engineMode == "ghidra")
+        .put("engine", engineMode))
     tools.viewLoading = ""
     tools.pseudoKey = key
     tools.pseudoJson = r?.toString()
@@ -3148,6 +3152,9 @@ private fun DisasmView(
             )
             SmallAction(if (zh) "重新加载" else "Reload", onClick = onRefresh)
             SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
+            listOf("auto" to "Auto", "ghidra" to "Ghidra", "native" to "Native", "java" to "Java").forEach { (k, l) ->
+                SmallAction(l, active = engineMode == k) { engineMode = k }
+            }
             if (addr.isNotBlank()) {
                 Text(
                     "$addr · $count",
@@ -3294,12 +3301,11 @@ private fun PseudoView(
     val cs = MaterialTheme.colorScheme
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
-    val key = "pseudo|$ws|$target"
+    var engineMode by remember { mutableStateOf("auto") }
+    val key = "pseudo|$ws|$target|$engineMode"
 
     LaunchedEffect(key, tools.reloadTick) {
-        if (tools.pseudoKey != key || tools.pseudoJson.isBlank()) {
-            fetchPseudo(context, tools, zh, ws, target, key)
-        }
+        fetchPseudo(context, tools, zh, ws, target, key, engineMode)
     }
 
     val body = tools.pseudoJson
@@ -3310,6 +3316,7 @@ private fun PseudoView(
     val coverage = remember(body) { obj?.optJSONObject("pseudocodeCoverage") }
     val typeInf = remember(body) { obj?.optJSONObject("typeInference") }
     val warn = obj?.optString("boundaryWarning").orEmpty()
+    val usedEngine = obj?.optString("engine").orEmpty()
 
     val allLines = remember(pseudo) { if (pseudo.isBlank()) emptyList() else pseudo.split("\n") }
     val truncated = allLines.size > 3000
@@ -3335,6 +3342,7 @@ private fun PseudoView(
                 enabled = pseudo.isNotBlank(),
                 onClick = { copyToClipboard(context, pseudo, zh) },
             )
+            if (usedEngine.isNotBlank()) TypeBadge(usedEngine, cs.primary)
         }
         Spacer(Modifier.size(6.dp))
         if (ws.isBlank() || target.isBlank()) {

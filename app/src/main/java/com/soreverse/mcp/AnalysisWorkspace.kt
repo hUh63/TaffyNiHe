@@ -350,6 +350,10 @@ internal fun AnalysisWorkspace(
 
                         "hardening" -> HardeningView(tools, zh, context, refreshAll)
 
+                        "callgraph" -> CallGraphView(tools, zh, context, refreshAll)
+
+                        "export" -> ExportView(tools, zh, context, refreshAll)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -1974,6 +1978,8 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("funcsig", "签名", "Sig", Icons.Filled.ListAlt),
     AnalysisNavItem("jnireg", "JNI", "JNI", Icons.Filled.DataObject),
     AnalysisNavItem("hardening", "加固", "Hard", Icons.Filled.Warning),
+    AnalysisNavItem("callgraph", "调用图", "Calls", Icons.Filled.CompareArrows),
+    AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -7104,4 +7110,348 @@ private fun hardReport(findings: List<HardFinding>, entropy: Double, strings: In
     findings.forEach { sb.append("- [").append(it.severity).append("] ").append(it.category).append(" / ").append(it.title).append('\n').append("    ").append(it.detail).append('\n') }
     if (findings.isEmpty()) sb.append(if (zh) "（未检出常见特征）\n" else "(none)\n")
     return sb.toString()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  全局调用图 + 导出中心
+//  对齐 Exbin §2.3 GlobalCfgView（全局调用图）与 §5.3 导出能力。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** rzCommand 的 stdout/text 取正文。 */
+private fun rzText(res: JSONObject?): String =
+    if (res == null) "" else res.optString("stdout").ifBlank { res.optString("text") }.trim()
+
+/** 取 JSON 数组（来自 rzCommand 文本）。 */
+private fun rzArray(res: JSONObject?): List<JSONObject> {
+    val t = rzText(res)
+    if (t.isBlank()) return emptyList()
+    val a = runCatching { JSONArray(t) }.getOrNull() ?: return emptyList()
+    return (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+}
+
+/** 数字（hex 字符串或 int）→ Long。 */
+private fun numOf(v: Any?): Long = when (v) {
+    is Number -> v.toLong()
+    is String -> runCatching {
+        if (v.startsWith("0x", true)) v.substring(2).toLong(16) else v.toLong()
+    }.getOrNull() ?: 0L
+    else -> 0L
+}
+
+private fun hexAddr(v: Any?): String {
+    val n = numOf(v)
+    return if (n <= 0) "" else "0x" + java.lang.Long.toHexString(n)
+}
+
+// ───────────────────────── 全局调用图 ─────────────────────────
+
+@Composable
+private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val tick = tools.reloadTick
+    val cs = MaterialTheme.colorScheme
+    var nodes by remember(ws, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var edges by remember(ws, tick) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var loading by remember(ws, tick) { mutableStateOf(false) }
+    var error by remember(ws, tick) { mutableStateOf("") }
+    var note by remember(ws, tick) { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+
+    LaunchedEffect(ws, tick) {
+        if (ws.isBlank()) return@LaunchedEffect
+        loading = true; error = ""; note = ""
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
+                val eng = EngineProvider.get(context)
+                val g = rzArray(eng.rzCommand(ws, "", "agCj"))
+                if (g.isNotEmpty()) Triple(g, emptyList<Pair<String, String>>(), "")
+                else {
+                    // 降级：函数列表（含各自规模），无全局边
+                    val fns = rzArray(eng.rzCommand(ws, "", "aflj"))
+                    Triple(fns, emptyList(), if (fns.isEmpty())
+                        (if (zh) "rizin 未返回调用图（agC 不可用或未分析），也无法列出函数" else "no call graph / functions from rizin")
+                    else (if (zh) "全局调用图 (agC) 不可用，已降级为函数清单" else "agC unavailable; fell back to function list"))
+                }
+            }.getOrNull()
+        }
+        loading = false
+        if (res == null) { error = if (zh) "引擎未就绪或命令失败" else "engine/command failed"; return@LaunchedEffect }
+        val (n, _, nt) = res
+        val (parsedNodes, parsedEdges) = parseCallGraph(n)
+        nodes = parsedNodes
+        edges = parsedEdges
+        note = nt
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    val indeg = remember(edges) {
+        edges.groupingBy { it.second }.eachCount().entries.sortedByDescending { it.value }.take(5)
+    }
+    val shown = remember(nodes, query) {
+        if (query.isBlank()) nodes else nodes.filter {
+            it.optString("name").contains(query, true) || it.optString("id").contains(query, true)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
+            SmallAction(if (zh) "复制节点" else "Copy nodes", enabled = nodes.isNotEmpty()) {
+                val sb = StringBuilder()
+                nodes.forEach { n -> sb.append(n.optString("name").ifBlank { n.optString("id") }).append('\t').append(hexAddr(n.opt("offset") ?: n.opt("id"))).append('\n') }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            SmallAction(if (zh) "复制边" else "Copy edges", enabled = edges.isNotEmpty()) {
+                copyToClipboard(context, edges.joinToString("\n") { "${it.first} -> ${it.second}" }, zh)
+            }
+            SmallAction(if (zh) "导出 JSON" else "JSON", enabled = nodes.isNotEmpty()) {
+                val o = JSONObject()
+                o.put("nodes", JSONArray(nodes.map { it.toString() }))
+                o.put("edges", JSONArray(edges.map { JSONObject().put("from", it.first).put("to", it.second) }))
+                copyToClipboard(context, o.toString(2), zh)
+            }
+            Text(if (zh) "${nodes.size} 节点 · ${edges.size} 边" else "${nodes.size} nodes · ${edges.size} edges",
+                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = query, onValueChange = { query = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
+            placeholder = { Text(if (zh) "过滤函数名" else "filter function", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        )
+        if (note.isNotBlank()) { Spacer(Modifier.size(6.dp)); MonoLine(note, cs.onSurfaceVariant, AppText.label) }
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            nodes.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "无调用图数据" else "No call graph",
+                hint = if (zh) "rizin 未返回全局调用图。可先在「工具」页跑一次全量分析（aaaa），或改用「CFG」页看单函数控制流。"
+                    else "rizin returned no call graph. Run full analysis (aaaa) first, or use the CFG page for per-function control flow.",
+                primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (indeg.isNotEmpty()) {
+                    Text(if (zh) "枢纽（入度 Top5）" else "Hubs (indegree Top5)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        indeg.forEach { (name, c) -> TypeBadge("$name  ×$c", cs.primary) }
+                    }
+                }
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    shown.take(500).forEach { n ->
+                        val nm = n.optString("name").ifBlank { n.optString("id") }
+                        Row(Modifier.fillMaxWidth().clickable { copyToClipboard(context, nm, zh) }, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            MonoLine(hexAddr(n.opt("offset") ?: n.opt("id")), cs.primary, AppText.label)
+                            Text(nm, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), fontSize = AppText.body,
+                                color = cs.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val sz = numOf(n.opt("size"))
+                            if (sz > 0) MonoLine("$sz", cs.onSurfaceVariant, AppText.label)
+                        }
+                    }
+                    if (shown.size > 500) MonoLine(if (zh) "… 仅显示前 500 个节点" else "… first 500 nodes", cs.onSurfaceVariant, AppText.label)
+                }
+                if (edges.isNotEmpty()) {
+                    Text(if (zh) "调用边（前 400）" else "Edges (first 400)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(AppShape.md))
+                            .background(cs.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        edges.take(400).forEach { (f, t) ->
+                            MonoLine("$f  →  $t", cs.onSurface, AppText.label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** agCj 输出既可能是 {nodes,edges} 也可能是 [{name,imports|out}] 数组。 */
+private fun parseCallGraph(items: List<JSONObject>): Pair<List<JSONObject>, List<Pair<String, String>>> {
+    if (items.isEmpty()) return emptyList<JSONObject>() to emptyList<Pair<String, String>>()
+    // 形式一：单个对象含 nodes/edges
+    val first = items.firstOrNull()
+    if (items.size == 1 && first != null && (first.has("nodes") || first.has("edges"))) {
+        val ns = mutableListOf<JSONObject>()
+        first.optJSONArray("nodes")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { ns.add(it) } }
+        val es = mutableListOf<Pair<String, String>>()
+        first.optJSONArray("edges")?.let { a ->
+            for (i in 0 until a.length()) {
+                val e = a.optJSONObject(i) ?: continue
+                val f = e.optString("from").ifBlank { e.optString("src") }
+                val t = e.optString("to").ifBlank { e.optString("dst") }
+                if (f.isNotBlank() && t.isNotBlank()) es.add(f to t)
+            }
+        }
+        return ns to es
+    }
+    // 形式二：数组，每项是一个函数节点（可能含 imports/out 列表）
+    val nodes = items
+    val edges = mutableListOf<Pair<String, String>>()
+    items.forEach { o ->
+        val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset")) }
+        listOf("imports", "out", "calls", "children").forEach { key ->
+            o.optJSONArray(key)?.let { a ->
+                for (i in 0 until a.length()) {
+                    val t = when (val v = a.opt(i)) {
+                        is String -> v
+                        is JSONObject -> v.optString("name").ifBlank { hexAddr(v.opt("offset")) }
+                        else -> ""
+                    }
+                    if (nm.isNotBlank() && t.isNotBlank()) edges.add(nm to t)
+                }
+            }
+        }
+    }
+    return nodes to edges
+}
+
+// ───────────────────────── 导出中心 ─────────────────────────
+
+private data class ExportKind(val key: String, val zh: String, val en: String, val cmd: String, val fields: List<Triple<String, String, String>>)
+
+/** fields: (jsonKey, 中文列名, 英文列名) */
+private val exportKinds = listOf(
+    ExportKind("functions", "函数列表", "Functions", "aflj", listOf(
+        Triple("offset", "地址", "ADDR"), Triple("size", "大小", "SIZE"),
+        Triple("nbbs", "基本块", "BBS"), Triple("name", "名字", "NAME"))),
+    ExportKind("strings", "字符串", "Strings", "izj", listOf(
+        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"),
+        Triple("length", "长度", "LEN"), Triple("string", "内容", "VALUE"))),
+    ExportKind("symbols", "符号", "Symbols", "isj", listOf(
+        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"),
+        Triple("bind", "绑定", "BIND"), Triple("name", "名字", "NAME"))),
+    ExportKind("imports", "导入", "Imports", "iij", listOf(
+        Triple("plt", "PLT", "PLT"), Triple("type", "类型", "TYPE"), Triple("name", "名字", "NAME"))),
+    ExportKind("sections", "节区", "Sections", "iSj", listOf(
+        Triple("vaddr", "虚地址", "VADDR"), Triple("paddr", "文件偏移", "OFF"),
+        Triple("size", "大小", "SIZE"), Triple("name", "名称", "NAME"))),
+    ExportKind("segments", "程序段", "Segments", "iSSj", listOf(
+        Triple("vaddr", "虚地址", "VADDR"), Triple("paddr", "文件偏移", "OFF"),
+        Triple("vsize", "内存大小", "VMSIZE"), Triple("type", "类型", "TYPE"))),
+    ExportKind("relocs", "重定位", "Relocations", "irj", listOf(
+        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"), Triple("name", "名字", "NAME"))),
+    ExportKind("entries", "入口点", "Entrypoints", "iej", listOf(
+        Triple("vaddr", "虚地址", "VADDR"), Triple("type", "类型", "TYPE"), Triple("name", "名称", "NAME"))),
+)
+
+@Composable
+private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var kind by remember { mutableStateOf("functions") }
+    var tabSep by remember { mutableStateOf(true) }
+    var limit by remember { mutableStateOf("2000") }
+    var text by remember { mutableStateOf("") }
+    var count by remember { mutableStateOf(0) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var saved by remember { mutableStateOf("") }
+
+    val spec = exportKinds.firstOrNull { it.key == kind } ?: exportKinds.first()
+
+    fun generate() {
+        if (ws.isBlank()) return
+        val lim = limit.toIntOrNull()?.coerceIn(1, 100000) ?: 2000
+        scope.launch {
+            loading = true; error = ""; text = ""; count = 0; saved = ""
+            val res = withContext(Dispatchers.IO) {
+                runCatching { rzArray(EngineProvider.get(context).rzCommand(ws, "", spec.cmd)) }.getOrNull()
+            }
+            loading = false
+            if (res == null) { error = if (zh) "命令失败（${spec.cmd}）" else "command failed (${spec.cmd})"; return@launch }
+            val rows = res.take(lim)
+            count = rows.size
+            val sep = if (tabSep) "\t" else ","
+            val sb = StringBuilder()
+            if (spec.key == "functions") sb.append("# TaffyNiHe 函数列表导出\t# SO 函数列表导出\n")
+            else sb.append("# TaffyNiHe ${if (zh) spec.zh else spec.en} ${if (zh) "导出" else "export"}\n")
+            sb.append("# ").append(spec.fields.joinToString(sep) { if (zh) it.second else it.third }).append('\n')
+            rows.forEach { o ->
+                sb.append(spec.fields.joinToString(sep) { f ->
+                    val v = o.opt(f.first)
+                    when (v) {
+                        null, JSONObject.NULL -> ""
+                        is String -> v
+                        else -> v.toString()
+                    }
+                }).append('\n')
+            }
+            text = sb.toString()
+        }
+    }
+
+    fun saveToWorkspace() {
+        if (text.isBlank()) return
+        scope.launch {
+            saved = ""
+            val name = "taffy_${spec.key}_${System.currentTimeMillis()}.${if (tabSep) "tsv" else "csv"}"
+            // 写到外部私有目录（无需额外权限），路径稳定可被文件管理/分享访问
+            val dir = java.io.File(context.getExternalFilesDir(null), "exports").apply { mkdirs() }
+            val out = java.io.File(dir, name)
+            val okW = withContext(Dispatchers.IO) { runCatching { out.writeText(text); true }.getOrDefault(false) }
+            saved = if (okW) (if (zh) "已保存：${out.absolutePath}" else "saved: ${out.absolutePath}")
+                else (if (zh) "保存失败" else "save failed")
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            exportKinds.forEach { k ->
+                SmallAction(if (zh) k.zh else k.en, active = k.key == kind) { kind = k.key; text = ""; count = 0 }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "生成" else "Generate", loading = loading, onClick = { generate() })
+            SmallAction("TSV", active = tabSep) { tabSep = true }
+            SmallAction("CSV", active = !tabSep) { tabSep = false }
+            SmallAction(if (zh) "复制" else "Copy", enabled = text.isNotBlank()) { copyToClipboard(context, text, zh) }
+            SmallAction(if (zh) "保存到文件" else "Save file", enabled = text.isNotBlank()) { saveToWorkspace() }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            if (count > 0) Text(if (zh) "$count 行" else "$count rows", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = limit, onValueChange = { limit = it }, singleLine = true,
+            modifier = Modifier.width(120.dp).heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            label = { Text(if (zh) "行数上限" else "limit", fontSize = AppText.label) },
+        )
+        if (saved.isNotBlank()) { Spacer(Modifier.size(6.dp)); MonoLine(saved, cs.primary, AppText.label) }
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            text.isBlank() -> AnalysisEmptyState(
+                title = if (zh) "导出中心" else "Export center",
+                hint = if (zh) "选择数据类型（函数/字符串/符号/导入/节区/程序段/重定位/入口点）后点「生成」，得到 TSV/CSV；可复制或保存到文件。"
+                    else "Pick a data type, then Generate to get TSV/CSV; copy it or save to a file.",
+                primaryLabel = if (zh) "生成" else "Generate", onPrimary = { generate() },
+            )
+            else -> ToolResultBlock(
+                if (zh) "${spec.zh} · ${if (tabSep) "TSV" else "CSV"} 预览" else "${spec.en} · ${if (tabSep) "TSV" else "CSV"} preview",
+                text.take(6000), zh = zh, onCopy = { copyToClipboard(context, text, zh) },
+            )
+        }
+    }
 }

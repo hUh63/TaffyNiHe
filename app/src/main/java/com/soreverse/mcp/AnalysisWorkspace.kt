@@ -354,6 +354,8 @@ internal fun AnalysisWorkspace(
 
                         "export" -> ExportView(tools, zh, context, refreshAll)
 
+                        "unpack" -> UnpackView(tools, zh, context, refreshAll)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -1980,6 +1982,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("hardening", "加固", "Hard", Icons.Filled.Warning),
     AnalysisNavItem("callgraph", "调用图", "Calls", Icons.Filled.CompareArrows),
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
+    AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -7452,6 +7455,232 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
                 if (zh) "${spec.zh} · ${if (tabSep) "TSV" else "CSV"} 预览" else "${spec.en} · ${if (tabSep) "TSV" else "CSV"} preview",
                 text.take(6000), zh = zh, onCopy = { copyToClipboard(context, text, zh) },
             )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  脱壳工作台（对齐 Exbin §6.7 DumpStrategy：Frida 内存 Dump 脚本 + ELF 修复清单）
+//  纯模板/本地实现；检测部分复用 rizin 字符串特征 + .text 熵。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 生成 Frida 内存 dump 脚本（按模块名参数化）。 */
+private fun buildDumpScript(moduleName: String, outPath: String, dumpAll: Boolean): String {
+    val mod = moduleName.ifBlank { "libtarget.so" }
+    val out = outPath.ifBlank { "/data/local/tmp" }
+    val sb = StringBuilder()
+    sb.append("// ── 塔菲逆核 · Frida 内存 Dump 脚本（脱壳用） ──\n")
+    sb.append("// 用法: frida -U -f <包名> -l dump.js --no-pause\n")
+    sb.append("// 说明: 壳在运行时解密 .text 后才会有真实指令, 静态打开看到的是密文;\n")
+    sb.append("//       本脚本把解密后的内存镜像 dump 到文件, 再用 SoFixer/修复工具重建 ELF 结构。\n\n")
+    if (dumpAll) {
+        sb.append("// 模式: dump 全部已加载模块\n")
+        sb.append("var OUT = '").append(out).append("';\n\n")
+        sb.append("function sanitize(name) { return name.replace(/[^A-Za-z0-9_.-]/g, '_'); }\n\n")
+        sb.append("Process.enumerateModulesSync().forEach(function (m) {\n")
+        sb.append("    try {\n")
+        sb.append("        var base = m.base;\n")
+        sb.append("        if (base.isNull()) return;\n")
+        sb.append("        var bytes = base.readByteArray(m.size);\n")
+        sb.append("        var path = OUT + '/' + sanitize(m.name) + '.dump';\n")
+        sb.append("        var f = new File(path, 'wb');\n")
+        sb.append("        f.write(bytes); f.flush(); f.close();\n")
+        sb.append("        console.log('[dump] ' + m.name + '  size=' + m.size + '  -> ' + path);\n")
+        sb.append("    } catch (e) { console.log('[skip] ' + m.name + ' : ' + e); }\n")
+        sb.append("});\n\n")
+        sb.append("console.log('[done] all modules dumped to ' + OUT);\n")
+    } else {
+        sb.append("var MODULE_NAME = '").append(mod).append("';\n")
+        sb.append("var OUT = '").append(out).append("';\n\n")
+        sb.append("var base = Module.findBaseAddress(MODULE_NAME);\n")
+        sb.append("if (!base) { console.log('[!] module not loaded: ' + MODULE_NAME); }\n")
+        sb.append("else {\n")
+        sb.append("    Process.enumerateModulesSync().forEach(function (m) {\n")
+        sb.append("        if (m.name !== MODULE_NAME) return;\n")
+        sb.append("        var bytes = m.base.readByteArray(m.size);\n")
+        sb.append("        var path = OUT + '/' + MODULE_NAME + '.dump';\n")
+        sb.append("        var f = new File(path, 'wb');\n")
+        sb.append("        f.write(bytes); f.flush(); f.close();\n")
+        sb.append("        console.log('[dump] ' + MODULE_NAME + '  base=' + m.base + '  size=' + m.size);\n")
+        sb.append("        console.log('[dump] saved to ' + path);\n")
+        sb.append("    });\n")
+        sb.append("}\n")
+    }
+    sb.append("\n// ── 进阶: 若目标模块在 dump 时尚未解密完毕, 可挂到 JNI_OnLoad 之后再 dump ──\n")
+    sb.append("// var onLoad = Module.findExportByName('").append(mod).append("', 'JNI_OnLoad');\n")
+    sb.append("// if (onLoad) Interceptor.attach(onLoad, { onLeave: function () { /* 在此 dump */ } });\n")
+    return sb.toString()
+}
+
+/** ELF 修复流程（对齐 Exbin FIX_STEPS）。 */
+private val fixSteps: List<Pair<String, String>> = listOf(
+    "1. 内存 Dump" to "root 后用 Frida 脚本枚举模块并把解密后的内存镜像写到 /data/local/tmp（本页可生成脚本）。",
+    "2. 修复 ELF 头" to "校正 e_shoff / e_shnum / e_shstrndx，恢复被抹除的节区头表（工具：taffy_edit_fix_sections）。",
+    "3. 重建 Section Headers" to "依据动态表重建 .dynsym / .dynstr / .rela.dyn / .rela.plt / .init_array（工具：taffy_edit_fix_sections）。",
+    "4. 反混淆" to "对高跳转密度函数做控制流平坦化还原（不透明谓词识别 + 调度器状态机重建）。",
+    "5. 动态辅助与校验" to "Unidbg / Frida Stalker 记录执行路径；最后用 readelf -a / IDA 重新加载比对。",
+)
+
+@Composable
+private fun UnpackView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var module by remember { mutableStateOf("") }
+    var outPath by remember { mutableStateOf("/data/local/tmp") }
+    var dumpAll by remember { mutableStateOf(false) }
+    var script by remember { mutableStateOf("") }
+    var pkg by remember { mutableStateOf("") }
+    var findings by remember(ws) { mutableStateOf<List<HardFinding>>(emptyList()) }
+    var entropy by remember(ws) { mutableStateOf(-1.0) }
+    var scanning by remember(ws) { mutableStateOf(false) }
+    var scanned by remember(ws) { mutableStateOf(false) }
+
+    // 默认模块名取当前 SO
+    LaunchedEffect(ws) {
+        if (module.isBlank()) module = tools.sharedSoName.ifBlank { "libtarget.so" }
+    }
+    // 自动扫一次加固特征（判断是否需要脱壳）
+    LaunchedEffect(ws) {
+        if (ws.isBlank() || scanned) return@LaunchedEffect
+        scanning = true
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
+                val eng = EngineProvider.get(context)
+                val txt = eng.rzCommand(ws, "", "izq").let { r -> r.optString("stdout").ifBlank { r.optString("text") } }
+                val strs = txt.split('\n').map { it.trim() }.filter { it.length in 3..300 }.take(50000)
+                val hx = eng.rzCommand(ws, "", "p8 4096 @ .text").let { r -> r.optString("stdout").ifBlank { r.optString("text") } }.trim()
+                val bytes = runCatching {
+                    val t = hx.filter { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+                    ByteArray(t.length / 2) { i -> t.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+                }.getOrNull() ?: ByteArray(0)
+                hardMatch(strs) to (if (bytes.isNotEmpty()) shannonEntropy(bytes) else -1.0)
+            }.getOrNull()
+        }
+        scanning = false; scanned = true
+        if (res != null) { findings = res.first; entropy = res.second }
+    }
+
+    fun gen() {
+        script = buildDumpScript(module.trim(), outPath.trim(), dumpAll)
+    }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (zh) "脱壳工作台" else "Unpack workbench", style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
+            MonoLine(if (zh) "Frida 内存 Dump + ELF 修复流程" else "Frida memory dump + ELF repair", cs.onSurfaceVariant, AppText.label)
+            if (scanning) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
+        }
+
+        // ── 是否需要脱壳的判定 ──
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.md))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(if (zh) "① 脱壳判定" else "① Need unpack?", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+            when {
+                ws.isBlank() -> MonoLine(if (zh) "未打开 SO" else "no SO opened", cs.onSurfaceVariant, AppText.label)
+                scanning -> MonoLine(if (zh) "正在扫描特征…" else "scanning…", cs.onSurfaceVariant, AppText.label)
+                else -> {
+                    val need = findings.isNotEmpty() || entropy >= 7.0
+                    MonoLine(
+                        if (need) (if (zh) "⚠ 检出加固/混淆特征，建议先脱壳再静态分析" else "⚠ hardening detected — unpack first")
+                        else (if (zh) "✓ 未检出常见加固特征，通常可直接分析" else "✓ no common hardening — analyze directly"),
+                        if (need) cs.error else cs.primary, AppText.label,
+                    )
+                    if (entropy >= 0) MonoLine(".text entropy: %.3f / 8.0".format(entropy) + (if (entropy >= 7.0) (if (zh) "  （偏高，疑似加密）" else "  (likely encrypted)") else ""), cs.onSurfaceVariant, AppText.label)
+                    findings.take(6).forEach { f -> MonoLine("· [${f.severity}] ${f.title}", cs.onSurfaceVariant, AppText.label) }
+                    if (findings.size > 6) MonoLine(if (zh) "… 共 ${findings.size} 项（见「加固」页）" else "… ${findings.size} total (see Hardening)", cs.onSurfaceVariant, AppText.label)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SmallAction(if (zh) "重新扫描" else "Rescan", onClick = onRefresh)
+                        SmallAction(if (zh) "查看加固报告" else "Hardening") { tools.analysisView = "hardening" }
+                    }
+                }
+            }
+        }
+
+        // ── 脚本生成 ──
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.md))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(if (zh) "② Frida 内存 Dump 脚本" else "② Frida dump script", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = module, onValueChange = { module = it }, singleLine = true,
+                    modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                    shape = RoundedCornerShape(AppShape.sm),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                    label = { Text(if (zh) "目标模块名" else "module", fontSize = AppText.label) },
+                    placeholder = { Text("libtarget.so", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+                )
+                OutlinedTextField(
+                    value = outPath, onValueChange = { outPath = it }, singleLine = true,
+                    modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                    shape = RoundedCornerShape(AppShape.sm),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                    label = { Text(if (zh) "输出目录" else "out dir", fontSize = AppText.label) },
+                )
+            }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallAction(if (zh) "单模块" else "Single", active = !dumpAll) { dumpAll = false; script = "" }
+                SmallAction(if (zh) "全部模块" else "All modules", active = dumpAll) { dumpAll = true; script = "" }
+                SmallAction(if (zh) "生成脚本" else "Generate", onClick = { gen() })
+                SmallAction(if (zh) "复制脚本" else "Copy", enabled = script.isNotBlank()) { copyToClipboard(context, script, zh) }
+            }
+            OutlinedTextField(
+                value = pkg, onValueChange = { pkg = it }, singleLine = true,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "目标包名（生成运行命令）" else "package", fontSize = AppText.label) },
+                placeholder = { Text("com.example.app", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+            )
+            if (script.isNotBlank()) {
+                MonoLine(
+                    "frida -U -f ${pkg.ifBlank { "<包名>" }} -l dump.js --no-pause",
+                    cs.primary, AppText.label,
+                )
+                ToolResultBlock(if (zh) "生成结果" else "Generated", script, zh = zh, onCopy = { copyToClipboard(context, script, zh) })
+            } else {
+                SmallAction(if (zh) "生成脚本" else "Generate", onClick = { gen() })
+            }
+        }
+
+        // ── 修复流程 ──
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.md))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(if (zh) "③ Dump 后修复流程" else "③ Post-dump repair", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+            fixSteps.forEach { (title, detail) ->
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(title, style = MaterialTheme.typography.bodySmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.primary)
+                    Text(detail, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurface, lineHeight = 15.sp)
+                }
+            }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallAction(if (zh) "复制流程" else "Copy steps") {
+                    copyToClipboard(context, fixSteps.joinToString("\n") { "${it.first}\n  ${it.second}" }, zh)
+                }
+                SmallAction(if (zh) "复制脚本+流程" else "Copy all") {
+                    val all = buildDumpScript(module.trim(), outPath.trim(), dumpAll) + "\n\n" +
+                        fixSteps.joinToString("\n") { "${it.first}\n  ${it.second}" }
+                    copyToClipboard(context, all, zh)
+                }
+            }
         }
     }
 }

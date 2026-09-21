@@ -322,6 +322,22 @@ internal fun AnalysisWorkspace(
                             onShowCfg = { tools.analysisView = "cfg" },
                         )
 
+                        "hub" -> ToolsHubView(zh = zh) { key -> tools.analysisView = key }
+
+                        "xor" -> XorDecryptView(zh = zh, context = context)
+
+                        "regs" -> ArmRegisterView(zh = zh, context = context)
+
+                        "strdec" -> StringDecodeView(zh = zh, context = context)
+
+                        "bytediff" -> ByteDiffView(zh = zh, context = context)
+
+                        "insnexp" -> InsnExplainView(zh = zh, context = context)
+
+                        "asm2c" -> AsmToPseudoCView(zh = zh, context = context)
+
+                        "asm2flow" -> AsmToFlowChartView(zh = zh, context = context)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -1932,6 +1948,14 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("asm", "汇编器", "Asm+", Icons.Filled.SwapHoriz),
     AnalysisNavItem("results", "结果", "Out", Icons.Filled.Terminal),
     AnalysisNavItem("tools", "工具", "Tools", Icons.Filled.Build),
+    AnalysisNavItem("hub", "工具集", "Hub", Icons.Filled.Build),
+    AnalysisNavItem("xor", "XOR", "XOR", Icons.Filled.LockOpen),
+    AnalysisNavItem("regs", "寄存器", "Reg", Icons.Filled.Memory),
+    AnalysisNavItem("strdec", "解码", "Dec", Icons.Filled.DataObject),
+    AnalysisNavItem("bytediff", "差分", "Diff", Icons.Filled.CompareArrows),
+    AnalysisNavItem("insnexp", "指令", "Insn", Icons.Filled.Description),
+    AnalysisNavItem("asm2c", "译C", "→C", Icons.Filled.Transform),
+    AnalysisNavItem("asm2flow", "框图", "Flow", Icons.Filled.Inventory2),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -4845,3 +4869,1295 @@ private fun EntriesView(tools: ToolPagesState, zh: Boolean, context: android.con
         onRefresh,
     )
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  逆向工程工具集（复刻 Exbin ToolsHubFragment 的 12 项）
+//  本文件所有页面均为纯客户端实现：不打开工作区也能用（与「进制转换/汇编器」一致）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+private data class ToolEntry(
+    val key: String,
+    val zh: String,
+    val en: String,
+    val zhDesc: String,
+    val enDesc: String,
+)
+
+private val toolHubItems = listOf(
+    ToolEntry("base", "进制转换", "Base", "BIN / OCT / DEC / HEX 互转 + 字节序 + ASCII", "BIN / OCT / DEC / HEX + endianness + ASCII"),
+    ToolEntry("strdec", "字符串解码", "Decode", "Hex / Base64 / UTF-8 / ASCII / URL 解码与编码", "Hex / Base64 / UTF-8 / ASCII / URL decode &amp; encode"),
+    ToolEntry("asm", "汇编器", "Assembler", "汇编 → 机器码（多架构，可视化预览与写回）", "Assemble → machine code (multi-arch)"),
+    ToolEntry("xor", "XOR 解密", "XOR", "对 hex 数据用 key 做 XOR，输出 hex + ASCII", "XOR hex data with key → hex + ASCII"),
+    ToolEntry("elfhdr", "ELF 头解析", "ELF Header", "解析 ELF 头字段、程序段与节表结构", "Parse ELF header, program &amp; section tables"),
+    ToolEntry("regs", "寄存器速查", "Registers", "ARM64 / ARM32 寄存器用途与调用约定", "ARM64 / ARM32 registers &amp; calling convention"),
+    ToolEntry("hex", "十六进制查看器", "Hex Viewer", "按偏移查看当前文件的十六进制内容", "Hex view of the current file"),
+    ToolEntry("bytediff", "字节差分对比", "Byte Diff", "对比两段 hex 数据，逐字节输出差异行", "Diff two hex blobs byte by byte"),
+    ToolEntry("insnexp", "指令含义", "Insn Explain", "ARM / ARM64 汇编指令中文语义查询", "Explain ARM / ARM64 instructions in Chinese"),
+    ToolEntry("asm2c", "汇编转伪C", "Asm → C", "把多条汇编指令翻译成可读的伪 C 代码", "Translate assembly into readable pseudo-C"),
+    ToolEntry("asm2flow", "汇编转流程图", "Asm → Flow", "按基本块切分汇编，输出 ASCII 框图", "Split asm into basic blocks → ASCII flowchart"),
+    ToolEntry("demangle", "符号解码", "Demangle", "Itanium C++ mangled 符号解码", "Decode Itanium mangled C++ symbols"),
+)
+
+@Composable
+private fun ToolsHubView(zh: Boolean, onOpen: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Filled.Build, null, tint = cs.primary, modifier = Modifier.size(15.dp))
+            Text(
+                if (zh) "逆向工程工具集 · 共 ${toolHubItems.size} 项" else "Reverse Engineering Toolkit · ${toolHubItems.size} tools",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        toolHubItems.forEach { item ->
+            Surface(
+                onClick = { onOpen(item.key) },
+                shape = RoundedCornerShape(AppShape.md),
+                color = cs.surfaceContainerHigh,
+                border = BorderStroke(1.dp, cs.outlineVariant),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    Box(
+                        Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(cs.primary.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(toolHubIcon(item.key), null, tint = cs.primary, modifier = Modifier.size(15.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (zh) item.zh else item.en,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = AppText.bodyStrong,
+                            fontWeight = FontWeight.SemiBold,
+                            color = cs.onSurface,
+                        )
+                        Text(
+                            if (zh) item.zhDesc else item.enDesc,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = cs.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+private fun toolHubIcon(key: String): ImageVector = when (key) {
+    "base" -> Icons.Filled.Calculate
+    "strdec" -> Icons.Filled.DataObject
+    "asm" -> Icons.Filled.SwapHoriz
+    "xor" -> Icons.Filled.LockOpen
+    "elfhdr" -> Icons.Filled.Info
+    "regs" -> Icons.Filled.Memory
+    "hex" -> Icons.Filled.Storage
+    "bytediff" -> Icons.Filled.CompareArrows
+    "insnexp" -> Icons.Filled.Description
+    "asm2c" -> Icons.Filled.Transform
+    "asm2flow" -> Icons.Filled.Inventory2
+    else -> Icons.Filled.ListAlt
+}
+
+// ───────────────────────── 通用小工具 ─────────────────────────
+
+/** 宽松地把一串 hex（允许空格/逗号/0x 前缀）解析成字节数组；非法返回 null。 */
+private fun hexToBytesLoose(raw: String): ByteArray? {
+    val t = raw.filter { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+    if (t.isEmpty() || t.length % 2 != 0) return null
+    return runCatching { ByteArray(t.length / 2) { i -> t.substring(i * 2, i * 2 + 2).toInt(16).toByte() } }.getOrNull()
+}
+
+/** 标准 hex dump：偏移 + 16 字节 hex（中点分隔）+ ASCII。 */
+private fun hexDumpBytes(bytes: ByteArray, base: Long = 0L): String {
+    if (bytes.isEmpty()) return ""
+    val sb = StringBuilder()
+    var i = 0
+    while (i < bytes.size) {
+        val n = minOf(16, bytes.size - i)
+        sb.append("%08x  ".format(base + i))
+        for (j in 0 until 16) {
+            if (j < n) sb.append("%02x ".format(bytes[i + j].toInt() and 0xff)) else sb.append("   ")
+            if (j == 7) sb.append(' ')
+        }
+        sb.append(' ')
+        for (j in 0 until n) {
+            val c = bytes[i + j].toInt() and 0xff
+            sb.append(if (c in 32..126) c.toChar() else '.')
+        }
+        sb.append('\n')
+        i += 16
+    }
+    return sb.toString().trimEnd('\n')
+}
+
+/** 可打印 ASCII 表示（非可打印用 '.'）。 */
+private fun bytesToAscii(bytes: ByteArray): String =
+    bytes.map { b -> val c = b.toInt() and 0xff; if (c in 32..126) c.toChar() else '.' }.joinToString("")
+
+/** 工具页统一外壳：标题行 + 动作行 + 内容区。 */
+@Composable
+private fun ToolPageScaffold(
+    title: String,
+    hint: String,
+    actions: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = AppText.bodyStrong,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurface,
+            )
+            Text(
+                hint,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) { actions() }
+        Spacer(Modifier.size(8.dp))
+        content()
+    }
+}
+
+/** 工具页的等宽多行输入框。 */
+@Composable
+private fun ToolMonoField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    minHeight: androidx.compose.ui.unit.Dp = 96.dp,
+    modifier: Modifier = Modifier,
+) {
+    val cs = MaterialTheme.colorScheme
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth().heightIn(min = minHeight),
+        label = { Text(label, fontSize = AppText.label) },
+        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+        shape = RoundedCornerShape(AppShape.sm),
+        placeholder = {
+            Text(
+                placeholder,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurfaceVariant,
+            )
+        },
+    )
+}
+
+/** 结果块：标题 + 等宽内容（可横向滚动）。 */
+@Composable
+private fun ToolResultBlock(title: String, body: String, zh: Boolean = true, onCopy: (() -> Unit)? = null) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (onCopy != null) TextButton(onClick = onCopy) { Text(if (zh) "复制" else "Copy", fontSize = AppText.label) }
+        }
+        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            Text(
+                body,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                color = cs.onSurface,
+                lineHeight = 16.sp,
+            )
+        }
+    }
+}
+
+// ───────────────────────── 1. XOR 解密 ─────────────────────────
+
+private fun xorTransform(data: ByteArray, key: ByteArray, scheme: String): ByteArray =
+    ByteArray(data.size) { i ->
+        val k = when (scheme) {
+            "single" -> key[0].toInt() and 0xff
+            "inc" -> (key[0].toInt() and 0xff) + i
+            "dec" -> (key[0].toInt() and 0xff) - i
+            else -> key[i % key.size].toInt() and 0xff
+        }
+        ((data[i].toInt() and 0xff) xor (k and 0xff)).toByte()
+    }
+
+@Composable
+private fun XorDecryptView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    var input by remember { mutableStateOf("") }
+    var keyText by remember { mutableStateOf("") }
+    var keyMode by remember { mutableStateOf("hex") }
+    var scheme by remember { mutableStateOf("repeat") }
+
+    val data = remember(input) { hexToBytesLoose(input) }
+    val key = remember(keyText, keyMode) {
+        if (keyMode == "text") keyText.toByteArray(Charsets.UTF_8).takeIf { it.isNotEmpty() }
+        else hexToBytesLoose(keyText)
+    }
+    val out = remember(data, key, scheme) {
+        if (data == null || key == null || key.isEmpty()) null else xorTransform(data, key, scheme)
+    }
+
+    ToolPageScaffold(
+        title = if (zh) "XOR 解密" else "XOR decrypt",
+        hint = if (zh) "对 hex 数据用 key 做 XOR，输出 hex + ASCII" else "XOR hex data with key → hex + ASCII",
+        actions = {
+            SmallAction("HEX key", active = keyMode == "hex") { keyMode = "hex" }
+            SmallAction("TEXT key", active = keyMode == "text") { keyMode = "text" }
+            SmallAction(if (zh) "循环" else "Repeat", active = scheme == "repeat") { scheme = "repeat" }
+            SmallAction(if (zh) "单字节" else "Single", active = scheme == "single") { scheme = "single" }
+            SmallAction(if (zh) "递增" else "Inc", active = scheme == "inc") { scheme = "inc" }
+            SmallAction(if (zh) "递减" else "Dec", active = scheme == "dec") { scheme = "dec" }
+            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank() || keyText.isNotBlank()) {
+                input = ""; keyText = ""
+            }
+        },
+        content = {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolMonoField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = if (zh) "hex 数据" else "hex data",
+                    placeholder = if (zh) "48 65 6c 6c 6f  或  0x48656c6c6f" else "48 65 6c 6c 6f",
+                    minHeight = 110.dp,
+                )
+                ToolMonoField(
+                    value = keyText,
+                    onValueChange = { keyText = it },
+                    label = if (zh) "key" else "key",
+                    placeholder = if (keyMode == "hex") (if (zh) "hex，如 6b6579" else "hex, e.g. 6b6579")
+                        else (if (zh) "文本，如 secret" else "text, e.g. secret"),
+                    minHeight = 52.dp,
+                )
+                when {
+                    data == null -> AnalysisEmptyState(
+                        title = if (zh) "XOR 解密" else "XOR decrypt",
+                        hint = if (zh) "在「hex 数据」里粘贴偶数长度的十六进制字节，在「key」里给一个 hex（或切到 TEXT key 用文本），选择循环/单字节/递增/递减后即可解密。"
+                            else "Paste an even-length hex blob and a key (hex, or TEXT mode), then pick repeat/single/inc/dec.",
+                    )
+                    key == null -> AnalysisErrorBanner(if (zh) "key 非法：hex 模式需要偶数长度的十六进制" else "invalid key: hex mode needs even-length hex")
+                    else -> {
+                        val o = out!!
+                        ToolResultBlock(
+                            if (zh) "解密结果（hex dump）" else "Result (hex dump)",
+                            hexDumpBytes(o),
+                            zh = zh,
+                            onCopy = { copyToClipboard(context, o.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }, zh) },
+                        )
+                        ToolResultBlock(
+                            "ASCII",
+                            bytesToAscii(o).ifBlank { "—" },
+                            zh = zh,
+                            onCopy = { copyToClipboard(context, bytesToAscii(o), zh) },
+                        )
+                        KeyValueCard(zh, listOf(
+                            (if (zh) "长度" else "length") to "${data.size} ${if (zh) "字节" else "bytes"}",
+                            ("key") to (if (keyMode == "hex") key.joinToString(" ") { "%02x".format(it.toInt() and 0xff) } else keyText),
+                            (if (zh) "模式" else "scheme") to scheme,
+                        ))
+                    }
+                }
+            }
+        },
+    )
+}
+
+// ───────────────────────── 2. 寄存器速查 ─────────────────────────
+
+private data class RegRow(val name: String, val alias: String, val usage: String)
+
+private val arm64GeneralRegs = listOf(
+    RegRow("x0", "参数1 / 返回值", "第 1 个参数；函数返回时存放返回值（w0 为低 32 位）"),
+    RegRow("x1–x7", "参数 2–8", "第 2 到第 8 个整型/指针参数"),
+    RegRow("x8", "间接结果寄存器", "返回大对象时存放返回缓冲区指针（与 Apple ABI 相关）"),
+    RegRow("x9–x15", "临时寄存器", "调用者保存（caller-saved），子函数可随意破坏"),
+    RegRow("x16 (IP0)", "过程内临时 0", "链接器修补/长跳转（PLT）中间寄存器，勿作长期存储"),
+    RegRow("x17 (IP1)", "过程内临时 1", "同 x16，用于长跳转"),
+    RegRow("x18", "平台寄存器", "Android/Linux 保留，用户代码不应使用"),
+    RegRow("x19–x28", "被调用者保存", "callee-saved：子函数若要使用必须先保存、返回前恢复"),
+    RegRow("x29 (FP)", "帧指针", "指向当前栈帧，用于回溯与调试"),
+    RegRow("x30 (LR)", "链接寄存器", "存放 bl/blr 的返回地址（调用返回地址）"),
+    RegRow("SP", "栈指针", "指向当前栈顶（16 字节对齐）"),
+    RegRow("PC", "程序计数器", "下一条指令地址（ARM64 不能直接 mov 到 PC）"),
+    RegRow("XZR / WZR", "零寄存器", "读取恒为 0，写入被丢弃（常用作丢弃结果的占位）"),
+    RegRow("W0–W30", "x0–x30 低 32 位", "写入 wN 会把 xN 的高 32 位清零"),
+)
+
+private val arm64SpecialRegs = listOf(
+    RegRow("NZCV", "条件标志", "N 负 / Z 零 / C 进位 / V 溢出，由 cbz、cmp(b) 等设置"),
+    RegRow("V0–V31", "SIMD/FP 寄存器", "128 位向量寄存器；Q=128b / D=64b / S=32b / H=16b / B=8b"),
+    RegRow("FPCR / FPSR", "浮点控制/状态", "舍入模式、异常标志等"),
+    RegRow("TPIDR_EL0", "线程指针", "TLS 基址（Android 上指向线程控制块）"),
+    RegRow("SP_EL0 / SP_ELx", "各异常级栈指针", "EL0 用户态栈（应用层基本只见 SP_EL0）"),
+)
+
+private val arm32Regs = listOf(
+    RegRow("r0", "参数1 / 返回值", "第 1 个参数；返回时存返回值；也作临时寄存器"),
+    RegRow("r1–r3", "参数 2–4", "第 2–4 个参数（调用者保存）"),
+    RegRow("r4–r8", "通用变量寄存器", "被调用者保存（callee-saved）"),
+    RegRow("r9", "平台寄存器", "Android 上常保留（SB 静态基址），一般不使用"),
+    RegRow("r10 (SL)", "栈界限", "栈限制寄存器，部分平台保留"),
+    RegRow("r11 (FP)", "帧指针", "指向当前栈帧"),
+    RegRow("r12 (IP)", "过程内临时", "长跳转/链接器修补中间寄存器"),
+    RegRow("r13 (SP)", "栈指针", "指向当前栈顶"),
+    RegRow("r14 (LR)", "链接寄存器", "存放 bl/blx 的返回地址"),
+    RegRow("r15 (PC)", "程序计数器", "下一条指令地址（可读，赋值语义特殊）"),
+    RegRow("CPSR", "状态寄存器", "N/Z/C/V/Q 标志 + 中断位 + 模式位（r15 之外的全局状态）"),
+    RegRow("S0–S31 / D0–D15", "VFP/NEON", "浮点与 SIMD 寄存器（S=单精度 / D=双精度）"),
+)
+
+@Composable
+private fun ArmRegisterView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    var arch by remember { mutableStateOf("arm64") }
+    val general = if (arch == "arm64") arm64GeneralRegs else arm32Regs
+    val special = if (arch == "arm64") arm64SpecialRegs else arm32Regs.drop(11)
+
+    ToolPageScaffold(
+        title = if (zh) "寄存器速查" else "Registers",
+        hint = if (zh) "ARM64 / ARM32 寄存器用途与调用约定" else "ARM64 / ARM32 registers & calling convention",
+        actions = {
+            SmallAction("AArch64", active = arch == "arm64") { arch = "arm64" }
+            SmallAction("ARM (A32)", active = arch == "arm32") { arch = "arm32" }
+            SmallAction(if (zh) "复制全部" else "Copy all") {
+                val sb = StringBuilder()
+                sb.append(if (arch == "arm64") "AArch64\n" else "ARM (A32)\n")
+                general.forEach { sb.append("%-12s %-18s %s\n".format(it.name, it.alias, it.usage)) }
+                special.forEach { sb.append("%-12s %-18s %s\n".format(it.name, it.alias, it.usage)) }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+        },
+        content = {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                RegSection(if (zh) "通用寄存器" else "General purpose", general)
+                RegSection(if (zh) "特殊 / 状态寄存器" else "Special / status", special)
+                val conv = if (arch == "arm64") listOf(
+                    ("参数" to "x0–x7（超出部分走栈）"),
+                    ("返回值" to "x0（大对象用 x8 指针）"),
+                    ("调用者保存" to "x0–x18"),
+                    ("被调用者保存" to "x19–x28, x29(FP), SP"),
+                    ("栈对齐" to "16 字节"),
+                ) else listOf(
+                    ("参数" to "r0–r3（超出部分走栈）"),
+                    ("返回值" to "r0（64 位用 r0:r1）"),
+                    ("调用者保存" to "r0–r3, r12(IP)"),
+                    ("被调用者保存" to "r4–r11, r13(SP)"),
+                    ("栈对齐" to "8 字节（部分 ABI 16）"),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(
+                        if (zh) "调用约定（AAPCS）" else "Calling convention (AAPCS)",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        fontWeight = FontWeight.SemiBold,
+                        color = cs.onSurfaceVariant,
+                    )
+                    KeyValueCard(zh, conv)
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun RegSection(title: String, rows: List<RegRow>) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            fontWeight = FontWeight.SemiBold,
+            color = cs.onSurfaceVariant,
+        )
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.md))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            rows.forEach { r ->
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            r.name,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            fontSize = AppText.body,
+                            fontWeight = FontWeight.SemiBold,
+                            color = cs.primary,
+                        )
+                        Text(
+                            r.alias,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        r.usage,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = AppText.label,
+                        color = cs.onSurface,
+                        lineHeight = 15.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 3. 字符串解码（Hex / Base64 / UTF-8 / ASCII / URL） ─────────────────────────
+
+private fun decodeHexToText(s: String): String? {
+    val b = hexToBytesLoose(s) ?: return null
+    if (b.isEmpty()) return null
+    return runCatching { String(b, Charsets.UTF_8) }.getOrNull()
+}
+
+private fun decodeBase64ToText(s: String): String? {
+    val t = s.trim().replace("\n", "").replace("\r", "").replace(" ", "")
+    if (t.length < 4) return null
+    return runCatching {
+        val padded = t.padEnd(((t.length + 3) / 4) * 4, '=')
+        String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+}
+
+private fun decodeUrl(s: String): String? = runCatching {
+    java.net.URLDecoder.decode(s, "UTF-8")
+}.getOrNull()
+
+private fun decodeUnicodeEscapes(s: String): String? {
+    if (!s.contains("\\u")) return null
+    val re = Regex("\\\\u([0-9a-fA-F]{4})")
+    if (!re.containsMatchIn(s)) return null
+    return re.replace(s) { m -> m.groupValues[1].toInt(16).toChar().toString() }
+}
+
+@Composable
+private fun StringDecodeView(zh: Boolean, context: android.content.Context) {
+    var input by remember { mutableStateOf("") }
+
+    val trimmed = input.trim()
+    val hexText = remember(trimmed) { if (trimmed.isNotBlank()) decodeHexToText(trimmed) else null }
+    val b64Text = remember(trimmed) { if (trimmed.isNotBlank()) decodeBase64ToText(trimmed) else null }
+    val urlText = remember(trimmed) { if (trimmed.isNotBlank() && (trimmed.contains('%') || trimmed.contains('+'))) decodeUrl(trimmed) else null }
+    val uniText = remember(trimmed) { if (trimmed.isNotBlank()) decodeUnicodeEscapes(trimmed) else null }
+    val hexOfInput = remember(trimmed) {
+        if (trimmed.isBlank()) null else trimmed.toByteArray(Charsets.UTF_8).joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+    }
+    val b64OfInput = remember(trimmed) {
+        if (trimmed.isBlank()) null else runCatching {
+            android.util.Base64.encodeToString(trimmed.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+        }.getOrNull()
+    }
+    val urlOfInput = remember(trimmed) {
+        if (trimmed.isBlank()) null else runCatching { java.net.URLEncoder.encode(trimmed, "UTF-8") }.getOrNull()
+    }
+
+    ToolPageScaffold(
+        title = if (zh) "字符串解码" else "String decoder",
+        hint = if (zh) "Hex / Base64 / UTF-8 / ASCII / URL / Unicode 转义" else "Hex / Base64 / UTF-8 / ASCII / URL / \\u escapes",
+        actions = {
+            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "复制输入" else "Copy input", enabled = trimmed.isNotBlank()) { copyToClipboard(context, trimmed, zh) }
+        },
+        content = {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolMonoField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = if (zh) "输入" else "input",
+                    placeholder = if (zh) "粘贴 hex / base64 / URL 编码串，或普通文本" else "hex / base64 / URL-encoded, or plain text",
+                    minHeight = 100.dp,
+                )
+                if (trimmed.isBlank()) {
+                    AnalysisEmptyState(
+                        title = if (zh) "字符串解码" else "String decoder",
+                        hint = if (zh) "粘贴任意字符串，自动尝试 Hex、Base64、URL、Unicode 转义解码，并给出 Hex / Base64 / URL 编码结果。"
+                            else "Paste any string; it auto-tries hex, base64, URL and \\u escapes, and also shows hex/base64/URL encodings.",
+                    )
+                } else {
+                    if (hexText != null) ToolResultBlock("HEX → Text", hexText, zh = zh, onCopy = { copyToClipboard(context, hexText, zh) })
+                    if (b64Text != null) ToolResultBlock("Base64 → Text", b64Text, zh = zh, onCopy = { copyToClipboard(context, b64Text, zh) })
+                    if (urlText != null && urlText != trimmed) ToolResultBlock("URL → Text", urlText, zh = zh, onCopy = { copyToClipboard(context, urlText, zh) })
+                    if (uniText != null && uniText != trimmed) ToolResultBlock(if (zh) "Unicode 转义 → Text" else "\u escape → Text", uniText, zh = zh, onCopy = { copyToClipboard(context, uniText, zh) })
+                    if (hexOfInput != null) ToolResultBlock("Text → HEX", hexOfInput, zh = zh, onCopy = { copyToClipboard(context, hexOfInput, zh) })
+                    if (b64OfInput != null) ToolResultBlock("Text → Base64", b64OfInput, zh = zh, onCopy = { copyToClipboard(context, b64OfInput, zh) })
+                    if (urlOfInput != null) ToolResultBlock("Text → URL", urlOfInput, zh = zh, onCopy = { copyToClipboard(context, urlOfInput, zh) })
+                }
+            }
+        },
+    )
+}
+
+// ───────────────────────── 4. 字节差分对比 ─────────────────────────
+
+@Composable
+private fun ByteDiffView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    var aText by remember { mutableStateOf("") }
+    var bText by remember { mutableStateOf("") }
+
+    val a = remember(aText) { if (aText.isBlank()) null else hexToBytesLoose(aText) }
+    val b = remember(bText) { if (bText.isBlank()) null else hexToBytesLoose(bText) }
+    val diffs = remember(a, b) {
+        if (a == null || b == null) null
+        else {
+            val n = maxOf(a.size, b.size)
+            (0 until n).mapNotNull { i ->
+                val x = if (i < a.size) a[i] else null
+                val y = if (i < b.size) b[i] else null
+                if (x != y) Triple(i, x, y) else null
+            }
+        }
+    }
+
+    ToolPageScaffold(
+        title = if (zh) "字节差分对比" else "Byte diff",
+        hint = if (zh) "对比两段 hex 数据，逐字节输出差异行" else "Diff two hex blobs byte by byte",
+        actions = {
+            SmallAction(if (zh) "清空" else "Clear", enabled = aText.isNotBlank() || bText.isNotBlank()) { aText = ""; bText = "" }
+            SmallAction(if (zh) "交换 A/B" else "Swap A/B", enabled = aText.isNotBlank() || bText.isNotBlank()) {
+                val t = aText; aText = bText; bText = t
+            }
+            SmallAction(if (zh) "复制差异" else "Copy diff", enabled = !diffs.isNullOrEmpty()) {
+                val sb = StringBuilder()
+                diffs?.forEach { (i, x, y) ->
+                    sb.append("%08x  A:%s  B:%s\n".format(i, x?.let { "%02x".format(it.toInt() and 0xff) } ?: "--", y?.let { "%02x".format(it.toInt() and 0xff) } ?: "--"))
+                }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+        },
+        content = {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolMonoField(aText, { aText = it }, "A (hex)", if (zh) "原始数据的十六进制" else "original hex", 84.dp)
+                ToolMonoField(bText, { bText = it }, "B (hex)", if (zh) "对比数据的十六进制" else "patched hex", 84.dp)
+                when {
+                    a == null || b == null -> AnalysisEmptyState(
+                        title = if (zh) "字节差分对比" else "Byte diff",
+                        hint = if (zh) "在 A / B 里分别粘贴两段 hex 数据（偶数长度），逐字节比较并列出所有差异偏移。"
+                            else "Paste two even-length hex blobs into A / B; every differing byte is listed with its offset.",
+                    )
+                    diffs.isEmpty() -> KeyValueCard(zh, listOf(
+                        (if (zh) "结果" else "result") to (if (zh) "两段数据完全一致" else "identical"),
+                        (if (zh) "长度" else "length") to "${a.size} / ${b.size}",
+                    ))
+                    else -> {
+                        val dl = diffs ?: emptyList()
+                        KeyValueCard(zh, listOf(
+                            (if (zh) "差异" else "diffs") to "${dl.size} ${if (zh) "字节" else "bytes"}",
+                            (if (zh) "长度" else "length") to "${a.size} / ${b.size}",
+                        ))
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(AppShape.md))
+                                .background(cs.surfaceContainerHigh)
+                                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Row(Modifier.fillMaxWidth()) {
+                                listOf(("OFFSET" to 84.dp), ("A" to 0.dp), ("B" to 0.dp)).forEachIndexed { idx, (t, w) ->
+                                    Text(
+                                        t,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = AppText.label,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = cs.onSurfaceVariant,
+                                        modifier = if (idx == 0) Modifier.width(w) else Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                            dl.take(400).forEach { (i, x, y) ->
+                                Row(Modifier.fillMaxWidth()) {
+                                    Text(
+                                        "%08x".format(i),
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        fontSize = AppText.label,
+                                        color = cs.onSurfaceVariant,
+                                        modifier = Modifier.width(84.dp),
+                                    )
+                                    Text(
+                                        x?.let { "%02x".format(it.toInt() and 0xff) } ?: "--",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        fontSize = AppText.body,
+                                        color = cs.error,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        y?.let { "%02x".format(it.toInt() and 0xff) } ?: "--",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        fontSize = AppText.body,
+                                        color = cs.primary,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                            if (dl.size > 400) {
+                                Text(
+                                    if (zh) "… 仅显示前 400 处差异" else "… showing first 400 diffs",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = AppText.label,
+                                    color = cs.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+// ───────────────────────── 5. 指令含义（ARM / ARM64 中文语义查询） ─────────────────────────
+
+private val insnTable: Map<String, String> = mapOf(
+    // AArch64 数据传送
+    "mov" to "传送（寄存器 → 寄存器，或别名 movz/movn 的简写）",
+    "movz" to "把 16 位立即数移入寄存器的某一段，其余位清零",
+    "movk" to "把 16 位立即数移入寄存器的某一段，其余位保持不变",
+    "movn" to "把 16 位立即数取反后移入寄存器",
+    "mvn" to "按位取反后传送",
+    "ldr" to "加载（从内存地址读 32/64 位到寄存器，或加载字面量常量）",
+    "ldrb" to "加载字节（8 位，零扩展）",
+    "ldrh" to "加载半字（16 位，零扩展）",
+    "ldrsb" to "加载字节并符号扩展",
+    "ldrsh" to "加载半字并符号扩展",
+    "ldrsw" to "加载字（32 位）并符号扩展到 64 位",
+    "ldur" to "加载（非对齐/未缩放偏移，偏移范围更小）",
+    "str" to "存储（把寄存器的 32/64 位写入内存）",
+    "strb" to "存储字节（8 位）",
+    "strh" to "存储半字（16 位）",
+    "stur" to "存储（未缩放偏移）",
+    "ldp" to "成对加载（一次从内存读两个寄存器，常用于恢复 FP/LR）",
+    "stp" to "成对存储（一次把两个寄存器压栈，常用于保存 FP/LR）",
+    "ldar" to "带获取语义的原子加载（acquire）",
+    "stlr" to "带释放语义的原子存储（release）",
+    // AArch64 算术
+    "add" to "加法（不带标志）",
+    "adds" to "加法并更新标志位（NZCV）",
+    "adc" to "带进位加法",
+    "adcs" to "带进位加法并更新标志位",
+    "sub" to "减法",
+    "subs" to "减法并更新标志位（常用于比较）",
+    "sbc" to "带借位减法",
+    "neg" to "取负（0 − 操作数）",
+    "negs" to "取负并更新标志位",
+    "mul" to "乘法（低 64 位结果）",
+    "madd" to "乘加（a×b + c）",
+    "msub" to "乘减（c − a×b）",
+    "smull" to "有符号长乘法（64 位结果）",
+    "umull" to "无符号长乘法（64 位结果）",
+    "sdiv" to "有符号除法",
+    "udiv" to "无符号除法",
+    "inc" to "自增（伪指令，等价 add #1）",
+    "dec" to "自减（伪指令，等价 sub #1）",
+    // AArch64 逻辑 / 移位
+    "and" to "按位与",
+    "ands" to "按位与并更新标志位",
+    "orr" to "按位或",
+    "eor" to "按位异或",
+    "bic" to "按位清零（a AND NOT b）",
+    "orn" to "按位或非（a OR NOT b）",
+    "eon" to "按位同或非（a XOR NOT b）",
+    "lsl" to "逻辑左移",
+    "lsr" to "逻辑右移（补 0）",
+    "asr" to "算术右移（补符号位）",
+    "ror" to "循环右移",
+    "tst" to "按位测试（AND 后丢弃结果，仅更新标志）",
+    "cmp" to "比较（做减法只更新标志，不写回）",
+    "cmn" to "比较取负（把操作数取负后相加，更新标志）",
+    "cset" to "条件置位（条件成立写 1，否则 0）",
+    "csel" to "条件选择（根据条件在两个寄存器间二选一）",
+    "csinc" to "条件选择并自增（不成立侧 +1，用于实现 cset/cinc）",
+    "csinv" to "条件选择并按位取反",
+    "csneg" to "条件选择并取负",
+    "ccmp" to "条件比较（满足条件才比较）",
+    // AArch64 跳转 / 分支
+    "b" to "无条件跳转（相对偏移 ±128MB）",
+    "bl" to "带链接跳转（调用函数，返回地址写入 x30/LR）",
+    "br" to "按寄存器跳转（间接跳转，如跳转表）",
+    "blr" to "按寄存器调用（返回地址写入 x30/LR，用于间接调用）",
+    "ret" to "函数返回（默认跳到 x30/LR）",
+    "cbz" to "比较寄存器为 0 则跳转",
+    "cbnz" to "比较寄存器非 0 则跳转",
+    "tbz" to "测试某一位为 0 则跳转",
+    "tbnz" to "测试某一位为 1 则跳转",
+    "adr" to "把相对地址（±1MB）加载到寄存器",
+    "adrp" to "把相对页地址加载到寄存器（4KB 页对齐，常与 ADD 配合取符号地址）",
+    // AArch64 系统 / 其它
+    "nop" to "空操作（不改变任何状态）",
+    "hlt" to "停机/断点指令（异常）",
+    "brk" to "断点（软件断点，进入调试异常）",
+    "svc" to "系统调用（Supervisor Call，进入内核）",
+    "hvc" to "超级调用（进入 Hypervisor）",
+    "mrs" to "读系统寄存器到通用寄存器",
+    "msr" to "把通用寄存器写入系统寄存器",
+    "dmb" to "数据内存屏障（保证内存访问顺序）",
+    "dsb" to "数据同步屏障（等待内存访问完成）",
+    "isb" to "指令同步屏障（刷新流水线）",
+    "crc32b" to "CRC32 校验（按字节）",
+    "crc32w" to "CRC32 校验（按字）",
+    "ubfx" to "无符号位域提取",
+    "sbfx" to "有符号位域提取",
+    "ubfiz" to "无符号位域插入",
+    "sbfiz" to "有符号位域插入",
+    "bfi" to "位域插入",
+    "bfxil" to "位域提取并插入低位",
+    "extr" to "提取寄存器位段（移位拼接）",
+    // 浮点 / SIMD
+    "fmov" to "浮点传送（寄存器/立即数 → 浮点寄存器）",
+    "fadd" to "浮点加法",
+    "fsub" to "浮点减法",
+    "fmul" to "浮点乘法",
+    "fdiv" to "浮点除法",
+    "fmadd" to "浮点乘加（a×b + c）",
+    "fmsub" to "浮点乘减",
+    "fneg" to "浮点取负",
+    "fabs" to "浮点绝对值",
+    "fsqrt" to "浮点平方根",
+    "fcmp" to "浮点比较（更新标志）",
+    "fcsel" to "浮点条件选择",
+    "scvtf" to "有符号整数 → 浮点",
+    "ucvtf" to "无符号整数 → 浮点",
+    "fcvtzs" to "浮点 → 有符号整数（向零截断）",
+    "fcvtzu" to "浮点 → 无符号整数（向零截断）",
+    "fcvt" to "浮点精度转换（如 double ↔ float）",
+    "ld1" to "SIMD 单结构加载",
+    "st1" to "SIMD 单结构存储",
+    "dup" to "向量的元素广播（复制）",
+    "ins" to "向量元素插入",
+    "umov" to "从向量元素移动到通用寄存器",
+    "addv" to "把向量所有元素相加得到一个标量",
+    "cnt" to "统计向量各字节中 1 的个数",
+    "movi" to "加载立即数到向量",
+    // ARM32 常见
+    "rsb" to "反向减法（imm − Rn）",
+    "rsc" to "带借位的反向减法",
+    "bx" to "按寄存器跳转（常用于返回或跳转表）",
+    "blx" to "按寄存器调用（可切换 ARM/Thumb 状态）",
+    "push" to "压栈（等价 STMDB sp!, {regs}）",
+    "pop" to "出栈（等价 LDMIA sp!, {regs}）",
+    "ldm" to "多寄存器加载（批量读内存）",
+    "stm" to "多寄存器存储（批量写内存）",
+    "swi" to "软件中断（老式系统调用）",
+    "bkpt" to "断点指令",
+    "ite" to "If-Then-Else 条件执行块（Thumb）",
+    "it" to "If-Then 条件执行块（Thumb）",
+    "tbb" to "跳转表字节查表分支",
+    "tbh" to "跳转表半字查表分支",
+    "vldr" to "VFP 加载（浮点从内存到 S/D 寄存器）",
+    "vstr" to "VFP 存储（浮点到内存）",
+    "vmov" to "在通用寄存器与 VFP 寄存器之间传送数据",
+    "teq" to "按位异或测试（仅更新标志）",
+    "rrx" to "带扩展的循环右移",
+    "clz" to "统计前导零个数",
+    "rbit" to "按位反转",
+    "rev" to "字节序反转",
+)
+
+/** 从一行汇编里剥离地址/字节前缀（如 "0x1000  mov x0, x1" / "1000:  mov ..."），返回助记符与操作数。 */
+private fun splitInsn(line: String): Pair<String, String>? {
+    var s = line.trim()
+    if (s.isEmpty() || s.startsWith(";") || s.startsWith("//") || s.startsWith("//")) return null
+    // 去掉行首地址：0x1234: / 1234: / 0x1234 后跟若干 hex 字节
+    s = s.replace(Regex("^0x[0-9a-fA-F]+\\s*:?\\s*"), "")
+    s = s.replace(Regex("^[0-9a-fA-F]{4,16}\\s*:?\\s*"), "")
+    // 去掉行内注释
+    s = s.substringBefore(";").substringBefore("//").trim()
+    if (s.isEmpty()) return null
+    val parts = s.split(Regex("\\s+"), limit = 2)
+    val mnem = parts[0].lowercase().trimEnd(',')
+    if (mnem.isEmpty()) return null
+    return mnem to (parts.getOrNull(1) ?: "")
+}
+
+/** 把操作数字符串解析出「目标 / 源」的粗粒度语义。 */
+private fun explainOperands(ops: String): List<Pair<String, String>> {
+    if (ops.isBlank()) return emptyList()
+    val out = mutableListOf<Pair<String, String>>()
+    ops.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEachIndexed { idx, raw ->
+        val role = if (idx == 0) "目标" else "源$idx"
+        out += role to describeOperand(raw)
+    }
+    return out
+}
+
+private fun describeOperand(op: String): String {
+    val o = op.trim()
+    return when {
+        o.startsWith("[") -> "内存 " + o.replace("[", "[").replace("]", "]")
+            .replace("#", "").let { "访问 $it" }
+        o.startsWith("#") -> "立即数 ${o.substring(1)}"
+        o.matches(Regex("^[wx]\\d{1,2}$")) -> "通用寄存器 $o"
+        o.matches(Regex("^[wW]zr$|^[xX]zr$")) -> "零寄存器 $o"
+        o.equals("sp", true) || o.equals("wsp", true) -> "栈指针"
+        o.matches(Regex("^(lr|x30)$", RegexOption.IGNORE_CASE)) -> "链接寄存器（返回地址）"
+        o.matches(Regex("^(fp|x29)$", RegexOption.IGNORE_CASE)) -> "帧指针"
+        o.matches(Regex("^(pc|x15)$", RegexOption.IGNORE_CASE)) -> "程序计数器"
+        o.matches(Regex("^[vqds]\\d{1,2}$", RegexOption.IGNORE_CASE)) -> "SIMD/浮点寄存器 $o"
+        o.matches(Regex("^\\{.*\\}$")) -> "寄存器列表 $o"
+        o.startsWith("0x") || o.matches(Regex("^\\d+$")) -> "常量／偏移 $o"
+        else -> "符号／标签 $o"
+    }
+}
+
+@Composable
+private fun InsnExplainView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    var input by remember { mutableStateOf("mov x0, x1\nldr x2, [x0, #0x8]\nbl 0x1234") }
+
+    val lines = remember(input) { input.split("\n").map { it.trim() }.filter { it.isNotEmpty() } }
+    val explained = remember(input) {
+        lines.mapNotNull { raw ->
+            val sp = splitInsn(raw) ?: return@mapNotNull null
+            val (mnem, ops) = sp
+            val desc = insnTable[mnem]
+                ?: insnTable[mnem.removeSuffix("s")]?.let { "$it（带标志位变体）" }
+                ?: insnTable[strBase(mnem)]?.let { it }
+            Triple(raw, mnem, (desc ?: "未收录的指令（请核实拼写或查阅 ARM 手册）") to explainOperands(ops))
+        }
+    }
+
+    ToolPageScaffold(
+        title = if (zh) "指令含义" else "Instruction explain",
+        hint = if (zh) "ARM / ARM64 汇编指令中文语义查询（逐行）" else "Explain ARM / ARM64 instructions line by line",
+        actions = {
+            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "复制说明" else "Copy", enabled = explained.isNotEmpty()) {
+                val sb = StringBuilder()
+                explained.forEach { (raw, mnem, pair) ->
+                    sb.append("$raw\n  [$mnem] ${pair.first}\n")
+                    pair.second.forEach { (r, d) -> sb.append("    $r: $d\n") }
+                }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            Text(
+                if (zh) "已收录 ${insnTable.size} 条" else "${insnTable.size} mnemonics",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+            )
+        },
+        content = {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolMonoField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = if (zh) "汇编指令（每行一条）" else "assembly (one per line)",
+                    placeholder = "mov x0, x1\nldr x2, [x0, #0x8]",
+                    minHeight = 110.dp,
+                )
+                if (explained.isEmpty()) {
+                    AnalysisEmptyState(
+                        title = if (zh) "指令含义" else "Instruction explain",
+                        hint = if (zh) "逐行粘贴汇编指令（可带地址前缀或分号注释），得到每条助记符的中文语义与操作数解读。"
+                            else "Paste assembly lines (address prefixes / comments allowed) to get mnemonic semantics and operand roles.",
+                    )
+                } else {
+                    explained.forEach { (raw, mnem, pair) ->
+                        val (desc, opList) = pair
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(AppShape.md))
+                                .background(cs.surfaceContainerHigh)
+                                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                raw,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                fontSize = AppText.body,
+                                color = cs.primary,
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    mnem,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    fontSize = AppText.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(cs.primary.copy(alpha = 0.14f))
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                )
+                                Text(
+                                    desc,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = AppText.body,
+                                    color = cs.onSurface,
+                                    lineHeight = 15.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (opList.isNotEmpty()) {
+                                opList.forEach { (role, d) ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            role,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = AppText.label,
+                                            color = cs.onSurfaceVariant,
+                                            modifier = Modifier.width(38.dp),
+                                        )
+                                        Text(
+                                            d,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = AppText.label,
+                                            color = cs.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** 去掉常见后缀变体，尝试回到基础助记符（subs → sub、ldrb → ldr）。 */
+private fun strBase(mnem: String): String {
+    val cands = listOf("b", "s", "h", "w", "n", "sb", "sh", "sw", "z", "t")
+    for (c in cands) {
+        if (mnem.endsWith(c) && mnem.length > c.length + 1) {
+            val base = mnem.dropLast(c.length)
+            if (insnTable.containsKey(base)) return base
+        }
+    }
+    return mnem
+}
+
+// ───────────────────────── 6. 汇编转伪 C ─────────────────────────
+
+private data class AsmLine(val addr: String, val mnem: String, val ops: String, val raw: String)
+
+private fun parseAsmLines(input: String): List<AsmLine> {
+    return input.split("\n").mapNotNull { rawLine ->
+        val raw = rawLine.trim()
+        if (raw.isEmpty() || raw.startsWith(";") || raw.startsWith("//")) return@mapNotNull null
+        var addr = ""
+        var rest = raw
+        val m = Regex("^(0x[0-9a-fA-F]+|[0-9a-fA-F]{4,16})\\s*:?\\s+").find(raw)
+        if (m != null) {
+            addr = m.groupValues[1]
+            rest = raw.substring(m.value.length).trim()
+        }
+        rest = rest.substringBefore(";").substringBefore("//").trim()
+        if (rest.isEmpty()) return@mapNotNull null
+        val parts = rest.split(Regex("\\s+"), limit = 2)
+        AsmLine(addr, parts[0].lowercase().trimEnd(','), parts.getOrNull(1)?.trim() ?: "", raw)
+    }
+}
+
+/** 启发式把汇编翻译成可读的伪 C。 */
+private fun asmToPseudoC(lines: List<AsmLine>, zh: Boolean): String {
+    if (lines.isEmpty()) return ""
+    val sb = StringBuilder()
+    val fnName = "sub_" + (lines.firstOrNull()?.addr?.removePrefix("0x").orEmpty().ifBlank { "unknown" })
+    sb.append("// ${if (zh) "由汇编启发式翻译（仅供理解，非真实源码）" else "heuristic translation (for reading only)"}\n")
+    sb.append("// ${lines.size} ${if (zh) "条指令" else "instructions"}\n\n")
+    sb.append("void $fnName(void) {\n")
+    var indent = "    "
+    var emittedRet = false
+    lines.forEach { l ->
+        val m = l.mnem
+        val o = l.ops
+        val comment = if (l.addr.isNotEmpty()) "  // ${l.addr}" else ""
+        when {
+            m == "ret" -> {
+                sb.append("${indent}return; /* $o */$comment\n")
+                emittedRet = true
+            }
+            m == "bl" || m == "blr" -> {
+                val target = o.ifBlank { "?" }
+                sb.append("${indent}sub_${target.removePrefix("0x")}();$comment\n")
+            }
+            m == "b" -> {
+                sb.append("${indent}goto ${o.ifBlank { "L_unknown" }};$comment\n")
+            }
+            m == "cbz" || m == "cbnz" -> {
+                val regs = o.split(",").map { it.trim() }
+                val reg = regs.getOrNull(0) ?: "?"
+                val tgt = regs.getOrNull(1) ?: "?"
+                val cond = if (m == "cbz") "== 0" else "!= 0"
+                sb.append("${indent}if ($reg $cond) goto $tgt;$comment\n")
+            }
+            m == "tbz" || m == "tbnz" -> {
+                sb.append("${indent}if (bit($o) ${if (m == "tbz") "== 0" else "!= 0"}) goto ?;$comment\n")
+            }
+            m == "cmp" || m == "cmn" || m == "tst" -> {
+                sb.append("${indent}flags = ($o);$comment\n")
+            }
+            m == "mov" || m == "movz" || m == "movk" || m == "movn" || m == "mvn" -> {
+                val regs = o.split(",").map { it.trim() }
+                val dst = regs.getOrNull(0) ?: "?"
+                val src = regs.getOrNull(1) ?: "?"
+                sb.append("${indent}$dst = $src;$comment\n")
+            }
+            m == "add" || m == "adds" -> {
+                val regs = o.split(",").map { it.trim() }
+                sb.append("${indent}${regs.getOrNull(0) ?: "?"} = ${regs.getOrNull(1) ?: "?"} + ${regs.getOrNull(2) ?: "?"};$comment\n")
+            }
+            m == "sub" || m == "subs" -> {
+                val regs = o.split(",").map { it.trim() }
+                sb.append("${indent}${regs.getOrNull(0) ?: "?"} = ${regs.getOrNull(1) ?: "?"} - ${regs.getOrNull(2) ?: "?"};$comment\n")
+            }
+            m == "mul" || m == "madd" -> {
+                val regs = o.split(",").map { it.trim() }
+                sb.append("${indent}${regs.getOrNull(0) ?: "?"} = ${regs.getOrNull(1) ?: "?"} * ${regs.getOrNull(2) ?: "?"};$comment\n")
+            }
+            m == "ldr" || m == "ldrb" || m == "ldrh" || m == "ldrsw" || m == "ldur" -> {
+                val regs = o.split(",").map { it.trim() }
+                val dst = regs.getOrNull(0) ?: "?"
+                val mem = memExpr(regs.drop(1).joinToString(","))
+                sb.append("${indent}$dst = $mem;  /* load */$comment\n")
+            }
+            m == "str" || m == "strb" || m == "strh" || m == "stur" -> {
+                val regs = o.split(",").map { it.trim() }
+                val src = regs.getOrNull(0) ?: "?"
+                val mem = memExpr(regs.drop(1).joinToString(","))
+                sb.append("${indent}$mem = $src;  /* store */$comment\n")
+            }
+            m == "stp" -> {
+                sb.append("${indent}push($o);$comment\n")
+            }
+            m == "ldp" -> {
+                sb.append("${indent}pop($o);$comment\n")
+            }
+            m == "adr" || m == "adrp" -> {
+                val regs = o.split(",").map { it.trim() }
+                sb.append("${indent}${regs.getOrNull(0) ?: "?"} = &${regs.getOrNull(1) ?: "?"};$comment\n")
+            }
+            m == "nop" -> sb.append("${indent}/* nop */$comment\n")
+            m == "br" -> sb.append("${indent}goto *$o;$comment\n")
+            else -> sb.append("${indent}/* ${m} ${o} */$comment\n")
+        }
+    }
+    if (!emittedRet) {
+        sb.append("${indent}return; /* fallthrough */\n")
+    }
+    sb.append("}\n")
+    return sb.toString()
+}
+
+private fun memExpr(s: String): String {
+    val t = s.trim().removePrefix("[").removeSuffix("]").trim()
+    if (t.isEmpty()) return "mem"
+    val parts = t.split(",").map { it.trim().replace("#", "") }
+    val base = parts.getOrNull(0) ?: return "mem"
+    val off = parts.getOrNull(1)
+    return if (off.isNullOrBlank()) "*(uint64_t*)$base" else "*(uint64_t*)($base + $off)"
+}
+
+@Composable
+private fun AsmToPseudoCView(zh: Boolean, context: android.content.Context) {
+    var input by remember {
+        mutableStateOf(
+            "0x1000  stp x29, x30, [sp, #-16]!\n" +
+                "0x1004  mov x29, sp\n" +
+                "0x1008  mov w0, #0x0\n" +
+                "0x100c  ldr x1, [x0, #0x8]\n" +
+                "0x1010  bl 0x2000\n" +
+                "0x1014  ldp x29, x30, [sp], #16\n" +
+                "0x1018  ret",
+        )
+    }
+    val lines = remember(input) { parseAsmLines(input) }
+    val pseudo = remember(input) { asmToPseudoC(lines, zh) }
+
+    ToolPageScaffold(
+        title = if (zh) "汇编转伪C" else "Asm → Pseudo-C",
+        hint = if (zh) "把多条汇编指令翻译成可读的伪 C 代码" else "Translate assembly into readable pseudo-C",
+        actions = {
+            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "复制伪C" else "Copy C", enabled = pseudo.isNotBlank()) { copyToClipboard(context, pseudo, zh) }
+            Text(
+                if (zh) "${lines.size} 条指令" else "${lines.size} insns",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        content = {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolMonoField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = if (zh) "汇编（每行一条，可带地址）" else "assembly (one per line, address optional)",
+                    placeholder = "0x1000  mov x0, #1",
+                    minHeight = 130.dp,
+                )
+                if (pseudo.isBlank()) {
+                    AnalysisEmptyState(
+                        title = if (zh) "汇编转伪C" else "Asm → Pseudo-C",
+                        hint = if (zh) "粘贴一段汇编（可带地址前缀），启发式翻译成函数框架 + 语句级伪 C，便于快速理解逻辑。"
+                            else "Paste assembly (address prefixes allowed) to heuristically translate it into a pseudo-C function body.",
+                    )
+                } else {
+                    ToolResultBlock(if (zh) "伪 C（启发式）" else "Pseudo-C (heuristic)", pseudo)
+                }
+            }
+        },
+    )
+}
+
+// ───────────────────────── 7. 汇编转流程图 ─────────────────────────
+
+private fun isBranch(mnem: String): Boolean =
+    mnem == "b" || mnem == "bl" || mnem == "br" || mnem == "blr" || mnem == "ret" ||
+        mnem == "cbz" || mnem == "cbnz" || mnem == "tbz" || mnem == "tbnz" ||
+        mnem.startsWith("b.") || mnem.startsWith("beq") || mnem.startsWith("bne") ||
+        mnem.startsWith("bgt") || mnem.startsWith("blt") || mnem.startsWith("bge") ||
+        mnem.startsWith("ble") || mnem.startsWith("bhi") || mnem.startsWith("bls") ||
+        mnem.startsWith("bcs") || mnem.startsWith("bcc") || mnem.startsWith("bmi") ||
+        mnem.startsWith("bpl") || mnem.startsWith("bvs") || mnem.startsWith("bvc")
+
+private fun isCondBranch(mnem: String): Boolean =
+    mnem in setOf("cbz", "cbnz", "tbz", "tbnz") || (mnem.startsWith("b") && mnem != "b" && mnem != "bl" && mnem != "br" && mnem != "blr")
+
+private fun asmToFlowChart(lines: List<AsmLine>, zh: Boolean): String {
+    if (lines.isEmpty()) return ""
+    // 按「分支指令作为块结尾」切分基本块
+    data class Block(val label: String, val insns: List<AsmLine>)
+    val blocks = mutableListOf<Block>()
+    var cur = mutableListOf<AsmLine>()
+    var idx = 0
+    lines.forEach { l ->
+        cur.add(l)
+        if (isBranch(l.mnem)) {
+            blocks.add(Block("B" + idx, cur)); idx++; cur = mutableListOf()
+        }
+    }
+    if (cur.isNotEmpty()) { blocks.add(Block("B" + idx, cur)); idx++ }
+
+    val sb = StringBuilder()
+    sb.append("// ${if (zh) "按基本块切分的 ASCII 流程图" else "ASCII flowchart by basic block"}（${blocks.size} blocks）\n\n")
+    val boxW = 52
+    val top = "┌" + "─".repeat(boxW) + "┐"
+    val bot = "└" + "─".repeat(boxW) + "┘"
+    blocks.forEachIndexed { i, b ->
+        val head = " ${b.label}  @ ${b.insns.firstOrNull()?.addr?.ifBlank { "—" } ?: "—"}"
+        sb.append(top).append('\n')
+        sb.append("│").append(head.take(boxW).padEnd(boxW)).append("│\n")
+        sb.append("├").append("─".repeat(boxW)).append("┤\n")
+        b.insns.forEach { ins ->
+            val txt = " ${ins.addr.ifBlank { "" }} ${ins.mnem} ${ins.ops}".trim()
+            sb.append("│").append(txt.take(boxW).padEnd(boxW)).append("│\n")
+        }
+        sb.append(bot).append('\n')
+        val last = b.insns.lastOrNull()
+        if (i < blocks.size - 1) {
+            val label = when {
+                last == null -> ""
+                last.mnem in setOf("cbz", "cbnz", "tbz", "tbnz") -> {
+                    val regs = last.ops.split(",").map { it.trim() }
+                    if (zh) "条件(${regs.getOrNull(0) ?: "?"}) 成立 → ${regs.getOrNull(1) ?: "?"}"
+                    else "cond(${regs.getOrNull(0) ?: "?"}) true → ${regs.getOrNull(1) ?: "?"}"
+                }
+                isCondBranch(last.mnem) -> (if (zh) "条件跳转 " else "branch ") + last.ops
+                last.mnem == "b" -> (if (zh) "无条件跳转 " else "goto ") + last.ops
+                last.mnem == "ret" -> if (zh) "返回" else "return"
+                else -> (if (zh) "顺序执行" else "fallthrough")
+            }
+            sb.append("        │ ").append(label).append('\n')
+            sb.append("        ▼\n")
+        }
+    }
+    return sb.toString()
+}
+
+@Composable
+private fun AsmToFlowChartView(zh: Boolean, context: android.content.Context) {
+    var input by remember {
+        mutableStateOf(
+            "0x1000  mov x0, #0\n" +
+                "0x1004  cmp x0, #5\n" +
+                "0x1008  b.ge 0x1020\n" +
+                "0x100c  add x0, x0, #1\n" +
+                "0x1010  b 0x1004\n" +
+                "0x1020  ret",
+        )
+    }
+    val lines = remember(input) { parseAsmLines(input) }
+    val flow = remember(input, zh) { asmToFlowChart(lines, zh) }
+
+    ToolPageScaffold(
+        title = if (zh) "汇编转流程图" else "Asm → Flowchart",
+        hint = if (zh) "按基本块切分汇编，输出 ASCII 框图" else "Split asm into basic blocks → ASCII flowchart",
+        actions = {
+            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "复制框图" else "Copy", enabled = flow.isNotBlank()) { copyToClipboard(context, flow, zh) }
+            Text(
+                if (zh) "${lines.count { isBranch(it.mnem) }} 个分支" else "${lines.count { isBranch(it.mnem) }} branches",
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        content = {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolMonoField(
+                    value = input,
+                    onValueChange = { input = it },
+                    label = if (zh) "汇编（每行一条，建议带地址）" else "assembly (one per line, address recommended)",
+                    placeholder = "0x1000  cmp x0, #5\n0x1004  b.eq 0x1010",
+                    minHeight = 130.dp,
+                )
+                if (flow.isBlank()) {
+                    AnalysisEmptyState(
+                        title = if (zh) "汇编转流程图" else "Asm → Flowchart",
+                        hint = if (zh) "粘贴一段汇编（建议带地址），按分支指令切分基本块并用 ASCII 框图呈现控制流。"
+                            else "Paste assembly (address recommended); basic blocks are split on branch instructions and drawn as an ASCII flowchart.",
+                    )
+                } else {
+                    ToolResultBlock(if (zh) "控制流框图" else "Control-flow chart", flow)
+                }
+            }
+        },
+    )
+}

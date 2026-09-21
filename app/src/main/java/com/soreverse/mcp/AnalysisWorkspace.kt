@@ -358,6 +358,8 @@ internal fun AnalysisWorkspace(
 
                         "data" -> DataView(tools, zh, context, refreshAll)
 
+                        "funcinfo" -> FuncInfoView(tools, zh, context, refreshAll)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -1986,6 +1988,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
     AnalysisNavItem("data", "数据", "Data", Icons.Filled.Inventory2),
+    AnalysisNavItem("funcinfo", "函数详情", "Detail", Icons.Filled.Description),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -7193,6 +7196,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var error by remember(ws, tick) { mutableStateOf("") }
     var note by remember(ws, tick) { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
+    var sccMode by remember { mutableStateOf(false) }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -7242,6 +7246,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
             SmallAction(if (zh) "复制边" else "Copy edges", enabled = edges.isNotEmpty()) {
                 copyToClipboard(context, edges.joinToString("\n") { "${it.first} -> ${it.second}" }, zh)
             }
+            SmallAction("SCC", active = sccMode, enabled = nodes.isNotEmpty()) { sccMode = !sccMode }
             SmallAction(if (zh) "导出 JSON" else "JSON", enabled = nodes.isNotEmpty()) {
                 val o = JSONObject()
                 o.put("nodes", JSONArray(nodes.map { it.toString() }))
@@ -7271,6 +7276,46 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     else "rizin returned no call graph. Run full analysis (aaaa) first, or use the CFG page for per-function control flow.",
                 primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
             )
+            sccMode -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val sccs = remember(nodes, edges) {
+                    if (nodes.isEmpty()) emptyList()
+                    else tarjanScc(nodes.map { it.optString("name").ifBlank { it.optString("id") } }, edges)
+                        .sortedByDescending { it.size }
+                }
+                val cyclic = sccs.filter { it.size > 1 }
+                KeyValueCard(zh, listOf(
+                    (if (zh) "强连通分量" else "SCCs") to "${sccs.size}",
+                    (if (zh) "环状簇(>1)" else "cyclic (>1)") to "${cyclic.size}",
+                    (if (zh) "最大簇" else "largest") to "${sccs.firstOrNull()?.size ?: 0}",
+                ))
+                if (cyclic.isEmpty()) {
+                    AnalysisEmptyState(
+                        title = if (zh) "无环状调用簇" else "No cyclic clusters",
+                        hint = if (zh) "所有函数的调用关系无环（DAG），可直接按调用顺序阅读。" else "The call graph is acyclic (DAG).",
+                    )
+                } else {
+                    Text(if (zh) "环状簇（互相调用，建议整体理解）" else "Cyclic clusters", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(AppShape.md))
+                            .background(cs.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        cyclic.take(60).forEachIndexed { idx, comp ->
+                            Column(Modifier.fillMaxWidth().clickable { copyToClipboard(context, comp.joinToString("\n"), zh) }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    TypeBadge("#$idx · ${comp.size}", cs.tertiary)
+                                    MonoLine(if (zh) "点按复制该簇" else "tap to copy", cs.onSurfaceVariant, AppText.label)
+                                }
+                                comp.take(12).forEach { nm -> MonoLine(nm, cs.onSurface, AppText.label) }
+                                if (comp.size > 12) MonoLine(if (zh) "… 共 ${comp.size} 个" else "… ${comp.size} total", cs.onSurfaceVariant, AppText.label)
+                            }
+                        }
+                    }
+                }
+            }
             else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (indeg.isNotEmpty()) {
                     Text(if (zh) "枢纽（入度 Top5）" else "Hubs (indegree Top5)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
@@ -7822,6 +7867,176 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
                             Text(e.optString("target").ifBlank { "--" }, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                                 fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 函数详情（对齐 Exbin FuncDetailActivity / FuncSignatureDialog） ─────────────────────────
+
+/** 本地 Tarjan 强连通分量（用于调用图 SCC 鸟瞰）。 */
+private fun tarjanScc(nodes: List<String>, edges: List<Pair<String, String>>): List<List<String>> {
+    val adj = HashMap<String, MutableList<String>>()
+    nodes.forEach { adj[it] = mutableListOf() }
+    edges.forEach { (f, t) -> if (adj.containsKey(f) && adj.containsKey(t)) adj[f]!!.add(t) }
+    val index = HashMap<String, Int>()
+    val low = HashMap<String, Int>()
+    val onStack = HashSet<String>()
+    val stack = ArrayDeque<String>()
+    var counter = 0
+    val out = mutableListOf<List<String>>()
+    // 迭代式 Tarjan（避免深递归栈溢出）
+    nodes.forEach { start ->
+        if (index.containsKey(start)) return@forEach
+        val work = ArrayDeque<Pair<String, Int>>()
+        work.addLast(start to 0)
+        while (work.isNotEmpty()) {
+            val (v, pi) = work.removeLast()
+            if (pi == 0) {
+                index[v] = counter; low[v] = counter; counter++
+                stack.addLast(v); onStack.add(v)
+            }
+            var recursed = false
+            val neighbors = adj[v] ?: emptyList()
+            var i = pi
+            while (i < neighbors.size) {
+                val w = neighbors[i]
+                if (!index.containsKey(w)) {
+                    work.addLast(v to (i + 1))
+                    work.addLast(w to 0)
+                    recursed = true
+                    break
+                } else if (onStack.contains(w)) {
+                    low[v] = minOf(low[v] ?: 0, index[w] ?: 0)
+                }
+                i++
+            }
+            if (recursed) continue
+            if ((low[v] ?: 0) == (index[v] ?: 0)) {
+                val comp = mutableListOf<String>()
+                while (true) {
+                    val w = stack.removeLastOrNull() ?: break
+                    onStack.remove(w)
+                    comp.add(w)
+                    if (w == v) break
+                }
+                out.add(comp)
+            }
+            // 回填父节点 low
+            work.lastOrNull()?.let { (pv, _) ->
+                if (low.containsKey(pv) && low.containsKey(v)) low[pv] = minOf(low[pv] ?: 0, low[v] ?: 0)
+            }
+        }
+    }
+    return out
+}
+
+@Composable
+private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    var locator by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var ran by remember { mutableStateOf(false) }
+    var sig by remember { mutableStateOf<JSONObject?>(null) }
+    var callers by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var callees by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(ws) {
+        if (locator.isBlank()) locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    }
+
+    fun load() {
+        val loc = locator.trim().ifBlank { tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName } }
+        if (loc.isBlank() || ws.isBlank()) return
+        scope.launch {
+            loading = true; error = ""; ran = true
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val sigR = callMcpTool(context, "taffy_so_func_sig",
+                        JSONObject().put("workspaceId", ws).put("locator", loc).put("count", 1))
+                    val s = sigR?.optJSONArray("signatures")?.optJSONObject(0)
+                    val eng = EngineProvider.get(context)
+                    val inR = eng.rzCommand(ws, "", "s $loc; axtj")
+                    val outR = eng.rzCommand(ws, "", "s $loc; axfj")
+                    Triple(s, parseRzArray(inR) ?: emptyList(), parseRzArray(outR) ?: emptyList())
+                }.getOrNull()
+            }
+            loading = false
+            if (r == null) { error = if (zh) "取数失败（定位失败或引擎异常）" else "failed" ; return@launch }
+            sig = r.first; callers = r.second; callees = r.third
+            if (sig == null && callers.isEmpty() && callees.isEmpty()) error = if (zh) "无数据：请检查函数名/地址" else "no data"
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "加载" else "Load", loading = loading, onClick = { load() })
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank() || tools.selectedFunctionName.isNotBlank()) {
+                locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }; load()
+            }
+            SmallAction(if (zh) "复制摘要" else "Copy", enabled = sig != null || callers.isNotEmpty() || callees.isNotEmpty()) {
+                val s = sig
+                val sb = StringBuilder()
+                sb.append(if (s != null) sigLine(s, zh) else locator).append('\n')
+                sb.append(if (zh) "调用者" else "callers").append(" (${callers.size}): ").append(callers.joinToString(", ") { it.optString("from") }).append('\n')
+                sb.append(if (zh) "被调用" else "callees").append(" (${callees.size}): ").append(callees.joinToString(", ") { it.optString("to") })
+                copyToClipboard(context, sb.toString(), zh)
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = locator, onValueChange = { locator = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            label = { Text(if (zh) "函数名 / 地址" else "symbol / addr", fontSize = AppText.label) },
+            placeholder = { Text("JNI_OnLoad 或 0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+        )
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() && sig == null && callers.isEmpty() && callees.isEmpty() -> AnalysisErrorBanner(error)
+            !ran -> AnalysisEmptyState(
+                title = if (zh) "函数详情" else "Function detail",
+                hint = if (zh) "输入函数名或地址，查看还原签名 / 参数列表 / 调用者 / 被调用者，并可直接跳到汇编、伪 C、CFG。"
+                    else "Enter a symbol or address to see signature, params, callers/callees, with jump to disasm/pseudo-C/CFG.",
+                primaryLabel = if (zh) "取当前函数" else "Current fn",
+                onPrimary = { locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }; load() },
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val s = sig
+                if (s != null) {
+                    SigCard(s, zh, context, cs)
+                } else {
+                    KeyValueCard(zh, listOf((if (zh) "函数" else "fn") to locator.ifBlank { tools.selectedFunctionName }))
+                }
+                RefBlock(if (zh) "调用者（谁调用它）" else "Callers", callers, "from", cs.primary, zh, context)
+                RefBlock(if (zh) "被调用（它调用谁）" else "Callees", callees, "to", cs.tertiary, zh, context)
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SmallAction(if (zh) "查看汇编" else "Disasm") {
+                        tools.selectedFunctionVa = if (locator.startsWith("0x")) locator else tools.selectedFunctionVa
+                        tools.selectedFunctionName = if (!locator.startsWith("0x")) locator else tools.selectedFunctionName
+                        tools.disasmAddr = locator
+                        tools.analysisView = "disasm"
+                    }
+                    SmallAction(if (zh) "查看伪C" else "Pseudo-C") {
+                        tools.decompileTarget = locator
+                        tools.analysisView = "pseudo"
+                    }
+                    SmallAction("CFG") {
+                        tools.cfgTarget = locator
+                        tools.analysisView = "cfg"
+                    }
+                    SmallAction(if (zh) "看引用" else "XRefs") {
+                        tools.analysisView = "xrefs"
                     }
                 }
             }

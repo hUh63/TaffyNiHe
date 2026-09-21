@@ -179,6 +179,7 @@ internal fun AnalysisWorkspace(
     // ── 弹层状态 ──
     var showToolPicker by remember { mutableStateOf(false) }
     var showTree by remember { mutableStateOf(false) }
+    var showString by remember { mutableStateOf<AnalysisRow?>(null) }
 
     // 对象树状态（沿用原 loadTree / extractNames 逻辑，只是入口搬到顶部条 + 函数视图）
     val treeScope = rememberCoroutineScope()
@@ -273,7 +274,7 @@ internal fun AnalysisWorkspace(
                         "strings" -> StringsView(
                             tools = tools, zh = zh, context = context,
                             onRefresh = refreshAll,
-                        ) { row -> copyToClipboard(context, row.text.ifBlank { row.title }, zh) }
+                        ) { row -> showString = row }
 
                         "symbols" -> SymbolsView(
                             tools = tools, zh = zh, context = context,
@@ -382,6 +383,10 @@ internal fun AnalysisWorkspace(
                 }
             }
         }
+    }
+
+    showString?.let { row ->
+        StringDetailDialog(row = row, ws = tools.sharedWorkspaceId, zh = zh, context = context) { showString = null }
     }
 
     // ── 工具选择弹层（沿用原 ConsoleToolPickerDialog） ──
@@ -8700,6 +8705,111 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
                     MonoLine(if (zh) "· 需要 rizin-ghidra 后端支持 pdg；不可用时个别函数会失败。" else "· Requires the rizin-ghidra (pdg) backend.", cs.onSurface, AppText.label)
                 }
             }
+        }
+    }
+}
+
+// ───────────────────────── 字符串详情弹窗（对齐 Exbin §4.6 dialog_string_detail） ─────────────────────────
+
+@Composable
+private fun StringDetailDialog(
+    row: AnalysisRow,
+    ws: String,
+    zh: Boolean,
+    context: android.content.Context,
+    onDismiss: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    var refs by remember(row) { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loadingRefs by remember(row) { mutableStateOf(false) }
+
+    LaunchedEffect(row, ws) {
+        if (ws.isBlank() || row.va.isBlank()) return@LaunchedEffect
+        loadingRefs = true
+        refs = withContext(Dispatchers.IO) {
+            runCatching {
+                parseRzArray(EngineProvider.get(context).rzCommand(ws, "", "s ${row.va}; axtj")) ?: emptyList()
+            }.getOrDefault(emptyList())
+        }
+        loadingRefs = false
+    }
+
+    val fullText = row.text
+    val hexBytes = remember(row) {
+        fullText.toByteArray(Charsets.UTF_8).joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxWidth(0.94f)
+                .clip(RoundedCornerShape(AppShape.lg))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.lg))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Filled.DataObject, null, tint = cs.primary, modifier = Modifier.size(15.dp))
+                Text(if (zh) "字符串详情" else "String detail", style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong, fontWeight = FontWeight.SemiBold, color = cs.onSurface, modifier = Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text(if (zh) "关闭" else "Close", fontSize = AppText.label) }
+            }
+            MonoLine(row.va.ifBlank { "--" } + (row.meta.takeIf { it.isNotBlank() }?.let { "  ·  $it" } ?: ""), cs.onSurfaceVariant, AppText.label)
+
+            DetailBlock(if (zh) "完整字符串" else "Full string", fullText.ifBlank { "—" })
+            DetailBlock(if (zh) "原始字节 (hex)" else "Raw bytes (hex)", hexBytes.ifBlank { "—" })
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (loadingRefs) (if (zh) "被引用位置（加载中…）" else "References (loading…)")
+                    else (if (zh) "被引用位置 (${refs.size})" else "References (${refs.size})"),
+                    style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant,
+                )
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHighest)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    if (refs.isEmpty()) MonoLine(if (zh) "（无引用 / 未分析）" else "(none)", cs.onSurfaceVariant, AppText.label)
+                    refs.take(10).forEach { r ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            MonoLine(r.optString("from"), cs.primary, AppText.label)
+                            val ty = r.optString("type")
+                            if (ty.isNotBlank()) TypeBadge(ty, cs.onSurfaceVariant)
+                            val op = r.optString("opcode")
+                            if (op.isNotBlank()) Text(op, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallAction(if (zh) "复制字符串" else "Copy string", onClick = { copyToClipboard(context, fullText, zh) })
+                SmallAction(if (zh) "复制 hex" else "Copy hex", onClick = { copyToClipboard(context, hexBytes, zh) })
+                SmallAction(if (zh) "复制地址" else "Copy addr", enabled = row.va.isNotBlank(), onClick = { copyToClipboard(context, row.va, zh) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailBlock(title: String, body: String) {
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(title, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+        Box(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.md))
+                .background(cs.surfaceContainerHighest)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .heightIn(max = 160.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Text(body, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), fontSize = AppText.label, color = cs.onSurface, lineHeight = 15.sp)
         }
     }
 }

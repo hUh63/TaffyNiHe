@@ -338,6 +338,18 @@ internal fun AnalysisWorkspace(
 
                         "asm2flow" -> AsmToFlowChartView(zh = zh, context = context)
 
+                        "vtable" -> VtableView(tools, zh, context, refreshAll)
+
+                        "xrefs" -> XRefsView(tools, zh, context, refreshAll)
+
+                        "addrview" -> AddrViewerView(tools, zh, context, refreshAll)
+
+                        "funcsig" -> FuncSigView(tools, zh, context, refreshAll)
+
+                        "jnireg" -> JniRegView(tools, zh, context, refreshAll)
+
+                        "hardening" -> HardeningView(tools, zh, context, refreshAll)
+
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (zh) "未知视图" else "Unknown view",
@@ -1956,6 +1968,12 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("insnexp", "指令", "Insn", Icons.Filled.Description),
     AnalysisNavItem("asm2c", "译C", "→C", Icons.Filled.Transform),
     AnalysisNavItem("asm2flow", "框图", "Flow", Icons.Filled.Inventory2),
+    AnalysisNavItem("vtable", "虚表", "Vtab", Icons.Filled.Transform),
+    AnalysisNavItem("xrefs", "引用", "XRef", Icons.Filled.Link),
+    AnalysisNavItem("addrview", "地址", "Addr", Icons.Filled.MyLocation),
+    AnalysisNavItem("funcsig", "签名", "Sig", Icons.Filled.ListAlt),
+    AnalysisNavItem("jnireg", "JNI", "JNI", Icons.Filled.DataObject),
+    AnalysisNavItem("hardening", "加固", "Hard", Icons.Filled.Warning),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -6160,4 +6178,930 @@ private fun AsmToFlowChartView(zh: Boolean, context: android.content.Context) {
             }
         },
     )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  深度分析页（对齐 Exbin：虚表 / 交叉引用 / 地址查看器 / 函数签名 /
+//  JNI 注册还原 / 加固·反调试报告）
+//  数据来源：MCP 工具（taffy_so_vtable 等）+ rizin 只读命令（rzCommand）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 在 IO 线程调用一个塔菲 MCP 工具；失败/无 handler 返回 null。 */
+private suspend fun callMcpTool(
+    context: android.content.Context,
+    name: String,
+    args: JSONObject,
+): JSONObject? = withContext(Dispatchers.IO) {
+    runCatching {
+        val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatching null
+        val tcx = com.soreverse.mcp.mcp.ToolContext(
+            context,
+            com.soreverse.mcp.core.SettingsStore(context),
+            EngineProvider.get(context),
+            null,
+        )
+        h.handle(tcx, args)
+    }.getOrNull()
+}
+
+/** 分析页通用“需要先打开 SO”占位。 */
+@Composable
+private fun NeedWorkspace(zh: Boolean) {
+    AnalysisEmptyState(
+        title = if (zh) "尚未打开 SO" else "No SO opened",
+        hint = if (zh) "请先在「函数」页或顶部选择文件打开一个 ELF/.so，本页依赖工作区里的已解析数据。"
+            else "Open an ELF/.so first (Functions page or the top bar); this page reads the opened workspace.",
+    )
+}
+
+/** 类型徽章（返回类型 / 类型标签）。 */
+@Composable
+private fun TypeBadge(text: String, color: Color) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        fontSize = AppText.label,
+        fontWeight = FontWeight.SemiBold,
+        color = color,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(color.copy(alpha = 0.16f))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    )
+}
+
+/** 等宽可复制行。 */
+@Composable
+private fun MonoLine(text: String, color: Color = MaterialTheme.colorScheme.onSurface, size: androidx.compose.ui.unit.TextUnit = AppText.body) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        fontSize = size,
+        color = color,
+        lineHeight = 16.sp,
+    )
+}
+
+// ───────────────────────── 1. 虚表（C++ vtable / RTTI） ─────────────────────────
+
+@Composable
+private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val tick = tools.reloadTick
+    var data by remember(ws, tick) { mutableStateOf<JSONObject?>(null) }
+    var loading by remember(ws, tick) { mutableStateOf(false) }
+    var error by remember(ws, tick) { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(setOf<String>()) }
+    var header by remember { mutableStateOf("") }
+    var exporting by remember { mutableStateOf(false) }
+
+    LaunchedEffect(ws, tick) {
+        if (ws.isBlank()) return@LaunchedEffect
+        loading = true; error = ""
+        val r = callMcpTool(context, "taffy_so_vtable",
+            JSONObject().put("workspaceId", ws).put("action", "detail").put("limit", 300))
+        loading = false
+        data = r
+        if (r == null) error = if (zh) "引擎未就绪（native 库未加载）" else "engine not ready"
+        else if (!r.optBoolean("ok", true)) error = r.optString("error").ifBlank { r.optString("note") }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    val all = remember(data) {
+        val a = data?.optJSONArray("vtables") ?: JSONArray()
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+    }
+    val shown = remember(all, query) {
+        if (query.isBlank()) all else all.filter {
+            it.optString("className").contains(query, true) || it.optString("vtableAddr").contains(query, true)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
+            SmallAction(
+                if (zh) "生成头文件" else "Header",
+                enabled = all.isNotEmpty(), loading = exporting,
+                onClick = {
+                    scope.launch {
+                        exporting = true
+                        val r = callMcpTool(context, "taffy_so_vtable",
+                            JSONObject().put("workspaceId", ws).put("action", "export")
+                                .put("className", query).put("limit", 100))
+                        exporting = false
+                        header = r?.optString("header").orEmpty()
+                        if (header.isBlank()) header = if (zh) "// 未生成内容（无虚表或引擎无输出）" else "// nothing generated"
+                    }
+                },
+            )
+            if (all.isNotEmpty()) {
+                SmallAction(if (zh) "复制全部" else "Copy all", onClick = {
+                    val sb = StringBuilder()
+                    all.forEach { v ->
+                        sb.append(v.optString("className")).append("  @ ").append(v.optString("vtableAddr"))
+                            .append("  slots=").append(v.optInt("slotCount")).append('\n')
+                        v.optJSONArray("slots")?.let { s ->
+                            for (i in 0 until s.length()) {
+                                val o = s.optJSONObject(i) ?: continue
+                                sb.append("    #").append(o.optInt("index")).append(' ').append(o.optString("name"))
+                                    .append("  ").append(o.optString("addr")).append('\n')
+                            }
+                        }
+                    }
+                    copyToClipboard(context, sb.toString().trimEnd(), zh)
+                })
+                Text(
+                    if (zh) "${all.size} 个虚表" else "${all.size} vtables",
+                    style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = query, onValueChange = { query = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
+            placeholder = { Text(if (zh) "过滤类名 / 虚表地址" else "filter class / vtable addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        )
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading && data == null -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            all.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "未发现虚表" else "No vtables",
+                hint = if (zh) "该 SO 可能未使用 C++ 虚函数，或 RTTI 已被 strip / 编译时关闭（-fno-rtti）。底层为 rizin avj。"
+                    else "No C++ vtables/RTTI found (stripped or -fno-rtti). Backed by rizin avj.",
+                primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (header.isNotBlank()) {
+                    ToolResultBlock(if (zh) "生成的 vtable 头文件" else "Generated vtable header", header, zh = zh,
+                        onCopy = { copyToClipboard(context, header, zh) })
+                }
+                shown.forEach { v ->
+                    val cls = v.optString("className").ifBlank { "(未命名类)" }
+                    val vAddr = v.optString("vtableAddr")
+                    val slots = v.optJSONArray("slots") ?: JSONArray()
+                    val key = vAddr.ifBlank { cls }
+                    val isOpen = key in expanded
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(AppShape.md))
+                            .background(cs.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Row(Modifier.fillMaxWidth().clickable { expanded = if (isOpen) expanded - key else expanded + key },
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(if (isOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                null, tint = cs.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                            Text(cls, style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong,
+                                fontWeight = FontWeight.SemiBold, color = cs.onSurface, modifier = Modifier.weight(1f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            TypeBadge("${slots.length()}", cs.primary)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MonoLine("vtable $vAddr", cs.onSurfaceVariant, AppText.label)
+                            if (v.optString("typeinfoAddr").isNotBlank()) MonoLine("rtti ${v.optString("typeinfoAddr")}", cs.onSurfaceVariant, AppText.label)
+                            if (v.optString("confidence").isNotBlank()) MonoLine("conf ${v.optString("confidence")}", cs.onSurfaceVariant, AppText.label)
+                        }
+                        if (isOpen) {
+                            GroupDivider()
+                            for (i in 0 until slots.length()) {
+                                val s = slots.optJSONObject(i) ?: continue
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    MonoLine("#${s.optInt("index")}", cs.onSurfaceVariant, AppText.label, )
+                                    MonoLine(s.optString("addr"), cs.primary, AppText.label)
+                                    Text(s.optString("name").ifBlank { "slot_${s.optInt("index")}" },
+                                        style = MaterialTheme.typography.bodySmall, fontSize = AppText.label,
+                                        color = cs.onSurface, modifier = Modifier.weight(1f), maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 2. 交叉引用（含方向） ─────────────────────────
+
+@Composable
+private fun XRefsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    var locator by remember { mutableStateOf("") }
+    var inRefs by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var outRefs by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var ran by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(ws) {
+        if (locator.isBlank()) locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    }
+
+    fun go() {
+        val loc = locator.trim()
+        if (loc.isBlank() || ws.isBlank()) return
+        scope.launch {
+            loading = true; error = ""; ran = true
+            val rs = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    val axt = eng.rzCommand(ws, "", "s $loc; axtj")
+                    val axf = eng.rzCommand(ws, "", "s $loc; axfj")
+                    parseRzArray(axt) to parseRzArray(axf)
+                }.getOrElse { (null as List<JSONObject>?) to (null as List<JSONObject>?) }
+            }
+            loading = false
+            val (a, b) = rs
+            if (a == null && b == null) error = if (zh) "定位失败：请检查符号名或地址（支持 0x… / 函数名）" else "failed to locate symbol/address"
+            inRefs = a ?: emptyList()
+            outRefs = b ?: emptyList()
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "分析" else "Analyze", loading = loading, enabled = locator.isNotBlank(), onClick = { go() })
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank() || tools.selectedFunctionName.isNotBlank()) {
+                locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "导出 CSV" else "CSV", enabled = inRefs.isNotEmpty() || outRefs.isNotEmpty()) {
+                val sb = StringBuilder("dir,from,to,type,opcode\n")
+                inRefs.forEach { sb.append("in,").append(it.optString("from")).append(',').append(locator.trim()).append(',').append(it.optString("type")).append(',').append(it.optString("opcode")).append('\n') }
+                outRefs.forEach { sb.append("out,").append(locator.trim()).append(',').append(it.optString("to")).append(',').append(it.optString("type")).append(',').append(it.optString("opcode")).append('\n') }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            Text(
+                if (zh) "入 ${inRefs.size} · 出 ${outRefs.size}" else "in ${inRefs.size} · out ${outRefs.size}",
+                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(
+                value = locator, onValueChange = { locator = it }, singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "函数名 / 地址" else "symbol / addr", fontSize = AppText.label) },
+                placeholder = { Text("JNI_OnLoad 或 0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            !ran -> AnalysisEmptyState(
+                title = if (zh) "交叉引用" else "Cross references",
+                hint = if (zh) "输入函数名或地址后点「分析」，得到该位置的入引用（谁调用/引用它）与出引用（它引用了谁）。"
+                    else "Enter a symbol or address, then Analyze, to list incoming and outgoing references.",
+                primaryLabel = if (zh) "取当前函数" else "Current fn",
+                onPrimary = { locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }; go() },
+            )
+            inRefs.isEmpty() && outRefs.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "无交叉引用" else "No references",
+                hint = if (zh) "该位置没有显式引用记录（可能是叶子函数，或未被 rizin 分析到）。"
+                    else "No references recorded here (leaf, or not analyzed by rizin).",
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                RefBlock(if (zh) "入引用（谁引用它）" else "Incoming", inRefs, "from", cs.primary, zh, context)
+                RefBlock(if (zh) "出引用（它引用谁）" else "Outgoing", outRefs, "to", cs.tertiary, zh, context)
+            }
+        }
+    }
+}
+
+/** axtj/axfj 的 JSON 数组解析（rzCommand 返回体里取 stdout）。 */
+private fun parseRzArray(res: JSONObject?): List<JSONObject>? {
+    if (res == null) return null
+    val out = res.optString("stdout").ifBlank { res.optString("text") }.trim()
+    if (out.isBlank()) return emptyList()
+    return runCatching {
+        val a = JSONArray(out)
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+    }.getOrNull()
+}
+
+@Composable
+private fun RefBlock(
+    title: String,
+    refs: List<JSONObject>,
+    peerKey: String,
+    color: Color,
+    zh: Boolean,
+    context: android.content.Context,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(title, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+        Column(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.md))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            if (refs.isEmpty()) MonoLine(if (zh) "（无）" else "(none)", cs.onSurfaceVariant, AppText.label)
+            refs.take(300).forEach { r ->
+                Column(Modifier.fillMaxWidth().clickable {
+                    val p = r.optString(peerKey)
+                    if (p.isNotBlank()) copyToClipboard(context, p, zh)
+                }) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        MonoLine(r.optString(peerKey), color, AppText.label)
+                        val ty = r.optString("type")
+                        if (ty.isNotBlank()) TypeBadge(ty, cs.onSurfaceVariant)
+                    }
+                    val op = r.optString("opcode")
+                    if (op.isNotBlank()) MonoLine(op, cs.onSurfaceVariant, AppText.label)
+                }
+            }
+            if (refs.size > 300) MonoLine(if (zh) "… 仅显示前 300 条" else "… showing first 300", cs.onSurfaceVariant, AppText.label)
+        }
+    }
+}
+
+// ───────────────────────── 3. 地址查看器（代码 / 数据 双模式） ─────────────────────────
+
+@Composable
+private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    var addr by remember { mutableStateOf("") }
+    var mode by remember { mutableStateOf("code") }
+    var lines by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var info by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(ws) {
+        if (addr.isBlank()) addr = tools.selectedFunctionVa.ifBlank { tools.disasmAddr }
+    }
+
+    fun load() {
+        val a = addr.trim()
+        if (a.isBlank() || ws.isBlank()) return
+        scope.launch {
+            loading = true; error = ""; info = ""
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    val cmd = if (mode == "code") "s $a; pdj 64" else "s $a; pxj 256"
+                    val sec = eng.rzCommand(ws, "", "iSj")
+                    parseRzArray(eng.rzCommand(ws, "", cmd)) to sectionOf(sec, a)
+                }.getOrElse { (null as List<JSONObject>?) to "" }
+            }
+            loading = false
+            val (l, s) = res
+            if (l == null) error = if (zh) "读取失败：地址无法解析（试试 0x 开头的虚拟地址）" else "failed to read at address"
+            lines = l ?: emptyList()
+            info = s
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "代码模式" else "Code", active = mode == "code") { mode = "code"; if (lines.isNotEmpty()) load() }
+            SmallAction(if (zh) "数据模式" else "Data", active = mode == "data") { mode = "data"; if (lines.isNotEmpty()) load() }
+            SmallAction(if (zh) "前往" else "Go", loading = loading, enabled = addr.isNotBlank(), onClick = { load() })
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank()) { addr = tools.selectedFunctionVa }
+            SmallAction(if (zh) "复制" else "Copy", enabled = lines.isNotEmpty()) {
+                val sb = StringBuilder()
+                lines.forEach { o -> sb.append(if (mode == "code") "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("disasm")}" else "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("ascii")}").append('\n') }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = addr, onValueChange = { addr = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            label = { Text(if (zh) "前往地址（0x… 虚拟地址）" else "go to address", fontSize = AppText.label) },
+            placeholder = { Text("0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+        )
+        if (info.isNotBlank()) {
+            Spacer(Modifier.size(6.dp))
+            MonoLine(info, cs.primary, AppText.label)
+        }
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            lines.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "地址查看器" else "Address viewer",
+                hint = if (zh) "输入虚拟地址，用「代码模式」看反汇编、用「数据模式」看 hex+ASCII；上方显示所在节区与地址范围。"
+                    else "Enter a VA: Code mode disassembles, Data mode shows hex+ASCII; the section is shown above.",
+                primaryLabel = if (zh) "取当前函数" else "Current fn", onPrimary = { addr = tools.selectedFunctionVa; load() },
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                lines.forEach { o ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                        MonoLine(o.optString("offset"), cs.primary, AppText.label)
+                        if (mode == "code") {
+                            MonoLine(o.optString("bytes"), cs.onSurfaceVariant, AppText.label)
+                            Text(o.optString("disasm"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                fontSize = AppText.body, color = cs.onSurface, modifier = Modifier.weight(1f), lineHeight = 16.sp)
+                        } else {
+                            Text(o.optString("bytes"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                fontSize = AppText.body, color = cs.onSurface, modifier = Modifier.weight(1f), lineHeight = 16.sp)
+                            MonoLine(o.optString("ascii"), cs.onSurfaceVariant, AppText.body)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 从 iSj 输出里找出包含给定地址的节区，返回 "addr 节区(范围)"。 */
+private fun sectionOf(res: JSONObject?, addr: String): String {
+    if (res == null) return ""
+    val out = res.optString("stdout").ifBlank { res.optString("text") }.trim()
+    if (out.isBlank()) return ""
+    val want = parseHex64(addr) ?: return ""
+    val arr = runCatching { JSONArray(out) }.getOrNull() ?: return ""
+    for (i in 0 until arr.length()) {
+        val s = arr.optJSONObject(i) ?: continue
+        val vaddr = s.opt("vaddr")?.let { hexOrLong(it) } ?: continue
+        val vsize = s.opt("vsize")?.let { hexOrLong(it) } ?: 0L
+        if (want >= vaddr && want < vaddr + vsize) {
+            val name = s.optString("name")
+            val range = "0x" + java.lang.Long.toHexString(vaddr) + "–0x" + java.lang.Long.toHexString(vaddr + vsize)
+            return "$name  $range"
+        }
+    }
+    return ""
+}
+
+private fun parseHex64(s: String): Long? {
+    val t = s.trim().removePrefix("0x").removePrefix("0X")
+    return runCatching { java.lang.Long.parseLong(t, 16) }.getOrNull()
+}
+
+private fun hexOrLong(v: Any?): Long? = when (v) {
+    is Number -> v.toLong()
+    is String -> parseHex64(v)
+    else -> null
+}
+
+// ───────────────────────── 4. 函数签名还原 ─────────────────────────
+
+@Composable
+private fun FuncSigView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    var locator by remember { mutableStateOf("") }
+    var count by remember { mutableStateOf("12") }
+    var sigs by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var ran by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(ws) {
+        if (locator.isBlank()) locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    }
+
+    fun go() {
+        if (ws.isBlank()) return
+        scope.launch {
+            loading = true; error = ""; ran = true
+            val r = callMcpTool(context, "taffy_so_func_sig",
+                JSONObject().put("workspaceId", ws).put("locator", locator.trim())
+                    .put("count", count.toIntOrNull()?.coerceIn(1, 50) ?: 12))
+            loading = false
+            if (r == null) { error = if (zh) "引擎未就绪" else "engine not ready" }
+            else if (!r.optBoolean("ok", true)) error = r.optString("error").ifBlank { r.optString("note") }
+            else {
+                val a = r.optJSONArray("signatures") ?: JSONArray()
+                sigs = (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+                if (sigs.isEmpty()) error = r.optString("note").ifBlank { if (zh) "未还原出签名" else "no signatures" }
+            }
+        }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "还原" else "Recover", loading = loading, onClick = { go() })
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank() || tools.selectedFunctionName.isNotBlank()) {
+                locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+            }
+            SmallAction(if (zh) "复制全部" else "Copy all", enabled = sigs.isNotEmpty()) {
+                val sb = StringBuilder()
+                sigs.forEach { s -> sb.append(sigLine(s, zh)).append('\n') }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+        }
+        Spacer(Modifier.size(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(
+                value = locator, onValueChange = { locator = it }, singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "函数（留空=批量）" else "fn (blank=batch)", fontSize = AppText.label) },
+            )
+            OutlinedTextField(
+                value = count, onValueChange = { count = it }, singleLine = true,
+                modifier = Modifier.width(84.dp).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "个数" else "count", fontSize = AppText.label) },
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() && sigs.isEmpty() -> AnalysisErrorBanner(error)
+            sigs.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "函数签名还原" else "Signature recovery",
+                hint = if (zh) "还原函数的参数列表（基于 rizin 的 afvj 局部变量/参数寄存器启发式）。留空函数名可批量还原前 N 个函数。"
+                    else "Recover argument lists heuristically from rizin afvj. Leave the name blank to batch the first N functions.",
+                primaryLabel = if (zh) "批量还原" else "Batch", onPrimary = { locator = ""; go() },
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                sigs.forEach { s -> SigCard(s, zh, context, cs) }
+            }
+        }
+    }
+}
+
+private fun sigLine(s: JSONObject, zh: Boolean): String {
+    val args = s.optJSONArray("args") ?: JSONArray()
+    val params = (0 until args.length()).joinToString(", ") { i ->
+        val a = args.optJSONObject(i) ?: return@joinToString ""
+        (a.optString("type").ifBlank { "?" }) + " " + (a.optString("name").ifBlank { a.optString("reg") })
+    }
+    return "${s.optString("addr")}  ${s.optString("returnType", "unknown")} ${s.optString("function")}($params)   [${s.optString("confidence")}]"
+}
+
+@Composable
+private fun SigCard(s: JSONObject, zh: Boolean, context: android.content.Context, cs: androidx.compose.material3.ColorScheme) {
+    val args = s.optJSONArray("args") ?: JSONArray()
+    val locals = s.optJSONArray("locals") ?: JSONArray()
+    val conf = s.optString("confidence")
+    val confColor = when (conf) { "medium" -> cs.primary; "low" -> cs.onSurfaceVariant; else -> cs.outline }
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(s.optString("function"), style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong,
+                fontWeight = FontWeight.SemiBold, color = cs.onSurface, modifier = Modifier.weight(1f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            MonoLine(s.optString("addr"), cs.primary, AppText.label)
+            TypeBadge(conf.ifBlank { "?" }, confColor)
+        }
+        MonoLine(sigLine(s, zh), cs.onSurface, AppText.label)
+        if (args.length() > 0) {
+            GroupDivider()
+            Text(if (zh) "参数" else "args", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            for (i in 0 until args.length()) {
+                val a = args.optJSONObject(i) ?: continue
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MonoLine("#${i + 1}", cs.onSurfaceVariant, AppText.label)
+                    MonoLine(a.optString("reg"), cs.primary, AppText.label)
+                    MonoLine(a.optString("type"), cs.onSurfaceVariant, AppText.label)
+                    Text(a.optString("name").ifBlank { a.optString("reg") }, style = MaterialTheme.typography.bodySmall,
+                        fontSize = AppText.label, color = cs.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        if (locals.length() > 0) {
+            MonoLine(if (zh) "局部变量 ${locals.length()} 个" else "${locals.length()} locals", cs.onSurfaceVariant, AppText.label)
+        }
+        val note = s.optString("typeConfidenceNote")
+        if (note.isNotBlank()) MonoLine(note, cs.onSurfaceVariant.copy(alpha = 0.8f), AppText.label)
+    }
+}
+
+// ───────────────────────── 5. JNI RegisterNatives 还原 ─────────────────────────
+
+@Composable
+private fun JniRegView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val tick = tools.reloadTick
+    var data by remember(ws, tick) { mutableStateOf<JSONObject?>(null) }
+    var loading by remember(ws, tick) { mutableStateOf(false) }
+    var error by remember(ws, tick) { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+
+    LaunchedEffect(ws, tick) {
+        if (ws.isBlank()) return@LaunchedEffect
+        loading = true; error = ""
+        val r = callMcpTool(context, "taffy_so_jni_reg", JSONObject().put("workspaceId", ws).put("limit", 800))
+        loading = false
+        data = r
+        if (r == null) error = if (zh) "引擎未就绪" else "engine not ready"
+        else if (!r.optBoolean("ok", true)) error = r.optString("error").ifBlank { r.optString("note") }
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    val pairs = remember(data) {
+        val a = data?.optJSONArray("pairs") ?: JSONArray()
+        (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+    }
+    val shown = remember(pairs, query) {
+        if (query.isBlank()) pairs else pairs.filter {
+            it.optString("javaName").contains(query, true) || it.optString("signature").contains(query, true)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
+            SmallAction(if (zh) "复制全部" else "Copy all", enabled = pairs.isNotEmpty()) {
+                val sb = StringBuilder()
+                pairs.forEach { p -> sb.append(p.optString("javaName")).append(' ').append(p.optString("signature")).append("  @").append(p.optString("sigAddr")).append('\n') }
+                copyToClipboard(context, sb.toString().trimEnd(), zh)
+            }
+            if (data != null) {
+                val onLoad = data!!.optBoolean("hasJniOnLoad", false)
+                val reg = data!!.optBoolean("hasRegisterNatives", false)
+                TypeBadge(if (onLoad) "JNI_OnLoad ✓" else "JNI_OnLoad ✗", if (onLoad) cs.primary else cs.outline)
+                TypeBadge(if (reg) "RegisterNatives ✓" else "RegisterNatives ✗", if (reg) cs.primary else cs.outline)
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        OutlinedTextField(
+            value = query, onValueChange = { query = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
+            placeholder = { Text(if (zh) "过滤 Java 方法名 / 签名" else "filter method / signature", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        )
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading && data == null -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            pairs.isEmpty() -> AnalysisEmptyState(
+                title = if (zh) "未发现 JNI 方法表" else "No JNI table",
+                hint = if (zh) "未在字符串中扫到 JNI 方法描述符（形如 (Landroid/…;)V）。可能是静态注册（Java_xxx 符号）或已加密。"
+                    else "No JNI descriptors found in strings — may be statically registered or encrypted.",
+            )
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                MonoLine(if (zh) "${shown.size} / ${pairs.size} 条配对" else "${shown.size} / ${pairs.size} pairs", cs.onSurfaceVariant, AppText.label)
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    shown.take(600).forEach { p ->
+                        Column(Modifier.fillMaxWidth().clickable {
+                            copyToClipboard(context, p.optString("javaName") + " " + p.optString("signature"), zh)
+                        }, verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(p.optString("javaName").ifBlank { "(未命名)" },
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    fontSize = AppText.bodyStrong, color = cs.onSurface, modifier = Modifier.weight(1f),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                MonoLine(p.optString("sigAddr"), cs.primary, AppText.label)
+                                TypeBadge(p.optString("confidence").ifBlank { "?" },
+                                    if (p.optString("confidence") == "medium") cs.primary else cs.onSurfaceVariant)
+                            }
+                            MonoLine(p.optString("signature"), cs.onSurfaceVariant, AppText.label)
+                        }
+                    }
+                    if (shown.size > 600) MonoLine(if (zh) "… 仅显示前 600 条" else "… first 600", cs.onSurfaceVariant, AppText.label)
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 6. 加固 / 反调试 报告 ─────────────────────────
+
+private data class HardFinding(val category: String, val title: String, val detail: String, val severity: String)
+
+/** 壳 / 加固厂商特征（文件名/字符串级）。 */
+private val packerSignatures: List<Triple<String, String, String>> = listOf(
+    Triple("libjiagu", "360 加固保", "high"),
+    Triple("libmobisec", "阿里聚安全", "high"),
+    Triple("libsgmain", "阿里 SecurityGuard", "high"),
+    Triple("libsgsecuritybody", "阿里 SecurityGuard", "high"),
+    Triple("libDexHelper", "梆梆企业版", "high"),
+    Triple("libijiami", "爱加密", "high"),
+    Triple("libexecmain", "爱加密", "high"),
+    Triple("libshella", "通用加固壳", "medium"),
+    Triple("libshellx", "通用加固壳", "medium"),
+    Triple("libnesec", "网易易盾", "high"),
+    Triple("libSecShell", "娜迦", "high"),
+    Triple("libsecexe", "娜迦", "high"),
+    Triple("libsecmain", "娜迦", "high"),
+    Triple("libtprt", "腾讯乐固/梆梆", "high"),
+    Triple("libreloc", "腾讯乐固", "medium"),
+    Triple("libbaiduprotect", "百度加固", "high"),
+    Triple("libbprotect", "百度加固", "high"),
+    Triple("libkwscmm", "几维安全", "medium"),
+    Triple("libkwscr", "几维安全", "medium"),
+    Triple("libVMProtect", "VMProtect", "high"),
+    Triple("libedog", "易遁加固", "medium"),
+)
+
+/** 运行环境检测 / 混淆标记特征。 */
+private val envSignatures: List<Pair<String, String>> = listOf(
+    "frida" to "Frida 检测（反调试/反注入）",
+    "gum-js-loop" to "Frida 线程检测",
+    "re.frida.server" to "Frida server 检测",
+    "xposed" to "Xposed 检测",
+    "substrate" to "Substrate 检测",
+    "magisk" to "Magisk / Root 检测",
+    "/system/bin/su" to "Root 检测（su 路径）",
+    "/system/xbin/su" to "Root 检测（su 路径）",
+    "goldfish" to "模拟器检测（goldfish）",
+    "qemu" to "模拟器检测（qemu）",
+    "ranchu" to "模拟器检测（ranchu）",
+    "/proc/self/status" to "反调试（读取 TracerPid）",
+    "TracerPid" to "反调试（TracerPid）",
+    "ptrace" to "反调试（ptrace）",
+    "ollvm" to "OLLVM 混淆标记",
+    "__vmp" to "VMP 虚拟化保护标记",
+    "VMHandler" to "VMP Handler 标记",
+    "soinfo" to "自定义 Linker（soinfo）",
+    "linker_init" to "自定义 Linker（linker_init）",
+    "__dl_" to "自定义 Linker（__dl_ 符号）",
+)
+
+/** 基于字符串集合做特征匹配。 */
+private fun hardMatch(strings: List<String>): List<HardFinding> {
+    val out = mutableListOf<HardFinding>()
+    packerSignatures.forEach { (sig, name, sev) ->
+        val ev = strings.firstOrNull { it.contains(sig, true) }
+        if (ev != null) out += HardFinding("加固壳", name, "命中特征「$sig」：${ev.take(160)}", sev)
+    }
+    envSignatures.forEach { (sig, desc) ->
+        val ev = strings.firstOrNull { it.contains(sig, true) }
+        if (ev != null) {
+            val sev = if (desc.contains("Frida") || desc.contains("反调试")) "high" else "medium"
+            out += HardFinding("反调试/环境", desc, "命中「$sig」：${ev.take(160)}", sev)
+        }
+    }
+    if (strings.any { it.matches(Regex("^sub_[0-9A-Fa-f]{4,}$")) }) {
+        out += HardFinding("符号剥离", "符号剥离 (sub_ 命名)", "大量函数名为 sub_xxxx，符号表可能被剥离。", "low")
+    }
+    return out
+}
+
+/** Shannon 熵（比特/字节）。 */
+private fun shannonEntropy(bytes: ByteArray): Double {
+    if (bytes.isEmpty()) return 0.0
+    val freq = IntArray(256)
+    bytes.forEach { freq[it.toInt() and 0xff]++ }
+    var h = 0.0
+    val n = bytes.size.toDouble()
+    freq.forEach { c -> if (c > 0) { val p = c / n; h -= p * kotlin.math.log2(p) } }
+    return h
+}
+
+@Composable
+private fun HardeningView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val ws = tools.sharedWorkspaceId
+    val tick = tools.reloadTick
+    val cs = MaterialTheme.colorScheme
+    var findings by remember(ws, tick) { mutableStateOf<List<HardFinding>>(emptyList()) }
+    var entropy by remember(ws, tick) { mutableStateOf(-1.0) }
+    var textCount by remember(ws, tick) { mutableStateOf(0) }
+    var loading by remember(ws, tick) { mutableStateOf(false) }
+    var error by remember(ws, tick) { mutableStateOf("") }
+    var ran by remember(ws, tick) { mutableStateOf(false) }
+
+    LaunchedEffect(ws, tick) {
+        if (ws.isBlank()) return@LaunchedEffect
+        loading = true; error = ""; ran = true
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
+                val eng = EngineProvider.get(context)
+                // 1) 字符串清单（quiet，逐行；限流避免大 SO 内存爆）
+                val strRes = eng.rzCommand(ws, "", "izq")
+                val txt = strRes.optString("stdout").ifBlank { strRes.optString("text") }
+                val strs = txt.split('\n').map { it.trim() }.filter { it.length in 3..300 }.take(50000)
+                // 2) .text 头部 4KB 熵
+                val hexRes = eng.rzCommand(ws, "", "p8 4096 @ .text")
+                val hx = hexRes.optString("stdout").ifBlank { hexRes.optString("text") }.trim()
+                val bytes = runCatching {
+                    val t = hx.filter { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+                    ByteArray(t.length / 2) { i -> t.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+                }.getOrNull() ?: ByteArray(0)
+                Triple(strs, shannonEntropy(bytes), bytes.size)
+            }.getOrNull()
+        }
+        loading = false
+        if (res == null) { error = if (zh) "扫描失败（工作区或引擎异常）" else "scan failed" ; return@LaunchedEffect }
+        val (strs, ent, n) = res
+        textCount = strs.size
+        entropy = if (n > 0) ent else -1.0
+        findings = hardMatch(strs)
+    }
+
+    if (ws.isBlank()) return NeedWorkspace(zh)
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "重新扫描" else "Rescan", loading = loading, onClick = onRefresh)
+            SmallAction(if (zh) "复制报告" else "Copy report", enabled = ran) {
+                copyToClipboard(context, hardReport(findings, entropy, textCount, zh), zh)
+            }
+            if (entropy >= 0) {
+                val hi = entropy >= 7.0
+                TypeBadge(".text 熵 %.2f".format(entropy), if (hi) cs.error else cs.primary)
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+        when {
+            loading -> AnalysisLoading()
+            error.isNotBlank() -> AnalysisErrorBanner(error)
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                KeyValueCard(zh, listOf(
+                    (if (zh) "字符串数" else "strings") to "$textCount",
+                    (if (zh) "命中项" else "findings") to "${findings.size}",
+                    ("\u200b.text 熵") to if (entropy < 0) "—" else "%.3f / 8.0".format(entropy),
+                ))
+                if (entropy >= 7.0) {
+                    AnalysisErrorBanner(if (zh) "代码段熵值异常偏高（%.2f，接近 8.0），高度疑似加密或压缩——磁盘静态数据可能不是真实指令，通常需要内存 Dump。" else "Very high .text entropy — likely encrypted/compressed; memory dump may be required.")
+                }
+                if (findings.isEmpty()) {
+                    AnalysisEmptyState(
+                        title = if (zh) "未检出常见加固特征" else "No hardening found",
+                        hint = if (zh) "未命中已知壳厂商 / 反调试 / 混淆标记。若确为加固目标，可结合 taffy_apk_shell_check（APK 级）与动态分析确认。"
+                            else "No known packer/anti-debug/obfuscation fingerprints. Cross-check with taffy_apk_shell_check for APKs.",
+                    )
+                } else {
+                    val byCat = findings.groupBy { it.category }
+                    byCat.forEach { (cat, list) ->
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("$cat · ${list.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                            list.forEach { f ->
+                                val col = when (f.severity) { "high" -> cs.error; "medium" -> cs.tertiary; else -> cs.onSurfaceVariant }
+                                Column(
+                                    Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(AppShape.md))
+                                        .background(cs.surfaceContainerHigh)
+                                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(f.title, style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong, fontWeight = FontWeight.SemiBold, color = cs.onSurface, modifier = Modifier.weight(1f))
+                                        TypeBadge(f.severity, col)
+                                    }
+                                    MonoLine(f.detail, cs.onSurfaceVariant, AppText.label)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun hardReport(findings: List<HardFinding>, entropy: Double, strings: Int, zh: Boolean): String {
+    val sb = StringBuilder()
+    sb.append("=== ${if (zh) "加固 / 混淆分析报告" else "Hardening report"} ===\n")
+    sb.append("${if (zh) "字符串数" else "strings"}: $strings\n")
+    sb.append(".text entropy: ").append(if (entropy < 0) "n/a" else "%.3f".format(entropy)).append("\n")
+    sb.append("${if (zh) "命中" else "findings"}: ${findings.size}\n\n")
+    findings.forEach { sb.append("- [").append(it.severity).append("] ").append(it.category).append(" / ").append(it.title).append('\n').append("    ").append(it.detail).append('\n') }
+    if (findings.isEmpty()) sb.append(if (zh) "（未检出常见特征）\n" else "(none)\n")
+    return sb.toString()
 }

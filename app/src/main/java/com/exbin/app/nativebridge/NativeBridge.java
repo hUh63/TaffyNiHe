@@ -1,28 +1,156 @@
 package com.exbin.app.nativebridge;
 
+import com.exbin.app.elf.pseudoc.r2dec.ItaniumDemangler;
+
 /**
- * 塔菲逆核 · r2dec 移植的最小 NativeBridge 契约桩。
+ * 塔菲逆核 · Exbin 复刻层的 NativeBridge 适配桥。
  * <p>
- * Exbin 的 r2dec 纯 Java 移植在 native 增强不可用时会自动降级为离线模式；
- * 本桩令 {@link #isSupported()} 恒为 false，使 r2dec 走纯 Java 路径。
- * 所有 native 增强方法返回空值（调用方均有 null/长度守卫）。
+ * Exbin 的 r2dec / FunctionSignatureAnalyzer / DisasmAnnotator 等纯 Java 模块通过本类访问
+ * native 增强能力（demangle / 签名还原 / 控制流分析 / 变量分析）。
  * <p>
- * 唯一的例外：CFG 由塔菲在 Kotlin 侧用 rizin(agfj) 预构建并通过
- * {@code PseudoCConverter.PseudoCContext.prebuiltCfg} 注入，不经过
- * {@link #analyzeControlFlow}。
+ * 塔菲逆核没有 Exbin 那套 soide-native，因此本类采取「离线优先 + 可选后端注入」策略：
+ * <ul>
+ *   <li>{@link #demangle(String)} 委托纯 Java 的 {@link ItaniumDemangler}（等价 native __cxa_demangle）；</li>
+ *   <li>签名还原（{@code restoreSignatures*}）通过 {@link SignatureBackend} 注入点由塔菲
+ *       Kotlin 侧用 rizin(afvj/afij/axt) 提供实现；未注入时返回空结果，调用方自动降级；</li>
+ *   <li>{@link #analyzeControlFlow} 返回 null，使 ControlFlowAnalyzer 走 fallback —
+ *       塔菲通过 {@code PseudoCContext.prebuiltCfg}（rizin agfj 预构建）提供真实 CFG。</li>
+ * </ul>
  */
 public final class NativeBridge {
 
     private NativeBridge() {}
 
-    /** 恒为 false：禁用一切 native 增强（demangle/vtable/afvj/aaef/noreturn 传播）。 */
-    public static boolean isSupported() {
-        return false;
+    // ============================================================
+    // 塔菲扩展: 签名还原后端注入点
+    //   Exbin 用 soide-native 的 capstone 分析实现；塔菲用 rizin 等价实现。
+    // ============================================================
+
+    /** 签名还原后端契约（由塔菲 RizinSignatureBackend 实现并注册）。 */
+    public interface SignatureBackend {
+        /** 后端是否可用。 */
+        boolean available();
+
+        /** 批量 demangle（返回与输入等长数组；失败元素保持原样）。 */
+        String[] demangleBatch(String[] names);
+
+        /** 基于 SO 字节做函数签名还原（addrs 为文件偏移）。 */
+        String[] restoreSignatures(byte[] soData, long[] addrs, int[] sizes,
+                                   int[] thumbFlags, int machine, String[] names);
+
+        /** 基于 native handle（SO 路径）做签名还原。 */
+        String[] restoreSignaturesByHandle(long handle, long[] addrs, int[] sizes,
+                                           int[] thumbFlags, int machine, String[] names);
+
+        /** 结构化签名还原：Object[n][9]（ret/params/float/wide/stackOff/noreturn/variadic/isStatic）。 */
+        Object[][] restoreSignaturesStructuredByHandle(long handle, long[] addrs, int[] sizes,
+                                                       int[] thumbFlags, int machine, String[] names);
     }
 
-    /** Itanium demangle 降级：原样返回。 */
+    private static volatile SignatureBackend sSigBackend = null;
+
+    /** 注册签名还原后端（塔菲 RizinSignatureBackend）。 */
+    public static void setSignatureBackend(SignatureBackend backend) {
+        sSigBackend = backend;
+    }
+
+    public static SignatureBackend signatureBackend() {
+        return sSigBackend;
+    }
+
+    /** 签名还原能力是否可用（区别于 {@link #isSupported()} 的 native 增强总开关）。 */
+    public static boolean isSigSupported() {
+        SignatureBackend b = sSigBackend;
+        return b != null && b.available();
+    }
+
+    // ============================================================
+    // demangle
+    // ============================================================
+
+    /**
+     * Itanium demangle —— 委托纯 Java {@link ItaniumDemangler}（等价 __cxa_demangle）。
+     *
+     * @param name mangled 名（如 _ZN3foo3barEi）；非 mangled 或解码失败时原样返回
+     */
     public static String demangle(String name) {
-        return name;
+        if (name == null || name.length() < 3 || !name.startsWith("_Z")) return name;
+        try {
+            String d = ItaniumDemangler.demangle(name);
+            return (d != null && !d.isEmpty()) ? d : name;
+        } catch (Throwable t) {
+            return name;
+        }
+    }
+
+    /** 批量 demangle —— 优先注入后端，其次逐条 {@link #demangle(String)}。 */
+    public static String[] demangleBatch(String[] names) {
+        if (names == null || names.length == 0) return new String[0];
+        SignatureBackend b = sSigBackend;
+        if (b != null && b.available()) {
+            try {
+                String[] r = b.demangleBatch(names);
+                if (r != null && r.length == names.length) return r;
+            } catch (Throwable ignored) {
+            }
+        }
+        String[] out = new String[names.length];
+        for (int i = 0; i < names.length; i++) out[i] = demangle(names[i]);
+        return out;
+    }
+
+    // ============================================================
+    // 签名还原（转发注入后端；未注入则空结果）
+    // ============================================================
+
+    public static String[] restoreSignatures(byte[] soData, long[] addrs, int[] sizes,
+                                             int[] thumbFlags, int machine, String[] names) {
+        if (soData == null || addrs == null || sizes == null) return new String[0];
+        SignatureBackend b = sSigBackend;
+        if (b != null && b.available()) {
+            try {
+                String[] r = b.restoreSignatures(soData, addrs, sizes, thumbFlags, machine, names);
+                return r != null ? r : new String[0];
+            } catch (Throwable ignored) {
+            }
+        }
+        return new String[0];
+    }
+
+    public static String[] restoreSignaturesByHandle(long handle, long[] addrs, int[] sizes,
+                                                     int[] thumbFlags, int machine, String[] names) {
+        if (handle == 0 || addrs == null || sizes == null) return new String[0];
+        SignatureBackend b = sSigBackend;
+        if (b != null && b.available()) {
+            try {
+                String[] r = b.restoreSignaturesByHandle(handle, addrs, sizes, thumbFlags, machine, names);
+                return r != null ? r : new String[0];
+            } catch (Throwable ignored) {
+            }
+        }
+        return new String[0];
+    }
+
+    public static Object[][] restoreSignaturesStructuredByHandle(long handle, long[] addrs, int[] sizes,
+                                                                 int[] thumbFlags, int machine, String[] names) {
+        if (handle == 0 || addrs == null || sizes == null) return null;
+        SignatureBackend b = sSigBackend;
+        if (b != null && b.available()) {
+            try {
+                return b.restoreSignaturesStructuredByHandle(handle, addrs, sizes, thumbFlags, machine, names);
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
+    // ============================================================
+    // 其余 native 增强能力 —— 桩（调用方均有 null / 长度守卫）
+    // ============================================================
+
+    /** 恒为 false：禁用 Exbin native 增强（demangle 除外，见上）。 */
+    public static boolean isSupported() {
+        return false;
     }
 
     /** 打开 SO —— 桩：无句柄。 */
@@ -63,7 +191,11 @@ public final class NativeBridge {
         return null;
     }
 
-    /** 与 Exbin 契约一致的虚表条目（r2dec 的 DecompContext 会读取字段）。 */
+    // ============================================================
+    // native 数据载体（与 Exbin 字段布局一致）
+    // ============================================================
+
+    /** 虚表条目（r2dec 的 DecompContext 会读取字段）。 */
     public static class VTableEntryNative {
         public long address;
         public String className;
@@ -78,5 +210,41 @@ public final class NativeBridge {
         public String[] inheritChain;
 
         public VTableEntryNative() {}
+    }
+
+    /** 数据标签（地址 → 名称映射，DisasmAnnotator 消费）。 */
+    public static class DataLabelNative {
+        public long address;
+        public String name;
+        public int size;
+        public int type;        // 0=符号表, 1=重定位GOT, 2=字符串, 3=自动dword_
+        public boolean isImported;
+        public DataLabelNative() {}
+    }
+
+    /** 常量条目（数据段分析）。 */
+    public static class ConstantEntryNative {
+        public long address;
+        public long offset;
+        public int size;
+        public String type;
+        public String value;
+        public String section;
+        public ConstantEntryNative() {}
+    }
+
+    /** 全局变量条目（数据段分析）。 */
+    public static class GlobalVarEntryNative {
+        public long address;
+        public long offset;
+        public int size;
+        public String section;
+        public String type;
+        public String basis;
+        public boolean isPointer;
+        public boolean isRelocated;
+        public long initialValue;
+        public String symbolName;
+        public GlobalVarEntryNative() {}
     }
 }

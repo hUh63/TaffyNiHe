@@ -38,7 +38,7 @@ object SoDecompileTool {
                 "filePath" str "path 的别名"
                 "locator" str "函数定位符：函数名/符号/0x 十六进制线性地址；留空时由引擎回退到 ELF 入口点"
                 "strict" bool "true（默认）：Ghidra 不可用时返回错误；false：尽量降级返回可用结果"
-                "engine".oneOf("反编译引擎: auto(自动降级) | ghidra(rizin-ghidra pdg) | native(rizin 内置 pdc) | java(纯 Kotlin 启发式引擎)", "auto", "ghidra", "native", "java")
+                "engine".oneOf("反编译引擎: auto(自动降级) | ghidra(rizin-ghidra pdg) | native(rizin 内置 pdc) | java(Exbin r2dec 纯 Java 引擎，缺失时降级启发式) | simple(Exbin SimplePseudoC 结构化引擎)", "auto", "ghidra", "native", "java", "simple")
             })
         }
 
@@ -110,6 +110,19 @@ object SoDecompileTool {
                     .put("engineNote", "纯 Kotlin 启发式引擎（对标 r2dec 纯 Java 移植思路）；非编译器级反编译")
             }
 
+            fun runExbinSimple(): JSONObject? {
+                return runCatching {
+                    val ag = engine.rzCommand(workspaceId, "", "s $locator; agfj")
+                    val agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
+                    if (!agTxt.startsWith("[")) return@runCatching null
+                    val code = com.soreverse.mcp.engine.R2DecEngine.decompileSimple(agTxt, "")
+                    if (code.isNullOrBlank()) null
+                    else JSONObject().put("ok", true).put("pseudocode", code)
+                        .put("engine", "java-simple")
+                        .put("engineNote", "SimplePseudoC 结构化伪 C（Exbin v2.1.4 引擎；CFG 由 rizin agfj 注入）")
+                }.getOrNull()
+            }
+
             if (wantEngine == "native") {
                 val r = runNativePdc()
                 if (r == null) return err("DECOMPILER_UNAVAILABLE", "native(pdc) 引擎无输出（该 rizin 构建可能未启用 pdc）", "engine", "native")
@@ -118,6 +131,11 @@ object SoDecompileTool {
             if (wantEngine == "java") {
                 val r = runJavaHeuristic()
                 if (r == null) return err("DECOMPILER_UNAVAILABLE", "java 引擎无输出（地址无法反汇编或指令为空）", "engine", "java")
+                return ok(r.put("workspaceId", workspaceId).put("locator", locator))
+            }
+            if (wantEngine == "simple") {
+                val r = runExbinSimple()
+                if (r == null) return err("DECOMPILER_UNAVAILABLE", "SimplePseudoC 引擎无输出（地址无法反汇编或指令为空）", "engine", "simple")
                 return ok(r.put("workspaceId", workspaceId).put("locator", locator))
             }
 

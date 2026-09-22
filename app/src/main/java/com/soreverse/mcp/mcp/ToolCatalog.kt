@@ -328,6 +328,7 @@ object ToolCatalog {
             "addr" str "十六进制虚拟地址兜底；ARM32 Thumb 可用奇数地址或 thumb=true"
             "thumb" bool "强制 ARM32 Thumb 模式"
             "mode".oneOf("指令模式", "auto", "arm", "thumb")
+            "annotate" bool "为 true 时用 Exbin DisasmAnnotator 做 IDA 风格语义注解（全局变量/字符串/分支标签/栈帧变量），注释追加到每行尾部并结构化输出到 annotations 字段"
         }) }
     ) { e, a, s ->
         val r = resolveWorkspace(e, a)
@@ -337,7 +338,14 @@ object ToolCatalog {
         val addr = a.str("addr")
         // 只传 path 且既无 locator 也无 addr 时，从 ELF 入口点开始反汇编。
         val effectiveLocator = if (r.autoOpened && locator.isBlank() && addr.isBlank()) r.entryPoint else locator
-        e.disasm(r.workspaceId, a.str("editSessionId"), effectiveLocator, a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), addr, if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")).withAutoOpen(r)
+        val res = e.disasm(r.workspaceId, a.str("editSessionId"), effectiveLocator, a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), addr, if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")).withAutoOpen(r)
+        if (a.bool("annotate", false)) {
+            runCatching {
+                val elf = e.elfFor(r.workspaceId, a.str("editSessionId"))
+                val bytes = e.dataFor(r.workspaceId, a.str("editSessionId"))
+                com.soreverse.mcp.engine.ExbinAnnotate.apply(res, elf, bytes)
+            }.getOrDefault(res)
+        } else res
     }
 
     private val readHexdump = EngineToolHandler(

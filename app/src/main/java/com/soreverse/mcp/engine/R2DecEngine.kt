@@ -180,6 +180,23 @@ internal object R2DecEngine {
     }
 
     /**
+     * SimplePseudoC 结构化伪 C（Exbin `SimplePseudoC` v2.1.4 引擎）。
+     *
+     * 与 r2dec 引擎共用同一 CFG 构建（prebuiltCfg 注入），但走 Exbin 的
+     * 结构化转换器：支配关系 + 循环识别 + 空分支裁剪 + goto 统一。
+     * 适合作为 r2dec 之外的第二视角 / 交叉验证。
+     */
+    fun decompileSimple(agfjText: String, fnNameIn: String, isThumb: Boolean = false): String? {
+        return try {
+            val ctx = buildCtx(agfjText, fnNameIn, isThumb) ?: return null
+            val text = com.exbin.app.elf.pseudoc.SimplePseudoC().convert(ctx).joinToString("\n")
+            if (text.isBlank()) null else text
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    /**
      * 整函数伪 C + 块首行映射（对标 Exbin `BlockPseudoCProvider`）。
      * @return (body 行列表, 块入口地址 → 首行下标)；失败返回 null
      */

@@ -438,7 +438,8 @@ object SoDeepTools {
     val soFuncSig: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "taffy_so_func_sig",
-            "【函数签名还原】还原函数的参数列表: 基于 rizin 的局部变量/参数寄存器信息启发式推断(strip 后不再满屏 sub_xxxx)。" +
+            "【函数签名还原】还原函数的参数列表与返回类型。优先走 Exbin FunctionSignatureAnalyzer（JNI 特判 + 寄存器 read-before-write 反汇编分析，输出结构化 paramTypes/paramRegs/minArgs/maxArgs/confidence/notes）；" +
+                "不可用时降级为 rizin afvj 局部变量启发式。" +
                 "给 locator 看单个函数; 不给则批量取前 count 个函数。每个结果都带 confidence 与 evidence 字段, 低置信会明确标注, 不伪造确定结论。",
             "Recover function signatures (argument list) from rizin local-variable/argument metadata. " +
                 "Pass locator for one function, or omit for the first `count` functions. Every result carries confidence and evidence.",
@@ -487,6 +488,15 @@ object SoDeepTools {
             for (pair in targets) {
                 val nm = pair.first
                 val va = pair.second
+                // ── Exbin FunctionSignatureAnalyzer 路径（移植自 Exbin；含 JNI 特判与结构化结果）──
+                val fsa = com.soreverse.mcp.engine.ExbinSignature.analyze(engine, ws, nm, va)
+                if (fsa != null) {
+                    out.put(
+                        fsa.put("function", nm)
+                            .put("addr", if (va > 0) "0x" + java.lang.Long.toHexString(va) else ""),
+                    )
+                    continue
+                }
                 val seek = if (va > 0) "0x" + java.lang.Long.toHexString(va) else nm
                 val varsRaw = engine.rzCommand(ws, "", "s $seek; afvj", false)
                 val parsed = parseJsonOrNull(cmdStdout(varsRaw))

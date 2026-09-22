@@ -24,10 +24,12 @@ package com.soreverse.mcp
 
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +70,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,8 +78,11 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 private const val NODE_W_MIN_DP = 98f
@@ -790,19 +797,264 @@ private fun fitText(paint: Paint, text: String, maxWidth: Float): String {
 }
 
 @Composable
-private fun CfgChip(text: String, tint: Color, onClick: () -> Unit) {
+private fun CfgChip(text: String, tint: Color, active: Boolean = false, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(AppShape.xs),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.80f),
+        color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.80f),
     ) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
-            color = tint,
+            color = if (active) MaterialTheme.colorScheme.primary else tint,
             maxLines = 1,
+        )
+    }
+}
+
+// ───────────────────────── 背景 / 边路径 / 拖动 / 小地图 ─────────────────────────
+
+private fun nextBgStyle(cur: String): String = when (cur) {
+    "grid" -> "cobweb"
+    "cobweb" -> "honeycomb"
+    "honeycomb" -> "radar"
+    "radar" -> "none"
+    else -> "grid"
+}
+
+private fun nextRouting(cur: String): String = when (cur) {
+    "ortho" -> "polyline"
+    "polyline" -> "spline"
+    else -> "ortho"
+}
+
+private fun bgStyleLabel(zh: Boolean, s: String): String = when (s) {
+    "none" -> if (zh) "背景:无" else "BG:None"
+    "cobweb" -> if (zh) "背景:蛛网" else "BG:Web"
+    "honeycomb" -> if (zh) "背景:蜂窝" else "BG:Honeycomb"
+    "radar" -> if (zh) "背景:雷达" else "BG:Radar"
+    else -> if (zh) "背景:网格" else "BG:Grid"
+}
+
+private fun routeStyleLabel(zh: Boolean, s: String): String = when (s) {
+    "polyline" -> if (zh) "边:折线" else "Edge:Poly"
+    "spline" -> if (zh) "边:样条" else "Edge:Spline"
+    else -> if (zh) "边:正交" else "Edge:Ortho"
+}
+
+/** 直线折线路径（第二种边路由风格）。 */
+private fun polylineCfgPath(pts: List<Offset>): Path {
+    val path = Path()
+    if (pts.isEmpty()) return path
+    path.moveTo(pts[0].x, pts[0].y)
+    for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+    return path
+}
+
+/** Catmull-Rom → 三次贝塞尔：平滑通过所有控制点（第三种边路由风格）。 */
+private fun splineCfgPath(pts: List<Offset>): Path {
+    val path = Path()
+    if (pts.isEmpty()) return path
+    path.moveTo(pts[0].x, pts[0].y)
+    if (pts.size == 1) return path
+    if (pts.size == 2) {
+        path.lineTo(pts[1].x, pts[1].y)
+        return path
+    }
+    for (i in 0 until pts.size - 1) {
+        val p0 = if (i == 0) pts[0] else pts[i - 1]
+        val p1 = pts[i]
+        val p2 = pts[i + 1]
+        val p3 = if (i + 2 < pts.size) pts[i + 2] else pts[pts.size - 1]
+        val c1x = p1.x + (p2.x - p0.x) / 6f
+        val c1y = p1.y + (p2.y - p0.y) / 6f
+        val c2x = p2.x - (p3.x - p1.x) / 6f
+        val c2y = p2.y - (p3.y - p1.y) / 6f
+        path.cubicTo(c1x, c1y, c2x, c2y, p2.x, p2.y)
+    }
+    return path
+}
+
+/** 应用手动拖动偏移生成有效布局（不改动原始布局；边端点随节点平移）。 */
+internal fun applyCfgDrag(layout: CfgLayoutResult, offs: Map<Int, Offset>): CfgLayoutResult {
+    if (offs.isEmpty()) return layout
+    val boxes = ArrayList<CfgNodeBox>(layout.boxes.size)
+    layout.boxes.forEach { b ->
+        val o = if (b.isDummy) null else offs[b.index]
+        boxes += if (o == null) b else CfgNodeBox(b.index, b.cx + o.x, b.cy + o.y, b.w, b.h, b.addrText, b.lines)
+    }
+    val routes = ArrayList<CfgRoute>(layout.routes.size)
+    layout.routes.forEach { r ->
+        val of = offs[r.from]
+        val ot = offs[r.to]
+        if (of == null && ot == null) {
+            routes += r
+        } else {
+            val pts = r.points.toMutableList()
+            if (pts.isNotEmpty()) {
+                if (of != null) pts[0] = Offset(pts[0].x + of.x, pts[0].y + of.y)
+                val li = pts.size - 1
+                if (ot != null && li > 0) pts[li] = Offset(pts[li].x + ot.x, pts[li].y + ot.y)
+            }
+            routes += CfgRoute(r.from, r.to, r.kind, r.isBack, r.isSelf, pts)
+        }
+    }
+    return CfgLayoutResult(
+        boxes, routes, layout.width, layout.height,
+        layout.entryIndex, layout.loopHeadIndices, layout.returnIndices,
+    )
+}
+
+/** 背景图案绘制（网格 / 蛛网 / 蜂窝 / 雷达 / 无）。 */
+private fun DrawScope.drawCfgBackground(
+    bgStyle: String,
+    colors: androidx.compose.material3.ColorScheme,
+    density: Float,
+    sc: Float,
+    viewportSize: Size,
+    originX: Float,
+    originY: Float,
+) {
+    if (bgStyle == "none") return
+    val soft = colors.outlineVariant.copy(alpha = 0.32f)
+    when (bgStyle) {
+        "cobweb" -> {
+            val c = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+            val maxR = sqrt(c.x * c.x + c.y * c.y) + 40f
+            val ring = 46f * density * sc
+            if (ring >= 12f) {
+                var r = ring
+                var rg = 0
+                while (r < maxR && rg < 200) {
+                    drawCircle(soft, radius = r, center = c, style = Stroke(1f))
+                    r += ring
+                    rg++
+                }
+            }
+            var a = 0f
+            var ag = 0
+            while (a < 360f && ag < 24) {
+                val rad = a * PI.toFloat() / 180f
+                drawLine(soft, c, Offset(c.x + cos(rad) * maxR, c.y + sin(rad) * maxR), strokeWidth = 1f)
+                a += 30f
+                ag++
+            }
+        }
+        "honeycomb" -> {
+            val rr = 30f * density * sc
+            if (rr >= 10f) {
+                val dx = 1.5f * rr
+                val dy = sqrt(3f) * rr
+                var col = 0
+                var x = -dx
+                var cg = 0
+                while (x < viewportSize.width + dx && cg < 120) {
+                    var y = if (col % 2 == 0) 0f else dy / 2f
+                    var yg = 0
+                    while (y < viewportSize.height + dy && yg < 160) {
+                        drawCfgHexagon(Offset(x, y), rr, soft)
+                        y += dy
+                        yg++
+                    }
+                    x += dx
+                    col++
+                    cg++
+                }
+            }
+        }
+        "radar" -> {
+            val c = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+            val maxR = sqrt(c.x * c.x + c.y * c.y) + 40f
+            val ring = 54f * density * sc
+            if (ring >= 14f) {
+                var r = ring
+                var rg = 0
+                while (r < maxR && rg < 120) {
+                    drawCircle(soft, radius = r, center = c, style = Stroke(1f))
+                    r += ring
+                    rg++
+                }
+            }
+            drawLine(soft, Offset(0f, c.y), Offset(viewportSize.width, c.y), strokeWidth = 1f)
+            drawLine(soft, Offset(c.x, 0f), Offset(c.x, viewportSize.height), strokeWidth = 1f)
+        }
+        else -> {
+            val step = 42f * density * sc
+            if (step >= 10f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
+                val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
+                val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
+                var gx = ((originX % step) + step) % step
+                var guard = 0
+                while (gx < viewportSize.width && guard < 400) {
+                    var gy = ((originY % step) + step) % step
+                    var guardY = 0
+                    while (gy < viewportSize.height && guardY < 400) {
+                        drawCircle(dotColor, radius = 0.9f, center = Offset(gx, gy))
+                        gy += step
+                        guardY++
+                    }
+                    gx += step
+                    guard++
+                }
+            }
+        }
+    }
+}
+
+private fun DrawScope.drawCfgHexagon(c: Offset, r: Float, color: Color) {
+    val path = Path()
+    for (i in 0 until 6) {
+        val rad = (60f * i - 30f) * PI.toFloat() / 180f
+        val x = c.x + cos(rad) * r
+        val y = c.y + sin(rad) * r
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    path.close()
+    drawPath(path, color, style = Stroke(1f))
+}
+
+/** 右下角迷你导航图：全图缩略 + 当前视口框（对标 Exbin CfgMinimap）。 */
+private fun DrawScope.drawCfgMinimap(
+    layout: CfgLayoutResult,
+    colors: androidx.compose.material3.ColorScheme,
+    size: Size,
+    viewport: IntSize,
+    scale: Float,
+    pan: Offset,
+) {
+    val gw = layout.width.coerceAtLeast(1f)
+    val gh = layout.height.coerceAtLeast(1f)
+    val s = min((size.width - 6f) / gw, (size.height - 6f) / gh)
+    if (s <= 0f) return
+    val cx = size.width / 2f
+    val cy = size.height / 2f
+    val nodeColor = colors.primary.copy(alpha = 0.55f)
+    layout.boxes.forEach { b ->
+        if (b.isDummy) return@forEach
+        drawRoundRect(
+            nodeColor,
+            topLeft = Offset(cx + b.left * s, cy + b.top * s),
+            size = Size((b.w * s).coerceAtLeast(1.5f), (b.h * s).coerceAtLeast(1.5f)),
+            cornerRadius = CornerRadius(1f),
+        )
+    }
+    if (viewport.width > 0 && viewport.height > 0 && scale > 0f) {
+        val x0 = (0f - (viewport.width / 2f + pan.x)) / scale
+        val y0 = (0f - (viewport.height / 2f + pan.y)) / scale
+        val x1 = (viewport.width - (viewport.width / 2f + pan.x)) / scale
+        val y1 = (viewport.height - (viewport.height / 2f + pan.y)) / scale
+        val l = cx + min(x0, x1) * s
+        val t = cy + min(y0, y1) * s
+        val r = cx + max(x0, x1) * s
+        val b = cy + max(y0, y1) * s
+        drawRect(
+            colors.primary.copy(alpha = 0.95f),
+            topLeft = Offset(l, t),
+            size = Size((r - l).coerceAtLeast(1f), (b - t).coerceAtLeast(1f)),
+            style = Stroke(1.2f),
         )
     }
 }
@@ -843,6 +1095,25 @@ internal fun CfgCanvas(
     var fitted by remember(graph) { mutableStateOf(false) }
     // 大图自动进入简化视图（只画块骨架），也可手动切换。
     var simpleView by remember(graph) { mutableStateOf(graph.blocks.size > 260) }
+    // 背景形状（对标 Exbin BG_NONE/GRID/COBWEB/HONEYCOMB/RADAR）。
+    var bgStyle by remember { mutableStateOf("grid") }
+    // 边路由风格（对标 Exbin「三种边路由风格」：正交 / 折线 / 样条）。
+    var routing by remember { mutableStateOf("ortho") }
+    // 单指拖动调整节点位置（对标 Exbin KEY_FLOWCHART_DRAG）。
+    var dragMode by remember { mutableStateOf(false) }
+    var dragOffsets by remember(graph) { mutableStateOf<Map<Int, Offset>>(emptyMap()) }
+    // 右下角迷你导航图（对标 Exbin CfgMinimap「显示小地图」）。
+    var showMinimap by remember { mutableStateOf(true) }
+
+    val ctx = LocalContext.current
+    val densityObj = LocalDensity.current
+    // 应用手动拖动后的有效布局（绘制 / 命中 / 导出共用）。
+    val effective = remember(layout, dragOffsets) { applyCfgDrag(layout, dragOffsets) }
+    val scaleS by rememberUpdatedState(scale)
+    val panS by rememberUpdatedState(pan)
+    val viewportS by rememberUpdatedState(viewport)
+    val dragModeS by rememberUpdatedState(dragMode)
+    val effectiveS by rememberUpdatedState(effective)
 
     val colors = MaterialTheme.colorScheme
     val jumpColor = colors.primary
@@ -895,24 +1166,51 @@ internal fun CfgCanvas(
                 .background(colors.surfaceContainerLow)
                 .border(BorderStroke(1.dp, colors.outlineVariant), shape)
                 .onSizeChanged { viewport = it }
-                .pointerInput(layout) {
+                .pointerInput(layout, dragMode) {
+                    if (!dragMode) return@pointerInput
+                    var curIdx = -1
+                    detectDragGestures(
+                        onDragStart = { pos ->
+                            val sc = scaleS.value
+                            if (sc > 0f) {
+                                val originX = viewportS.value.width / 2f + panS.value.x
+                                val originY = viewportS.value.height / 2f + panS.value.y
+                                val wx = (pos.x - originX) / sc
+                                val wy = (pos.y - originY) / sc
+                                curIdx = effectiveS.value.boxes.lastOrNull { it.contains(wx, wy) }?.index ?: -1
+                                if (curIdx >= 0) selected = curIdx
+                            }
+                        },
+                        onDragEnd = { curIdx = -1 },
+                        onDragCancel = { curIdx = -1 },
+                        onDrag = { change, drag ->
+                            val sc = scaleS.value
+                            if (curIdx >= 0 && sc > 0f) {
+                                val prev = dragOffsets[curIdx] ?: Offset.Zero
+                                dragOffsets = dragOffsets + (curIdx to Offset(prev.x + drag.x / sc, prev.y + drag.y / sc))
+                            }
+                            change.consume()
+                        },
+                    )
+                }
+                .pointerInput(effective) {
                     detectTapGestures { pos ->
                         val originX = viewport.width / 2f + pan.x
                         val originY = viewport.height / 2f + pan.y
                         val wx = (pos.x - originX) / scale
                         val wy = (pos.y - originY) / scale
-                        selected = layout.boxes.lastOrNull { it.contains(wx, wy) }?.index ?: -1
+                        selected = effective.boxes.lastOrNull { it.contains(wx, wy) }?.index ?: -1
                     }
                 }
                 .pointerInput(Unit) {
                     detectTransformGestures { _, panChange, zoom, _ ->
                         scale = (scale * zoom).coerceIn(0.12f, 6f)
-                        pan += panChange
+                        if (!dragModeS.value) pan += panChange
                     }
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                drawCfgScene(layout, colors, density, scale, pan, size, simpleView, selected)
+                drawCfgScene(effective, colors, density, scale, pan, size, simpleView, selected, bgStyle, routing)
             }
 
             if (layout.boxes.isEmpty()) {
@@ -954,6 +1252,39 @@ internal fun CfgCanvas(
                 )
             }
 
+            // 右下角：迷你导航图（对标 Exbin CfgMinimap「显示小地图」）
+            if (showMinimap && effective.boxes.any { !it.isDummy }) {
+                Surface(
+                    shape = RoundedCornerShape(AppShape.xs),
+                    color = colors.surfaceContainerHigh.copy(alpha = 0.88f),
+                    border = BorderStroke(1.dp, colors.outlineVariant),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .size(118.dp, 84.dp)
+                        .clip(RoundedCornerShape(AppShape.xs))
+                        .pointerInput(effective, scale, pan, viewport) {
+                            detectTapGestures { pos ->
+                                val sz = size
+                                val gw = effectiveS.value.width.coerceAtLeast(1f)
+                                val gh = effectiveS.value.height.coerceAtLeast(1f)
+                                val s = min((sz.width - 6f) / gw, (sz.height - 6f) / gh)
+                                if (s > 0f) {
+                                    val wx = (pos.x - sz.width / 2f) / s
+                                    val wy = (pos.y - sz.height / 2f) / s
+                                    pan = Offset(-wx * scaleS.value, -wy * scaleS.value)
+                                }
+                            }
+                        },
+                ) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawCfgMinimap(effective, colors, size, viewport, scale, pan)
+                    }
+                }
+            }
+
             // 右上角：视图工具（FlowRow 窄屏自动换行）
             Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
                 FlowRow(
@@ -967,6 +1298,39 @@ internal fun CfgCanvas(
                         if (simpleView) (if (zh) "完整视图" else "Full") else (if (zh) "简化视图" else "Simple"),
                         colors.onSurfaceVariant,
                     ) { simpleView = !simpleView }
+                    CfgChip(bgStyleLabel(zh, bgStyle), colors.onSurfaceVariant) { bgStyle = nextBgStyle(bgStyle) }
+                    CfgChip(routeStyleLabel(zh, routing), colors.onSurfaceVariant) { routing = nextRouting(routing) }
+                    CfgChip(
+                        if (zh) "拖动节点" else "Drag",
+                        colors.onSurfaceVariant,
+                        active = dragMode,
+                    ) { dragMode = !dragMode }
+                    CfgChip(
+                        if (zh) "小地图" else "Minimap",
+                        colors.onSurfaceVariant,
+                        active = showMinimap,
+                    ) { showMinimap = !showMinimap }
+                    if (dragOffsets.isNotEmpty()) {
+                        CfgChip(if (zh) "复位" else "Reset", failColor) { dragOffsets = emptyMap() }
+                    }
+                    CfgChip(if (zh) "导出 PNG" else "PNG", colors.primary) {
+                        val w = (layout.width + 80f).coerceAtLeast(320f)
+                        val h = (layout.height + 80f).coerceAtLeast(240f)
+                        val p = exportDrawToPng(
+                            context = ctx,
+                            fileName = "cfg_" + System.currentTimeMillis() + ".png",
+                            widthPx = w.toInt(),
+                            heightPx = h.toInt(),
+                            density = densityObj,
+                        ) {
+                            drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, bgStyle, routing)
+                        }
+                        Toast.makeText(
+                            ctx,
+                            if (p != null) (if (zh) "已导出：$p" else "saved: $p") else (if (zh) "导出失败" else "export failed"),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
                 }
             }
         }
@@ -1040,6 +1404,8 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     viewportSize: Size,
     simpleView: Boolean,
     selected: Int,
+    bgStyle: String = "grid",
+    routing: String = "ortho",
 ) {
     val jumpColor = colors.primary
     val failColor = AppPalette.orange
@@ -1053,25 +1419,8 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     fun px(v: Float) = v * sc + originX
     fun py(v: Float) = v * sc + originY
 
-    // ── 背景细点阵网格（随缩放淡出；迭代次数有上限）──
-    val step = 42f * density * sc
-    if (step >= 10f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
-        val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
-        val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
-        var gx = ((originX % step) + step) % step
-        var guard = 0
-        while (gx < viewportSize.width && guard < 400) {
-            var gy = ((originY % step) + step) % step
-            var guardY = 0
-            while (gy < viewportSize.height && guardY < 400) {
-                drawCircle(dotColor, radius = 0.9f, center = Offset(gx, gy))
-                gy += step
-                guardY++
-            }
-            gx += step
-            guard++
-        }
-    }
+    // ── 背景图案（对标 Exbin BG_NONE/GRID/COBWEB/HONEYCOMB/RADAR）──
+    drawCfgBackground(bgStyle, colors, density, sc, viewportSize, originX, originY)
 
     val scl = sc.coerceIn(0.5f, 2f)
     val strokeW = max(1f, 1.35f * density * scl)
@@ -1089,7 +1438,11 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
         val lineW = if (r.isBack) strokeW * 1.9f else strokeW
         val effect = if (r.kind == "fail" && !r.isBack) dash else null
         val screenPts = r.points.map { Offset(px(it.x), py(it.y)) }
-        val path = roundedOrthoPath(screenPts, 9f * density * scl)
+        val path = when (routing) {
+            "polyline" -> polylineCfgPath(screenPts)
+            "spline" -> splineCfgPath(screenPts)
+            else -> roundedOrthoPath(screenPts, 9f * density * scl)
+        }
         drawPath(
             path,
             color,

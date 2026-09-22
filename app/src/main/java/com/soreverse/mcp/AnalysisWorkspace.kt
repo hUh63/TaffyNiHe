@@ -3583,31 +3583,6 @@ private fun CfgView(
                         SmallAction(if (zh) "网格" else "Grid", active = cfgLayout == "grid") { cfgLayout = "grid" }
                         SmallAction(if (zh) "力导向" else "Force", active = cfgLayout == "force") { cfgLayout = "force" }
                         SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
-                        SmallAction(if (zh) "导出 PNG" else "PNG") {
-                            val json = tools.cfgJson
-                            val g = parseCfgGraph(json)
-                            val l = layoutCfgGraph(g, density.density)
-                            val w = (l.width + 80f).coerceAtLeast(320f)
-                            val h = (l.height + 80f).coerceAtLeast(240f)
-                            val path = exportDrawToPng(
-                                context = context,
-                                fileName = "cfg_" + System.currentTimeMillis() + ".png",
-                                widthPx = w.toInt(),
-                                heightPx = h.toInt(),
-                                density = density,
-                            ) {
-                                drawCfgScene(
-                                    l, cs, density.density, 1f, Offset.Zero,
-                                    androidx.compose.ui.geometry.Size(w, h), false, -1,
-                                )
-                            }
-                            Toast.makeText(
-                                context,
-                                if (path != null) (if (zh) "已导出：$path" else "saved: $path")
-                                else (if (zh) "导出失败" else "export failed"),
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        }
                     }
                 }
             }
@@ -8909,7 +8884,7 @@ private fun DetailBlock(title: String, body: String) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 统一的导出目录（外部私有 exports/，同时被 FileProvider 暴露以便分享）。 */
-private fun exportsDir(context: android.content.Context): java.io.File =
+internal fun exportsDir(context: android.content.Context): java.io.File =
     java.io.File(context.getExternalFilesDir(null), "exports").apply { mkdirs() }
 
 /** 分享一个导出文件（FileProvider + ACTION_SEND）。 */
@@ -8951,7 +8926,7 @@ private fun openExportFile(context: android.content.Context, f: java.io.File, zh
 }
 
 /** 把一段 DrawScope 绘制渲染成 PNG 并写入 exports/，返回文件绝对路径。 */
-private fun exportDrawToPng(
+internal fun exportDrawToPng(
     context: android.content.Context,
     fileName: String,
     widthPx: Int,

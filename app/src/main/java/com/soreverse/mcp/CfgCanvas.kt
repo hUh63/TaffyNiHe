@@ -1030,6 +1030,12 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     simpleView: Boolean,
     selected: Int,
 ) {
+    val jumpColor = colors.primary
+    val failColor = AppPalette.orange
+    val backColor = AppPalette.pink
+    val entryColor = AppPalette.green
+    val loopColor = AppPalette.purple
+    val returnColor = AppPalette.teal
     val sc = scale
     val originX = viewportSize.width / 2f + pan.x
     val originY = viewportSize.height / 2f + pan.y

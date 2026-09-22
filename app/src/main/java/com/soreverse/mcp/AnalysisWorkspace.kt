@@ -3476,6 +3476,7 @@ private fun CfgView(
     onGoFunctions: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
@@ -3578,6 +3579,31 @@ private fun CfgView(
                             onClick = { useEntryPoint() },
                         )
                         SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
+                        SmallAction(if (zh) "导出 PNG" else "PNG") {
+                            val json = tools.cfgJson
+                            val g = parseCfgGraph(json)
+                            val l = layoutCfgGraph(g, density.density)
+                            val w = (l.width + 80f).coerceAtLeast(320f)
+                            val h = (l.height + 80f).coerceAtLeast(240f)
+                            val path = exportDrawToPng(
+                                context = context,
+                                fileName = "cfg_" + System.currentTimeMillis() + ".png",
+                                widthPx = w.toInt(),
+                                heightPx = h.toInt(),
+                                density = density,
+                            ) {
+                                drawCfgScene(
+                                    l, cs, density.density, 1f, Offset.Zero,
+                                    androidx.compose.ui.geometry.Size(w, h), false, -1,
+                                )
+                            }
+                            Toast.makeText(
+                                context,
+                                if (path != null) (if (zh) "已导出：$path" else "saved: $path")
+                                else (if (zh) "导出失败" else "export failed"),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
                     }
                 }
             }

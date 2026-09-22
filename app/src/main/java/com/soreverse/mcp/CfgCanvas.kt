@@ -901,142 +901,7 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                val sc = scale
-                val originX = size.width / 2f + pan.x
-                val originY = size.height / 2f + pan.y
-                fun px(v: Float) = v * sc + originX
-                fun py(v: Float) = v * sc + originY
-
-                // ── 背景细点阵网格（随缩放淡出；迭代次数有上限）──
-                val step = 42f * density * sc
-                if (step >= 10f && step <= max(size.width, size.height) * 2f) {
-                    val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
-                    val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
-                    var gx = ((originX % step) + step) % step
-                    var guard = 0
-                    while (gx < size.width && guard < 400) {
-                        var gy = ((originY % step) + step) % step
-                        var guardY = 0
-                        while (gy < size.height && guardY < 400) {
-                            drawCircle(dotColor, radius = 0.9f, center = Offset(gx, gy))
-                            gy += step
-                            guardY++
-                        }
-                        gx += step
-                        guard++
-                    }
-                }
-
-                val scl = sc.coerceIn(0.5f, 2f)
-                val strokeW = max(1f, 1.35f * density * scl)
-                val arrowSize = max(4.5f, 7.5f * density * scl)
-                val dash = PathEffect.dashPathEffect(floatArrayOf(9f * scl, 6f * scl), 0f)
-
-                // ── 边（正交折线）──
-                layout.routes.forEach { r ->
-                    if (r.points.size < 2) return@forEach
-                    val color = when {
-                        r.isBack -> backColor
-                        r.kind == "fail" -> failColor
-                        else -> jumpColor
-                    }
-                    val lineW = if (r.isBack) strokeW * 1.9f else strokeW
-                    val effect = if (r.kind == "fail" && !r.isBack) dash else null
-                    val screenPts = r.points.map { Offset(px(it.x), py(it.y)) }
-                    val path = roundedOrthoPath(screenPts, 9f * density * scl)
-                    drawPath(
-                        path,
-                        color,
-                        style = Stroke(
-                            width = lineW,
-                            pathEffect = effect,
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round,
-                        ),
-                    )
-                    val tip = r.points[r.points.size - 1]
-                    val prev = r.points[r.points.size - 2]
-                    arrowHead(
-                        Offset(px(tip.x), py(tip.y)),
-                        Offset(px(prev.x), py(prev.y)),
-                        color,
-                        arrowSize * (if (r.isBack) 1.35f else 1f),
-                    )
-                }
-
-                // ── 节点（按角色分层：入口/返回/循环头/普通/选中）──
-                val showText = !simpleView && sc >= TEXT_HIDE_SCALE
-                val nodeStroke = max(1f, 1f * density * scl)
-                val radius = CornerRadius(8f * density * scl)
-                val barW = 3.5f * density * scl
-                val paintAddr = Paint().apply {
-                    isAntiAlias = true
-                    typeface = Typeface.MONOSPACE
-                    textSize = (10.5f * density * sc).coerceIn(7f, 30f)
-                }
-                val paintSum = Paint().apply {
-                    isAntiAlias = true
-                    typeface = Typeface.MONOSPACE
-                    textSize = (9f * density * sc).coerceIn(6f, 26f)
-                }
-                layout.boxes.forEach { box ->
-                    if (box.isDummy) return@forEach
-                    val isSel = box.index == selected
-                    val roleColor = when {
-                        isSel -> colors.primary
-                        layout.loopHeadIndices.contains(box.index) -> loopColor
-                        box.index == layout.entryIndex -> entryColor
-                        layout.returnIndices.contains(box.index) -> returnColor
-                        else -> colors.outlineVariant
-                    }
-                    val hasRole = isSel || box.index == layout.entryIndex ||
-                        layout.returnIndices.contains(box.index) || layout.loopHeadIndices.contains(box.index)
-                    val topLeft = Offset(px(box.left), py(box.top))
-                    val rectSize = Size(box.w * sc, box.h * sc)
-                    val fill = when {
-                        isSel -> colors.primary.copy(alpha = 0.16f)
-                        !showText -> roleColor.copy(alpha = 0.16f)
-                        else -> colors.surfaceContainerHigh
-                    }
-                    drawRoundRect(color = fill, topLeft = topLeft, size = rectSize, cornerRadius = radius)
-                    if (hasRole) {
-                        val inset = 3f * density * sc
-                        val barH = (box.h * sc - inset * 4f).coerceAtLeast(2f)
-                        drawRoundRect(
-                            color = roleColor.copy(alpha = 0.95f),
-                            topLeft = Offset(topLeft.x + inset, topLeft.y + inset * 2f),
-                            size = Size(barW, barH),
-                            cornerRadius = CornerRadius(barW / 2f),
-                        )
-                    }
-                    drawRoundRect(
-                        color = roleColor,
-                        topLeft = topLeft,
-                        size = rectSize,
-                        cornerRadius = radius,
-                        style = Stroke(width = if (isSel) nodeStroke * 2f else nodeStroke),
-                    )
-                    if (!showText) return@forEach
-                    val maxTextW = box.w * sc - 12f * density
-                    if (maxTextW <= 10f) return@forEach
-                    paintAddr.color = if (isSel) colors.primary.toArgb() else colors.onSurface.toArgb()
-                    paintSum.color = colors.onSurfaceVariant.toArgb()
-                    val addrText = fitText(paintAddr, box.addrText, maxTextW)
-                    val lines = box.lines.map { fitText(paintSum, it, maxTextW) }
-                    val gapY = 2.5f * density * sc
-                    val sumH = paintSum.textSize
-                    val totalH = paintAddr.textSize + (if (lines.isEmpty()) 0f else gapY * lines.size + lines.size * sumH)
-                    val baseline = py(box.cy) - totalH / 2f + paintAddr.textSize
-                    drawIntoCanvas { canvas ->
-                        val nc = canvas.nativeCanvas
-                        nc.drawText(addrText, px(box.cx) - paintAddr.measureText(addrText) / 2f, baseline, paintAddr)
-                        var y = baseline
-                        lines.forEach { ln ->
-                            y += gapY + sumH
-                            nc.drawText(ln, px(box.cx) - paintSum.measureText(ln) / 2f, y, paintSum)
-                        }
-                    }
-                }
+                drawCfgScene(layout, colors, density, scale, pan, size, simpleView, selected)
             }
 
             if (layout.boxes.isEmpty()) {
@@ -1145,6 +1010,159 @@ internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier)
                         color = colors.onSurfaceVariant,
                     )
                 }
+            }
+        }
+    }
+}
+
+
+/**
+ * CFG 场景绘制（Composable 画布与 PNG 导出共用同一套绘制，保证导出与所见一致）。
+ * viewportSize 为画布尺寸；导出时可传整图尺寸 + scale=1 + pan=Zero 得到全景。
+ */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
+    layout: CfgLayoutResult,
+    colors: androidx.compose.material3.ColorScheme,
+    density: Float,
+    scale: Float,
+    pan: Offset,
+    viewportSize: Size,
+    simpleView: Boolean,
+    selected: Int,
+) {
+    val sc = scale
+    val originX = viewportSize.width / 2f + pan.x
+    val originY = viewportSize.height / 2f + pan.y
+    fun px(v: Float) = v * sc + originX
+    fun py(v: Float) = v * sc + originY
+
+    // ── 背景细点阵网格（随缩放淡出；迭代次数有上限）──
+    val step = 42f * density * sc
+    if (step >= 10f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
+        val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
+        val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
+        var gx = ((originX % step) + step) % step
+        var guard = 0
+        while (gx < viewportSize.width && guard < 400) {
+            var gy = ((originY % step) + step) % step
+            var guardY = 0
+            while (gy < viewportSize.height && guardY < 400) {
+                drawCircle(dotColor, radius = 0.9f, center = Offset(gx, gy))
+                gy += step
+                guardY++
+            }
+            gx += step
+            guard++
+        }
+    }
+
+    val scl = sc.coerceIn(0.5f, 2f)
+    val strokeW = max(1f, 1.35f * density * scl)
+    val arrowSize = max(4.5f, 7.5f * density * scl)
+    val dash = PathEffect.dashPathEffect(floatArrayOf(9f * scl, 6f * scl), 0f)
+
+    // ── 边（正交折线）──
+    layout.routes.forEach { r ->
+        if (r.points.size < 2) return@forEach
+        val color = when {
+            r.isBack -> backColor
+            r.kind == "fail" -> failColor
+            else -> jumpColor
+        }
+        val lineW = if (r.isBack) strokeW * 1.9f else strokeW
+        val effect = if (r.kind == "fail" && !r.isBack) dash else null
+        val screenPts = r.points.map { Offset(px(it.x), py(it.y)) }
+        val path = roundedOrthoPath(screenPts, 9f * density * scl)
+        drawPath(
+            path,
+            color,
+            style = Stroke(
+                width = lineW,
+                pathEffect = effect,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+        )
+        val tip = r.points[r.points.size - 1]
+        val prev = r.points[r.points.size - 2]
+        arrowHead(
+            Offset(px(tip.x), py(tip.y)),
+            Offset(px(prev.x), py(prev.y)),
+            color,
+            arrowSize * (if (r.isBack) 1.35f else 1f),
+        )
+    }
+
+    // ── 节点（按角色分层：入口/返回/循环头/普通/选中）──
+    val showText = !simpleView && sc >= TEXT_HIDE_SCALE
+    val nodeStroke = max(1f, 1f * density * scl)
+    val radius = CornerRadius(8f * density * scl)
+    val barW = 3.5f * density * scl
+    val paintAddr = Paint().apply {
+        isAntiAlias = true
+        typeface = Typeface.MONOSPACE
+        textSize = (10.5f * density * sc).coerceIn(7f, 30f)
+    }
+    val paintSum = Paint().apply {
+        isAntiAlias = true
+        typeface = Typeface.MONOSPACE
+        textSize = (9f * density * sc).coerceIn(6f, 26f)
+    }
+    layout.boxes.forEach { box ->
+        if (box.isDummy) return@forEach
+        val isSel = box.index == selected
+        val roleColor = when {
+            isSel -> colors.primary
+            layout.loopHeadIndices.contains(box.index) -> loopColor
+            box.index == layout.entryIndex -> entryColor
+            layout.returnIndices.contains(box.index) -> returnColor
+            else -> colors.outlineVariant
+        }
+        val hasRole = isSel || box.index == layout.entryIndex ||
+            layout.returnIndices.contains(box.index) || layout.loopHeadIndices.contains(box.index)
+        val topLeft = Offset(px(box.left), py(box.top))
+        val rectSize = Size(box.w * sc, box.h * sc)
+        val fill = when {
+            isSel -> colors.primary.copy(alpha = 0.16f)
+            !showText -> roleColor.copy(alpha = 0.16f)
+            else -> colors.surfaceContainerHigh
+        }
+        drawRoundRect(color = fill, topLeft = topLeft, size = rectSize, cornerRadius = radius)
+        if (hasRole) {
+            val inset = 3f * density * sc
+            val barH = (box.h * sc - inset * 4f).coerceAtLeast(2f)
+            drawRoundRect(
+                color = roleColor.copy(alpha = 0.95f),
+                topLeft = Offset(topLeft.x + inset, topLeft.y + inset * 2f),
+                size = Size(barW, barH),
+                cornerRadius = CornerRadius(barW / 2f),
+            )
+        }
+        drawRoundRect(
+            color = roleColor,
+            topLeft = topLeft,
+            size = rectSize,
+            cornerRadius = radius,
+            style = Stroke(width = if (isSel) nodeStroke * 2f else nodeStroke),
+        )
+        if (!showText) return@forEach
+        val maxTextW = box.w * sc - 12f * density
+        if (maxTextW <= 10f) return@forEach
+        paintAddr.color = if (isSel) colors.primary.toArgb() else colors.onSurface.toArgb()
+        paintSum.color = colors.onSurfaceVariant.toArgb()
+        val addrText = fitText(paintAddr, box.addrText, maxTextW)
+        val lines = box.lines.map { fitText(paintSum, it, maxTextW) }
+        val gapY = 2.5f * density * sc
+        val sumH = paintSum.textSize
+        val totalH = paintAddr.textSize + (if (lines.isEmpty()) 0f else gapY * lines.size + lines.size * sumH)
+        val baseline = py(box.cy) - totalH / 2f + paintAddr.textSize
+        drawIntoCanvas { canvas ->
+            val nc = canvas.nativeCanvas
+            nc.drawText(addrText, px(box.cx) - paintAddr.measureText(addrText) / 2f, baseline, paintAddr)
+            var y = baseline
+            lines.forEach { ln ->
+                y += gapY + sumH
+                nc.drawText(ln, px(box.cx) - paintSum.measureText(ln) / 2f, y, paintSum)
             }
         }
     }

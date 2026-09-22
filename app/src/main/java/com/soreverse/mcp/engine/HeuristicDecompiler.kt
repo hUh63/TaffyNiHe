@@ -6,13 +6,13 @@ import org.json.JSONObject
 /**
  * 塔菲逆核 · 启发式伪 C 反编译器（纯 Kotlin，对标 Exbin 的 r2dec "纯 Java 移植"引擎）。
  *
- * 与 rizin-ghidra(pdg) / rizin 内置(pdc) 并列的第三套反编译实现：
- * 不依赖任何 native 库，直接吃反汇编指令流，做三件事：
- *   1. 过程重建：识别 prologue 求栈帧大小、识别参数寄存器（x0-x7 / r0-r3）、
- *      把 [sp/fp ± off] 归一成局部变量名；
- *   2. 语句翻译：把 mov/add/ldr/str/cmp/bl/条件跳转 等翻译成 C 语句；
- *   3. 控制流结构化：正向条件跳转恢复成 if 块（在目标地址处闭合），
- *      回跳输出 loop-back 注释 + goto，保证每条指令都有对应输出、不丢逻辑。
+ * 不依赖任何 native 库，直接吃反汇编指令流，做四件事：
+ *   1. 过程重建：prologue 求栈帧、识别整型/浮点参数寄存器、[sp/fp ± off] 归一为局部变量；
+ *   2. 类型推断：整数宽度（u8/u16/u32/u64）、指针（被用作内存基址）、浮点（s/d 寄存器）、
+ *      结构体字段（同一基址的多个偏移 → field_0xNN）；
+ *   3. 语句翻译：算术/逻辑/移位/访存/调用/条件选择 → C 语句；
+ *   4. 控制流结构化：正向条件跳转 → if 块；回边 → do-while（单回边）或 while(1)+continue
+ *      （多回边）；跳出循环的条件跳转 → break；支持嵌套循环。
  *
  * 输出明确标注为启发式结果，避免与真正的编译器级反编译混淆。
  */
@@ -59,45 +59,29 @@ internal object HeuristicDecompiler {
     )
 
     private data class CmpCtx(val kind: String, val a: String, val b: String)
+    private data class LoopRange(val head: Long, val tail: Long, val backEdges: List<Long>, val doWhile: Boolean)
 
-    /** 把「cmp/tst + 条件跳转」配对还原成真正的 C 比较表达式。 */
-    private fun condFromCmp(cond: String, c: CmpCtx): String {
-        if (c.kind == "tst") {
-            return when (cond) {
-                "eq" -> "(${c.a} & ${c.b}) == 0"
-                "ne" -> "(${c.a} & ${c.b}) != 0"
-                else -> "flag_$cond"
-            }
-        }
-        val signed = when (cond) {
-            "eq" -> "${c.a} == ${c.b}"
-            "ne" -> "${c.a} != ${c.b}"
-            "gt" -> "${c.a} > ${c.b}"
-            "ge" -> "${c.a} >= ${c.b}"
-            "lt" -> "${c.a} < ${c.b}"
-            "le" -> "${c.a} <= ${c.b}"
-            "hi" -> "(u32)${c.a} > (u32)${c.b}"
-            "hs", "cs" -> "(u32)${c.a} >= (u32)${c.b}"
-            "lo", "cc" -> "(u32)${c.a} < (u32)${c.b}"
-            "ls" -> "(u32)${c.a} <= (u32)${c.b}"
-            "mi" -> "(${c.a} - ${c.b}) < 0"
-            "pl" -> "(${c.a} - ${c.b}) >= 0"
-            "vs" -> "(overflow)"
-            "vc" -> "(!overflow)"
-            else -> "flag_$cond"
-        }
-        return signed
-    }
-
-    /** 分支后缀（b.eq → eq）。 */
-    private fun branchSuffix(mnem: String): String? {
-        if (!mnem.startsWith("b") || mnem.length < 3 || mnem[1] != '.') return null
-        return mnem.substring(2)
-    }
+    private val FLOAT_OPS = setOf(
+        "fadd", "fsub", "fmul", "fdiv", "fmadd", "fmsub", "fnmadd", "fnmsub",
+        "fneg", "fabs", "fsqrt", "fcmp", "fcsel", "fmov", "fcvt", "scvtf", "ucvtf",
+        "fcvtzs", "fcvtzu", "frinta", "frintm", "frintn", "frintp", "frintz", "frinti",
+        "vadd", "vsub", "vmul", "vdiv", "vsqrt", "vmov", "vcmp",
+    )
+    private val INT_OPS = setOf(
+        "add", "sub", "adds", "subs", "adc", "sbc", "mul", "madd", "msub", "smull", "umull",
+        "sdiv", "udiv", "and", "orr", "eor", "bic", "orn", "lsl", "lsr", "asr", "ror",
+        "cmp", "cmn", "tst", "neg", "mvn", "mov", "movz", "movk", "movn", "csel", "cset",
+        "clz", "rbit", "rev", "ubfx", "sbfx", "ubfiz", "sbfiz", "bfi", "bfxil", "extr",
+    )
 
     private fun isCondBranch(mnem: String): Boolean =
         mnem in setOf("cbz", "cbnz", "tbz", "tbnz") ||
             (mnem.length > 1 && mnem[0] == 'b' && mnem.substring(1).split('.')[0] in COND)
+
+    private fun branchSuffix(mnem: String): String? {
+        if (!mnem.startsWith("b") || mnem.length < 3 || mnem[1] != '.') return null
+        return mnem.substring(2)
+    }
 
     private fun condOf(mnem: String, ops: String): String? {
         if (mnem == "cbz" || mnem == "cbnz") {
@@ -115,109 +99,289 @@ internal object HeuristicDecompiler {
         return "flags $op"
     }
 
-    /** 归一化操作数：寄存器别名、内存表达式。 */
-    private fun normOp(op: String, stackVars: MutableMap<String, String>, base: String): String {
-        var o = op.trim()
-        // 内存访问 [Xn, #off] / [sp, #off]
-        if (o.startsWith("[")) {
-            val inner = o.trimStart('[').trimEnd(']', '!').trim()
-            val parts = inner.split(",").map { it.trim().replace("#", "") }.filter { it.isNotEmpty() }
-            val reg = parts.getOrNull(0) ?: "?"
-            val off = parts.getOrNull(1)
-            val baseReg = when (reg.lowercase()) {
-                "sp", "wsp" -> base
-                "x29", "fp" -> "fp"
-                else -> reg
+    /** 把「cmp/tst + 条件跳转」配对还原成真正的 C 比较表达式。 */
+    private fun condFromCmp(cond: String, c: CmpCtx): String {
+        if (c.kind == "tst") {
+            return when (cond) {
+                "eq" -> "(${c.a} & ${c.b}) == 0"
+                "ne" -> "(${c.a} & ${c.b}) != 0"
+                else -> "flag_$cond"
             }
-            val offv = off?.let { runCatching { if (it.startsWith("0x")) it.substring(2).toLong(16) else it.toLong() }.getOrNull() } ?: 0L
-            val name = "v_%x".format(if (offv < 0) -offv else offv)
-            if (baseReg == base || baseReg == "fp") stackVars.getOrPut(name) { "/*stack ${if (offv < 0) "-" else "+"}${hex(if (offv < 0) -offv else offv)}*/" }
-            val access = if (baseReg == base || baseReg == "fp") name else "*(u64*)($baseReg ${if (offv != 0L) "+ ${hex(offv)}" else ""})".trim()
-            return access
         }
-        if (o.startsWith("#")) return o.substring(1)
-        return when (o.lowercase()) {
-            "x29", "fp" -> "fp"
-            "x30", "lr" -> "lr"
-            "sp", "wsp" -> base
-            "xzr", "wzr" -> "0"
-            else -> o
+        return when (cond) {
+            "eq" -> "${c.a} == ${c.b}"
+            "ne" -> "${c.a} != ${c.b}"
+            "gt" -> "${c.a} > ${c.b}"
+            "ge" -> "${c.a} >= ${c.b}"
+            "lt" -> "${c.a} < ${c.b}"
+            "le" -> "${c.a} <= ${c.b}"
+            "hi" -> "(u32)${c.a} > (u32)${c.b}"
+            "hs", "cs" -> "(u32)${c.a} >= (u32)${c.b}"
+            "lo", "cc" -> "(u32)${c.a} < (u32)${c.b}"
+            "ls" -> "(u32)${c.a} <= (u32)${c.b}"
+            "mi" -> "(${c.a} - ${c.b}) < 0"
+            "pl" -> "(${c.a} - ${c.b}) >= 0"
+            "vs" -> "(overflow)"
+            "vc" -> "(!overflow)"
+            else -> "flag_$cond"
         }
     }
+
+    // ── 类型推断 ────────────────────────────────────────────────
+
+    private fun isFloatReg(r: String): Boolean =
+        r.length >= 2 && r[0] in "sdqv" && r.drop(1).all { it.isDigit() }
+
+    private fun isIntReg(r: String): Boolean =
+        r.length >= 2 && r[0] in "wxr" && r.drop(1).all { it.isDigit() }
+
+    private fun regIndex(r: String): Int = r.drop(1).toIntOrNull() ?: 99
+
+    /**
+     * 推断寄存器用途类型：
+     *   void*   被当作内存基址（[reg, ...]）
+     *   float/double  出现在浮点指令的 s/d 寄存器
+     *   u8/u16/u32/u64 (或 s8/s16/s32)  由访存宽度与算术宽度决定
+     */
+    private fun inferRegTypes(insns: List<Insn>): Map<String, String> {
+        val t = HashMap<String, String>()
+        fun bump(reg: String, ty: String) {
+            val r = reg.lowercase()
+            if (!isIntReg(r) && !isFloatReg(r)) return
+            val cur = t[r]
+            // 优先级：float > ptr > 更窄的整数（保留最具体）
+            val rank = mapOf(
+                "double" to 5, "float" to 5, "void*" to 4,
+                "u8" to 3, "s8" to 3, "u16" to 3, "s16" to 3,
+                "u32" to 2, "s32" to 2, "u64" to 1, "s64" to 1,
+            )
+            if (cur == null || (rank[ty] ?: 0) > (rank[cur] ?: 0)) t[r] = ty
+        }
+        insns.forEach { i ->
+            val o = i.ops
+            val m = i.mnem
+            // 1) 浮点指令中的寄存器
+            if (m in FLOAT_OPS) {
+                Regex("\\b[sdqvh]\\d{1,2}\\b", RegexOption.IGNORE_CASE).findAll(o).forEach {
+                    bump(it.groupValues[0], if (it.groupValues[0][0].lowercaseChar() == 'd') "double" else "float")
+                }
+            }
+            // 2) 内存基址 → 指针
+            Regex("\\[\\s*([a-z]\\d{1,2})", RegexOption.IGNORE_CASE).findAll(o).forEach {
+                bump(it.groupValues[1], "void*")
+            }
+            // 3) 访存宽度
+            Regex("\\b([a-z]\\d{1,2})\\b", RegexOption.IGNORE_CASE).findAll(o).forEach {
+                val r = it.groupValues[1]
+                when (m) {
+                    "ldrb", "strb", "ldurb", "sturb" -> bump(r, "u8")
+                    "ldrsb" -> bump(r, "s8")
+                    "ldrh", "strh", "ldurh", "sturh" -> bump(r, "u16")
+                    "ldrsh" -> bump(r, "s16")
+                    "ldrsw" -> bump(r, "s32")
+                    "ldr", "str", "ldur", "stur" -> bump(r, if (r.startsWith("w")) "u32" else "u64")
+                    else -> if (m in INT_OPS) bump(r, if (r.startsWith("w")) "u32" else "u64")
+                }
+            }
+            // 4) 浮点加载（ldr s0, ... / ldr d0, ...）
+            if (m in setOf("ldr", "str", "ldur", "stur")) {
+                Regex("\\b([sd])\\d{1,2}\\b", RegexOption.IGNORE_CASE).findAll(o).forEach {
+                    bump(it.groupValues[0], if (it.groupValues[0][0].lowercaseChar() == 'd') "double" else "float")
+                }
+            }
+        }
+        return t
+    }
+
+    /** 收集「基址寄存器 → 偏移集合」，用于结构体字段命名。 */
+    private fun inferStructFields(insns: List<Insn>): Map<String, Set<Long>> {
+        val out = HashMap<String, MutableSet<Long>>()
+        insns.forEach { i ->
+            Regex("\\[\\s*([a-z]\\d{1,2})\\s*,\\s*#?(-?0x[0-9a-f]+|-?\\d+)", RegexOption.IGNORE_CASE).findAll(i.ops).forEach { m ->
+                val reg = m.groupValues[1].lowercase()
+                val off = runCatching {
+                    val s = m.groupValues[2]
+                    if (s.startsWith("-")) -s.substring(1).toLong(16) else s.toLong(16)
+                }.getOrNull() ?: 0L
+                out.getOrPut(reg) { linkedSetOf() }.add(off)
+            }
+        }
+        return out
+    }
+
+    // ── 循环分析 ────────────────────────────────────────────────
+
+    /** 分析循环区间：按回边目标分组，取区间尾为回边最大地址；单回边且在最末 → do-while。 */
+    private fun analyzeLoops(insns: List<Insn>): Map<Long, LoopRange> {
+        val byHead = LinkedHashMap<Long, MutableList<Long>>()
+        insns.forEach { i ->
+            val t = i.jump
+            if (t != null && t < i.addr && (isCondBranch(i.mnem) || i.mnem == "b")) {
+                byHead.getOrPut(t) { mutableListOf() }.add(i.addr)
+            }
+        }
+        val out = LinkedHashMap<Long, LoopRange>()
+        byHead.forEach { (h, backs) ->
+            val sorted = backs.sorted()
+            val tail = sorted.last()
+            val doWhile = sorted.size == 1
+            // 嵌套时外层 tail 需要收缩：取「不被内层循环包含」的最大回边地址
+            val headIdx = insns.indexOfFirst { it.addr == h }
+            val innerHeads = byHead.keys.filter { it > h && it <= tail }
+            val outerTail = if (innerHeads.isEmpty()) tail else {
+                val innerMax = innerHeads.maxOf { hh -> byHead[hh]!!.max() }
+                val outerBacks = sorted.filter { b ->
+                    insns.indexOfFirst { it.addr == b } > headIdx &&
+                        innerHeads.none { hh -> hh < b && b <= innerMax }
+                }
+                outerBacks.maxOrNull() ?: tail
+            }
+            out[h] = LoopRange(h, outerTail, sorted, doWhile)
+        }
+        return out
+    }
+
+    // ── 主流程 ──────────────────────────────────────────────────
 
     fun decompile(insns: List<Insn>, fnName: String, zh: Boolean): String {
         if (insns.isEmpty()) return ""
         val base = "sp"
         val stackVars = LinkedHashMap<String, String>()
 
-        // 参数寄存器：出现在操作数里、且从未作为写入目标的 x0-x7 / r0-r3
-        val read = LinkedHashSet<String>()
-        insns.forEach { i ->
-            val o = i.ops
-            if (o.isBlank()) return@forEach
-            val first = o.split(",").firstOrNull()?.trim() ?: return@forEach
-            Regex("\\b([xr]\\d{1,2})\\b", RegexOption.IGNORE_CASE).findAll(o).forEach { read.add(it.groupValues[1].lowercase()) }
-        }
-        val writesX0 = insns.any { i ->
-            val f = i.ops.split(",").firstOrNull()?.trim()?.lowercase()
-            (f == "x0" || f == "w0") && i.mnem !in setOf("cmp", "cmn", "tst", "str", "strb", "strh", "stur", "stp", "b", "bl")
-        }
+        val regTypes = inferRegTypes(insns)
+        val structFields = inferStructFields(insns)
+
+        // 参数寄存器：入口附近被读的 x0-x7 / r0-r3（含浮点 d0-d7/s0-s7）
         val headEnd = maxOf(6, insns.size / 3).coerceAtMost(insns.size)
         val headRead = LinkedHashSet<String>()
         insns.take(headEnd).forEach { i ->
-            Regex("\\b([xr]\\d{1,2})\\b", RegexOption.IGNORE_CASE).findAll(i.ops).forEach { headRead.add(it.groupValues[1].lowercase()) }
+            Regex("\\b([wxrsdq]\\d{1,2})\\b", RegexOption.IGNORE_CASE).findAll(i.ops).forEach { headRead.add(it.groupValues[1].lowercase()) }
         }
-        val argRegs = headRead.filter { r ->
-            val n = r.drop(1).toIntOrNull() ?: 99
+        val intArgs = headRead.filter { r ->
+            val n = regIndex(r)
             (r.startsWith("x") && n in 0..7) || (r.startsWith("r") && n in 0..3)
-        }.sortedBy { it.drop(1).toIntOrNull() ?: 0 }.take(8)
+        }.sortedBy { regIndex(it) }.take(8)
+        val floatArgs = headRead.filter { r ->
+            val n = regIndex(r)
+            isFloatReg(r) && n in 0..7
+        }.sortedBy { regIndex(it) }.take(8)
+        val argRegs = intArgs + floatArgs
         val argNames = argRegs.mapIndexed { i, r -> r to "a$i" }.toMap()
 
-        fun op(o: String): String {
-            val n = normOp(o, stackVars, base)
-            return argNames[n.lowercase()] ?: n
-        }
+        fun typeOf(reg: String): String = regTypes[reg.lowercase()] ?: if (reg.startsWith("w")) "u32" else "u64"
 
-        // 分支目标集合（用于标签与 if 闭合）
+        val loops = analyzeLoops(insns)
         val targets = insns.mapNotNull { it.jump }.toSortedSet()
-        val openIfs = ArrayDeque<Long>()
-        var lastCmp: CmpCtx? = null
-        // 简单循环识别：回边（条件跳转目标地址更小）；每个头恰好一条回边才做 do-while 还原
-        val headCount = HashMap<Long, Int>()
-        insns.forEach { i ->
-            val t = i.jump
-            if (t != null && t < i.addr && (isCondBranch(i.mnem) || i.mnem == "b")) {
-                headCount[t] = (headCount[t] ?: 0) + 1
+
+        fun normOp(op: String): String {
+            var o = op.trim()
+            if (o.startsWith("[")) {
+                val inner = o.trimStart('[').trimEnd(']', '!').trim()
+                val parts = inner.split(",").map { it.trim().replace("#", "") }.filter { it.isNotEmpty() }
+                val reg = parts.getOrNull(0) ?: "?"
+                val off = parts.getOrNull(1)
+                val baseReg = when (reg.lowercase()) {
+                    "sp", "wsp" -> base
+                    "x29", "fp" -> "fp"
+                    else -> reg
+                }
+                val offv = off?.let { runCatching { if (it.startsWith("0x")) it.substring(2).toLong(16) else it.toLong() }.getOrNull() } ?: 0L
+                if (baseReg == base || baseReg == "fp") {
+                    val abs = if (offv < 0) -offv else offv
+                    val name = "v_%x".format(abs)
+                    stackVars.getOrPut(name) { "/*stack ${if (offv < 0) "-" else "+"}${hex(abs)}*/" }
+                    return name
+                }
+                // 结构体字段：同一基址有多个偏移 → base->field_0xNN
+                val fields = structFields[baseReg.lowercase()] ?: emptySet()
+                val useField = fields.size >= 2
+                val b = argNames[baseReg.lowercase()] ?: baseReg
+                return if (useField) {
+                    "$b->field_%x".format(offv)
+                } else {
+                    "*(u64*)($b" + (if (offv != 0L) " + " + hex(offv) else "") + ")"
+                }
+            }
+            if (o.startsWith("#")) return o.substring(1)
+            return when (o.lowercase()) {
+                "x29", "fp" -> "fp"
+                "x30", "lr" -> "lr"
+                "sp", "wsp" -> base
+                "xzr", "wzr" -> "0"
+                else -> argNames[o.lowercase()] ?: o
             }
         }
-        val doHeads = headCount.filterValues { it == 1 }.keys.toHashSet()
+
         val sb = StringBuilder()
         var indent = 1
         fun emit(line: String) = sb.append("    ".repeat(indent)).append(line).append('\n')
 
+        val writesX0 = insns.any { i ->
+            val f = i.ops.split(",").firstOrNull()?.trim()?.lowercase()
+            (f == "x0" || f == "w0") && i.mnem !in setOf("cmp", "cmn", "tst", "str", "strb", "strh", "stur", "stp", "b", "bl")
+        }
+        val writesF0 = insns.any { i ->
+            val f = i.ops.split(",").firstOrNull()?.trim()?.lowercase()
+            f == "d0" || f == "s0"
+        }
+
         val header = StringBuilder()
-        header.append("// ── ").append(if (zh) "塔菲启发式伪 C（taffy-java 引擎）" else "Taffy heuristic pseudo-C (taffy-java engine)").append(" ──\n")
-        header.append("// ").append(if (zh) "由 ${insns.size} 条指令重建；非编译器级反编译，仅供理解逻辑" else "rebuilt from ${insns.size} insns; not a compiler-level decompilation").append('\n')
+        header.append("// ── ").append(if (zh) "塔菲启发式伪 C（taffy-java 引擎）" else "Taffy heuristic pseudo-C").append(" ──\n")
+        header.append("// ").append(if (zh) "由 ${insns.size} 条指令重建；非编译器级反编译，仅供理解逻辑" else "rebuilt from ${insns.size} insns; heuristic").append('\n')
+        if (regTypes.isNotEmpty()) {
+            header.append("// ").append(if (zh) "推断类型：" else "inferred types: ")
+                .append(argRegs.joinToString(", ") { "${argNames[it]}($it:${typeOf(it)})" }).append('\n')
+        }
         header.append("// entry ").append(hex(insns.first().addr)).append('\n')
 
         val body = StringBuilder()
-        body.append(if (writesX0) "u64 " else "void ").append(fnName).append("(")
-        body.append(argNames.entries.sortedBy { it.value }.joinToString(", ") { "u64 ${it.value} /*${it.key}*/" })
+        val retTy = when {
+            writesF0 -> if (insns.any { i -> i.ops.split(",").firstOrNull()?.trim()?.lowercase() == "d0" }) "double" else "float"
+            writesX0 -> "u64"
+            else -> "void"
+        }
+        body.append(retTy).append(' ').append(fnName).append("(")
+        body.append(argRegs.mapIndexed { i, r ->
+            val ty = when {
+                isFloatReg(r) -> if (typeOf(r) == "double") "double" else "float"
+                else -> typeOf(r)
+            }
+            "$ty a$i /*$r*/"
+        }.joinToString(", "))
         body.append(") {\n")
+
+        val openIfs = ArrayDeque<Long>()
+        val loopStack = ArrayDeque<LoopRange>()
+        var lastCmp: CmpCtx? = null
+
+        fun closeIf() { indent = maxOf(1, indent - 1); emit("}"); openIfs.removeLast() }
+        fun closeLoop() { indent = maxOf(1, indent - 1); emit("}"); loopStack.removeLast() }
 
         insns.forEach { i ->
             val a = i.addr
-            // 闭合已经结束的 if 块
-            while (openIfs.isNotEmpty() && openIfs.last() <= a) {
-                indent = maxOf(1, indent - 1); emit("}"); openIfs.removeLast()
+            // 先闭合已结束的 if / loop（靠内的先闭）
+            var guard = 0
+            while (guard++ < 64) {
+                val ifT = openIfs.lastOrNull()
+                val lp = loopStack.lastOrNull()
+                if (ifT != null && ifT <= a && (lp == null || ifT <= lp.tail)) { closeIf(); continue }
+                if (lp != null && lp.tail < a) { closeLoop(); continue }
+                break
             }
-            if (a in doHeads) {
-                emit("do {")
+
+            // 进入新的循环头
+            val entered = loops[a]
+            if (entered != null) {
+                emit(if (entered.doWhile) "do {" else "while (1) {")
+                loopStack.addLast(entered)
                 indent += 1
-            } else if (a in targets) emit("label_%x:".format(a))
+            } else if (a in targets) {
+                emit("label_%x:".format(a))
+            }
 
             val m = i.mnem
             val o = i.ops
+            val curLoop = loopStack.lastOrNull()
             when {
                 m == "ret" -> emit("return;")
                 m == "nop" -> emit("/* nop */")
@@ -230,55 +394,70 @@ internal object HeuristicDecompiler {
                     }
                     if (suf != null) lastCmp = null
                     val t = i.jump
-                    if (t != null && t < a && t in doHeads) {
-                        indent = maxOf(1, indent - 1)
-                        emit("} while ($c);")
-                    } else if (t != null && t < a) {
-                        emit("/* loop back -> ${hex(t)} */ goto label_%x;".format(t))
-                    } else {
-                        emit("if ($c) {")
-                        indent += 1
-                        if (t != null) openIfs.addLast(t) else indent = maxOf(1, indent - 1)
+                    when {
+                        t == null -> emit("/* if ($c) -> unknown target */")
+                        t < a && t in loops -> {
+                            // 回边
+                            val lp = loops[t]!!
+                            if (lp.doWhile && loopStack.lastOrNull()?.head == t) {
+                                indent = maxOf(1, indent - 1)
+                                loopStack.removeLast()
+                                emit("} while ($c);")
+                            } else {
+                                emit("if ($c) continue;   /* -> ${hex(t)} */")
+                            }
+                        }
+                        curLoop != null && t > curLoop.tail -> emit("if ($c) break;   /* -> ${hex(t)} */")
+                        else -> {
+                            emit("if ($c) {")
+                            indent += 1
+                            openIfs.addLast(t)
+                        }
                     }
                 }
                 m == "b" && i.jump != null -> {
-                    if (i.jump!! < a && i.jump in doHeads) {
-                        indent = maxOf(1, indent - 1)
-                        emit("} while (1);")
-                    } else if (i.jump!! < a) emit("/* loop back */ goto label_%x;".format(i.jump))
-                    else emit("goto label_%x;".format(i.jump))
+                    val t = i.jump!!
+                    if (t < a) {
+                        if (loopStack.lastOrNull()?.head == t) {
+                            val lp = loopStack.last()
+                            if (lp.doWhile) {
+                                indent = maxOf(1, indent - 1)
+                                loopStack.removeLast()
+                                emit("} while (1);")
+                            } else emit("/* loop */ continue;")
+                        } else emit("/* loop back */ goto label_%x;".format(t))
+                    } else emit("goto label_%x;".format(t))
                 }
                 m == "bl" || m == "blr" -> {
-                    val target = o.removePrefix("0x").takeIf { o.startsWith("0x") }?.let { "sub_$it" } ?: o.replace(Regex("[^A-Za-z0-9_]"), "_")
-                    val args = argNames.entries.sortedBy { it.value }.joinToString(", ") { it.value }
+                    val target = if (o.startsWith("0x")) "sub_" + o.removePrefix("0x") else o.replace(Regex("[^A-Za-z0-9_]"), "_")
+                    val args = argRegs.mapIndexed { idx, _ -> "a$idx" }.joinToString(", ")
                     emit("$target($args);  /* call */")
                 }
                 m == "mov" || m == "movz" || m == "movk" || m == "movn" || m == "mvn" -> {
                     val p = o.split(",").map { it.trim() }
-                    emit("${p.getOrNull(0) ?: "?"} = ${op(p.getOrNull(1) ?: "?")};")
+                    emit("${p.getOrNull(0)} = ${normOp(p.getOrNull(1) ?: "?")};")
                 }
                 m == "add" || m == "adds" -> {
                     val p = o.split(",").map { it.trim() }
-                    emit("${p.getOrNull(0)} = ${op(p.getOrNull(1) ?: "?")} + ${op(p.getOrNull(2) ?: "?")};")
+                    emit("${p.getOrNull(0)} = ${normOp(p.getOrNull(1) ?: "?")} + ${normOp(p.getOrNull(2) ?: "?")};")
                 }
                 m == "sub" || m == "subs" -> {
                     val p = o.split(",").map { it.trim() }
-                    // prologue: sub sp, sp, #N → 不进语句（帧调整）
                     if (p.getOrNull(0)?.lowercase() in setOf("sp", "x29")) emit("/* frame adjust: $o */")
-                    else emit("${p.getOrNull(0)} = ${op(p.getOrNull(1) ?: "?")} - ${op(p.getOrNull(2) ?: "?")};")
+                    else emit("${p.getOrNull(0)} = ${normOp(p.getOrNull(1) ?: "?")} - ${normOp(p.getOrNull(2) ?: "?")};")
                 }
                 m == "cmp" || m == "cmn" || m == "tst" -> {
                     val p = o.split(",").map { it.trim() }
-                    lastCmp = CmpCtx(m, op(p.getOrNull(0) ?: "?"), op(p.getOrNull(1) ?: "?"))
+                    lastCmp = CmpCtx(m, normOp(p.getOrNull(0) ?: "?"), normOp(p.getOrNull(1) ?: "?"))
                     emit("/* $m ${p.joinToString(", ")} */")
                 }
-                m == "ldr" || m == "ldrb" || m == "ldrh" || m == "ldrsw" || m == "ldur" -> {
+                m in setOf("ldr", "ldrb", "ldrh", "ldrsw", "ldur", "ldrsb", "ldrsh") -> {
                     val p = o.split(",").map { it.trim() }
-                    emit("${p.getOrNull(0)} = ${op(p.drop(1).joinToString(","))};  /* load */")
+                    emit("${p.getOrNull(0)} = ${normOp(p.drop(1).joinToString(","))};  /* load */")
                 }
-                m == "str" || m == "strb" || m == "strh" || m == "stur" -> {
+                m in setOf("str", "strb", "strh", "stur") -> {
                     val p = o.split(",").map { it.trim() }
-                    emit("${op(p.drop(1).joinToString(","))} = ${p.getOrNull(0)};  /* store */")
+                    emit("${normOp(p.drop(1).joinToString(","))} = ${p.getOrNull(0)};  /* store */")
                 }
                 m == "stp" -> emit("/* push */ $o")
                 m == "ldp" -> emit("/* pop */ $o")
@@ -286,39 +465,60 @@ internal object HeuristicDecompiler {
                     val p = o.split(",").map { it.trim() }
                     emit("${p.getOrNull(0)} = &${p.getOrNull(1) ?: "?"};")
                 }
+                m in FLOAT_OPS -> {
+                    val p = o.split(",").map { it.trim() }
+                    val expr = when (m) {
+                        "fadd" -> "${normOp(p.getOrNull(1) ?: "?")} + ${normOp(p.getOrNull(2) ?: "?")}"
+                        "fsub" -> "${normOp(p.getOrNull(1) ?: "?")} - ${normOp(p.getOrNull(2) ?: "?")}"
+                        "fmul" -> "${normOp(p.getOrNull(1) ?: "?")} * ${normOp(p.getOrNull(2) ?: "?")}"
+                        "fdiv" -> "${normOp(p.getOrNull(1) ?: "?")} / ${normOp(p.getOrNull(2) ?: "?")}"
+                        "fneg" -> "-${normOp(p.getOrNull(1) ?: "?")}"
+                        "fabs" -> "fabs(${normOp(p.getOrNull(1) ?: "?")})"
+                        "fsqrt" -> "sqrt(${normOp(p.getOrNull(1) ?: "?")})"
+                        else -> null
+                    }
+                    if (expr != null && p.size >= 2) emit("${p[0]} = $expr;")
+                    else emit("/* $m $o */")
+                }
                 m == "mul" || m == "madd" -> {
                     val p = o.split(",").map { it.trim() }
-                    if (p.size >= 3) emit("${p[0]} = ${op(p[1])} * ${op(p[2])};") else emit("/* $o */")
+                    if (p.size >= 3) emit("${p[0]} = ${normOp(p[1])} * ${normOp(p[2])};") else emit("/* $o */")
                 }
                 m == "sdiv" || m == "udiv" -> {
                     val p = o.split(",").map { it.trim() }
-                    if (p.size >= 3) emit("${p[0]} = ${op(p[1])} / ${op(p[2])};") else emit("/* $o */")
+                    if (p.size >= 3) emit("${p[0]} = ${normOp(p[1])} / ${normOp(p[2])};") else emit("/* $o */")
                 }
                 m == "and" || m == "orr" || m == "eor" -> {
                     val p = o.split(",").map { it.trim() }
                     val sym = when (m) { "and" -> "&"; "orr" -> "|"; else -> "^" }
-                    if (p.size >= 3) emit("${p[0]} = ${op(p[1])} $sym ${op(p[2])};") else emit("/* $o */")
+                    if (p.size >= 3) emit("${p[0]} = ${normOp(p[1])} $sym ${normOp(p[2])};") else emit("/* $o */")
                 }
                 m == "lsl" || m == "lsr" || m == "asr" -> {
                     val p = o.split(",").map { it.trim() }
                     val sym = if (m == "lsl") "<<" else ">>"
-                    if (p.size >= 3) emit("${p[0]} = ${op(p[1])} $sym ${op(p[2])};") else emit("/* $o */")
+                    if (p.size >= 3) emit("${p[0]} = ${normOp(p[1])} $sym ${normOp(p[2])};") else emit("/* $o */")
                 }
                 m == "csel" -> {
                     val p = o.split(",").map { it.trim() }
                     val cc = lastCmp
                     val cond = if (cc != null) condFromCmp("ne", cc) else "flags"
-                    if (p.size >= 3) emit("${p[0]} = ($cond) ? ${op(p[1])} : ${op(p[2])};") else emit("/* $o */")
+                    if (p.size >= 3) emit("${p[0]} = ($cond) ? ${normOp(p[1])} : ${normOp(p[2])};") else emit("/* $o */")
                 }
                 m == "cset" -> emit("${o.split(",").firstOrNull()?.trim()} = flags ? 1 : 0;")
                 m == "br" -> emit("goto *$o;  /* indirect */")
                 else -> emit("/* ${m} ${o} */")
             }
         }
-        while (openIfs.isNotEmpty()) { indent = maxOf(1, indent - 1); emit("}"); openIfs.removeLast() }
+        var g2 = 0
+        while ((openIfs.isNotEmpty() || loopStack.isNotEmpty()) && g2++ < 64) {
+            if (openIfs.isNotEmpty()) closeIf() else closeLoop()
+        }
         if (!insns.any { it.mnem == "ret" }) emit("return;")
 
-        val vars = stackVars.keys.joinToString("") { "    u64 $it;\n" }
+        val argSet = argNames.keys
+        val vars = stackVars.entries.filter { it.key !in argSet }.joinToString("") { (k, v) ->
+            "    u64 $k;  $v\n"
+        }
         return header.toString() + body.toString() + vars + sb.toString() + "}\n"
     }
 }

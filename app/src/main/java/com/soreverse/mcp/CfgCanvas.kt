@@ -1109,11 +1109,11 @@ internal fun CfgCanvas(
     val densityObj = LocalDensity.current
     // 应用手动拖动后的有效布局（绘制 / 命中 / 导出共用）。
     val effective = remember(layout, dragOffsets) { applyCfgDrag(layout, dragOffsets) }
-    val scaleS by rememberUpdatedState(scale)
-    val panS by rememberUpdatedState(pan)
-    val viewportS by rememberUpdatedState(viewport)
-    val dragModeS by rememberUpdatedState(dragMode)
-    val effectiveS by rememberUpdatedState(effective)
+    val scaleS = rememberUpdatedState(scale)
+    val panS = rememberUpdatedState(pan)
+    val viewportS = rememberUpdatedState(viewport)
+    val dragModeS = rememberUpdatedState(dragMode)
+    val effectiveS = rememberUpdatedState(effective)
 
     val colors = MaterialTheme.colorScheme
     val jumpColor = colors.primary

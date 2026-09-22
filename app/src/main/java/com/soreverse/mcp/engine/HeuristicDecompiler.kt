@@ -182,6 +182,15 @@ internal object HeuristicDecompiler {
         val targets = insns.mapNotNull { it.jump }.toSortedSet()
         val openIfs = ArrayDeque<Long>()
         var lastCmp: CmpCtx? = null
+        // 简单循环识别：回边（条件跳转目标地址更小）；每个头恰好一条回边才做 do-while 还原
+        val headCount = HashMap<Long, Int>()
+        insns.forEach { i ->
+            val t = i.jump
+            if (t != null && t < i.addr && (isCondBranch(i.mnem) || i.mnem == "b")) {
+                headCount[t] = (headCount[t] ?: 0) + 1
+            }
+        }
+        val doHeads = headCount.filterValues { it == 1 }.keys.toHashSet()
         val sb = StringBuilder()
         var indent = 1
         fun emit(line: String) = sb.append("    ".repeat(indent)).append(line).append('\n')
@@ -202,7 +211,10 @@ internal object HeuristicDecompiler {
             while (openIfs.isNotEmpty() && openIfs.last() <= a) {
                 indent = maxOf(1, indent - 1); emit("}"); openIfs.removeLast()
             }
-            if (a in targets) emit("label_%x:".format(a))
+            if (a in doHeads) {
+                emit("do {")
+                indent += 1
+            } else if (a in targets) emit("label_%x:".format(a))
 
             val m = i.mnem
             val o = i.ops
@@ -218,7 +230,10 @@ internal object HeuristicDecompiler {
                     }
                     if (suf != null) lastCmp = null
                     val t = i.jump
-                    if (t != null && t < a) {
+                    if (t != null && t < a && t in doHeads) {
+                        indent = maxOf(1, indent - 1)
+                        emit("} while ($c);")
+                    } else if (t != null && t < a) {
                         emit("/* loop back -> ${hex(t)} */ goto label_%x;".format(t))
                     } else {
                         emit("if ($c) {")
@@ -227,7 +242,10 @@ internal object HeuristicDecompiler {
                     }
                 }
                 m == "b" && i.jump != null -> {
-                    if (i.jump!! < a) emit("/* loop back */ goto label_%x;".format(i.jump))
+                    if (i.jump!! < a && i.jump in doHeads) {
+                        indent = maxOf(1, indent - 1)
+                        emit("} while (1);")
+                    } else if (i.jump!! < a) emit("/* loop back */ goto label_%x;".format(i.jump))
                     else emit("goto label_%x;".format(i.jump))
                 }
                 m == "bl" || m == "blr" -> {

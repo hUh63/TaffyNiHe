@@ -7519,6 +7519,11 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf("") }
+    var files by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    fun refreshFiles() {
+        files = (exportsDir(context).listFiles() ?: emptyArray()).sortedByDescending { it.lastModified() }.take(30).toList()
+    }
+    LaunchedEffect(Unit) { refreshFiles() }
 
     val spec = exportKinds.firstOrNull { it.key == kind } ?: exportKinds.first()
 
@@ -7559,8 +7564,7 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
             saved = ""
             val name = "taffy_${spec.key}_${System.currentTimeMillis()}.${if (tabSep) "tsv" else "csv"}"
             // 写到外部私有目录（无需额外权限），路径稳定可被文件管理/分享访问
-            val dir = java.io.File(context.getExternalFilesDir(null), "exports").apply { mkdirs() }
-            val out = java.io.File(dir, name)
+            val out = java.io.File(exportsDir(context), name)
             val okW = withContext(Dispatchers.IO) { runCatching { out.writeText(text); true }.getOrDefault(false) }
             saved = if (okW) (if (zh) "已保存：${out.absolutePath}" else "saved: ${out.absolutePath}")
                 else (if (zh) "保存失败" else "save failed")
@@ -7569,7 +7573,7 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
 
     if (ws.isBlank()) return NeedWorkspace(zh)
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             exportKinds.forEach { k ->
                 SmallAction(if (zh) k.zh else k.en, active = k.key == kind) { kind = k.key; text = ""; count = 0 }
@@ -7610,6 +7614,33 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
             )
         }
     }
+        GroupDivider()
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                if (zh) "导出文件 · ${files.size}" else "Exports · ${files.size}",
+                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
+                fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f),
+            )
+            SmallAction(if (zh) "刷新" else "Refresh") { refreshFiles() }
+            SmallAction(if (zh) "复制目录" else "Copy dir") { copyToClipboard(context, exportsDir(context).absolutePath, zh) }
+        }
+        files.forEach { f ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    f.name,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    fontSize = AppText.label, color = cs.onSurface, modifier = Modifier.weight(1f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text("%d KB".format(f.length() / 1024), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                SmallAction(if (zh) "打开" else "Open") { openExportFile(context, f, zh) }
+                SmallAction(if (zh) "分享" else "Share") { shareExportFile(context, f, zh) }
+                SmallAction(if (zh) "删除" else "Del") { f.delete(); refreshFiles() }
+            }
+        }
+        if (files.isEmpty()) {
+            MonoLine(if (zh) "还没有导出文件。生成的 CSV/TSV/PNG 会出现在这里。" else "No exports yet.", cs.onSurfaceVariant, AppText.label)
+        }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -8873,6 +8904,48 @@ private fun DetailBlock(title: String, body: String) {
 //  缩点 → 分层布局 → DrawScope 绘制（Composable 与 PNG 导出共用同一套绘制）
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** 统一的导出目录（外部私有 exports/，同时被 FileProvider 暴露以便分享）。 */
+private fun exportsDir(context: android.content.Context): java.io.File =
+    java.io.File(context.getExternalFilesDir(null), "exports").apply { mkdirs() }
+
+/** 分享一个导出文件（FileProvider + ACTION_SEND）。 */
+private fun shareExportFile(context: android.content.Context, f: java.io.File, zh: Boolean) {
+    runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", f)
+        val mime = when {
+            f.name.endsWith(".png", true) -> "image/png"
+            f.name.endsWith(".csv", true) -> "text/csv"
+            else -> "text/plain"
+        }
+        val i = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(android.content.Intent.createChooser(i, if (zh) "分享导出文件" else "Share export"))
+    }.onFailure {
+        android.widget.Toast.makeText(context, if (zh) "分享失败：${it.message}" else "share failed", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** 打开一个导出文件。 */
+private fun openExportFile(context: android.content.Context, f: java.io.File, zh: Boolean) {
+    runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", f)
+        val mime = when {
+            f.name.endsWith(".png", true) -> "image/png"
+            f.name.endsWith(".csv", true) -> "text/csv"
+            else -> "text/plain"
+        }
+        val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(i)
+    }.onFailure {
+        android.widget.Toast.makeText(context, if (zh) "无法打开：${it.message}" else "cannot open", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
 /** 把一段 DrawScope 绘制渲染成 PNG 并写入 exports/，返回文件绝对路径。 */
 private fun exportDrawToPng(
     context: android.content.Context,
@@ -8892,8 +8965,7 @@ private fun exportDrawToPng(
         canvas,
         androidx.compose.ui.geometry.Size(w.toFloat(), h.toFloat()),
     ) { draw() }
-    val dir = java.io.File(context.getExternalFilesDir(null), "exports").apply { mkdirs() }
-    val f = java.io.File(dir, fileName)
+    val f = java.io.File(exportsDir(context), fileName)
     f.outputStream().use { out -> bmp.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out) }
     f.absolutePath
 }.getOrNull()

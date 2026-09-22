@@ -844,6 +844,29 @@ internal fun parsePdfjInsns(jsonText: String): Map<Long, List<String>> {
     }
 }
 
+/** 解析 java 引擎伪 C：按 `label_<hex>:` 切分 → 块入口地址 → 伪C 行列表。 */
+internal fun parsePseudoBlocks(text: String): Map<Long, List<String>> {
+    if (text.isBlank()) return emptyMap()
+    val m = LinkedHashMap<Long, MutableList<String>>()
+    val re = Regex("^label_([0-9a-fA-F]+):?$")
+    var cur = -1L
+    text.lineSequence().forEach { raw ->
+        val t = raw.trim()
+        if (t.isEmpty() || t.startsWith("//")) return@forEach
+        val lm = re.find(t)
+        if (lm != null) {
+            val a = lm.groupValues[1].toLongOrNull(16)
+            if (a != null) {
+                cur = a
+                m.getOrPut(a) { ArrayList() }
+            }
+        } else if (cur >= 0L) {
+            m[cur]?.add(t)
+        }
+    }
+    return m
+}
+
 private fun nextBgStyle(cur: String): String = when (cur) {
     "grid" -> "cobweb"
     "cobweb" -> "honeycomb"
@@ -1103,7 +1126,7 @@ internal fun CfgCanvas(
     val density = LocalDensity.current.density
     val baseGraph = remember(json) { parseCfgGraph(json) }
     // 块内容模式：summary=首行摘要；asm=块内显示该块完整指令（对标 Exbin BLOCK_CONTENT_ASM）。
-    val asmBlocks = contentMode == "asm" && blockLines.isNotEmpty()
+    val asmBlocks = contentMode != "summary" && blockLines.isNotEmpty()
     val maxLines = if (asmBlocks) ASM_BLOCK_MAX_LINES else 2
     val graph = remember(baseGraph, asmBlocks, blockLines) {
         if (!asmBlocks) baseGraph else baseGraph.copy(

@@ -3499,11 +3499,21 @@ private fun CfgView(
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
     // 「汇编块」模式：按需取当前函数的块级反汇编（pdfj），供画布在块内展示指令。
     LaunchedEffect(cfgContent, tools.cfgJson, target, ws) {
-        if (cfgContent != "asm" || ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
+        if (cfgContent == "summary" || ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
         val m = withContext(Dispatchers.IO) {
             runCatching {
-                val eng = EngineProvider.get(context)
-                parsePdfjInsns(rzText(eng.rzCommand(ws, "", "s $target; pdfj")))
+                when (cfgContent) {
+                    "pseudo" -> {
+                        val r = callMcpTool(context, "taffy_so_decompile", JSONObject()
+                            .put("workspaceId", ws).put("locator", target)
+                            .put("strict", false).put("engine", "java"))
+                        parsePseudoBlocks(r?.optString("pseudocode").orEmpty())
+                    }
+                    else -> {
+                        val eng = EngineProvider.get(context)
+                        parsePdfjInsns(rzText(eng.rzCommand(ws, "", "s $target; pdfj")))
+                    }
+                }
             }.getOrNull() ?: emptyMap()
         }
         if (m.isNotEmpty()) cfgInsns = m
@@ -3609,8 +3619,19 @@ private fun CfgView(
                         SmallAction(if (zh) "分层" else "Layered", active = cfgLayout == "layered") { cfgLayout = "layered" }
                         SmallAction(if (zh) "网格" else "Grid", active = cfgLayout == "grid") { cfgLayout = "grid" }
                         SmallAction(if (zh) "力导向" else "Force", active = cfgLayout == "force") { cfgLayout = "force" }
-                        SmallAction(if (zh) "汇编块" else "Asm", active = cfgContent == "asm") {
-                            cfgContent = if (cfgContent == "asm") "summary" else "asm"
+                        SmallAction(
+                            when (cfgContent) {
+                                "asm" -> if (zh) "汇编块" else "Asm"
+                                "pseudo" -> if (zh) "伪C块" else "PseudoC"
+                                else -> if (zh) "摘要块" else "Summary"
+                            },
+                            active = cfgContent != "summary",
+                        ) {
+                            cfgContent = when (cfgContent) {
+                                "summary" -> "asm"
+                                "asm" -> "pseudo"
+                                else -> "summary"
+                            }
                         }
                         SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
                     }

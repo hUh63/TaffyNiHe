@@ -316,6 +316,9 @@ internal object HeuristicDecompiler {
         var indent = 1
         fun emit(line: String) = sb.append("    ".repeat(indent)).append(line).append('\n')
 
+        // 块级标记：入口块地址（供 CFG「伪 C 块内容模式」按块切分）
+        emit("label_%x:".format(insns.first().addr))
+
         val writesX0 = insns.any { i ->
             val f = i.ops.split(",").firstOrNull()?.trim()?.lowercase()
             (f == "x0" || f == "w0") && i.mnem !in setOf("cmp", "cmn", "tst", "str", "strb", "strh", "stur", "stp", "b", "bl")

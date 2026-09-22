@@ -3482,7 +3482,6 @@ private fun PseudoView(
 
 // ───────────────────────── CFG ─────────────────────────
 
-@Composable
 /** 把整函数伪C 按「块首行下标」切分为 块地址 → 伪C 行（r2dec convertWithBlockMap 输出）。 */
 private fun splitPseudoBlocks(body: List<String>, firstLine: Map<Long, Int>): Map<Long, List<String>> {
     if (body.isEmpty() || firstLine.isEmpty()) return emptyMap()
@@ -3500,6 +3499,7 @@ private fun splitPseudoBlocks(body: List<String>, firstLine: Map<Long, Int>): Ma
     return m
 }
 
+@Composable
 private fun CfgView(
     tools: ToolPagesState,
     zh: Boolean,

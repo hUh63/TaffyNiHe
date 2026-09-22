@@ -121,6 +121,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import android.graphics.Paint
 import android.graphics.Typeface
+import kotlin.math.max
+import kotlin.math.min
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap

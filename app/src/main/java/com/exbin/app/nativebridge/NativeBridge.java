@@ -41,10 +41,6 @@ public final class NativeBridge {
         /** 基于 native handle（SO 路径）做签名还原。 */
         String[] restoreSignaturesByHandle(long handle, long[] addrs, int[] sizes,
                                            int[] thumbFlags, int machine, String[] names);
-
-        /** 结构化签名还原：Object[n][9]（ret/params/float/wide/stackOff/noreturn/variadic/isStatic）。 */
-        Object[][] restoreSignaturesStructuredByHandle(long handle, long[] addrs, int[] sizes,
-                                                       int[] thumbFlags, int machine, String[] names);
     }
 
     private static volatile SignatureBackend sSigBackend = null;
@@ -131,16 +127,11 @@ public final class NativeBridge {
         return new String[0];
     }
 
+    /**
+     * 结构化签名通道 —— 塔菲后端暂不提供（返回 null，FSA 自动降级到字符串通道）。
+     */
     public static Object[][] restoreSignaturesStructuredByHandle(long handle, long[] addrs, int[] sizes,
                                                                  int[] thumbFlags, int machine, String[] names) {
-        if (handle == 0 || addrs == null || sizes == null) return null;
-        SignatureBackend b = sSigBackend;
-        if (b != null && b.available()) {
-            try {
-                return b.restoreSignaturesStructuredByHandle(handle, addrs, sizes, thumbFlags, machine, names);
-            } catch (Throwable ignored) {
-            }
-        }
         return null;
     }
 

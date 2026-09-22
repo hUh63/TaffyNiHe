@@ -489,7 +489,7 @@ object SoDeepTools {
                 val nm = pair.first
                 val va = pair.second
                 // ── Exbin FunctionSignatureAnalyzer 路径（移植自 Exbin；含 JNI 特判与结构化结果）──
-                val fsa = com.soreverse.mcp.engine.ExbinSignature.analyze(engine, ws, nm, va)
+                val fsa = engine.exbinSignature(ws, nm, va)
                 if (fsa != null) {
                     out.put(
                         fsa.put("function", nm)

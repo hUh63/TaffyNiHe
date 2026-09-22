@@ -11,6 +11,20 @@ class NativeSoEngine(context: Context) {
     private val runtime = EngineRuntime(appContext)
     internal val lief get() = runtime.lief
 
+    // ── 塔菲扩展: Exbin 分析模块（DisasmAnnotator / FunctionSignatureAnalyzer）接入 ──
+
+    /** Exbin 语义注解所需的 ELF 模型。 */
+    internal fun exbinElfFor(workspaceId: String, editSessionId: String): ElfFile =
+        runtime.elfFor(workspaceId, editSessionId)
+
+    /** Exbin 语义注解所需的原始字节。 */
+    internal fun exbinDataFor(workspaceId: String, editSessionId: String): ByteArray =
+        runtime.dataFor(workspaceId, editSessionId)
+
+    /** 用 Exbin FunctionSignatureAnalyzer 还原单函数签名（失败返回 null，调用方降级）。 */
+    internal fun exbinSignature(workspaceId: String, name: String, va: Long): JSONObject? =
+        ExbinSignature.analyze(runtime, workspaceId, name, va)
+
     fun setWorkDirectory(uri: Uri) = runtime.setWorkDirectory(uri)
     fun listAvailableSos(prefix: String = "", limit: Int = 50, cursor: String = ""): JSONObject = runtime.listAvailableSos(prefix, limit, cursor)
     fun open(path: String, temporary: Boolean): JSONObject = runtime.open(path, temporary)

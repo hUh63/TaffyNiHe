@@ -76,15 +76,6 @@ internal object ExbinSignatureBackend : NativeBridge.SignatureBackend {
         names: Array<String>?,
     ): Array<String> = emptyArray()
 
-    override fun restoreSignaturesStructuredByHandle(
-        handle: Long,
-        addrs: LongArray?,
-        sizes: IntArray?,
-        thumbFlags: IntArray?,
-        machine: Int,
-        names: Array<String>?,
-    ): Array<Array<Any?>>? = null
-
     // ============================================================
     // 参数个数推断
     // ============================================================

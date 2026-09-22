@@ -341,8 +341,8 @@ object ToolCatalog {
         val res = e.disasm(r.workspaceId, a.str("editSessionId"), effectiveLocator, a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), addr, if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")).withAutoOpen(r)
         if (a.bool("annotate", false)) {
             runCatching {
-                val elf = e.elfFor(r.workspaceId, a.str("editSessionId"))
-                val bytes = e.dataFor(r.workspaceId, a.str("editSessionId"))
+                val elf = e.exbinElfFor(r.workspaceId, a.str("editSessionId"))
+                val bytes = e.exbinDataFor(r.workspaceId, a.str("editSessionId"))
                 com.soreverse.mcp.engine.ExbinAnnotate.apply(res, elf, bytes)
             }.getOrDefault(res)
         } else res

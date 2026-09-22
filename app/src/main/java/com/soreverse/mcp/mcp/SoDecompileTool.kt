@@ -82,6 +82,20 @@ object SoDecompileTool {
             }
 
             fun runJavaHeuristic(): JSONObject? {
+                // 1) 优先：移植自 Exbin 的 r2dec 纯 Java 引擎（rizin agfj 提供 CFG + 指令）
+                runCatching {
+                    val ag = engine.rzCommand(workspaceId, "", "s $locator; agfj")
+                    val agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
+                    if (agTxt.startsWith("[")) {
+                        val code = com.soreverse.mcp.engine.R2DecEngine.decompile(agTxt, "")
+                        if (!code.isNullOrBlank()) {
+                            return JSONObject().put("ok", true).put("pseudocode", code)
+                                .put("engine", "java-r2dec")
+                                .put("engineNote", "r2dec 纯 Java 移植（Exbin 引擎；CFG 由 rizin agfj 注入）")
+                        }
+                    }
+                }
+                // 2) 兜底：纯 Kotlin 启发式引擎
                 val rj = engine.rzCommand(workspaceId, "", "s $locator; pdfj")
                 val txt = rj.optString("stdout").ifBlank { rj.optString("text") }.trim()
                 if (txt.isBlank() || !txt.startsWith("[")) return null

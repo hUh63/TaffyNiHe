@@ -822,7 +822,11 @@ internal fun CfgCanvas(
     val density = LocalDensity.current.density
     val graph = remember(json) { parseCfgGraph(json) }
     val layout = remember(graph, density, layoutMode) {
-        if (layoutMode == "grid") layoutCfgGrid(graph, density) else layoutCfgGraph(graph, density)
+        when (layoutMode) {
+            "grid" -> layoutCfgGrid(graph, density)
+            "force" -> layoutCfgForce(graph, density)
+            else -> layoutCfgGraph(graph, density)
+        }
     }
     // rzCfg 返回 err JSON 时给出结构化提示，而不是只显示「空图」。
     val errHint = remember(json) {
@@ -1241,6 +1245,124 @@ internal fun layoutCfgGrid(graph: CfgGraph, density: Float): CfgLayoutResult {
         width = cols * cellW + 80f * density,
         height = rows * cellH + 80f * density,
         entryIndex = entry,
+        loopHeadIndices = emptySet(),
+        returnIndices = emptySet(),
+    )
+}
+
+/**
+ * CFG 力导向布局（第三套布局引擎，Fruchterman-Reingold 简化版）。
+ * 把块视为带电荷的粒子：所有节点互相排斥、有边的节点互相吸引，逐轮降温收敛。
+ * 适合观察「谁和谁抱团」；节点数过大（>200）时自动降级为网格布局以保证性能。
+ */
+internal fun layoutCfgForce(graph: CfgGraph, density: Float): CfgLayoutResult {
+    val n = graph.blocks.size
+    if (n == 0 || density <= 0f) {
+        return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
+    }
+    if (n > 200) return layoutCfgGrid(graph, density)
+
+    val padX = PAD_X_DP * density
+    val minW = NODE_W_MIN_DP * density
+    val minH = NODE_H_MIN_DP * density
+    val paintAddr = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 10.5f * density }
+
+    val w = FloatArray(n) { max(minW, paintAddr.measureText(graph.blocks[it].addrText) + padX * 2f) }
+    val h = FloatArray(n) { max(minH, 46f * density) }
+
+    // 理想边长
+    val k = max(120f * density, kotlin.math.sqrt((n.toFloat()) * 9000f * density))
+    // 初始：圆形均匀分布（比随机更稳定，迭代更快收敛）
+    val rad = k * kotlin.math.sqrt(n.toFloat()) * 0.5f
+    val px = FloatArray(n)
+    val py = FloatArray(n)
+    for (i in 0 until n) {
+        val ang = 2.0 * Math.PI * i / n
+        px[i] = (rad * kotlin.math.cos(ang)).toFloat()
+        py[i] = (rad * kotlin.math.sin(ang)).toFloat()
+    }
+
+    val edges = graph.edges.filter { it.from != it.to && it.from in 0 until n && it.to in 0 until n }
+
+    val iterations = if (n <= 60) 90 else 50
+    for (it in 0 until iterations) {
+        val dx = FloatArray(n)
+        val dy = FloatArray(n)
+        // 斥力
+        for (i in 0 until n) {
+            for (j in i + 1 until n) {
+                var ddx = px[i] - px[j]
+                var ddy = py[i] - py[j]
+                var d2 = ddx * ddx + ddy * ddy
+                if (d2 < 0.01f) { ddx = 0.1f * (i - j); ddy = 0.1f; d2 = 0.02f }
+                val d = kotlin.math.sqrt(d2)
+                val f = k * k / d
+                val ux = ddx / d
+                val uy = ddy / d
+                dx[i] += ux * f; dy[i] += uy * f
+                dx[j] -= ux * f; dy[j] -= uy * f
+            }
+        }
+        // 引力
+        edges.forEach { e ->
+            var ddx = px[e.from] - px[e.to]
+            var ddy = py[e.from] - py[e.to]
+            val d = kotlin.math.sqrt(ddx * ddx + ddy * ddy).coerceAtLeast(0.01f)
+            val f = d * d / k
+            val ux = ddx / d
+            val uy = ddy / d
+            dx[e.from] -= ux * f; dy[e.from] -= uy * f
+            dx[e.to] += ux * f; dy[e.to] += uy * f
+        }
+        // 位移限制（温度）
+        val temp = k * (1f - it / iterations.toFloat()) * 0.35f + 0.5f
+        for (i in 0 until n) {
+            val dl = kotlin.math.sqrt(dx[i] * dx[i] + dy[i] * dy[i]).coerceAtLeast(0.001f)
+            val step = minOf(dl, temp) / dl
+            px[i] += dx[i] * step
+            py[i] += dy[i] * step
+        }
+    }
+
+    // 归一化到正坐标
+    val minX = (0 until n).minOf { px[it] - w[it] / 2f }
+    val minY = (0 until n).minOf { py[it] - h[it] / 2f }
+    val offX = 40f * density - minX
+    val offY = 40f * density - minY
+
+    val boxes = ArrayList<CfgNodeBox>(n)
+    val centers = HashMap<Int, Offset>()
+    for (i in 0 until n) {
+        val cx = px[i] + offX
+        val cy = py[i] + offY
+        centers[i] = Offset(cx, cy)
+        boxes.add(CfgNodeBox(i, cx, cy, w[i], h[i], graph.blocks[i].addrText, listOf(graph.blocks[i].summary).filter { it.isNotBlank() }))
+    }
+
+    val routes = ArrayList<CfgRoute>(edges.size)
+    edges.forEach { e ->
+        val a = centers[e.from] ?: return@forEach
+        val b = centers[e.to] ?: return@forEach
+        routes.add(
+            CfgRoute(
+                e.from, e.to, e.kind, e.to < e.from, false,
+                listOf(
+                    Offset(a.x, a.y),
+                    Offset((a.x + b.x) / 2f, (a.y + b.y) / 2f),
+                    Offset(b.x, b.y),
+                ),
+            ),
+        )
+    }
+
+    val maxX = boxes.maxOfOrNull { it.right } ?: 0f
+    val maxY = boxes.maxOfOrNull { it.bottom } ?: 0f
+    return CfgLayoutResult(
+        boxes = boxes,
+        routes = routes,
+        width = maxX + 40f * density,
+        height = maxY + 40f * density,
+        entryIndex = 0,
         loopHeadIndices = emptySet(),
         returnIndices = emptySet(),
     )

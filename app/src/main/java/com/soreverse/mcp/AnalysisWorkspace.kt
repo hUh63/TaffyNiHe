@@ -3483,6 +3483,23 @@ private fun PseudoView(
 // ───────────────────────── CFG ─────────────────────────
 
 @Composable
+/** 把整函数伪C 按「块首行下标」切分为 块地址 → 伪C 行（r2dec convertWithBlockMap 输出）。 */
+private fun splitPseudoBlocks(body: List<String>, firstLine: Map<Long, Int>): Map<Long, List<String>> {
+    if (body.isEmpty() || firstLine.isEmpty()) return emptyMap()
+    val sorted = firstLine.entries.sortedBy { it.value }
+    val m = LinkedHashMap<Long, List<String>>()
+    for (i in sorted.indices) {
+        val addr = sorted[i].key
+        val from = sorted[i].value.coerceIn(0, body.size)
+        val to = (if (i + 1 < sorted.size) sorted[i + 1].value else body.size).coerceIn(from, body.size)
+        if (to > from) {
+            val lines = body.subList(from, to).map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.isNotEmpty()) m[addr] = lines
+        }
+    }
+    return m
+}
+
 private fun CfgView(
     tools: ToolPagesState,
     zh: Boolean,
@@ -3504,10 +3521,19 @@ private fun CfgView(
             runCatching {
                 when (cfgContent) {
                     "pseudo" -> {
-                        val r = callMcpTool(context, "taffy_so_decompile", JSONObject()
-                            .put("workspaceId", ws).put("locator", target)
-                            .put("strict", false).put("engine", "java"))
-                        parsePseudoBlocks(r?.optString("pseudocode").orEmpty())
+                        // 优先：r2dec 精确块映射（对标 Exbin BlockPseudoCProvider.convertWithBlockMap）
+                        val engP = EngineProvider.get(context)
+                        val agTxt = rzText(engP.rzCommand(ws, "", "s $target; agfj"))
+                        val mapped = com.soreverse.mcp.engine.R2DecEngine.decompileBlocks(agTxt, target)
+                        if (mapped != null) {
+                            splitPseudoBlocks(mapped.first, mapped.second)
+                        } else {
+                            // 兜底：启发式伪 C 按 label_<hex>: 切分
+                            val r = callMcpTool(context, "taffy_so_decompile", JSONObject()
+                                .put("workspaceId", ws).put("locator", target)
+                                .put("strict", false).put("engine", "java"))
+                            parsePseudoBlocks(r?.optString("pseudocode").orEmpty())
+                        }
                     }
                     else -> {
                         val eng = EngineProvider.get(context)

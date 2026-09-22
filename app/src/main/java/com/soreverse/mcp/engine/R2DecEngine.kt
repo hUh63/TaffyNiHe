@@ -48,128 +48,150 @@ internal object R2DecEngine {
         else -> -1L
     }
 
+    /** 由 rizin `agfj` 构建 r2dec 上下文（含注入的 prebuiltCfg）。 */
+    private fun buildCtx(agfjText: String, fnNameIn: String, isThumb: Boolean): PseudoCConverter.PseudoCContext? {
+        if (agfjText.isBlank()) return null
+        val arr = JSONArray(agfjText)
+        val fn = arr.optJSONObject(0) ?: return null
+        val blocks = fn.optJSONArray("blocks") ?: return null
+        val all = ArrayList<DisassembledInstruction>()
+        val cfg = ControlFlowAnalyzer.CFG()
+        val jumpOf = HashMap<Long, Long>()
+        val failOf = HashMap<Long, Long>()
+        var funcAddr = numOf(fn.opt("offset")).takeIf { it > 0 } ?: -1L
+        var funcEnd = if (funcAddr > 0) funcAddr else 0L
+
+        for (i in 0 until blocks.length()) {
+            val b = blocks.optJSONObject(i) ?: continue
+            val start = numOf(b.opt("offset") ?: b.opt("addr"))
+            if (start <= 0) continue
+            if (funcAddr <= 0) funcAddr = start
+            val blk = ControlFlowAnalyzer.Block(start)
+            blk.blockId = i
+            var last = start
+            b.optJSONArray("ops")?.let { ops ->
+                for (j in 0 until ops.length()) {
+                    val op = ops.optJSONObject(j) ?: continue
+                    val a = numOf(op.opt("offset") ?: op.opt("addr"))
+                    if (a <= 0) continue
+                    val disasm = op.optString("disasm").ifBlank { op.optString("opcode") }.trim()
+                    if (disasm.isEmpty()) continue
+                    val hasMn = op.has("mnemonic") && op.optString("mnemonic").isNotBlank()
+                    val mn = if (hasMn) op.optString("mnemonic") else disasm.substringBefore(' ')
+                    val opsStr = if (hasMn) disasm else disasm.substringAfter(' ', "")
+                    val di = DisassembledInstruction(a, null, mn, opsStr)
+                    blk.instructions.add(di)
+                    all.add(di)
+                    last = a
+                }
+            }
+            blk.startAddr = start
+            blk.endAddr = last
+            blk.isEntry = (i == 0)
+            if (last > funcEnd) funcEnd = last
+            cfg.blocks.add(blk)
+            cfg.byAddr[start] = blk
+            val jj = numOf(b.opt("jump"))
+            if (jj > 0) jumpOf[start] = jj
+            val ff = numOf(b.opt("fail"))
+            if (ff > 0) failOf[start] = ff
+        }
+        if (all.isEmpty()) return null
+
+        for (k in cfg.blocks.indices) {
+            val blk = cfg.blocks[k]
+            val j = jumpOf[blk.startAddr]
+            val f = failOf[blk.startAddr]
+            when {
+                j != null && f != null -> {
+                    blk.successors.add(ControlFlowAnalyzer.Edge(blk.startAddr, j, ControlFlowAnalyzer.EdgeKind.TRUE_BRANCH, "true"))
+                    blk.successors.add(ControlFlowAnalyzer.Edge(blk.startAddr, f, ControlFlowAnalyzer.EdgeKind.FALSE_BRANCH, "false"))
+                }
+                j != null -> {
+                    val back = j <= blk.startAddr
+                    blk.successors.add(
+                        ControlFlowAnalyzer.Edge(
+                            blk.startAddr, j,
+                            if (back) ControlFlowAnalyzer.EdgeKind.BACK_EDGE else ControlFlowAnalyzer.EdgeKind.UNCONDITIONAL,
+                            if (back) "loop" else "uncond",
+                        ),
+                    )
+                }
+                else -> {
+                    val nxt = cfg.blocks.getOrNull(k + 1)
+                    if (nxt != null) {
+                        blk.successors.add(ControlFlowAnalyzer.Edge(blk.startAddr, nxt.startAddr, ControlFlowAnalyzer.EdgeKind.UNCONDITIONAL, "fallthrough"))
+                    }
+                }
+            }
+        }
+
+        val depth = HashMap<Long, Int>()
+        val q = ArrayDeque<Long>()
+        if (funcAddr > 0) {
+            depth[funcAddr] = 0
+            q.addLast(funcAddr)
+        }
+        var guard = 0
+        while (q.isNotEmpty() && guard++ < 200000) {
+            val a = q.removeFirst()
+            val d = depth[a] ?: 0
+            cfg.byAddr[a]?.successors?.forEach { e ->
+                if (depth[e.to] == null && cfg.byAddr.containsKey(e.to)) {
+                    depth[e.to] = d + 1
+                    q.addLast(e.to)
+                }
+            }
+        }
+        var maxD = 0
+        for (blk in cfg.blocks) {
+            blk.depth = depth[blk.startAddr] ?: 0
+            if (blk.depth > maxD) maxD = blk.depth
+            if (blk.successors.isEmpty()) {
+                blk.isExit = true
+                cfg.exitBlockIds.add(blk.blockId)
+            }
+        }
+        cfg.maxDepth = maxD
+        cfg.instructions = all
+        cfg.entryBlockId = 0
+
+        val fnName = fnNameIn.ifBlank { fn.optString("name") }
+            .ifBlank { "sub_" + java.lang.Long.toHexString(funcAddr) }
+        val size = (funcEnd - funcAddr + 4).coerceAtLeast(4L)
+        val ctx = PseudoCConverter.PseudoCContext(fnName, funcAddr, size, machineOf(all), isThumb, all)
+        ctx.prebuiltCfg = cfg
+        return ctx
+    }
+
     /**
+     * 整函数伪 C。
      * @param agfjText rizin `agfj` 的 JSON（函数数组）
-     * @param fnNameIn 函数显示名（可空，自动从 agfj/地址推导）
      * @return 伪 C 文本；无法解析或空结果时返回 null
      */
     fun decompile(agfjText: String, fnNameIn: String, isThumb: Boolean = false): String? {
-        if (agfjText.isBlank()) return null
         return try {
-            val arr = JSONArray(agfjText)
-            val fn = arr.optJSONObject(0) ?: return null
-            val blocks = fn.optJSONArray("blocks") ?: return null
-            val all = ArrayList<DisassembledInstruction>()
-            val cfg = ControlFlowAnalyzer.CFG()
-            val jumpOf = HashMap<Long, Long>()
-            val failOf = HashMap<Long, Long>()
-            var funcAddr = numOf(fn.opt("offset")).takeIf { it > 0 } ?: -1L
-            var funcEnd = if (funcAddr > 0) funcAddr else 0L
-
-            for (i in 0 until blocks.length()) {
-                val b = blocks.optJSONObject(i) ?: continue
-                val start = numOf(b.opt("offset") ?: b.opt("addr"))
-                if (start <= 0) continue
-                if (funcAddr <= 0) funcAddr = start
-                val blk = ControlFlowAnalyzer.Block(start)
-                blk.blockId = i
-                var last = start
-                b.optJSONArray("ops")?.let { ops ->
-                    for (j in 0 until ops.length()) {
-                        val op = ops.optJSONObject(j) ?: continue
-                        val a = numOf(op.opt("offset") ?: op.opt("addr"))
-                        if (a <= 0) continue
-                        val disasm = op.optString("disasm").ifBlank { op.optString("opcode") }.trim()
-                        if (disasm.isEmpty()) continue
-                        val hasMn = op.has("mnemonic") && op.optString("mnemonic").isNotBlank()
-                        val mn = if (hasMn) op.optString("mnemonic") else disasm.substringBefore(' ')
-                        val opsStr = if (hasMn) disasm else disasm.substringAfter(' ', "")
-                        val di = DisassembledInstruction(a, null, mn, opsStr)
-                        blk.instructions.add(di)
-                        all.add(di)
-                        last = a
-                    }
-                }
-                blk.startAddr = start
-                blk.endAddr = last
-                blk.isEntry = (i == 0)
-                if (last > funcEnd) funcEnd = last
-                cfg.blocks.add(blk)
-                cfg.byAddr[start] = blk
-                val j = numOf(b.opt("jump"))
-                if (j > 0) jumpOf[start] = j
-                val f = numOf(b.opt("fail"))
-                if (f > 0) failOf[start] = f
-            }
-            if (all.isEmpty()) return null
-
-            // 边：jump / fail / fall-through
-            for (k in cfg.blocks.indices) {
-                val blk = cfg.blocks[k]
-                val j = jumpOf[blk.startAddr]
-                val f = failOf[blk.startAddr]
-                when {
-                    j != null && f != null -> {
-                        blk.successors.add(ControlFlowAnalyzer.Edge(blk.startAddr, j, ControlFlowAnalyzer.EdgeKind.TRUE_BRANCH, "true"))
-                        blk.successors.add(ControlFlowAnalyzer.Edge(blk.startAddr, f, ControlFlowAnalyzer.EdgeKind.FALSE_BRANCH, "false"))
-                    }
-                    j != null -> {
-                        val back = j <= blk.startAddr
-                        blk.successors.add(
-                            ControlFlowAnalyzer.Edge(
-                                blk.startAddr, j,
-                                if (back) ControlFlowAnalyzer.EdgeKind.BACK_EDGE else ControlFlowAnalyzer.EdgeKind.UNCONDITIONAL,
-                                if (back) "loop" else "uncond",
-                            ),
-                        )
-                    }
-                    else -> {
-                        val nxt = cfg.blocks.getOrNull(k + 1)
-                        if (nxt != null) {
-                            blk.successors.add(ControlFlowAnalyzer.Edge(blk.startAddr, nxt.startAddr, ControlFlowAnalyzer.EdgeKind.UNCONDITIONAL, "fallthrough"))
-                        }
-                    }
-                }
-            }
-
-            // BFS 深度 + 出口块
-            val depth = HashMap<Long, Int>()
-            val q = ArrayDeque<Long>()
-            if (funcAddr > 0) {
-                depth[funcAddr] = 0
-                q.addLast(funcAddr)
-            }
-            var guard = 0
-            while (q.isNotEmpty() && guard++ < 200000) {
-                val a = q.removeFirst()
-                val d = depth[a] ?: 0
-                cfg.byAddr[a]?.successors?.forEach { e ->
-                    if (depth[e.to] == null && cfg.byAddr.containsKey(e.to)) {
-                        depth[e.to] = d + 1
-                        q.addLast(e.to)
-                    }
-                }
-            }
-            var maxD = 0
-            for (blk in cfg.blocks) {
-                blk.depth = depth[blk.startAddr] ?: 0
-                if (blk.depth > maxD) maxD = blk.depth
-                if (blk.successors.isEmpty()) {
-                    blk.isExit = true
-                    cfg.exitBlockIds.add(blk.blockId)
-                }
-            }
-            cfg.maxDepth = maxD
-            cfg.instructions = all
-            cfg.entryBlockId = 0
-
-            val fnName = fnNameIn.ifBlank { fn.optString("name") }
-                .ifBlank { "sub_" + java.lang.Long.toHexString(funcAddr) }
-            val size = (funcEnd - funcAddr + 4).coerceAtLeast(4L)
-            val ctx = PseudoCConverter.PseudoCContext(fnName, funcAddr, size, machineOf(all), isThumb, all)
-            ctx.prebuiltCfg = cfg
+            val ctx = buildCtx(agfjText, fnNameIn, isThumb) ?: return null
             val text = R2DecPseudoC().convert(ctx).joinToString("\n")
             if (text.isBlank()) null else text
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * 整函数伪 C + 块首行映射（对标 Exbin `BlockPseudoCProvider`）。
+     * @return (body 行列表, 块入口地址 → 首行下标)；失败返回 null
+     */
+    fun decompileBlocks(agfjText: String, fnNameIn: String, isThumb: Boolean = false): Pair<List<String>, Map<Long, Int>>? {
+        return try {
+            val ctx = buildCtx(agfjText, fnNameIn, isThumb) ?: return null
+            val res = R2DecPseudoC().convertWithBlockMap(ctx) ?: return null
+            @Suppress("UNCHECKED_CAST")
+            val body = res.getOrNull(0) as? List<String> ?: return null
+            @Suppress("UNCHECKED_CAST")
+            val map = res.getOrNull(1) as? Map<Long, Int> ?: emptyMap()
+            if (body.isEmpty()) null else (body to map)
         } catch (t: Throwable) {
             null
         }

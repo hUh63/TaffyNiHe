@@ -3478,9 +3478,22 @@ private fun CfgView(
     val cs = MaterialTheme.colorScheme
     val density = androidx.compose.ui.platform.LocalDensity.current
     var cfgLayout by remember { mutableStateOf("layered") }
+    var cfgContent by remember { mutableStateOf("summary") }
+    var cfgInsns by remember { mutableStateOf<Map<Long, List<String>>>(emptyMap()) }
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    // 「汇编块」模式：按需取当前函数的块级反汇编（pdfj），供画布在块内展示指令。
+    LaunchedEffect(cfgContent, tools.cfgJson, target, ws) {
+        if (cfgContent != "asm" || ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
+        val m = withContext(Dispatchers.IO) {
+            runCatching {
+                val eng = EngineProvider.get(context)
+                parsePdfjInsns(rzText(eng.rzCommand(ws, "", "s $target; pdfj")))
+            }.getOrNull() ?: emptyMap()
+        }
+        if (m.isNotEmpty()) cfgInsns = m
+    }
     val err = errMessageOf(tools.cfgJson)
     val hasGraph = tools.cfgJson.isNotBlank() && err.isBlank()
     val fnLabel = tools.selectedFunctionName.ifBlank { tools.cfgTarget }
@@ -3538,7 +3551,7 @@ private fun CfgView(
                 secondaryLabel = if (zh) "重试" else "Retry",
                 onSecondary = { loadCfg(context, tools, zh, scope, target) },
             )
-            else -> CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize(), cfgLayout)
+            else -> CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize(), cfgLayout, cfgContent, cfgInsns)
         }
 
         if (hasGraph) {
@@ -3582,6 +3595,9 @@ private fun CfgView(
                         SmallAction(if (zh) "分层" else "Layered", active = cfgLayout == "layered") { cfgLayout = "layered" }
                         SmallAction(if (zh) "网格" else "Grid", active = cfgLayout == "grid") { cfgLayout = "grid" }
                         SmallAction(if (zh) "力导向" else "Force", active = cfgLayout == "force") { cfgLayout = "force" }
+                        SmallAction(if (zh) "汇编块" else "Asm", active = cfgContent == "asm") {
+                            cfgContent = if (cfgContent == "asm") "summary" else "asm"
+                        }
                         SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
                     }
                 }

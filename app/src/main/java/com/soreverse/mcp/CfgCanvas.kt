@@ -101,6 +101,7 @@ private const val DUMMY_NODE_LIMIT = 400
 private const val LAYOUT_ITERATIONS_SMALL = 8
 private const val LAYOUT_ITERATIONS_LARGE = 2
 private const val TEXT_HIDE_SCALE = 0.42f
+private const val ASM_BLOCK_MAX_LINES = 6
 
 // ───────────────────────── 数据模型 ─────────────────────────
 
@@ -339,7 +340,7 @@ private fun wrapSummary(text: String, paint: Paint, avail: Float, maxLines: Int)
  * 分层 → 层内定序（median+barycenter 多轮迭代）→ 端口分配 → x 坐标收敛 → 边路由。
  * 空图 / 非法输入返回空布局；块数超过阈值自动关闭虚拟节点并降低迭代轮数。
  */
-internal fun layoutCfgGraph(graph: CfgGraph, density: Float): CfgLayoutResult {
+internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2): CfgLayoutResult {
     val n = graph.blocks.size
     if (n == 0 || density <= 0f) {
         return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
@@ -370,11 +371,11 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float): CfgLayoutResult {
         val sumW = paintSum.measureText(b.summary)
         val desired = max(addrW, min(sumW, maxW - padX * 2f)) + padX * 2f
         var w = desired.coerceIn(minW, maxW)
-        var lines = wrapSummary(b.summary, paintSum, w - padX * 2f, 2)
+        var lines = wrapSummary(b.summary, paintSum, w - padX * 2f, maxLines)
         var maxLineW = addrW
         lines.forEach { maxLineW = max(maxLineW, paintSum.measureText(it)) }
         w = (maxLineW + padX * 2f).coerceIn(minW, maxW)
-        lines = wrapSummary(b.summary, paintSum, w - padX * 2f, 2)
+        lines = wrapSummary(b.summary, paintSum, w - padX * 2f, maxLines)
         widths[i] = w
         heights[i] = max(padY * 2f + addrLine + lines.size * sumLine, minH)
         summaries[i] = lines
@@ -817,6 +818,32 @@ private fun CfgChip(text: String, tint: Color, active: Boolean = false, onClick:
 
 // ───────────────────────── 背景 / 边路径 / 拖动 / 小地图 ─────────────────────────
 
+/** 解析 rizin pdfj（函数反汇编 JSON）→ 块入口地址 → 指令行列表。 */
+internal fun parsePdfjInsns(jsonText: String): Map<Long, List<String>> {
+    if (jsonText.isBlank()) return emptyMap()
+    return try {
+        val o = JSONObject(jsonText)
+        val blocks = o.optJSONArray("blocks") ?: return emptyMap()
+        val m = HashMap<Long, List<String>>()
+        for (i in 0 until blocks.length()) {
+            val b = blocks.optJSONObject(i) ?: continue
+            val addr = parseCfgAddr(b.opt("addr")?.toString() ?: "")
+            if (addr < 0L) continue
+            val ops = b.optJSONArray("ops") ?: continue
+            val lines = ArrayList<String>(ops.length())
+            for (j in 0 until ops.length()) {
+                val op = ops.optJSONObject(j) ?: continue
+                val t = firstNonBlankText(op, "disasm", "opcode", "text", "code")
+                if (t.isNotBlank()) lines.add(t.lineSequence().firstOrNull().orEmpty().trim())
+            }
+            if (lines.isNotEmpty()) m[addr] = lines
+        }
+        m
+    } catch (_: Exception) {
+        emptyMap()
+    }
+}
+
 private fun nextBgStyle(cur: String): String = when (cur) {
     "grid" -> "cobweb"
     "cobweb" -> "honeycomb"
@@ -1070,14 +1097,27 @@ internal fun CfgCanvas(
     zh: Boolean,
     modifier: Modifier = Modifier,
     layoutMode: String = "layered",
+    contentMode: String = "summary",
+    blockLines: Map<Long, List<String>> = emptyMap(),
 ) {
     val density = LocalDensity.current.density
-    val graph = remember(json) { parseCfgGraph(json) }
-    val layout = remember(graph, density, layoutMode) {
+    val baseGraph = remember(json) { parseCfgGraph(json) }
+    // 块内容模式：summary=首行摘要；asm=块内显示该块完整指令（对标 Exbin BLOCK_CONTENT_ASM）。
+    val asmBlocks = contentMode == "asm" && blockLines.isNotEmpty()
+    val maxLines = if (asmBlocks) ASM_BLOCK_MAX_LINES else 2
+    val graph = remember(baseGraph, asmBlocks, blockLines) {
+        if (!asmBlocks) baseGraph else baseGraph.copy(
+            blocks = baseGraph.blocks.map { b ->
+                val ins = blockLines[b.addrValue]
+                if (ins.isNullOrEmpty()) b else b.copy(summary = ins.joinToString("\n"))
+            },
+        )
+    }
+    val layout = remember(graph, density, layoutMode, maxLines) {
         when (layoutMode) {
-            "grid" -> layoutCfgGrid(graph, density)
-            "force" -> layoutCfgForce(graph, density)
-            else -> layoutCfgGraph(graph, density)
+            "grid" -> layoutCfgGrid(graph, density, maxLines)
+            "force" -> layoutCfgForce(graph, density, maxLines)
+            else -> layoutCfgGraph(graph, density, maxLines)
         }
     }
     // rzCfg 返回 err JSON 时给出结构化提示，而不是只显示「空图」。
@@ -1194,7 +1234,9 @@ internal fun CfgCanvas(
                     )
                 }
                 .pointerInput(effective) {
-                    detectTapGestures { pos ->
+                    detectTapGestures(
+                        onDoubleTap = { applyFit() },
+                    ) { pos ->
                         val originX = viewport.width / 2f + pan.x
                         val originY = viewport.height / 2f + pan.y
                         val wx = (pos.x - originX) / scale
@@ -1542,7 +1584,7 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
  * CFG 紧凑网格布局（第二套布局引擎，对标 Exbin 的多布局引擎可切换）。
  * 忽略分层，按块序排成近似方形网格，边用直连——大图快速浏览时比分层更快、更紧凑。
  */
-internal fun layoutCfgGrid(graph: CfgGraph, density: Float): CfgLayoutResult {
+internal fun layoutCfgGrid(graph: CfgGraph, density: Float, maxLines: Int = 2): CfgLayoutResult {
     val n = graph.blocks.size
     if (n == 0 || density <= 0f) {
         return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
@@ -1557,7 +1599,7 @@ internal fun layoutCfgGrid(graph: CfgGraph, density: Float): CfgLayoutResult {
     val cols = kotlin.math.ceil(kotlin.math.sqrt(n.toDouble())).toInt().coerceIn(1, 12)
     val rows = (n + cols - 1) / cols
     val cellW = maxW * 1.12f + 24f * density
-    val cellH = 74f * density
+    val cellH = max(74f * density, (PAD_Y_DP * 2f + ADDR_LINE_DP + maxLines * SUM_LINE_DP) * density + 22f * density)
 
     val boxes = ArrayList<CfgNodeBox>(n)
     val centers = HashMap<Int, Offset>()
@@ -1568,7 +1610,7 @@ internal fun layoutCfgGrid(graph: CfgGraph, density: Float): CfgLayoutResult {
         val cx = 40f * density + c * cellW + cellW / 2f
         val cy = 40f * density + r * cellH + cellH / 2f
         val w = max(minW, paintAddr.measureText(b.addrText) + padX * 2f)
-        val h = max(minH, 46f * density)
+        val h = max(minH, (PAD_Y_DP * 2f + ADDR_LINE_DP + maxLines * SUM_LINE_DP) * density)
         centers[i] = Offset(cx, cy)
         boxes.add(CfgNodeBox(i, cx, cy, w, h, b.addrText, listOf(b.summary).filter { it.isNotBlank() }))
     }
@@ -1608,7 +1650,7 @@ internal fun layoutCfgGrid(graph: CfgGraph, density: Float): CfgLayoutResult {
  * 把块视为带电荷的粒子：所有节点互相排斥、有边的节点互相吸引，逐轮降温收敛。
  * 适合观察「谁和谁抱团」；节点数过大（>200）时自动降级为网格布局以保证性能。
  */
-internal fun layoutCfgForce(graph: CfgGraph, density: Float): CfgLayoutResult {
+internal fun layoutCfgForce(graph: CfgGraph, density: Float, maxLines: Int = 2): CfgLayoutResult {
     val n = graph.blocks.size
     if (n == 0 || density <= 0f) {
         return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
@@ -1621,7 +1663,7 @@ internal fun layoutCfgForce(graph: CfgGraph, density: Float): CfgLayoutResult {
     val paintAddr = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 10.5f * density }
 
     val w = FloatArray(n) { max(minW, paintAddr.measureText(graph.blocks[it].addrText) + padX * 2f) }
-    val h = FloatArray(n) { max(minH, 46f * density) }
+    val h = FloatArray(n) { max(minH, (PAD_Y_DP * 2f + ADDR_LINE_DP + maxLines * SUM_LINE_DP) * density) }
 
     // 理想边长
     val k = max(120f * density, kotlin.math.sqrt((n.toFloat()) * 9000f * density))

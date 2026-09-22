@@ -58,6 +58,43 @@ internal object HeuristicDecompiler {
         "mi" to "<0", "pl" to ">=0", "vs" to "overflow", "vc" to "!overflow",
     )
 
+    private data class CmpCtx(val kind: String, val a: String, val b: String)
+
+    /** 把「cmp/tst + 条件跳转」配对还原成真正的 C 比较表达式。 */
+    private fun condFromCmp(cond: String, c: CmpCtx): String {
+        if (c.kind == "tst") {
+            return when (cond) {
+                "eq" -> "(${c.a} & ${c.b}) == 0"
+                "ne" -> "(${c.a} & ${c.b}) != 0"
+                else -> "flag_$cond"
+            }
+        }
+        val signed = when (cond) {
+            "eq" -> "${c.a} == ${c.b}"
+            "ne" -> "${c.a} != ${c.b}"
+            "gt" -> "${c.a} > ${c.b}"
+            "ge" -> "${c.a} >= ${c.b}"
+            "lt" -> "${c.a} < ${c.b}"
+            "le" -> "${c.a} <= ${c.b}"
+            "hi" -> "(u32)${c.a} > (u32)${c.b}"
+            "hs", "cs" -> "(u32)${c.a} >= (u32)${c.b}"
+            "lo", "cc" -> "(u32)${c.a} < (u32)${c.b}"
+            "ls" -> "(u32)${c.a} <= (u32)${c.b}"
+            "mi" -> "(${c.a} - ${c.b}) < 0"
+            "pl" -> "(${c.a} - ${c.b}) >= 0"
+            "vs" -> "(overflow)"
+            "vc" -> "(!overflow)"
+            else -> "flag_$cond"
+        }
+        return signed
+    }
+
+    /** 分支后缀（b.eq → eq）。 */
+    private fun branchSuffix(mnem: String): String? {
+        if (!mnem.startsWith("b") || mnem.length < 3 || mnem[1] != '.') return null
+        return mnem.substring(2)
+    }
+
     private fun isCondBranch(mnem: String): Boolean =
         mnem in setOf("cbz", "cbnz", "tbz", "tbnz") ||
             (mnem.length > 1 && mnem[0] == 'b' && mnem.substring(1).split('.')[0] in COND)
@@ -121,6 +158,10 @@ internal object HeuristicDecompiler {
             val first = o.split(",").firstOrNull()?.trim() ?: return@forEach
             Regex("\\b([xr]\\d{1,2})\\b", RegexOption.IGNORE_CASE).findAll(o).forEach { read.add(it.groupValues[1].lowercase()) }
         }
+        val writesX0 = insns.any { i ->
+            val f = i.ops.split(",").firstOrNull()?.trim()?.lowercase()
+            (f == "x0" || f == "w0") && i.mnem !in setOf("cmp", "cmn", "tst", "str", "strb", "strh", "stur", "stp", "b", "bl")
+        }
         val headEnd = maxOf(6, insns.size / 3).coerceAtMost(insns.size)
         val headRead = LinkedHashSet<String>()
         insns.take(headEnd).forEach { i ->
@@ -140,6 +181,7 @@ internal object HeuristicDecompiler {
         // 分支目标集合（用于标签与 if 闭合）
         val targets = insns.mapNotNull { it.jump }.toSortedSet()
         val openIfs = ArrayDeque<Long>()
+        var lastCmp: CmpCtx? = null
         val sb = StringBuilder()
         var indent = 1
         fun emit(line: String) = sb.append("    ".repeat(indent)).append(line).append('\n')
@@ -150,7 +192,7 @@ internal object HeuristicDecompiler {
         header.append("// entry ").append(hex(insns.first().addr)).append('\n')
 
         val body = StringBuilder()
-        body.append("void ").append(fnName).append("(")
+        body.append(if (writesX0) "u64 " else "void ").append(fnName).append("(")
         body.append(argNames.entries.sortedBy { it.value }.joinToString(", ") { "u64 ${it.value} /*${it.key}*/" })
         body.append(") {\n")
 
@@ -168,7 +210,13 @@ internal object HeuristicDecompiler {
                 m == "ret" -> emit("return;")
                 m == "nop" -> emit("/* nop */")
                 isCondBranch(m) -> {
-                    val c = condOf(m, o) ?: "cond"
+                    val suf = branchSuffix(m)
+                    val cc = lastCmp
+                    val c = when {
+                        suf != null && cc != null -> condFromCmp(suf, cc)
+                        else -> condOf(m, o) ?: "cond"
+                    }
+                    if (suf != null) lastCmp = null
                     val t = i.jump
                     if (t != null && t < a) {
                         emit("/* loop back -> ${hex(t)} */ goto label_%x;".format(t))
@@ -201,7 +249,11 @@ internal object HeuristicDecompiler {
                     if (p.getOrNull(0)?.lowercase() in setOf("sp", "x29")) emit("/* frame adjust: $o */")
                     else emit("${p.getOrNull(0)} = ${op(p.getOrNull(1) ?: "?")} - ${op(p.getOrNull(2) ?: "?")};")
                 }
-                m == "cmp" || m == "cmn" || m == "tst" -> emit("flags = ($o);")
+                m == "cmp" || m == "cmn" || m == "tst" -> {
+                    val p = o.split(",").map { it.trim() }
+                    lastCmp = CmpCtx(m, op(p.getOrNull(0) ?: "?"), op(p.getOrNull(1) ?: "?"))
+                    emit("/* $m ${p.joinToString(", ")} */")
+                }
                 m == "ldr" || m == "ldrb" || m == "ldrh" || m == "ldrsw" || m == "ldur" -> {
                     val p = o.split(",").map { it.trim() }
                     emit("${p.getOrNull(0)} = ${op(p.drop(1).joinToString(","))};  /* load */")
@@ -236,7 +288,9 @@ internal object HeuristicDecompiler {
                 }
                 m == "csel" -> {
                     val p = o.split(",").map { it.trim() }
-                    if (p.size >= 3) emit("${p[0]} = flags ? ${op(p[1])} : ${op(p[2])};") else emit("/* $o */")
+                    val cc = lastCmp
+                    val cond = if (cc != null) condFromCmp("ne", cc) else "flags"
+                    if (p.size >= 3) emit("${p[0]} = ($cond) ? ${op(p[1])} : ${op(p[2])};") else emit("/* $o */")
                 }
                 m == "cset" -> emit("${o.split(",").firstOrNull()?.trim()} = flags ? 1 : 0;")
                 m == "br" -> emit("goto *$o;  /* indirect */")

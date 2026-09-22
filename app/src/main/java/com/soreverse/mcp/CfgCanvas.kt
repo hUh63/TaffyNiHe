@@ -813,10 +813,17 @@ private fun CfgChip(text: String, tint: Color, onClick: () -> Unit) {
  * CFG 图形画布。json 为 rzCfg 原始 JSON；空/非法 JSON 时显示「无 CFG 数据」而不是崩溃。
  */
 @Composable
-internal fun CfgCanvas(json: String, zh: Boolean, modifier: Modifier = Modifier) {
+internal fun CfgCanvas(
+    json: String,
+    zh: Boolean,
+    modifier: Modifier = Modifier,
+    layoutMode: String = "layered",
+) {
     val density = LocalDensity.current.density
     val graph = remember(json) { parseCfgGraph(json) }
-    val layout = remember(graph, density) { layoutCfgGraph(graph, density) }
+    val layout = remember(graph, density, layoutMode) {
+        if (layoutMode == "grid") layoutCfgGrid(graph, density) else layoutCfgGraph(graph, density)
+    }
     // rzCfg 返回 err JSON 时给出结构化提示，而不是只显示「空图」。
     val errHint = remember(json) {
         runCatching {
@@ -1172,4 +1179,68 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
             }
         }
     }
+}
+
+/**
+ * CFG 紧凑网格布局（第二套布局引擎，对标 Exbin 的多布局引擎可切换）。
+ * 忽略分层，按块序排成近似方形网格，边用直连——大图快速浏览时比分层更快、更紧凑。
+ */
+internal fun layoutCfgGrid(graph: CfgGraph, density: Float): CfgLayoutResult {
+    val n = graph.blocks.size
+    if (n == 0 || density <= 0f) {
+        return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
+    }
+    val padX = PAD_X_DP * density
+    val padY = PAD_Y_DP * density
+    val minW = NODE_W_MIN_DP * density
+    val minH = NODE_H_MIN_DP * density
+    val paintAddr = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 10.5f * density }
+
+    val cols = kotlin.math.ceil(kotlin.math.sqrt(n.toDouble())).toInt().coerceIn(1, 12)
+    val rows = (n + cols - 1) / cols
+    val cellW = maxW * 1.12f + 24f * density
+    val cellH = 74f * density
+
+    val boxes = ArrayList<CfgNodeBox>(n)
+    val centers = HashMap<Int, Offset>()
+    for (i in 0 until n) {
+        val b = graph.blocks[i]
+        val r = i / cols
+        val c = i % cols
+        val cx = 40f * density + c * cellW + cellW / 2f
+        val cy = 40f * density + r * cellH + cellH / 2f
+        val w = max(minW, paintAddr.measureText(b.addrText) + padX * 2f)
+        val h = max(minH, 46f * density)
+        centers[i] = Offset(cx, cy)
+        boxes.add(CfgNodeBox(i, cx, cy, w, h, b.addrText, listOf(b.summary).filter { it.isNotBlank() }))
+    }
+
+    val routes = ArrayList<CfgRoute>(graph.edges.size)
+    graph.edges.forEach { e ->
+        if (e.from == e.to) return@forEach
+        val a = centers[e.from] ?: return@forEach
+        val b = centers[e.to] ?: return@forEach
+        val isBack = e.to < e.from
+        routes.add(
+            CfgRoute(
+                e.from, e.to, e.kind, isBack, e.from == e.to,
+                listOf(
+                    Offset(a.x, a.y + cellH * 0.34f),
+                    Offset((a.x + b.x) / 2f, (a.y + b.y) / 2f),
+                    Offset(b.x, b.y - cellH * 0.34f),
+                ),
+            ),
+        )
+    }
+
+    val entry = 0
+    return CfgLayoutResult(
+        boxes = boxes,
+        routes = routes,
+        width = cols * cellW + 80f * density,
+        height = rows * cellH + 80f * density,
+        entryIndex = entry,
+        loopHeadIndices = emptySet(),
+        returnIndices = emptySet(),
+    )
 }

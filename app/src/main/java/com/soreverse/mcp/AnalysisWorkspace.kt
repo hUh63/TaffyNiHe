@@ -3477,6 +3477,7 @@ private fun CfgView(
 ) {
     val cs = MaterialTheme.colorScheme
     val density = androidx.compose.ui.platform.LocalDensity.current
+    var cfgLayout by remember { mutableStateOf("layered") }
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
@@ -3537,7 +3538,7 @@ private fun CfgView(
                 secondaryLabel = if (zh) "重试" else "Retry",
                 onSecondary = { loadCfg(context, tools, zh, scope, target) },
             )
-            else -> CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize())
+            else -> CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize(), cfgLayout)
         }
 
         if (hasGraph) {
@@ -3578,6 +3579,8 @@ private fun CfgView(
                             loading = tools.cfgLoading,
                             onClick = { useEntryPoint() },
                         )
+                        SmallAction(if (zh) "分层" else "Layered", active = cfgLayout == "layered") { cfgLayout = "layered" }
+                        SmallAction(if (zh) "网格" else "Grid", active = cfgLayout == "grid") { cfgLayout = "grid" }
                         SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
                         SmallAction(if (zh) "导出 PNG" else "PNG") {
                             val json = tools.cfgJson

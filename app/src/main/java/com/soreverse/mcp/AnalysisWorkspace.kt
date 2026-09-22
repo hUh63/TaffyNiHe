@@ -119,6 +119,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import android.graphics.Paint
+import android.graphics.Typeface
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import org.json.JSONObject
 
 /**
@@ -7257,7 +7269,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var error by remember(ws, tick) { mutableStateOf("") }
     var note by remember(ws, tick) { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
-    var sccMode by remember { mutableStateOf(false) }
+    var cgView by remember { mutableStateOf("graph") }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -7307,7 +7319,9 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
             SmallAction(if (zh) "复制边" else "Copy edges", enabled = edges.isNotEmpty()) {
                 copyToClipboard(context, edges.joinToString("\n") { "${it.first} -> ${it.second}" }, zh)
             }
-            SmallAction("SCC", active = sccMode, enabled = nodes.isNotEmpty()) { sccMode = !sccMode }
+            SmallAction(if (zh) "图形" else "Graph", active = cgView == "graph", enabled = nodes.isNotEmpty()) { cgView = "graph" }
+            SmallAction(if (zh) "列表" else "List", active = cgView == "list", enabled = nodes.isNotEmpty()) { cgView = "list" }
+            SmallAction("SCC", active = cgView == "scc", enabled = nodes.isNotEmpty()) { cgView = "scc" }
             SmallAction(if (zh) "导出 JSON" else "JSON", enabled = nodes.isNotEmpty()) {
                 val o = JSONObject()
                 o.put("nodes", JSONArray(nodes.map { it.toString() }))
@@ -7337,7 +7351,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     else "rizin returned no call graph. Run full analysis (aaaa) first, or use the CFG page for per-function control flow.",
                 primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
             )
-            sccMode -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            cgView == "scc" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val sccs = remember(nodes, edges) {
                     if (nodes.isEmpty()) emptyList()
                     else tarjanScc(nodes.map { it.optString("name").ifBlank { it.optString("id") } }, edges)
@@ -7385,7 +7399,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     }
                 }
             }
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            cgView == "list" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (indeg.isNotEmpty()) {
                     Text(if (zh) "枢纽（入度 Top5）" else "Hubs (indegree Top5)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
                     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -7428,6 +7442,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     }
                 }
             }
+            else -> CallGraphGraphPane(nodes, edges, query, zh)
         }
     }
 }
@@ -9167,5 +9182,448 @@ private fun SccGraphCanvas(
                 if (m != null) copyToClipboard(ctx, m.joinToString("\n"), zh)
             }
         }
+    }
+}
+
+
+// ══════════════════ 全局调用图 · 图形画布（对标 Exbin GlobalCfgView） ══════════════════
+
+private class CgNode(
+    val name: String,
+    val addr: String,
+    var level: Int,
+    var x: Float,
+    var y: Float,
+    val w: Float,
+    val h: Float,
+) {
+    val left: Float get() = x - w / 2f
+    val right: Float get() = x + w / 2f
+    val top: Float get() = y - h / 2f
+    val bottom: Float get() = y + h / 2f
+    fun contains(px: Float, py: Float): Boolean = px in left..right && py in top..bottom
+}
+
+private class CgLayout(
+    val nodes: List<CgNode>,
+    val edges: List<Pair<Int, Int>>,
+    val width: Float,
+    val height: Float,
+)
+
+/** 按模式（hot/root/full）过滤出子图；节点索引化。 */
+private fun buildCallSubgraph(
+    nodes: List<JSONObject>,
+    edges: List<Pair<String, String>>,
+    mode: String,
+    root: String,
+    depth: Int,
+    maxNodes: Int,
+): Pair<List<Pair<String, String>>, List<Pair<Int, Int>>> {
+    if (nodes.isEmpty()) return emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
+    val addrOf = HashMap<String, String>()
+    val all = ArrayList<String>(nodes.size)
+    nodes.forEach { o ->
+        val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
+        if (nm.isBlank()) return@forEach
+        all.add(nm)
+        addrOf[nm] = hexAddr(o.opt("offset") ?: o.opt("id"))
+    }
+    val outAdj = HashMap<String, MutableList<String>>()
+    val inDeg = HashMap<String, Int>()
+    all.forEach { inDeg[it] = 0 }
+    edges.forEach { (f, t) ->
+        if (f == t || !inDeg.containsKey(f) || !inDeg.containsKey(t)) return@forEach
+        outAdj.getOrPut(f) { ArrayList() }.add(t)
+        inDeg[t] = (inDeg[t] ?: 0) + 1
+    }
+    fun deg(n: String): Int = (outAdj[n]?.size ?: 0) + (inDeg[n] ?: 0)
+    val selected: List<String> = when (mode) {
+        "root" -> {
+            val r = root.ifBlank { all.firstOrNull { (inDeg[it] ?: 0) == 0 } ?: all.firstOrNull() }.orEmpty()
+            if (r.isBlank()) emptyList() else {
+                val seen = LinkedHashSet<String>()
+                seen.add(r)
+                var frontier = listOf(r)
+                repeat(depth.coerceIn(1, 8)) {
+                    val next = ArrayList<String>()
+                    frontier.forEach { u -> outAdj[u]?.forEach { v -> if (seen.add(v)) next.add(v) } }
+                    frontier = next
+                }
+                seen.toList()
+            }
+        }
+        "hot" -> all.sortedByDescending { deg(it) }.take(maxNodes.coerceIn(10, 400))
+        else -> all.take(maxNodes.coerceIn(10, 400))
+    }
+    val idx = HashMap<String, Int>(selected.size * 2)
+    selected.forEachIndexed { i, n -> idx[n] = i }
+    val sub = selected.map { it to (addrOf[it] ?: "") }
+    val subEdges = ArrayList<Pair<Int, Int>>()
+    edges.forEach { (f, t) ->
+        val a = idx[f]
+        val b = idx[t]
+        if (a != null && b != null && a != b) subEdges.add(a to b)
+    }
+    return sub to subEdges
+}
+
+/** 分层布局：level 由调用关系松弛求得；TB 层沿 y、LR 层沿 x。 */
+private fun layoutCallGraph(
+    sub: List<Pair<String, String>>,
+    edges: List<Pair<Int, Int>>,
+    dir: String,
+    density: Float,
+): CgLayout {
+    val n = sub.size
+    if (n == 0) return CgLayout(emptyList(), emptyList(), 0f, 0f)
+    val paint = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 10f * density }
+    val padX = 8f * density
+    val minW = 70f * density
+    val maxW = 230f * density
+    val nodeH = 30f * density
+    val gapLane = 16f * density
+    val gapLayer = 60f * density
+    val tb = dir != "LR"
+    val w = FloatArray(n) { max(minW, min(paint.measureText(sub[it].first) + padX * 2f, maxW)) }
+    val sizeCross = FloatArray(n) { if (tb) w[it] else nodeH }
+    val sizeMain = FloatArray(n) { if (tb) nodeH else w[it] }
+    val level = IntArray(n) { 0 }
+    repeat(n.coerceAtMost(120)) {
+        var changed = false
+        edges.forEach { (u, v) ->
+            if (u in 0 until n && v in 0 until n && level[v] < level[u] + 1) { level[v] = level[u] + 1; changed = true }
+        }
+        if (!changed) return@repeat
+    }
+    val maxL = level.maxOrNull() ?: 0
+    val layers = ArrayList<MutableList<Int>>(maxL + 1)
+    for (l in 0..maxL) layers.add(ArrayList())
+    for (i in 0 until n) layers[level[i]].add(i)
+    layers.forEach { l -> l.sortBy { sub[it].first } }
+    val layerW = FloatArray(layers.size)
+    layers.forEachIndexed { li, l ->
+        var acc = 0f
+        l.forEach { i -> acc += sizeCross[i] + gapLane }
+        layerW[li] = if (l.isEmpty()) 0f else acc - gapLane
+    }
+    val maxLayerW = layerW.maxOrNull() ?: 0f
+    val cross = FloatArray(n)
+    val main = FloatArray(n)
+    var pos = 0f
+    layers.forEachIndexed { li, l ->
+        val maxMain = l.maxOfOrNull { sizeMain[it] } ?: 0f
+        var cursor = (maxLayerW - layerW[li]) / 2f
+        l.forEach { i ->
+            cross[i] = cursor + sizeCross[i] / 2f
+            cursor += sizeCross[i] + gapLane
+            main[i] = pos + maxMain / 2f
+        }
+        pos += maxMain + gapLayer
+    }
+    val nodes = ArrayList<CgNode>(n)
+    for (i in 0 until n) {
+        val nm = sub[i].first
+        val addr = sub[i].second
+        if (tb) nodes.add(CgNode(nm, addr, level[i], cross[i], main[i], w[i], nodeH))
+        else nodes.add(CgNode(nm, addr, level[i], main[i], cross[i], w[i], nodeH))
+    }
+    var minX = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE
+    var minY = Float.MAX_VALUE
+    var maxY = -Float.MAX_VALUE
+    nodes.forEach { nd ->
+        minX = min(minX, nd.left)
+        maxX = max(maxX, nd.right)
+        minY = min(minY, nd.top)
+        maxY = max(maxY, nd.bottom)
+    }
+    if (minX > maxX) return CgLayout(nodes, edges, 0f, 0f)
+    val cx = (minX + maxX) / 2f
+    val cy = (minY + maxY) / 2f
+    nodes.forEach { it.x -= cx; it.y -= cy }
+    return CgLayout(nodes, edges, maxX - minX, maxY - minY)
+}
+
+private fun cgFitText(paint: Paint, text: String, maxWidth: Float): String {
+    if (text.isEmpty() || maxWidth <= 0f) return ""
+    if (paint.measureText(text) <= maxWidth) return text
+    var end = text.length
+    while (end > 1) {
+        val c = text.take(end) + "…"
+        if (paint.measureText(c) <= maxWidth) return c
+        end--
+    }
+    return ""
+}
+
+private fun DrawScope.cgArrowHead(tip: Offset, from: Offset, color: Color, sizePx: Float) {
+    var dx = tip.x - from.x
+    var dy = tip.y - from.y
+    var len = kotlin.math.sqrt(dx * dx + dy * dy)
+    if (len < 0.001f) {
+        dx = 0f
+        dy = 1f
+        len = 1f
+    }
+    val ux = dx / len
+    val uy = dy / len
+    val px = -uy
+    val py = ux
+    val bx = tip.x - ux * sizePx
+    val by = tip.y - uy * sizePx
+    val path = Path()
+    path.moveTo(tip.x, tip.y)
+    path.lineTo(bx + px * sizePx * 0.5f, by + py * sizePx * 0.5f)
+    path.lineTo(bx - px * sizePx * 0.5f, by - py * sizePx * 0.5f)
+    path.close()
+    drawPath(path, color)
+}
+
+private fun DrawScope.drawCgScene(
+    layout: CgLayout,
+    colors: androidx.compose.material3.ColorScheme,
+    density: Float,
+    scale: Float,
+    pan: Offset,
+    viewportSize: Size,
+    selected: Int,
+    findQ: String,
+    dir: String,
+) {
+    val sc = scale
+    val originX = viewportSize.width / 2f + pan.x
+    val originY = viewportSize.height / 2f + pan.y
+    fun px(v: Float) = v * sc + originX
+    fun py(v: Float) = v * sc + originY
+    val edgeColor = colors.outlineVariant
+    val selColor = colors.primary
+    val hitColor = AppPalette.orange
+    val scl = sc.coerceIn(0.5f, 2f)
+    val strokeW = max(1f, 1.1f * density * scl)
+    layout.edges.forEach { (u, v) ->
+        val a = layout.nodes.getOrNull(u) ?: return@forEach
+        val b = layout.nodes.getOrNull(v) ?: return@forEach
+        val dx = b.x - a.x
+        val dy = b.y - a.y
+        val horiz = kotlin.math.abs(dx) >= kotlin.math.abs(dy)
+        val p0 = if (horiz) Offset(if (dx >= 0) a.right else a.left, a.y) else Offset(a.x, if (dy >= 0) a.bottom else a.top)
+        val p1 = if (horiz) Offset(if (dx >= 0) b.left else b.right, b.y) else Offset(b.x, if (dy >= 0) b.top else b.bottom)
+        val path = Path()
+        path.moveTo(px(p0.x), py(p0.y))
+        if (dir != "LR") {
+            val my = (p0.y + p1.y) / 2f
+            path.cubicTo(px(p0.x), py(my), px(p1.x), py(my), px(p1.x), py(p1.y))
+        } else {
+            val mx = (p0.x + p1.x) / 2f
+            path.cubicTo(px(mx), py(p0.y), px(mx), py(p1.y), px(p1.x), py(p1.y))
+        }
+        drawPath(path, edgeColor, style = Stroke(width = strokeW, cap = StrokeCap.Round))
+        cgArrowHead(Offset(px(p1.x), py(p1.y)), Offset(px(p0.x), py(p0.y)), edgeColor, max(4f, 6f * density * scl))
+    }
+    val paint = Paint().apply {
+        isAntiAlias = true
+        typeface = Typeface.MONOSPACE
+        textSize = (9.5f * density * sc).coerceIn(7f, 26f)
+    }
+    val showText = sc >= 0.42f
+    layout.nodes.forEachIndexed { i, nd ->
+        val isSel = i == selected
+        val hit = findQ.isNotBlank() && nd.name.contains(findQ, true)
+        val stroke = when {
+            isSel -> selColor
+            hit -> hitColor
+            else -> colors.outlineVariant
+        }
+        val tl = Offset(px(nd.left), py(nd.top))
+        val sz = Size(nd.w * sc, nd.h * sc)
+        val cr = CornerRadius(7f * density * sc)
+        drawRoundRect(colors.surfaceContainerHigh, tl, sz, cr)
+        drawRoundRect(stroke, tl, sz, cr, style = Stroke(width = if (isSel || hit) strokeW * 1.8f else strokeW))
+        if (showText) {
+            val avail = nd.w * sc - 10f * density
+            if (avail > 12f) {
+                paint.color = (if (isSel) selColor else colors.onSurface).toArgb()
+                val label = cgFitText(paint, nd.name, avail)
+                drawIntoCanvas { c ->
+                    c.nativeCanvas.drawText(label, px(nd.x) - paint.measureText(label) / 2f, py(nd.y) + paint.textSize * 0.34f, paint)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallGraphCanvas(
+    sub: List<Pair<String, String>>,
+    edges: List<Pair<Int, Int>>,
+    dir: String,
+    findQ: String,
+    zh: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current.density
+    val cs = MaterialTheme.colorScheme
+    val layout = remember(sub, edges, dir, density) { layoutCallGraph(sub, edges, dir, density) }
+    var scale by remember(layout) { mutableStateOf(1f) }
+    var pan by remember(layout) { mutableStateOf(Offset.Zero) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    var selected by remember(layout) { mutableStateOf(-1) }
+    var fitted by remember(layout) { mutableStateOf(false) }
+    var mi by remember(layout, findQ) { mutableStateOf(0) }
+
+    fun applyFit() {
+        if (viewport.width <= 0 || viewport.height <= 0 || layout.nodes.isEmpty()) return
+        val w = layout.width + 60f
+        val h = layout.height + 60f
+        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.1f, 2.5f)
+        pan = Offset.Zero
+    }
+    LaunchedEffect(layout, viewport) {
+        if (!fitted && viewport.width > 0 && layout.nodes.isNotEmpty()) {
+            applyFit()
+            fitted = true
+        }
+    }
+
+    val shape = RoundedCornerShape(AppShape.md)
+    Box(
+        modifier
+            .clip(shape)
+            .background(cs.surfaceContainerLow)
+            .border(BorderStroke(1.dp, cs.outlineVariant), shape)
+            .onSizeChanged { viewport = it }
+            .pointerInput(layout) {
+                detectTapGestures(onDoubleTap = { applyFit() }) { pos ->
+                    val ox = viewport.width / 2f + pan.x
+                    val oy = viewport.height / 2f + pan.y
+                    val wx = (pos.x - ox) / scale
+                    val wy = (pos.y - oy) / scale
+                    selected = layout.nodes.indexOfLast { it.contains(wx, wy) }
+                }
+            }
+            .pointerInput(Unit) {
+                detectTransformGestures { _, panChange, zoom, _ ->
+                    scale = (scale * zoom).coerceIn(0.1f, 6f)
+                    pan += panChange
+                }
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawCgScene(layout, cs, density, scale, pan, size, selected, findQ, dir)
+        }
+        Surface(
+            shape = RoundedCornerShape(AppShape.xs),
+            color = cs.surfaceVariant.copy(alpha = 0.60f),
+            modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
+        ) {
+            Text(
+                "${layout.nodes.size} ${if (zh) "节点" else "nodes"} · ${layout.edges.size} ${if (zh) "边" else "edges"} · ${(scale * 100).toInt()}%",
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        FlowRow(
+            Modifier.align(Alignment.TopEnd).padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            SmallAction(if (zh) "适应" else "Fit") { applyFit() }
+            if (findQ.isNotBlank()) {
+                SmallAction(if (zh) "下一个" else "Next") {
+                    val matches = layout.nodes.indices.filter { layout.nodes[it].name.contains(findQ, true) }
+                    if (matches.isNotEmpty()) {
+                        val k = matches[mi % matches.size]
+                        mi++
+                        selected = k
+                        val nd = layout.nodes[k]
+                        pan = Offset(-nd.x * scale, -nd.y * scale)
+                    }
+                }
+            }
+        }
+        if (selected in layout.nodes.indices) {
+            Surface(
+                shape = RoundedCornerShape(AppShape.xs),
+                color = cs.surfaceVariant.copy(alpha = 0.72f),
+                modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
+            ) {
+                val nd = layout.nodes[selected]
+                Text(
+                    (if (nd.addr.isNotBlank()) nd.addr + "  " else "") + nd.name,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallGraphGraphPane(
+    nodes: List<JSONObject>,
+    edges: List<Pair<String, String>>,
+    findQ: String,
+    zh: Boolean,
+) {
+    val cs = MaterialTheme.colorScheme
+    var mode by remember { mutableStateOf("hot") }
+    var dir by remember { mutableStateOf("TB") }
+    var depth by remember { mutableStateOf(2) }
+    var maxN by remember { mutableStateOf(120) }
+    var root by remember { mutableStateOf("") }
+    val rootCandidates = remember(nodes, edges) {
+        val indeg = HashMap<String, Int>()
+        edges.forEach { (_, t) -> indeg[t] = (indeg[t] ?: 0) + 1 }
+        nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }
+            .filter { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
+            .take(40)
+    }
+    val subPair = remember(nodes, edges, mode, root, depth, maxN) {
+        buildCallSubgraph(nodes, edges, mode, root, depth, maxN)
+    }
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallAction(if (zh) "热点" else "Hot", active = mode == "hot") { mode = "hot" }
+            SmallAction(if (zh) "根展开" else "Root", active = mode == "root") { mode = "root" }
+            SmallAction(if (zh) "完整" else "Full", active = mode == "full") { mode = "full" }
+            SmallAction(if (dir == "TB") "TB → LR" else "LR → TB") { dir = if (dir == "TB") "LR" else "TB" }
+            if (mode != "full") {
+                SmallAction("-${if (zh) "上限" else "max"}") { maxN = (maxN - 40).coerceAtLeast(20) }
+                SmallAction("+${if (zh) "上限" else "max"}") { maxN = (maxN + 40).coerceAtMost(400) }
+            }
+            if (mode == "root") {
+                SmallAction("-${if (zh) "层" else "d"}") { depth = (depth - 1).coerceAtLeast(1) }
+                SmallAction(if (zh) "深 $depth" else "d $depth") { }
+                SmallAction("+${if (zh) "层" else "d"}") { depth = (depth + 1).coerceAtMost(8) }
+            }
+            Text(
+                "${subPair.first.size} / ${nodes.size}",
+                style = MaterialTheme.typography.labelSmall,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        if (mode == "root" && rootCandidates.isNotEmpty()) {
+            FlowRow(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                rootCandidates.take(12).forEach { r ->
+                    SmallAction(r.take(24), active = root == r) { root = r }
+                }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        CallGraphCanvas(subPair.first, subPair.second, dir, findQ, zh, Modifier.fillMaxWidth().weight(1f))
     }
 }

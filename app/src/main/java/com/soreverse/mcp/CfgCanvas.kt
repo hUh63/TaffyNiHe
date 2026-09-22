@@ -1193,6 +1193,7 @@ internal fun layoutCfgGrid(graph: CfgGraph, density: Float): CfgLayoutResult {
     val padX = PAD_X_DP * density
     val padY = PAD_Y_DP * density
     val minW = NODE_W_MIN_DP * density
+    val maxW = NODE_W_MAX_DP * density
     val minH = NODE_H_MIN_DP * density
     val paintAddr = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 10.5f * density }
 

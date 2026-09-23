@@ -24,6 +24,7 @@ package com.soreverse.mcp
 
 import android.graphics.Paint
 import com.soreverse.mcp.engine.ExbinDagre
+import com.soreverse.mcp.engine.ExbinElk
 import android.graphics.Typeface
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -720,13 +721,20 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
 }
 
 /**
- * Dagre 布局引擎（Exbin `DagreLayout`，dagre.js 的 1:1 Java 移植）。
+ * 外部布局引擎入口（Dagre / ELK），与自研 [layoutCfgGraph] 平行。
  *
- * 与自研 [layoutCfgGraph] 平行：走标准 dagre 流水线（去环 → rank → normalize →
- * 交叉最小化 order → 坐标二次优化 position），长边由 dagre 内部拆虚节点处理。
+ * - backend = "dagre"：Exbin DagreLayout（dagre.js 1:1 Java 移植）
+ * - backend = "elk"：Eclipse ELK Layered（官方 Java 库，正交边路由）
+ *
+ * 两者共享本文件的节点尺寸自适应逻辑，长边由各自引擎内部拆虚节点处理。
  * 布局失败自动回退自研分层布局，绝不产出空图。
  */
-internal fun layoutCfgGraphDagre(graph: CfgGraph, density: Float, maxLines: Int = 2): CfgLayoutResult {
+internal fun layoutCfgGraphDagre(
+    graph: CfgGraph,
+    density: Float,
+    maxLines: Int = 2,
+    backend: String = "dagre",
+): CfgLayoutResult {
     val n = graph.blocks.size
     if (n == 0 || density <= 0f) {
         return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
@@ -780,8 +788,11 @@ internal fun layoutCfgGraphDagre(graph: CfgGraph, density: Float, maxLines: Int 
         edges.add(e.from.toString() to e.to.toString())
     }
 
-    val laid = ExbinDagre.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), "TB")
-        ?: return layoutCfgGraph(graph, density, maxLines)
+    val laid = if (backend == "elk") {
+        ExbinElk.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), "orthogonal")
+    } else {
+        ExbinDagre.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), "TB")
+    } ?: return layoutCfgGraph(graph, density, maxLines)
     val nodesMap = laid.first
     val routesMap = laid.second
 
@@ -1295,6 +1306,7 @@ internal fun CfgCanvas(
             "grid" -> layoutCfgGrid(graph, density, maxLines)
             "force" -> layoutCfgForce(graph, density, maxLines)
             "dagre" -> layoutCfgGraphDagre(graph, density, maxLines)
+            "elk" -> layoutCfgGraphDagre(graph, density, maxLines, "elk")
             else -> layoutCfgGraph(graph, density, maxLines)
         }
     }

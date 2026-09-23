@@ -167,6 +167,11 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.10.0@aar")
     implementation("commons-codec:commons-codec:1.21.0")
     implementation("org.apache.commons:commons-collections4:4.5.0")
+
+    // 逆核: Eclipse ELK 分层布局引擎（CFG 画布可选布局；对应 Exbin ElkLayoutEngine 的官方 Java 库版）
+    implementation("org.eclipse.elk:org.eclipse.elk.core:0.9.1")
+    implementation("org.eclipse.elk:org.eclipse.elk.alg.layered:0.9.1")
+    implementation("org.eclipse.elk:org.eclipse.elk.graph:0.9.1")
     implementation("commons-io:commons-io:2.21.0")
     implementation("com.alibaba:fastjson:1.2.83")
     implementation("com.lambdapioneer.argon2kt:argon2kt:1.6.0")

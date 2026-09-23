@@ -225,3 +225,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR NOT CMAKE_BUILD_TYPE)
         -Wl,--as-needed
     )
 endif()
+
+# ── 逆核: Exbin 自研 microcode + SSA 反编译器（独立 libexbin_decomp.so）──
+# 独立于 rizin/ghidra 的第六条伪 C 路径；纯 C++17 + JNI，无第三方依赖。
+# JNI 入口: Java_com_exbin_app_nativebridge_NativeBridge_nativeDecompileFunction
+add_subdirectory(exbin_decomp)

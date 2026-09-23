@@ -125,6 +125,11 @@ jobs:
           # xanso_native(ELF section 重建) —— 源码已 clone, 一并编译
           cmake --build "build/native-${{ matrix.abi }}" --target xanso_native --parallel 4
           cp "build/native-${{ matrix.abi }}/libxanso_native.so" "app/src/main/jniLibs/${{ matrix.abi }}/"
+          # Exbin 自研 microcode+SSA 反编译器（libexbin_decomp.so）——
+          # 源码随仓库提交（app/src/main/cpp/exbin_decomp/），无第三方依赖，直接编译
+          cmake --build "build/native-${{ matrix.abi }}" --target exbin_decomp --parallel 4
+          cp "build/native-${{ matrix.abi }}/exbin_decomp/libexbin_decomp.so" "app/src/main/jniLibs/${{ matrix.abi }}/"
+          ls -lh "app/src/main/jniLibs/${{ matrix.abi }}/libexbin_decomp.so"
 
       - name: 编译 unidbg 原生库 (capstone/keystone/unicorn)
         run: |

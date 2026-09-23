@@ -112,3 +112,15 @@
 -dontwarn org.jf.dexlib2.iface.DexFile
 -dontwarn org.jf.smali.Smali
 -dontwarn org.jf.smali.SmaliOptions
+
+# ── Eclipse ELK（CFG 可选布局引擎）及其传递依赖 EMF ──
+# EMF 的 resource impl 引用了 Eclipse Platform / OSGi 的可选类（如 org.eclipse.core.resources.*），
+# Android 上不存在 → R8 会因 Missing class 直接失败，必须 dontwarn。
+# ELK/EMF 大量依赖反射与 EMF 工厂/元数据服务，整体保留（不混淆）。
+-dontwarn org.eclipse.core.**
+-dontwarn org.eclipse.emf.**
+-dontwarn org.osgi.**
+-keep class org.eclipse.elk.** { *; }
+-keepclassmembers class org.eclipse.elk.** { *; }
+-keep class org.eclipse.emf.** { *; }
+-keepclassmembers class org.eclipse.emf.** { *; }

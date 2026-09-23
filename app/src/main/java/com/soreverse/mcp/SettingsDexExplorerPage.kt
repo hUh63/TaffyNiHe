@@ -2,35 +2,31 @@ package com.soreverse.mcp
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
 import kotlinx.coroutines.Dispatchers
@@ -40,10 +36,10 @@ import java.io.File
 import java.util.zip.ZipFile
 
 /**
- * 设置 → DEX / APK 浏览器：可视化浏览 APK/DEX 的类与方法（对标 MT 管理器的 DEX 查看入口）。
+ * 设置 → DEX / APK 浏览器：可视化浏览 APK/DEX 的类与方法（只读）。
  *
- * 只读浏览（类列表可搜索、点类看字段/方法）；实际编辑仍走对应 MCP 工具 / 编辑器页。
- * 补齐「APK/DEX 工具只有命令行/JSON 交互、没有可视化操作界面」的空白。
+ * 修复：旧实现把 content:// URI 当文件路径用，选文件后必然报“文件不存在”；
+ * 现改为先落地到 cacheDir 再解析。列表用卡片行 + 实时搜索 + 稳定 key。
  */
 @Composable
 internal fun SettingsDexExplorerPage(t: UiText) {
@@ -51,12 +47,15 @@ internal fun SettingsDexExplorerPage(t: UiText) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var path by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var classes by remember { mutableStateOf<List<String>>(emptyList()) }
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<String?>(null) }
-    var members by remember { mutableStateOf<List<String>>(emptyList()) }
+    var members by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var memberLoading by remember { mutableStateOf(false) }
+    var memberError by remember { mutableStateOf("") }
 
     fun dexFilesOf(p: String): List<File> {
         val f = File(p)
@@ -75,11 +74,15 @@ internal fun SettingsDexExplorerPage(t: UiText) {
 
     fun load(p: String) {
         if (p.isBlank()) return
-        loading = true; error = ""; classes = emptyList(); selected = null; members = emptyList()
+        loading = true
+        error = ""
+        classes = emptyList()
+        selected = null
+        members = emptyList()
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 runCatching {
-                    val names = ArrayList<String>()
+                    val names = LinkedHashSet<String>()
                     dexFilesOf(p).forEach { d ->
                         DexFileFactory.loadDexFile(d, Opcodes.getDefault()).classes.forEach { cd -> names.add(cd.type) }
                     }
@@ -94,68 +97,150 @@ internal fun SettingsDexExplorerPage(t: UiText) {
 
     fun openClass(type: String) {
         if (path.isBlank()) return
-        selected = type; members = emptyList()
+        selected = type
+        members = emptyList()
+        memberError = ""
+        memberLoading = true
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 runCatching {
-                    val list = ArrayList<String>()
+                    val list = ArrayList<Pair<String, String>>()
+                    var found = false
                     dexFilesOf(path).forEach { d ->
                         DexFileFactory.loadDexFile(d, Opcodes.getDefault()).classes.firstOrNull { it.type == type }?.let { cd ->
-                            cd.fields.forEach { f -> list.add("field  ${f.type} ${f.name}") }
+                            found = true
+                            cd.fields.forEach { f -> list.add("field" to "${f.type} ${f.name}") }
                             cd.methods.forEach { m ->
-                                list.add("method ${m.name}(${m.parameterTypes.joinToString("") { it.toString() }})${m.returnType}")
+                                list.add("method" to "${m.name}(${m.parameterTypes.joinToString("") { it.toString() }})${m.returnType}")
                             }
                         }
                     }
+                    if (!found) throw IllegalStateException(if (zh) "未找到该类" else "class not found")
                     list
                 }
             }
+            memberLoading = false
             res.onSuccess { members = it }
-            res.onFailure { members = emptyList() }
+            res.onFailure { memberError = it.message ?: if (zh) "读取成员失败" else "load members failed" }
         }
     }
 
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) { path = uri.toString(); load(uri.toString()) }
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            loading = true
+            error = ""
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val name = uri.lastPathSegment?.substringAfterLast('/') ?: "input.dex"
+                    val f = File(context.cacheDir, "dexx_input_${System.currentTimeMillis()}_$name")
+                    context.contentResolver.openInputStream(uri)?.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+                        ?: throw IllegalStateException(if (zh) "无法读取所选文件" else "read failed")
+                    f.absolutePath to name
+                }
+            }
+            r.onSuccess { pair ->
+                path = pair.first
+                displayName = pair.second
+                load(pair.first)
+            }.onFailure {
+                error = it.message ?: "failed"
+                loading = false
+            }
+        }
     }
 
-    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(if (zh) "DEX / APK 浏览器" else "DEX / APK Explorer", style = MaterialTheme.typography.titleSmall)
-        Text(
-            if (zh) "浏览 APK/DEX 的类与方法（只读）。编辑请走对应 MCP 工具或编辑器页。" else "Browse classes & methods of an APK/DEX (read-only).",
-            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = path, onValueChange = { path = it }, label = { Text("APK / DEX path") }, modifier = Modifier.weight(1f), singleLine = true)
-            OutlinedButton(onClick = { pick.launch("*/*") }) { Text(if (zh) "选择" else "Pick") }
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        GlassGroup {
+            DataRow(
+                title = displayName.ifBlank { if (zh) "未选择文件" else "No file" },
+                subtitle = if (path.isBlank()) (if (zh) "选择一个 APK / DEX 浏览类与方法（只读）" else "Pick an APK / DEX to browse (read-only)")
+                else (if (zh) "${classes.size} 个类" else "${classes.size} classes"),
+                meta = if (path.isBlank()) null else path,
+                leading = { Icon(Icons.Default.Description, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
+                trailingText = if (zh) "选择" else "Pick",
+                onClick = { pick.launch("*/*") },
+            )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { load(path) }, enabled = path.isNotBlank() && !loading) { Text(if (zh) "加载" else "Load") }
-            if (loading) CircularProgressIndicator(Modifier.size(20.dp))
+
+        if (error.isNotBlank()) {
+            GlassGroup { InlineHint(error, tone = HintTone.Error) }
         }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
 
         val sel = selected
         if (sel != null) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(sel, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
-                TextButton(onClick = { selected = null; members = emptyList() }) { Text(if (zh) "返回类列表" else "Back") }
+            GlassGroup {
+                Text(
+                    sel.replace('/', '.'),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                )
+                DataRow(
+                    title = if (zh) "返回类列表" else "Back to class list",
+                    trailingText = "‹",
+                    onClick = { selected = null; members = emptyList() },
+                )
             }
-            HorizontalDivider()
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(members, key = { it }) { m ->
-                    Text(m, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp))
+            when {
+                memberLoading -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(if (zh) "读取成员…" else "Loading members…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                memberError.isNotBlank() -> InlineHint(memberError, tone = HintTone.Error)
+                members.isEmpty() -> InlineHint(if (zh) "该类无字段/方法" else "No fields/methods")
+                else -> {
+                    Text(
+                        if (zh) "${members.size} 个成员" else "${members.size} members",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(members) { m ->
+                            GlassGroup {
+                                DataRow(
+                                    title = m.second,
+                                    leading = { TypeChip(m.first, if (m.first == "field") AppPalette.orange else AppPalette.blue) },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         } else {
-            OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text(if (zh) "搜索类" else "Search class") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            val filtered = remember(classes, query) { if (query.isBlank()) classes else classes.filter { it.contains(query, ignoreCase = true) } }
-            Text(if (zh) "共 ${filtered.size} / ${classes.size} 个类" else "${filtered.size} / ${classes.size} classes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(filtered, key = { it }) { c ->
-                    Text(c, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, modifier = Modifier.fillMaxWidth().clickable { openClass(c) }.padding(vertical = 2.dp))
+            SearchCountBar(
+                query = query,
+                onQueryChange = { query = it },
+                shown = classes.count { it.contains(query.trim(), ignoreCase = true) },
+                total = classes.size,
+                placeholder = if (zh) "搜索类" else "Search class",
+            )
+            if (classes.isEmpty()) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
+                    InlineHint(
+                        if (loading) (if (zh) "解析中…" else "Parsing…")
+                        else (if (zh) "选择 APK / DEX 后显示类列表" else "Pick an APK / DEX to list classes"),
+                    )
+                }
+            } else {
+                val filtered = classes.filter { it.contains(query.trim(), ignoreCase = true) }
+                LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(filtered, key = { it }) { c ->
+                        GlassGroup {
+                            DataRow(
+                                title = c.substringAfterLast('/').removePrefix("L").removeSuffix(";").ifBlank { c },
+                                subtitle = c,
+                                onClick = { openClass(c) },
+                                onLongClick = { openClass(c) },
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+
+    BusyOverlay(visible = loading, message = if (zh) "解析中…" else "Parsing…")
 }

@@ -271,4 +271,63 @@ public final class NativeBridge {
     public static CrossRefEntryNative[] getCallers(long handle, long funcAddr) {
         return null;
     }
+
+    // ============================================================
+    // Exbin 自研 microcode + SSA 反编译器（libexbin_decomp.so）
+    //   AsmInsn → MicrocodeEmitter → SSA → Optimize → CFGStructure
+    //           → CTree → Beautify → CPrinter
+    //   纯 C++17 + JNI，无第三方依赖；仅 arm64/arm32/x86 ABI 由 CI 各自编译。
+    // ============================================================
+
+    private static final boolean sDecompLoaded;
+
+    static {
+        boolean ok = false;
+        try {
+            System.loadLibrary("exbin_decomp");
+            ok = true;
+        } catch (Throwable ignored) {
+            // 该 ABI 未打包 libexbin_decomp.so：静默降级，不影响其它能力
+        }
+        sDecompLoaded = ok;
+    }
+
+    /** libexbin_decomp.so 是否可用。 */
+    public static boolean isExbinDecompilerAvailable() {
+        return sDecompLoaded;
+    }
+
+    private static native String nativeDecompileFunction(
+            String funcName, long funcAddr, int machine, boolean isThumb, String soPath,
+            String[] mnemonics, String[] opStrs, long[] addresses, int[] sizes,
+            long[] labelAddrs, String[] labelNames,
+            long[] importAddrs, String[] importNames,
+            String[] sigNames, String[] sigStrings,
+            long[] symAddrs, String[] symNames);
+
+    /**
+     * 调用 Exbin 反编译器生成伪 C。
+     *
+     * @return 伪 C 文本；so 未打包 / native 失败时返回 null（调用方降级）
+     */
+    public static String decompileFunction(
+            String funcName, long funcAddr, int machine, boolean isThumb, String soPath,
+            String[] mnemonics, String[] opStrs, long[] addresses, int[] sizes,
+            long[] labelAddrs, String[] labelNames,
+            long[] importAddrs, String[] importNames,
+            String[] sigNames, String[] sigStrings,
+            long[] symAddrs, String[] symNames) {
+        if (!sDecompLoaded) return null;
+        try {
+            return nativeDecompileFunction(
+                    funcName, funcAddr, machine, isThumb, soPath,
+                    mnemonics, opStrs, addresses, sizes,
+                    labelAddrs, labelNames,
+                    importAddrs, importNames,
+                    sigNames, sigStrings,
+                    symAddrs, symNames);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 }

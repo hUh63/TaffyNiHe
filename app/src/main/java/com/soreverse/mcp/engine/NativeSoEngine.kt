@@ -25,6 +25,10 @@ class NativeSoEngine(context: Context) {
     internal fun exbinSignature(workspaceId: String, name: String, va: Long): JSONObject? =
         ExbinSignature.analyze(runtime, workspaceId, name, va)
 
+    /** Exbin 自研 microcode+SSA 反编译器（libexbin_decomp.so）；不可用/失败返回 null。 */
+    internal fun exbinDecompile(workspaceId: String, editSessionId: String, locator: String): String? =
+        ExbinDecompiler.decompile(runtime, workspaceId, editSessionId, locator)
+
     fun setWorkDirectory(uri: Uri) = runtime.setWorkDirectory(uri)
     fun listAvailableSos(prefix: String = "", limit: Int = 50, cursor: String = ""): JSONObject = runtime.listAvailableSos(prefix, limit, cursor)
     fun open(path: String, temporary: Boolean): JSONObject = runtime.open(path, temporary)

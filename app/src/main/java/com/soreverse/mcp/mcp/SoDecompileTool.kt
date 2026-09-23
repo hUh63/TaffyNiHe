@@ -38,7 +38,7 @@ object SoDecompileTool {
                 "filePath" str "path 的别名"
                 "locator" str "函数定位符：函数名/符号/0x 十六进制线性地址；留空时由引擎回退到 ELF 入口点"
                 "strict" bool "true（默认）：Ghidra 不可用时返回错误；false：尽量降级返回可用结果"
-                "engine".oneOf("反编译引擎: auto(自动降级) | ghidra(rizin-ghidra pdg) | native(rizin 内置 pdc) | java(Exbin r2dec 纯 Java 引擎，缺失时降级启发式) | simple(Exbin SimplePseudoC 结构化引擎)", "auto", "ghidra", "native", "java", "simple")
+                "engine".oneOf("反编译引擎: auto(自动降级) | ghidra(rizin-ghidra pdg) | native(rizin 内置 pdc) | java(Exbin r2dec 纯 Java 引擎，缺失时降级启发式) | simple(Exbin SimplePseudoC 结构化引擎) | exbin(Exbin 自研 microcode+SSA 反编译器)", "auto", "ghidra", "native", "java", "simple", "exbin")
             })
         }
 
@@ -123,6 +123,20 @@ object SoDecompileTool {
                 }.getOrNull()
             }
 
+            fun runExbinDecomp(): JSONObject? {
+                return runCatching {
+                    val code = engine.exbinDecompile(workspaceId, "", locator)
+                    if (code.isNullOrBlank()) null
+                    else JSONObject().put("ok", true).put("pseudocode", code)
+                        .put("engine", "exbin-decomp")
+                        .put(
+                            "engineNote",
+                            "Exbin 自研 microcode+SSA 反编译器（libexbin_decomp.so；" +
+                                "MicrocodeEmitter→SSA→Optimize→CFGStructure→CTree→CPrinter）",
+                        )
+                }.getOrNull()
+            }
+
             if (wantEngine == "native") {
                 val r = runNativePdc()
                 if (r == null) return err("DECOMPILER_UNAVAILABLE", "native(pdc) 引擎无输出（该 rizin 构建可能未启用 pdc）", "engine", "native")
@@ -136,6 +150,17 @@ object SoDecompileTool {
             if (wantEngine == "simple") {
                 val r = runExbinSimple()
                 if (r == null) return err("DECOMPILER_UNAVAILABLE", "SimplePseudoC 引擎无输出（地址无法反汇编或指令为空）", "engine", "simple")
+                return ok(r.put("workspaceId", workspaceId).put("locator", locator))
+            }
+            if (wantEngine == "exbin") {
+                val r = runExbinDecomp()
+                if (r == null) {
+                    return err(
+                        "DECOMPILER_UNAVAILABLE",
+                        "Exbin 反编译器无输出（该 ABI 未打包 libexbin_decomp.so / 地址无法反汇编 / 指令为空）",
+                        "engine", "exbin",
+                    )
+                }
                 return ok(r.put("workspaceId", workspaceId).put("locator", locator))
             }
 

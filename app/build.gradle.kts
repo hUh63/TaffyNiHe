@@ -143,6 +143,19 @@ android {
                 "plugin.xml",
                 ".api_description",
                 "feature.properties",
+                // OSGi jar 签名/辅助元数据（ELK/EMF 多 jar 重复），Android 上无用
+                "META-INF/ECLIPSE_.RSA",
+                "META-INF/ECLIPSE_.SF",
+            )
+            // 这些必须保留一份但不能重复
+            pickFirsts += setOf(
+                "META-INF/MANIFEST.MF",
+                "META-INF/eclipse.inf",
+            )
+            // ELK 的算法 provider 是 SPI 注册文件：各 jar 内容不同，必须【合并】而非取第一个，
+            // 否则只注册到部分布局算法。
+            merges += setOf(
+                "META-INF/services/org.eclipse.elk.core.data.ILayoutMetaDataProvider",
             )
         }
     }

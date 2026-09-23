@@ -3,21 +3,17 @@ package com.soreverse.mcp
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.BugReport
@@ -26,13 +22,12 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,14 +35,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.SettingsStore
-import com.soreverse.mcp.core.err
-import com.soreverse.mcp.core.str
 import com.soreverse.mcp.mcp.EdbgTools
 import com.soreverse.mcp.mcp.JadxTool
 import com.soreverse.mcp.mcp.ToolContext
@@ -57,13 +52,44 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 
+/** 数值比较内核版本（旧代码用字符串比较，"5.9" 会被判为 ≥"5.10"，属逻辑错误）。 */
+private fun versionAtLeast(value: String, min: String): Boolean {
+    fun parts(s: String) = s.trim().split(Regex("[^0-9]+")).filter { it.isNotEmpty() }.mapNotNull { it.toIntOrNull() }
+    val a = parts(value)
+    if (a.isEmpty()) return false
+    val b = parts(min)
+    for (i in 0 until maxOf(a.size, b.size)) {
+        val x = a.getOrElse(i) { 0 }
+        val y = b.getOrElse(i) { 0 }
+        if (x != y) return x > y
+    }
+    return true
+}
+
+/** 环境状态小方块（Exbin 风：圆角 + 无阴影 + 状态色）。 */
+@Composable
+private fun StatusTile(label: String, value: String, modifier: Modifier = Modifier, ok: Boolean) {
+    val metrics = LocalUiMetrics.current
+    Column(
+        modifier
+            .padding(8.dp)
+            .padding(top = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (ok) AppPalette.green else MaterialTheme.colorScheme.error,
+            maxLines = 1,
+        )
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
 /**
- * eDBG 图形化界面：环境检测 / 部署 / 会话管理 / 调试命令面板 / 反编译（jadx）。
- * 需要 Root + 内核 5.10+（eBPF）。对标 taffy_edbg MCP 工具的操作。
- *
- * 布局：整页只用**一个** LazyColumn 作为滚动容器（此前是 Column+verticalScroll 里再套
- * 三个独立滚动容器 —— 输出框写死 200dp 会被裁掉、且内外滚动互相抢手势，导致"显示不全/操作卡"）。
- * 输出与源码不再设固定高度，直接随页面滚动。
+ * eDBG 图形化页：环境卡（Root/内核/二进制）→ 调试 / 反编译 分区 → 卡片表单 + 终端框。
+ * 需要 Root + 内核 5.10+（eBPF）。对标 taffy_edbg MCP 工具。
  */
 @Composable
 internal fun EdbgPage(t: UiText) {
@@ -74,6 +100,7 @@ internal fun EdbgPage(t: UiText) {
 
     var env by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var busyMsg by remember { mutableStateOf("") }
     var pkgInput by remember { mutableStateOf("") }
     var libInput by remember { mutableStateOf("") }
     var brkInput by remember { mutableStateOf("") }
@@ -82,30 +109,33 @@ internal fun EdbgPage(t: UiText) {
     var sessionActive by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf("session") }
 
-    // 反编译状态
     var decompileName by remember { mutableStateOf("") }
     var classList by remember { mutableStateOf<List<String>>(emptyList()) }
     var classSource by remember { mutableStateOf("") }
+    var classQuery by remember { mutableStateOf("") }
+
     val decompileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             busy = true
+            busyMsg = if (zh) "正在反编译…" else "Decompiling…"
             val res = withContext(Dispatchers.IO) {
                 runCatching {
                     val input = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (input == null) err("READ_FAILED", "无法读取所选文件")
-                    else {
-                        val f = File(context.cacheDir, "edbg_decompile_input")
-                        f.writeBytes(input)
-                        decompileName = f.name
-                        val ctx = ToolContext(context, settings, EngineProvider.get(context))
-                        JadxTool.decompile.handle(ctx, JSONObject().put("action", "list").put("path", f.absolutePath).put("limit", 2000))
-                    }
-                }.getOrElse { e -> err("DECOMPILE_FAILED", e.message ?: "反编译失败") }
+                        ?: throw IllegalStateException("read failed")
+                    val f = File(context.cacheDir, "edbg_decompile_input")
+                    f.writeBytes(input)
+                    decompileName = f.name
+                    val ctx = ToolContext(context, settings, EngineProvider.get(context))
+                    JadxTool.decompile.handle(ctx, JSONObject().put("action", "list").put("path", f.absolutePath).put("limit", 2000))
+                }
             }
-            val list = res.optJSONArray("classes")
+            val r = res.getOrElse { JSONObject().put("error", it.message ?: "decompile failed") }
+            val list = r.optJSONArray("classes")
             classList = if (list != null) (0 until list.length()).map { list.optString(it) } else emptyList()
+            if (classList.isEmpty() && r.has("error")) output = r.optString("error")
             classSource = ""
+            classQuery = ""
             busy = false
         }
     }
@@ -113,6 +143,7 @@ internal fun EdbgPage(t: UiText) {
     fun probe() {
         scope.launch {
             busy = true
+            busyMsg = if (zh) "检测环境…" else "Probing…"
             env = withContext(Dispatchers.IO) {
                 val ctx = ToolContext(context, settings, EngineProvider.get(context))
                 EdbgTools.edbg.handle(ctx, JSONObject().put("action", "probe"))
@@ -121,9 +152,14 @@ internal fun EdbgPage(t: UiText) {
         }
     }
 
-    fun runAction(action: String, after: (JSONObject) -> Unit = {}) {
+    fun runAction(action: String) {
         scope.launch {
             busy = true
+            busyMsg = when (action) {
+                "launch" -> if (zh) "启动调试…" else "Launching…"
+                "install" -> if (zh) "部署 eDBG…" else "Installing…"
+                else -> if (zh) "执行中…" else "Working…"
+            }
             val args = JSONObject().put("action", action)
             if (action == "launch") {
                 args.put("package", pkgInput.trim())
@@ -135,21 +171,19 @@ internal fun EdbgPage(t: UiText) {
                 val ctx = ToolContext(context, settings, EngineProvider.get(context))
                 EdbgTools.edbg.handle(ctx, args)
             }
-            if (action == "cmd") {
-                val o = res.optString("output")
-                if (o.isNotBlank()) output = o
-            } else if (action == "launch") {
-                sessionActive = res.optBoolean("started", false)
-                val o = res.optString("output")
-                if (o.isNotBlank()) output = o
-                if (!sessionActive) Toast.makeText(context, res.optString("message", res.toString()), Toast.LENGTH_SHORT).show()
-            } else if (action == "stop") {
-                sessionActive = false
-            } else if (action == "install") {
-                val ok = res.optBoolean("installed", false)
-                Toast.makeText(context, if (ok) (if (zh) "部署成功" else "Installed") else res.optString("message", res.toString()), Toast.LENGTH_SHORT).show()
+            when (action) {
+                "cmd" -> res.optString("output").takeIf { it.isNotBlank() }?.let { output = it }
+                "launch" -> {
+                    sessionActive = res.optBoolean("started", false)
+                    res.optString("output").takeIf { it.isNotBlank() }?.let { output = it }
+                    if (!sessionActive) Toast.makeText(context, res.optString("message", res.toString()), Toast.LENGTH_SHORT).show()
+                }
+                "stop" -> sessionActive = false
+                "install" -> {
+                    val ok = res.optBoolean("installed", false)
+                    Toast.makeText(context, if (ok) (if (zh) "部署成功" else "Installed") else res.optString("message", res.toString()), Toast.LENGTH_SHORT).show()
+                }
             }
-            after(res)
             busy = false
         }
     }
@@ -157,6 +191,7 @@ internal fun EdbgPage(t: UiText) {
     fun viewClass(cls: String) {
         scope.launch {
             busy = true
+            busyMsg = if (zh) "反编译 $cls" else "Decompiling $cls"
             classSource = withContext(Dispatchers.IO) {
                 val f = File(context.cacheDir, "edbg_decompile_input")
                 val ctx = ToolContext(context, settings, EngineProvider.get(context))
@@ -167,227 +202,210 @@ internal fun EdbgPage(t: UiText) {
         }
     }
 
-    // 进入页面自动 probe
-    androidx.compose.runtime.LaunchedEffect(Unit) { probe() }
+    LaunchedEffect(Unit) { probe() }
 
     val envJson = env
     val rootOk = envJson?.optBoolean("root") == true
-    val kernelOk = envJson?.optBoolean("kernel") == true ||
-        (envJson?.optString("kernelVersion").orEmpty().isNotBlank() && (envJson?.optString("kernelVersion").orEmpty() >= "5.10"))
+    val kernelVersion = envJson?.optString("kernelVersion").orEmpty()
+    val kernelOk = envJson?.optBoolean("kernel") == true || versionAtLeast(kernelVersion, "5.10")
     val deployed = envJson?.optBoolean("deployed") == true
 
-    // ── 单一滚动容器 ──
     LazyColumn(
-        Modifier.fillMaxSize().padding(10.dp),
+        Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // 环境状态卡片
+        // ── 环境卡 ──
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                EnvBox("Root", if (rootOk) "✓" else "✗", Modifier.weight(1f), rootOk)
-                EnvBox(if (zh) "内核" else "Kernel", envJson?.optString("kernelVersion")?.take(12) ?: "-", Modifier.weight(1f), kernelOk)
-                EnvBox(if (zh) "二进制" else "Binary", if (deployed) "✓" else "✗", Modifier.weight(1f), deployed)
-            }
-        }
-        envJson?.optString("reason").takeIf { !it.isNullOrBlank() }?.let { reason ->
-            item {
-                Text(reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { probe() }, enabled = !busy) {
-                    Icon(Icons.Default.BugReport, null, Modifier.width(14.dp))
-                    Spacer(Modifier.width(4.dp)); Text(if (zh) "检测环境" else "Probe")
+            GlassGroup(title = if (zh) "运行环境" else "Environment") {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    StatusTile("Root", if (rootOk) "✓" else "✗", Modifier.weight(1f), rootOk)
+                    StatusTile(if (zh) "内核" else "Kernel", kernelVersion.ifBlank { "-" }, Modifier.weight(1f), kernelOk)
+                    StatusTile(if (zh) "二进制" else "Binary", if (deployed) "✓" else "✗", Modifier.weight(1f), deployed)
                 }
-                TextButton(onClick = { runAction("install") }, enabled = !busy) {
-                    Icon(Icons.Default.Download, null, Modifier.width(14.dp))
-                    Spacer(Modifier.width(4.dp)); Text(if (zh) "部署 eDBG" else "Install")
+                val reason = envJson?.optString("reason").orEmpty()
+                if (reason.isNotBlank()) InlineHint(reason)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryActionButton(if (zh) "检测环境" else "Probe", { probe() }, Modifier.weight(1f), leading = Icons.Default.BugReport)
+                    PrimaryActionButton(
+                        if (zh) "部署 eDBG" else "Install",
+                        { runAction("install") },
+                        Modifier.weight(1f),
+                        leading = Icons.Default.Download,
+                        container = MaterialTheme.colorScheme.secondary,
+                    )
                 }
             }
         }
 
-        // 标签页：调试 / 反编译
+        // ── 分区 Tab ──
         item {
-            val tabs = listOf(if (zh) "调试" else "Debug", if (zh) "反编译" else "Decompile")
-            TabRow(selectedTabIndex = if (tab == "decompile") 1 else 0, containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)) {
-                tabs.forEachIndexed { i, label ->
-                    Tab(selected = (tab == "decompile") == (i == 1), onClick = { tab = if (i == 1) "decompile" else "session" }, text = { Text(label, fontSize = AppText.body) })
-                }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(
+                    selected = tab == "session",
+                    onClick = { tab = "session" },
+                    label = { Text(if (zh) "调试" else "Debug") },
+                )
+                FilterChip(
+                    selected = tab == "decompile",
+                    onClick = { tab = "decompile" },
+                    label = { Text(if (zh) "反编译" else "Decompile") },
+                )
             }
         }
 
         if (tab == "decompile") {
             item {
-                TextButton(onClick = { decompileLauncher.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/java-archive")) }, enabled = !busy) {
-                    Icon(Icons.Default.Code, null, Modifier.width(14.dp))
-                    Spacer(Modifier.width(4.dp)); Text(if (zh) "选择 APK / DEX / JAR" else "Pick APK / DEX / JAR")
-                }
-            }
-            if (decompileName.isNotBlank()) {
-                item {
-                    Text(if (zh) "已加载：$decompileName（${classList.size} 个类）" else "Loaded: $decompileName (${classList.size} classes)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                GlassGroup {
+                    DataRow(
+                        title = decompileName.ifBlank { if (zh) "选择 APK / DEX / JAR" else "Pick APK / DEX / JAR" },
+                        subtitle = if (classList.isEmpty()) (if (zh) "图形化浏览类 / 方法，点类看源码" else "Browse classes, tap to view source")
+                        else (if (zh) "${classList.size} 个类" else "${classList.size} classes"),
+                        leading = { Icon(Icons.Default.Code, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
+                        trailingText = if (zh) "选择文件" else "Pick",
+                        onClick = { decompileLauncher.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "application/java-archive", "*/*")) },
+                    )
                 }
             }
             if (classSource.isNotBlank()) {
                 item {
-                    SelectionContainer {
-                        Text(classSource, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), modifier = Modifier.fillMaxWidth())
-                    }
+                    TerminalPane(
+                        text = classSource,
+                        title = decompileName,
+                        onClear = { classSource = "" },
+                        maxHeight = 520.dp,
+                    )
                 }
                 item {
-                    TextButton(onClick = { classSource = "" }) { Text(if (zh) "返回类列表" else "Back to list") }
+                    PrimaryActionButton(if (zh) "返回类列表" else "Back to list", { classSource = "" }, Modifier.fillMaxWidth())
                 }
-            } else {
-                items(classList) { cls ->
-                    Text(
-                        cls,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth()
-                            .clip(MaterialTheme.shapes.small)
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
-                            .clickable { viewClass(cls) }
-                            .padding(8.dp),
+            } else if (classList.isNotEmpty()) {
+                item {
+                    SearchCountBar(
+                        query = classQuery,
+                        onQueryChange = { classQuery = it },
+                        shown = classList.count { it.lowercase().contains(classQuery.trim().lowercase()) },
+                        total = classList.size,
+                        placeholder = if (zh) "筛选类名" else "Filter class",
                     )
+                }
+                items(classList.filter { it.lowercase().contains(classQuery.trim().lowercase()) }) { cls ->
+                    GlassGroup {
+                        DataRow(
+                            title = cls.substringAfterLast('.').ifBlank { cls },
+                            subtitle = cls,
+                            onClick = { viewClass(cls) },
+                            onLongClick = { viewClass(cls) },
+                        )
+                    }
                 }
             }
         } else {
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlassGroup(title = if (zh) "目标进程" else "Target process") {
                     OutlinedTextField(
                         value = pkgInput,
                         onValueChange = { pkgInput = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
                         placeholder = { Text(if (zh) "目标包名" else "Target package", maxLines = 1) },
                         singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
+                        textStyle = MaterialTheme.typography.bodySmall,
                     )
-                    if (sessionActive) {
-                        TextButton(onClick = { runAction("stop") }) { Text(if (zh) "停止" else "Stop", color = MaterialTheme.colorScheme.error) }
-                    } else {
-                        TextButton(onClick = { runAction("launch") }, enabled = !busy && pkgInput.isNotBlank()) {
-                            Icon(Icons.Default.PlayArrow, null, Modifier.width(14.dp))
-                            Spacer(Modifier.width(4.dp)); Text(if (zh) "启动调试" else "Launch")
+                    OutlinedTextField(
+                        value = libInput,
+                        onValueChange = { libInput = it },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                        placeholder = { Text(if (zh) "库名（可选）" else "Library (optional)", maxLines = 1) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = brkInput,
+                        onValueChange = { brkInput = it },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                        placeholder = { Text(if (zh) "断点偏移（如 0x1234）" else "Break offset (e.g. 0x1234)", maxLines = 1) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    )
+                    Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                        if (sessionActive) {
+                            PrimaryActionButton(
+                                if (zh) "停止调试" else "Stop",
+                                { runAction("stop") },
+                                Modifier.fillMaxWidth(),
+                                container = MaterialTheme.colorScheme.error,
+                            )
+                        } else {
+                            PrimaryActionButton(
+                                if (zh) "启动调试" else "Launch",
+                                { runAction("launch") },
+                                Modifier.fillMaxWidth(),
+                                leading = Icons.Default.PlayArrow,
+                            )
                         }
                     }
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = libInput,
-                        onValueChange = { libInput = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text(if (zh) "库名(可选)" else "Library (optional)", maxLines = 1) },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
-                    )
-                    OutlinedTextField(
-                        value = brkInput,
-                        onValueChange = { brkInput = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("偏移 0x0", maxLines = 1) },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
-                    )
-                }
-            }
-            item {
-                FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(if (zh) "执行" else "Run", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
-                    listOf("c", "s", "finish", "run", "bt").forEach { quick ->
+                GlassGroup(title = if (zh) "快捷命令" else "Quick commands") {
+                    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("c", "s", "finish", "run", "bt").forEach { quick ->
+                            FilterChip(
+                                selected = false,
+                                onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
+                                enabled = sessionActive && !busy,
+                                label = { Text(quick, fontFamily = FontFamily.Monospace) },
+                            )
+                        }
                         FilterChip(
                             selected = false,
-                            onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
-                            enabled = sessionActive && !busy,
-                            label = { Text(quick, fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
+                            onClick = { if (sessionActive && brkInput.isNotBlank()) { cmdInput = "b ${brkInput.trim()}"; runAction("cmd") } },
+                            enabled = sessionActive && !busy && brkInput.isNotBlank(),
+                            label = { Text("b ${brkInput.ifBlank { "0x…" }}", fontFamily = FontFamily.Monospace) },
                         )
+                        listOf("hbreak", "watch", "info regs", "x/16gx \$pc").forEach { quick ->
+                            FilterChip(
+                                selected = false,
+                                onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
+                                enabled = sessionActive && !busy,
+                                label = { Text(quick, fontFamily = FontFamily.Monospace) },
+                            )
+                        }
                     }
                 }
             }
             item {
-                FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(if (zh) "断点" else "BP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
-                    FilterChip(
-                        selected = false,
-                        onClick = { if (sessionActive && brkInput.isNotBlank()) { cmdInput = "b ${brkInput.trim()}"; runAction("cmd") } },
-                        enabled = sessionActive && !busy && brkInput.isNotBlank(),
-                        label = { Text("b ${brkInput.ifBlank { "0x…" }}", fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
-                    )
-                    listOf("hbreak", "watch", "info regs", "x/16gx \$pc").forEach { quick ->
-                        FilterChip(
-                            selected = false,
-                            onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
+                GlassGroup(title = if (zh) "调试命令" else "Debug command") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = cmdInput,
+                            onValueChange = { cmdInput = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("b 地址 / hbreak / watch / examine…", maxLines = 1) },
+                            singleLine = true,
                             enabled = sessionActive && !busy,
-                            label = { Text(quick, fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { if (cmdInput.isNotBlank()) runAction("cmd") }),
                         )
+                        IconButton(onClick = { if (cmdInput.isNotBlank()) runAction("cmd") }, enabled = sessionActive && !busy && cmdInput.isNotBlank()) {
+                            Icon(Icons.AutoMirrored.Filled.Send, if (zh) "发送" else "Send", tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = cmdInput,
-                        onValueChange = { cmdInput = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text(if (zh) "调试命令（b 地址 / hbreak / watch / examine…）" else "Debug command (b addr / hbreak / watch / examine…)", maxLines = 1) },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body, fontFamily = FontFamily.Monospace),
+                Box(Modifier.padding(horizontal = 8.dp)) {
+                    TerminalPane(
+                        text = output,
+                        title = if (zh) "输出" else "Output",
+                        onClear = { output = "" },
+                        placeholder = if (zh) "启动后等待断点命中，再发调试命令" else "Wait for breakpoint, then send commands",
+                        maxHeight = 420.dp,
                     )
-                    TextButton(onClick = { if (cmdInput.isNotBlank()) runAction("cmd") }, enabled = sessionActive && !busy && cmdInput.isNotBlank()) {
-                        Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.width(14.dp))
-                        Spacer(Modifier.width(4.dp)); Text(if (zh) "发送" else "Send")
-                    }
-                }
-            }
-            item {
-                Text(
-                    if (zh) "输出" else "Output",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                Spacer(Modifier.height(4.dp))
-                SelectionContainer {
-                    Text(
-                        output.ifBlank { if (zh) "（eDBG 输出显示在这里。启动后先等待断点命中，再发调试命令）" else "(eDBG output appears here. Wait for the breakpoint, then send commands.)" },
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), MaterialTheme.shapes.medium)
-                            .padding(10.dp),
-                    )
-                }
-            }
-            if (busy) {
-                item {
-                    Text(if (zh) "执行中…" else "Working…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
     }
-}
 
-/** 环境状态小方块。 */
-@Composable
-private fun EnvBox(label: String, value: String, modifier: Modifier = Modifier, ok: Boolean) {
-    Column(
-        modifier.clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    BusyOverlay(visible = busy, message = busyMsg.ifBlank { if (zh) "执行中…" else "Working…" })
 }

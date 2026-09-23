@@ -3643,6 +3643,7 @@ private fun CfgView(
                             onClick = { useEntryPoint() },
                         )
                         SmallAction(if (zh) "分层" else "Layered", active = cfgLayout == "layered") { cfgLayout = "layered" }
+                        SmallAction(if (zh) "Dagre" else "Dagre", active = cfgLayout == "dagre") { cfgLayout = "dagre" }
                         SmallAction(if (zh) "网格" else "Grid", active = cfgLayout == "grid") { cfgLayout = "grid" }
                         SmallAction(if (zh) "力导向" else "Force", active = cfgLayout == "force") { cfgLayout = "force" }
                         SmallAction(

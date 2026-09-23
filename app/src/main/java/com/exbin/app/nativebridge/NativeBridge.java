@@ -238,4 +238,37 @@ public final class NativeBridge {
         public String symbolName;
         public GlobalVarEntryNative() {}
     }
+
+    /** 交叉引用条目（callers / callees / data refs）。 */
+    public static class CrossRefEntryNative {
+        public long fromAddr;
+        public long toAddr;
+        public String fromFunc;
+        public String toFunc;
+        public String type;
+        public String instruction;
+        public CrossRefEntryNative() {}
+    }
+
+    // ============================================================
+    // 交叉引用分析 —— 桩
+    //   GlobalCallGraphAnalyzer 在 native 不可用时自动降级到
+    //   纯 Java 路径（扫描 FunctionInfo.instructions 的 call 指令）。
+    // ============================================================
+
+    public static boolean analyzeCrossRefs(long handle) {
+        return false;
+    }
+
+    public static boolean isCrossRefAnalyzed(long handle) {
+        return false;
+    }
+
+    public static CrossRefEntryNative[] getCallees(long handle, long funcAddr) {
+        return null;
+    }
+
+    public static CrossRefEntryNative[] getCallers(long handle, long funcAddr) {
+        return null;
+    }
 }

@@ -1,4 +1,4 @@
-// 塔菲逆核: 分析页 CFG 图形化画布（纯 Compose Canvas 自绘，无 ELK/dagre 依赖）。
+// 塔菲逆核: 分析页 CFG 图形化画布（纯 Compose Canvas 自绘；默认 Sugiyama 简化版自研布局，另提供可选 Dagre 引擎）。
 //
 // 布局（Sugiyama 简化版，v1.3.18 精致化升级）：
 //   1. 解析 rizin rzCfg 的 JSON（basicBlocks/blocks + jump/fail + edges，地址为 hex 字符串）。
@@ -23,6 +23,7 @@
 package com.soreverse.mcp
 
 import android.graphics.Paint
+import com.soreverse.mcp.engine.ExbinDagre
 import android.graphics.Typeface
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -718,6 +719,159 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
     return CfgLayoutResult(boxes, routes, maxX - minX, maxY - minY, entryIndex, loopHeads, returns)
 }
 
+/**
+ * Dagre 布局引擎（Exbin `DagreLayout`，dagre.js 的 1:1 Java 移植）。
+ *
+ * 与自研 [layoutCfgGraph] 平行：走标准 dagre 流水线（去环 → rank → normalize →
+ * 交叉最小化 order → 坐标二次优化 position），长边由 dagre 内部拆虚节点处理。
+ * 布局失败自动回退自研分层布局，绝不产出空图。
+ */
+internal fun layoutCfgGraphDagre(graph: CfgGraph, density: Float, maxLines: Int = 2): CfgLayoutResult {
+    val n = graph.blocks.size
+    if (n == 0 || density <= 0f) {
+        return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
+    }
+
+    val padX = PAD_X_DP * density
+    val padY = PAD_Y_DP * density
+    val addrLine = ADDR_LINE_DP * density
+    val sumLine = SUM_LINE_DP * density
+    val minW = NODE_W_MIN_DP * density
+    val maxW = NODE_W_MAX_DP * density
+    val minH = NODE_H_MIN_DP * density
+    val nodesep = LANE_GAP_DP * density
+    val ranksep = LAYER_GAP_DP * density
+
+    val paintAddr = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 10.5f * density }
+    val paintSum = Paint().apply { isAntiAlias = true; typeface = Typeface.MONOSPACE; textSize = 9f * density }
+
+    // ── 1. 节点尺寸（与自研布局一致的内容自适应）──
+    val widths = FloatArray(n)
+    val heights = FloatArray(n)
+    val summaries = arrayOfNulls<List<String>>(n)
+    for (i in 0 until n) {
+        val b = graph.blocks[i]
+        val addrW = paintAddr.measureText(b.addrText)
+        val sumW = paintSum.measureText(b.summary)
+        val desired = max(addrW, min(sumW, maxW - padX * 2f)) + padX * 2f
+        var w = desired.coerceIn(minW, maxW)
+        var lines = wrapSummary(b.summary, paintSum, w - padX * 2f, maxLines)
+        var maxLineW = addrW
+        lines.forEach { maxLineW = max(maxLineW, paintSum.measureText(it)) }
+        w = (maxLineW + padX * 2f).coerceIn(minW, maxW)
+        lines = wrapSummary(b.summary, paintSum, w - padX * 2f, maxLines)
+        widths[i] = w
+        heights[i] = max(padY * 2f + addrLine + lines.size * sumLine, minH)
+        summaries[i] = lines
+    }
+
+    // ── 2. 交给 dagre ──
+    val ids = ArrayList<String>(n)
+    val sizes = HashMap<String, Pair<Float, Float>>(n * 2)
+    for (i in 0 until n) {
+        val id = i.toString()
+        ids.add(id)
+        sizes[id] = widths[i] to heights[i]
+    }
+    val edges = ArrayList<Pair<String, String>>(graph.edges.size)
+    for (e in graph.edges) {
+        if (e.from == e.to) continue
+        if (e.from !in 0 until n || e.to !in 0 until n) continue
+        edges.add(e.from.toString() to e.to.toString())
+    }
+
+    val laid = ExbinDagre.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), "TB")
+        ?: return layoutCfgGraph(graph, density, maxLines)
+    val nodesMap = laid.first
+    val routesMap = laid.second
+
+    // ── 3. 求包围盒，平移到「图中心为原点」坐标系 ──
+    var minX = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE
+    var minY = Float.MAX_VALUE
+    var maxY = -Float.MAX_VALUE
+    for (i in 0 until n) {
+        val nd = nodesMap[i.toString()] ?: continue
+        minX = min(minX, nd.x - widths[i] / 2f)
+        maxX = max(maxX, nd.x + widths[i] / 2f)
+        minY = min(minY, nd.y - heights[i] / 2f)
+        maxY = max(maxY, nd.y + heights[i] / 2f)
+    }
+    if (minX > maxX) return layoutCfgGraph(graph, density, maxLines)
+    val cx0 = (minX + maxX) / 2f
+    val cy0 = (minY + maxY) / 2f
+
+    val boxes = ArrayList<CfgNodeBox>(n)
+    for (i in 0 until n) {
+        val nd = nodesMap[i.toString()] ?: continue
+        boxes.add(
+            CfgNodeBox(
+                i, nd.x - cx0, nd.y - cy0, widths[i], heights[i],
+                graph.blocks[i].addrText, summaries[i] ?: emptyList(),
+            ),
+        )
+    }
+
+    // ── 4. 邻接 / 层号 / 边路由 ──
+    val succ = Array(n) { ArrayList<Int>() }
+    val pred = Array(n) { ArrayList<Int>() }
+    graph.edges.forEach { e ->
+        if (e.from == e.to) return@forEach
+        if (e.from !in 0 until n || e.to !in 0 until n) return@forEach
+        if (!succ[e.from].contains(e.to)) succ[e.from].add(e.to)
+        if (!pred[e.to].contains(e.from)) pred[e.to].add(e.from)
+    }
+    val rankOf = IntArray(n) { nodesMap[it.toString()]?.rank ?: 0 }
+    val backChannel = BACK_CHANNEL_DP * density
+
+    val routes = ArrayList<CfgRoute>(graph.edges.size)
+    for (e in graph.edges) {
+        if (e.from !in 0 until n || e.to !in 0 until n) continue
+        val a = boxes.getOrNull(e.from) ?: continue
+        val b = boxes.getOrNull(e.to) ?: continue
+        val self = e.from == e.to
+        val isBack = !self && rankOf[e.to] <= rankOf[e.from]
+        val pts: List<Offset> = when {
+            self -> listOf(
+                Offset(a.right, a.top + a.h * 0.25f),
+                Offset(a.right + backChannel, a.top + a.h * 0.25f),
+                Offset(a.right + backChannel, a.top - a.h * 0.15f),
+                Offset(a.cx, a.top - a.h * 0.15f),
+                Offset(a.cx, a.top),
+            )
+            else -> {
+                val raw = routesMap[e.from.toString() + "|" + e.to.toString()]
+                if (raw != null && raw.size >= 2) {
+                    raw.map { Offset(it.first - cx0, it.second - cy0) }
+                } else if (isBack) {
+                    val chanX = max(a.right, b.right) + backChannel
+                    listOf(
+                        Offset(a.right, a.cy), Offset(chanX, a.cy),
+                        Offset(chanX, b.cy), Offset(b.right, b.cy),
+                    )
+                } else {
+                    listOf(Offset(a.cx, a.bottom), Offset(b.cx, b.top))
+                }
+            }
+        }
+        routes.add(CfgRoute(e.from, e.to, e.kind, isBack, self, pts))
+    }
+
+    val entryIndex = (0 until n).filter { pred[it].isEmpty() }.minByOrNull { rankOf[it] } ?: -1
+    val loopHeads = HashSet<Int>()
+    val returns = HashSet<Int>()
+    for (i in 0 until n) {
+        if (succ[i].isEmpty()) returns.add(i)
+    }
+    graph.edges.forEach { e ->
+        if (e.from in 0 until n && e.to in 0 until n && e.from != e.to && rankOf[e.to] <= rankOf[e.from]) {
+            loopHeads.add(e.to)
+        }
+    }
+
+    return CfgLayoutResult(boxes, routes, maxX - minX, maxY - minY, entryIndex, loopHeads, returns)
+}
+
 // ───────────────────────── Canvas 绘制 ─────────────────────────
 
 /** 圆角正交折线：拐角用三次贝塞尔近似二次圆角（避免 quadraticTo/quadraticBezierTo 的版本差异）。 */
@@ -1140,6 +1294,7 @@ internal fun CfgCanvas(
         when (layoutMode) {
             "grid" -> layoutCfgGrid(graph, density, maxLines)
             "force" -> layoutCfgForce(graph, density, maxLines)
+            "dagre" -> layoutCfgGraphDagre(graph, density, maxLines)
             else -> layoutCfgGraph(graph, density, maxLines)
         }
     }

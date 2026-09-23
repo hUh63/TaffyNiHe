@@ -2378,9 +2378,10 @@ private suspend fun fetchDisasm(
 ) {
     if (ws.isBlank() || target.isBlank()) return
     tools.viewLoading = key
+    val annotate = tools.disasmAnnotate
     val r = withContext(Dispatchers.IO) {
         runCatching {
-            EngineProvider.get(context).disasm(ws, "", target, limit, "", 0, 0, 65536, "", null, "auto")
+            EngineProvider.get(context).disasm(ws, "", target, limit, "", 0, 0, 65536, "", null, "auto", annotate)
         }.getOrNull()
     }
     tools.viewLoading = ""
@@ -3146,7 +3147,7 @@ private fun DisasmView(
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
-    val key = "disasm|$ws|$target"
+    val key = "disasm|$ws|$target|${tools.disasmAnnotate}"
 
     LaunchedEffect(key, tools.reloadTick) {
         if (tools.disasmKey != key || tools.disasmJson.isBlank()) {
@@ -3177,6 +3178,14 @@ private fun DisasmView(
                 onClick = { scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 400) } },
             )
             SmallAction(if (zh) "重新加载" else "Reload", onClick = onRefresh)
+            SmallAction(
+                label = if (zh) "语义注解" else "Annotate",
+                active = tools.disasmAnnotate,
+                onClick = {
+                    tools.disasmAnnotate = !tools.disasmAnnotate
+                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 120) }
+                },
+            )
             if (addr.isNotBlank()) {
                 Text(
                     "$addr · $count",

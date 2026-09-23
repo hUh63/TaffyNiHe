@@ -338,14 +338,8 @@ object ToolCatalog {
         val addr = a.str("addr")
         // 只传 path 且既无 locator 也无 addr 时，从 ELF 入口点开始反汇编。
         val effectiveLocator = if (r.autoOpened && locator.isBlank() && addr.isBlank()) r.entryPoint else locator
-        val res = e.disasm(r.workspaceId, a.str("editSessionId"), effectiveLocator, a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), addr, if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto")).withAutoOpen(r)
-        if (a.bool("annotate", false)) {
-            runCatching {
-                val elf = e.exbinElfFor(r.workspaceId, a.str("editSessionId"))
-                val bytes = e.exbinDataFor(r.workspaceId, a.str("editSessionId"))
-                com.soreverse.mcp.engine.ExbinAnnotate.apply(res, elf, bytes)
-            }.getOrDefault(res)
-        } else res
+        val res = e.disasm(r.workspaceId, a.str("editSessionId"), effectiveLocator, a.intValue("limit", s.defaultLimit), a.str("cursor"), a.intValue("instructionOffset"), a.intValue("byteOffset"), a.intValue("maxBytes", 4096), addr, if (a.has("thumb")) a.bool("thumb") else null, a.str("mode", "auto"), a.bool("annotate", false)).withAutoOpen(r)
+        res
     }
 
     private val readHexdump = EngineToolHandler(

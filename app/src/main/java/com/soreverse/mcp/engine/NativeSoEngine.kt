@@ -38,7 +38,14 @@ class NativeSoEngine(context: Context) {
     fun readElf(workspaceId: String, editSessionId: String, pathHint: String = ""): JSONObject = runtime.readElf(workspaceId, editSessionId, pathHint)
     fun hexdump(workspaceId: String, editSessionId: String, locator: String, byteOffset: Int, maxBytes: Int): JSONObject = runtime.hexdump(workspaceId, editSessionId, locator, byteOffset, maxBytes)
     fun strings(workspaceId: String, editSessionId: String, locator: String, prefix: String, limit: Int, pathHint: String = "", cursor: String = "", regex: Boolean = false, ignoreCase: Boolean = true, encoding: String = "", minConfidence: Double = 0.0): JSONObject = runtime.strings(workspaceId, editSessionId, locator, prefix, limit, pathHint, cursor, regex, ignoreCase, encoding, minConfidence)
-    fun disasm(workspaceId: String, editSessionId: String, locator: String, limit: Int, cursor: String = "", instructionOffset: Int = 0, byteOffset: Int = 0, maxBytes: Int = 4096, addr: String = "", thumb: Boolean? = null, mode: String = "auto"): JSONObject = runtime.disasm(workspaceId, editSessionId, locator, limit, cursor, instructionOffset, byteOffset, maxBytes, addr, thumb, mode)
+    fun disasm(workspaceId: String, editSessionId: String, locator: String, limit: Int, cursor: String = "", instructionOffset: Int = 0, byteOffset: Int = 0, maxBytes: Int = 4096, addr: String = "", thumb: Boolean? = null, mode: String = "auto", annotate: Boolean = false): JSONObject {
+        val r = runtime.disasm(workspaceId, editSessionId, locator, limit, cursor, instructionOffset, byteOffset, maxBytes, addr, thumb, mode)
+        if (!annotate) return r
+        // Exbin DisasmAnnotator：对反汇编窗口做 IDA 风格语义注解（失败不影响原始结果）
+        return runCatching {
+            ExbinAnnotate.apply(r, runtime.elfFor(workspaceId, editSessionId), runtime.dataFor(workspaceId, editSessionId))
+        }.getOrDefault(r)
+    }
     fun outline(workspaceId: String, editSessionId: String, locator: String, limit: Int): JSONObject = runtime.outline(workspaceId, editSessionId, locator, limit)
     fun xrefSymbol(workspaceId: String, editSessionId: String, locator: String, refDirection: String, limit: Int): JSONObject = runtime.xrefSymbol(workspaceId, editSessionId, locator, refDirection, limit)
     fun xrefString(workspaceId: String, editSessionId: String, locator: String, limit: Int): JSONObject = runtime.xrefString(workspaceId, editSessionId, locator, limit)

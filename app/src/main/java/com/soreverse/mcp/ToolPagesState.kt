@@ -141,6 +141,13 @@ class ToolPagesState {
     /** 反汇编结果（disasm 原始 JSON）与其对应的缓存 key。 */
     var disasmJson by mutableStateOf("")
     var disasmKey by mutableStateOf("")
+
+    /**
+     * 反汇编语义注解开关（Exbin DisasmAnnotator）：
+     * 开启后每行尾部附带 `; 全局变量 / 字符串 / loc 标签 / 栈帧变量` 注释，
+     * 并额外返回 annotations 结构化字段。默认开启。
+     */
+    var disasmAnnotate by mutableStateOf(true)
     /** 伪 C 结果（rzDecompile 原始 JSON）与其对应的缓存 key。 */
     var pseudoJson by mutableStateOf("")
     var pseudoKey by mutableStateOf("")

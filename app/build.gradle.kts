@@ -132,6 +132,16 @@ android {
                 "com/sun/jna/aix-*/**",
                 "com/sun/jna/darwin-*/**",
                 "com/sun/jna/win32-*/**",
+                // Eclipse EMF（ELK 布局引擎的传递依赖）OSGi 关于/插件元数据：
+                // 多个 jar 之间重复（about.mappings 等），Android 上无用，必须排除否则资源合并失败
+                "about.mappings",
+                "about.html",
+                "about.ini",
+                "about.properties",
+                "plugin.properties",
+                ".api_description",
+                "feature.properties",
+                "META-INF/*.mappings",
             )
         }
     }

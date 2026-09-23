@@ -120,6 +120,10 @@
 -dontwarn org.eclipse.core.**
 -dontwarn org.eclipse.emf.**
 -dontwarn org.osgi.**
+# ELK 的 comments/对齐子包引用了 AWT 几何类（Android 无 java.awt）
+-dontwarn java.awt.**
+-dontwarn javax.swing.**
+-dontwarn javax.imageio.**
 -keep class org.eclipse.elk.** { *; }
 -keepclassmembers class org.eclipse.elk.** { *; }
 -keep class org.eclipse.emf.** { *; }

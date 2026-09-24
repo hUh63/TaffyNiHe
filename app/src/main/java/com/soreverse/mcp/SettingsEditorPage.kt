@@ -565,6 +565,21 @@ internal fun SettingsEditorPage(t: UiText) {
         setCode(newText)
     }
 
+    /** 把当前光标行滚动到视口内（编辑区固定高度，BasicTextField 不会自己跟随）。 */
+    suspend fun followCursor() {
+        if (viewerMode || editorViewport <= 0) return
+        val text = tf.text
+        val before = text.substring(0, tf.selection.start.coerceIn(0, text.length))
+        val lineIdx = before.count { it == '\n' }
+        val lineH = with(density) { 19.sp.toPx() }
+        val y = lineIdx * lineH
+        val vp = editorViewport.toFloat()
+        val cur = editorScroll.value.toFloat()
+        if (y < cur + lineH || y > cur + vp - lineH * 2f) {
+            runCatching { editorScroll.scrollTo((y - vp * 0.4f).toInt().coerceAtLeast(0)) }
+        }
+    }
+
     /** 跳转到第 n 行（1-based）：把光标移动到该行行首并滚动到可见。 */
     fun jumpToLine(n: Int) {
         val text = tf.text
@@ -579,21 +594,6 @@ internal fun SettingsEditorPage(t: UiText) {
         }
         tf = TextFieldValue(text, selection = TextRange(idx))
         scope.launch { delay(30); followCursor() }
-    }
-
-    /** 把当前光标行滚动到视口内（编辑区固定高度，BasicTextField 不会自己跟随）。 */
-    suspend fun followCursor() {
-        if (viewerMode || editorViewport <= 0) return
-        val text = tf.text
-        val before = text.substring(0, tf.selection.start.coerceIn(0, text.length))
-        val lineIdx = before.count { it == '\n' }
-        val lineH = with(density) { 19.sp.toPx() }
-        val y = lineIdx * lineH
-        val vp = editorViewport.toFloat()
-        val cur = editorScroll.value.toFloat()
-        if (y < cur + lineH || y > cur + vp - lineH * 2f) {
-            runCatching { editorScroll.scrollTo((y - vp * 0.4f).toInt().coerceAtLeast(0)) }
-        }
     }
 
     // ── 行级编辑操作（行内编辑核心：缩进/注释/移动/复制/删除/大小写/格式化）──

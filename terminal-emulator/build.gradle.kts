@@ -1,6 +1,6 @@
 plugins {
+    // AGP 9 起内置 Kotlin 支持，无需（也不允许）再应用 org.jetbrains.kotlin.android
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {

@@ -1,6 +1,6 @@
 plugins {
+    // AGP 9 起内置 Kotlin 支持；Compose 编译插件仍需单独应用
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 

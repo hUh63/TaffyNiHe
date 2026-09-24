@@ -12,50 +12,63 @@ package com.soreverse.mcp.termemu
  */
 object AnsiFilter {
 
-    /** 剥离所有 ANSI 转义序列与回车控制符。 */
+    /**
+     * 剥离 ANSI 转义序列，并按终端语义处理回车与退格：
+     *  - `\r`：光标回到行首，**后续内容覆盖当前行**（进度条 `1%\r100%` → `100%`）
+     *  - `\r\n`：视为换行
+     *  - `\b`：删除当前行最后一个字符
+     */
     fun strip(input: String): String {
         if (input.isEmpty()) return input
-        val sb = StringBuilder(input.length)
+        val sb = StringBuilder(input.length)   // 已完成的行
+        val cur = StringBuilder()              // 当前行（可被 \r 覆盖）
         var i = 0
         val n = input.length
+
+        fun flush() {
+            sb.append(cur).append('\n')
+            cur.setLength(0)
+        }
+
         while (i < n) {
             val c = input[i]
-            if (c == '\u001B') {
-                if (i + 1 >= n) break
-                when (input[i + 1]) {
-                    '[' -> {
-                        // CSI: ESC [ 参数(0x30-0x3F) 中间(0x20-0x2F) 终止(0x40-0x7E)
-                        i += 2
-                        while (i < n && input[i] !in '@'..'~') i++
-                        if (i < n) i++
-                    }
-                    ']' -> {
-                        // OSC: ESC ] ... BEL 或 ESC \
-                        i += 2
-                        while (i < n) {
-                            if (input[i] == '\u0007') { i++; break }
-                            if (input[i] == '\u001B' && i + 1 < n && input[i + 1] == '\\') { i += 2; break }
-                            i++
+            when {
+                c == '\u001B' -> {
+                    if (i + 1 >= n) break
+                    when (input[i + 1]) {
+                        '[' -> {
+                            // CSI: ESC [ 参数 中间 终止(0x40-0x7E)
+                            i += 2
+                            while (i < n && input[i] !in '@'..'~') i++
+                            if (i < n) i++
                         }
+                        ']' -> {
+                            // OSC: ESC ] ... BEL 或 ESC \
+                            i += 2
+                            while (i < n) {
+                                if (input[i] == '\u0007') { i++; break }
+                                if (input[i] == '\u001B' && i + 1 < n && input[i + 1] == '\\') { i += 2; break }
+                                i++
+                            }
+                        }
+                        '(', ')', '*', '+', '-', '.', '/' -> i += 3   // 字符集选择
+                        else -> i += 2                                // 其他两字符序列
                     }
-                    '(', ')', '*', '+', '-', '.', '/' -> i += 3   // 字符集选择
-                    else -> i += 2                                // 其他两字符序列
                 }
-            } else if (c == '\r') {
-                // 回车：\r\n 归一为 \n；单独的 \r（进度条刷新）直接丢弃
-                if (i + 1 < n && input[i + 1] == '\n') { sb.append('\n'); i += 2 } else i++
-            } else if (c == '\u0008') {
-                // 退格：吃掉前一个字符（进度条/覆盖写常见）
-                if (sb.isNotEmpty()) sb.setLength(sb.length - 1)
-                i++
-            } else if (c == '\u0007') {
-                i++   // BEL 丢弃
-            } else {
-                sb.append(c)
-                i++
+                c == '\r' -> {
+                    if (i + 1 < n && input[i + 1] == '\n') { flush(); i += 2 }
+                    else { cur.setLength(0); i++ }
+                }
+                c == '\n' -> { flush(); i++ }
+                c == '\u0008' -> {
+                    if (cur.isNotEmpty()) cur.setLength(cur.length - 1)
+                    i++
+                }
+                c == '\u0007' -> i++   // BEL 丢弃
+                else -> { cur.append(c); i++ }
             }
         }
-        return sb.toString()
+        return sb.append(cur).toString()
     }
 
     /** 取最后一行非空内容（用于「输出预览条」）。 */

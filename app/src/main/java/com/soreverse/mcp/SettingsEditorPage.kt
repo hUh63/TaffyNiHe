@@ -166,8 +166,8 @@ internal fun SettingsEditorPage(t: UiText) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val zh = t.zh
-    val bg = Color(0xFF0B0F14)
-    val fg = Color(0xFFD6E2F0)
+    val bg = TerminalColors.bg
+    val fg = TerminalColors.fg
     val marker = "__TAFFY_END__"
 
     var mode by remember { mutableStateOf(CodeHighlighter.Lang.PYTHON) }

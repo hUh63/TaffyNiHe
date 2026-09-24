@@ -191,6 +191,18 @@ internal object EditorTextOps {
         return if (toEnd) le else ls
     }
 
+    /** 子串查找：返回全部匹配起始下标（不重叠）。 */
+    fun findAll(text: String, query: String): List<Int> {
+        if (query.isEmpty()) return emptyList()
+        val out = ArrayList<Int>()
+        var i = text.indexOf(query)
+        while (i >= 0) {
+            out.add(i)
+            i = text.indexOf(query, i + query.length)
+        }
+        return out
+    }
+
     /**
      * JSON 美化（对象或数组）；非法时返回 null。
      *

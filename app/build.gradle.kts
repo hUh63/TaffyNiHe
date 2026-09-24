@@ -162,6 +162,11 @@ android {
 }
 
 dependencies {
+    // 终端模块化（对标 Xed-Editor 的 terminal-emulator / terminal-view 两个独立 module）：
+    // :terminal-emulator = 会话内核（进程 + ANSI 过滤），:terminal-view = Compose 终端视图。
+    implementation(project(":terminal-emulator"))
+    implementation(project(":terminal-view"))
+
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")

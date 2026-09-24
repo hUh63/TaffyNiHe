@@ -44,6 +44,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.composed
+import androidx.compose.ui.input.pointer.PointerEventPass
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 图形化组件地基（对标 Explorer So 的交互范式）。
@@ -448,5 +458,55 @@ internal fun MonoRow(label: String, value: String, modifier: Modifier = Modifier
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+/**
+ * 按键式「按住」修饰符（借鉴 Xed-Editor 的 `Modifier.holdable`）。
+ *
+ * 语义：
+ *  - 点一下 → [onClick]
+ *  - 按住超过 [initialDelayMillis] → [onLongClick]（返回 true 表示已消费，不再触发 onClick）
+ *  - [repeatOnHold] = true 时，长按后按 [repeatDelayMillis] 间隔反复触发 [onClick]（方向键/退格连续移动）
+ *
+ * 用 `awaitEachGesture` 手写手势，避免 `combinedClickable` 无法做"按住连发"的限制。
+ */
+internal fun Modifier.holdable(
+    enabled: Boolean = true,
+    repeatOnHold: Boolean = false,
+    initialDelayMillis: Long = 420L,
+    repeatDelayMillis: Long = 70L,
+    onLongClick: () -> Boolean = { false },
+    onClick: () -> Unit = {},
+): Modifier = composed {
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnLongClick by rememberUpdatedState(onLongClick)
+    pointerInput(enabled, repeatOnHold) {
+        if (!enabled) return@pointerInput
+        coroutineScope {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                var held = true
+                var longTriggered = false
+                var repeated = false
+                val job = launch {
+                    delay(initialDelayMillis)
+                    if (held) {
+                        longTriggered = currentOnLongClick()
+                        if (repeatOnHold) {
+                            repeated = true
+                            while (held) {
+                                currentOnClick()
+                                delay(repeatDelayMillis)
+                            }
+                        }
+                    }
+                }
+                waitForUpOrCancellation(pass = PointerEventPass.Initial)
+                held = false
+                job.cancel()
+                if (!longTriggered && !repeated) currentOnClick()
+            }
+        }
     }
 }

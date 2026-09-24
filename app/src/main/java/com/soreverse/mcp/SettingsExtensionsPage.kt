@@ -453,24 +453,14 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                 }
             }
 
-            // ── 输出区 ──
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (zh) "运行输出" else "Output", style = MaterialTheme.typography.labelSmall, color = dim, modifier = Modifier.weight(1f))
-                Text(
-                    if (zh) "复制" else "Copy", style = MaterialTheme.typography.labelSmall, color = AppPalette.blue,
-                    modifier = Modifier.clickable { if (output.isNotBlank()) clipboard.setText(AnnotatedString(output)) }.padding(horizontal = 6.dp),
-                )
-            }
-            Box(Modifier.fillMaxWidth().height(190.dp).background(bg, RoundedCornerShape(AppShape.md))) {
-                SelectionContainer {
-                    Text(
-                        output.ifEmpty { if (zh) "点插件的「运行」查看输出…" else "Run a plugin to see output…" },
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
-                        color = if (output.isEmpty()) dim else fg,
-                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp),
-                    )
-                }
-            }
+            // ── 输出区（统一终端框）──
+            TerminalPane(
+                text = output,
+                title = if (zh) "运行输出" else "Output",
+                onClear = { output = "" },
+                placeholder = if (zh) "点插件的「运行」查看输出…" else "Run a plugin to see output…",
+                maxHeight = 300.dp,
+            )
         }
     }
 
@@ -523,6 +513,11 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
             dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(if (zh) "取消" else "Cancel") } },
         )
     }
+
+    BusyOverlay(
+        visible = running || marketLoading,
+        message = if (marketLoading) (if (zh) "市场处理中…" else "Working…") else (if (zh) "运行插件…" else "Running plugin…"),
+    )
 }
 
 /** 扩展教程（内置，随 app 离线可用）。 */

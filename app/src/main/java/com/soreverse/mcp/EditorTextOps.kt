@@ -191,12 +191,146 @@ internal object EditorTextOps {
         return if (toEnd) le else ls
     }
 
-    /** JSON 美化（对象或数组）；非法时返回 null。 */
-    fun formatJson(text: String): String? =
-        runCatching { org.json.JSONObject(text).toString(2) }
-            .recoverCatching { org.json.JSONArray(text).toString(2) }
-            .getOrNull()
+    /**
+     * JSON 美化（对象或数组）；非法时返回 null。
+     *
+     * 不用 `org.json`：它的 `toString(2)` 在单元测试环境（mockable android.jar）不可用，
+     * 且宽松模式对 `{oops}` 这类畸形输入仍会"成功"。这里自带一个严格的小解析器，
+     * 顺便让格式化结果稳定可控。
+     */
+    fun formatJson(text: String): String? = JsonPretty(text).pretty()
 
     /** 清理行尾空白。 */
     fun trimTrailing(text: String): String = text.split('\n').joinToString("\n") { it.trimEnd() }
+}
+
+/** 轻量 JSON 校验 + 美化（纯 Kotlin，零依赖，可单测）。 */
+private class JsonPretty(private val s: String) {
+    private var i = 0
+    private val sb = StringBuilder()
+
+    fun pretty(): String? {
+        skipWs()
+        if (!value(0)) return null
+        skipWs()
+        return if (i == s.length) sb.toString() else null
+    }
+
+    private fun indent(depth: Int) = "  ".repeat(depth)
+
+    private fun skipWs() {
+        while (i < s.length && s[i].isWhitespace()) i++
+    }
+
+    private fun value(depth: Int): Boolean {
+        if (i >= s.length) return false
+        return when (s[i]) {
+            '{' -> obj(depth)
+            '[' -> arr(depth)
+            '"' -> str()
+            't' -> lit("true")
+            'f' -> lit("false")
+            'n' -> lit("null")
+            else -> num()
+        }
+    }
+
+    private fun obj(depth: Int): Boolean {
+        sb.append('{'); i++; skipWs()
+        if (i < s.length && s[i] == '}') { sb.append('}'); i++; return true }
+        while (true) {
+            skipWs()
+            if (i >= s.length || s[i] != '"') return false
+            sb.append('\n').append(indent(depth + 1))
+            str()
+            skipWs()
+            if (i >= s.length || s[i] != ':') return false
+            i++
+            sb.append(": ")
+            skipWs()
+            if (!value(depth + 1)) return false
+            skipWs()
+            if (i >= s.length) return false
+            when (s[i]) {
+                ',' -> { sb.append(','); i++ }
+                '}' -> {
+                    sb.append('\n').append(indent(depth)).append('}')
+                    i++
+                    return true
+                }
+                else -> return false
+            }
+        }
+    }
+
+    private fun arr(depth: Int): Boolean {
+        sb.append('['); i++; skipWs()
+        if (i < s.length && s[i] == ']') { sb.append(']'); i++; return true }
+        while (true) {
+            sb.append('\n').append(indent(depth + 1))
+            skipWs()
+            if (!value(depth + 1)) return false
+            skipWs()
+            if (i >= s.length) return false
+            when (s[i]) {
+                ',' -> { sb.append(','); i++ }
+                ']' -> {
+                    sb.append('\n').append(indent(depth)).append(']')
+                    i++
+                    return true
+                }
+                else -> return false
+            }
+        }
+    }
+
+    private fun str(): Boolean {
+        if (i >= s.length || s[i] != '"') return false
+        val start = i
+        i++
+        while (i < s.length) {
+            when (s[i]) {
+                '\\' -> i += 2
+                '"' -> {
+                    i++
+                    sb.append(s, start, i)
+                    return true
+                }
+                else -> i++
+            }
+        }
+        return false
+    }
+
+    private fun lit(name: String): Boolean {
+        if (s.startsWith(name, i)) {
+            sb.append(name)
+            i += name.length
+            return true
+        }
+        return false
+    }
+
+    private fun num(): Boolean {
+        val start = i
+        if (i < s.length && s[i] == '-') i++
+        var digits = 0
+        while (i < s.length && s[i].isDigit()) { i++; digits++ }
+        if (digits == 0) { i = start; return false }
+        if (i < s.length && s[i] == '.') {
+            i++
+            var frac = 0
+            while (i < s.length && s[i].isDigit()) { i++; frac++ }
+            if (frac == 0) { i = start; return false }
+        }
+        if (i < s.length && (s[i] == 'e' || s[i] == 'E')) {
+            i++
+            if (i < s.length && (s[i] == '+' || s[i] == '-')) i++
+            var exp = 0
+            while (i < s.length && s[i].isDigit()) { i++; exp++ }
+            if (exp == 0) { i = start; return false }
+        }
+        sb.append(s, start, i)
+        return true
+    }
 }

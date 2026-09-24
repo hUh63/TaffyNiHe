@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** EditorTextOps 纯逻辑单测（不碰 Android API）。 */
+/** EditorTextOps 纯逻辑单测（不碰 Android API，也不依赖 org.json）。 */
 class EditorTextOpsTest {
 
     private val text = "alpha\nbeta\ngamma\ndelta"
@@ -67,17 +67,18 @@ class EditorTextOpsTest {
 
     @Test
     fun moveLines_upAndDown_withBoundary() {
+        // "1\n2\n3"：行首偏移分别是 0 / 2 / 4
         val src = "1\n2\n3"
-        val (up, _) = EditorTextOps.moveLines(src, 2, 2, -1)      // 移动第 2 行
-        assertEquals("2\n1\n3", up)
-        val (down, _) = EditorTextOps.moveLines(src, 0, 0, 1)
-        assertEquals("2\n1\n3", down)
+        // 第 2 行上移 → 1 与 2 交换
+        assertEquals("2\n1\n3", EditorTextOps.moveLines(src, 2, 2, -1).first)
+        // 第 1 行下移 → 1 与 2 交换
+        assertEquals("2\n1\n3", EditorTextOps.moveLines(src, 0, 0, 1).first)
         // 已在顶部再上移 → 原样返回
-        val (noop, _) = EditorTextOps.moveLines(src, 0, 0, -1)
-        assertEquals(src, noop)
+        assertEquals(src, EditorTextOps.moveLines(src, 0, 0, -1).first)
         // 已在底部再下移 → 原样返回
-        val (noop2, _) = EditorTextOps.moveLines(src, 2, 2, 1)
-        assertEquals(src, noop2)
+        assertEquals(src, EditorTextOps.moveLines(src, 4, 4, 1).first)
+        // 跨两行整体上移（第 2~3 行 → 顶部）
+        assertEquals("2\n3\n1", EditorTextOps.moveLines(src, 2, 4, -1).first)
     }
 
     @Test
@@ -88,9 +89,12 @@ class EditorTextOpsTest {
 
     @Test
     fun deleteLines_keepsAtLeastOneEmptyLine() {
+        // 删第 1 行
         assertEquals("b\nc", EditorTextOps.deleteLines("a\nb\nc", 0, 0).first)
+        // 只剩一行时删掉 → 留一个空行
         assertEquals("", EditorTextOps.deleteLines("only", 0, 0).first)
-        assertEquals("a", EditorTextOps.deleteLines("a\nb\nc", 1, 2).first)
+        // 删第 2~3 行（offset 2..4）→ 只剩 a
+        assertEquals("a", EditorTextOps.deleteLines("a\nb\nc", 2, 4).first)
     }
 
     @Test
@@ -129,14 +133,19 @@ class EditorTextOpsTest {
     }
 
     @Test
-    fun formatJson_objectAndArray_andInvalid() {
-        val obj = EditorTextOps.formatJson("{\"a\":1}")
-        assertNotNull(obj)
-        assertTrue(obj!!.contains("\n"))
-        val arr = EditorTextOps.formatJson("[1]")
-        assertNotNull(arr)
-        assertTrue(arr!!.contains("\n"))
+    fun formatJson_prettyAndInvalid() {
+        assertEquals("{\n  \"a\": 1\n}", EditorTextOps.formatJson("{\"a\":1}"))
+        assertEquals("[\n  1\n]", EditorTextOps.formatJson("[1]"))
+        assertEquals("{\n  \"a\": {\n    \"b\": [\n      1,\n      2\n    ]\n  }\n}",
+            EditorTextOps.formatJson("{\"a\":{\"b\":[1,2]}}"))
+        assertEquals("{}", EditorTextOps.formatJson("{}"))
         assertNull(EditorTextOps.formatJson("{oops}"))
+        assertNull(EditorTextOps.formatJson(""))
+        assertNull(EditorTextOps.formatJson("{\"a\":}"))
+        // 字符串里的括号/冒号不能影响结构
+        val obj = EditorTextOps.formatJson("{\"k\":\"a:{b}\"}")
+        assertNotNull(obj)
+        assertTrue(obj!!.contains("\"a:{b}\""))
     }
 
     @Test

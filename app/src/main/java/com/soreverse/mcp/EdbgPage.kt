@@ -326,14 +326,27 @@ internal fun EdbgPage(t: UiText) {
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     )
+                    var confirmStop by remember { mutableStateOf(false) }
                     Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                         if (sessionActive) {
                             PrimaryActionButton(
                                 if (zh) "停止调试" else "Stop",
-                                { runAction("stop") },
+                                { confirmStop = true },
                                 Modifier.fillMaxWidth(),
                                 container = MaterialTheme.colorScheme.error,
                             )
+                            if (confirmStop) {
+                                ConfirmDialog(
+                                    title = if (zh) "停止调试会话" else "Stop debug session",
+                                    message = if (zh)
+                                        "将结束 eDBG 会话并终止被调试进程（调试状态与断点丢失）。确定继续？"
+                                        else "This ends the eDBG session and kills the debuggee (breakpoints lost). Continue?",
+                                    confirmText = if (zh) "停止" else "Stop",
+                                    destructive = true,
+                                    onConfirm = { runAction("stop") },
+                                    onDismiss = { confirmStop = false },
+                                )
+                            }
                         } else {
                             PrimaryActionButton(
                                 if (zh) "启动调试" else "Launch",

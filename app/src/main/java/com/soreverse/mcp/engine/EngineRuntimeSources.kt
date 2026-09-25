@@ -218,7 +218,7 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     // 都要查：完整引用（`apk:<rel>!lib/<abi>/x.so`，按条目名命中自身库）与 APK 路径
     // （工作目录相对路径，需要可读文件才能判的检查放在下面读入字节之后）。
     val selfHit = listOfNotNull(src.path, src.apkPath)
-        .firstOrNull { it.isNotBlank() && SelfArtifactGuard.isSelfArtifact(context, it) }
+        .firstOrNull { it.isNotBlank() && com.soreverse.mcp.core.SelfArtifactGuard.isSelfArtifact(context, it) }
     if (selfHit != null) {
         error("SELF_ANALYSIS_FORBIDDEN: 塔菲逆核不能打开/查看/修改自身 artifact（$selfHit）")
     }

@@ -323,6 +323,95 @@ jobs:
           ./gradlew assembleRelease --no-daemon --stacktrace \
             -PabiFilter=arm64-v8a,armeabi-v7a,x86,x86_64
 
+      - name: Dex2C 加固发布 APK (Harden release APKs with Dex2C)
+        timeout-minutes: 90
+        # 上游 SOMCP 1.0.22 (#108) 借鉴: 被 tools/dex2c/filter.txt 选中的方法翻译成 C，
+        # 编译进 lib/<abi>/libnc.so，dex 中对应方法改为 native —— 发布包里不再有该逻辑的字节码。
+        # 加固必须发生在「收集 APK + SHA256SUMS」之前，否则校验和会被重签后的 APK 甩掉。
+        run: |
+          set -euo pipefail
+          DCC_COMMIT="17de4fd3202bd0e46735974211a43cda39fca5f3"  # dcc master @ 2024-02-07（上游钉死）
+          APKTOOL_VERSION="2.12.1"
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          NDK_DIR="$ANDROID_HOME/ndk/28.2.13676358"
+          WORK="$RUNNER_TEMP/dex2c"
+          FILTER="$GITHUB_WORKSPACE/tools/dex2c/filter.txt"
+
+          KEYS="release/keystore.properties"
+          [ -f "$KEYS" ] || { echo "::error::缺少 $KEYS（无法重签加固后的 APK）"; exit 1; }
+          STORE_FILE="$GITHUB_WORKSPACE/$(grep -E '^storeFile=' "$KEYS" | head -1 | cut -d= -f2-)"
+          STORE_PASSWORD="$(grep -E '^storePassword=' "$KEYS" | head -1 | cut -d= -f2-)"
+          KEY_ALIAS="$(grep -E '^keyAlias=' "$KEYS" | head -1 | cut -d= -f2-)"
+          KEY_PASSWORD="$(grep -E '^keyPassword=' "$KEYS" | head -1 | cut -d= -f2-)"
+          [ -f "$STORE_FILE" ] || { echo "::error::keystore 不存在: $STORE_FILE"; exit 1; }
+
+          test -x "$NDK_DIR/ndk-build" || { echo "::error::ndk-build 不存在于 $NDK_DIR"; exit 1; }
+          test -f "$FILTER" || { echo "::error::缺少 $FILTER"; exit 1; }
+
+          git clone --quiet https://github.com/amimo/dcc.git "$WORK/dcc"
+          git -C "$WORK/dcc" checkout --quiet "$DCC_COMMIT"
+          python3 -m venv "$WORK/venv"
+          "$WORK/venv/bin/pip" install --quiet --disable-pip-version-check -r "$WORK/dcc/requirements.txt"
+          curl -fsSL --retry 3 -o "$WORK/dcc/tools/apktool.jar" \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v${APKTOOL_VERSION}/apktool_${APKTOOL_VERSION}.jar"
+          printf '{"apktool": "%s", "ndk_dir": "%s"}\n' "$WORK/dcc/tools/apktool.jar" "$NDK_DIR" > "$WORK/dcc/dcc.cfg"
+
+          cat > "$WORK/abilist.py" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              abis = {n.split('/')[1] for n in z.namelist() if n.startswith('lib/') and n.count('/') >= 2}
+          print(' '.join(sorted(abis)))
+          PY
+          cat > "$WORK/zipcheck.py" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              names = set(z.namelist())
+          missing = [n for n in sys.argv[2:] if n not in names]
+          for n in missing:
+              print('missing entry: %s' % n)
+          sys.exit(1 if missing else 0)
+          PY
+
+          cd "$WORK/dcc"
+          for apk in "$GITHUB_WORKSPACE"/app/build/outputs/apk/release/*.apk; do
+            base="$(basename "$apk")"
+            # dcc 要求 APK 里每个 lib/<abi>/ 目录都有 libnc.so，其自带 Application.mk 只编
+            # arm64-v8a/armeabi-v7a + android-19（NDK 已不支持）。ABI 与 platform 从 APK 自身推导。
+            abis="$("$WORK/venv/bin/python" "$WORK/abilist.py" "$apk")"
+            [ -n "$abis" ] || { echo "::error::$base 没有 lib/<abi>/ 条目，dcc 无法确定 ABI"; exit 1; }
+            sed -i -e "s|^APP_ABI.*|APP_ABI := $abis|" -e "s|^APP_PLATFORM.*|APP_PLATFORM := android-26|" \
+                   "$WORK/dcc/project/jni/Application.mk"
+
+            mkdir -p "$WORK/out" "$WORK/src"
+            out="$WORK/out/$base"
+            src="$WORK/src/$base"
+            "$WORK/venv/bin/python" dcc.py "$apk" -o "$out" --filter "$FILTER" --source-dir "$src"
+
+            test -f "$out" || { echo "::error::dcc 未产出加固 APK（filter 未匹配到任何方法）: $base"; exit 1; }
+            converted="$src/jni/nc/compiled_methods.txt"
+            grep -q '^Lcom/soreverse/mcp/core/BackupCrypto;' "$converted" || {
+              echo "::error::$base: 转换结果里没有 BackupCrypto 的方法（$converted）"; exit 1; }
+            echo "[dex2c] $base: $(wc -l < "$converted" | tr -d ' ') method(s) converted"
+
+            for abi in $abis; do
+              "$WORK/venv/bin/python" "$WORK/zipcheck.py" "$out" "lib/$abi/libnc.so" || {
+                echo "::error::$base 加固后缺少 lib/$abi/libnc.so"; exit 1; }
+            done
+
+            # apktool 重建后 gradle 签名失效、dcc 用自带 testkey 签过；必须重新对齐并用发布密钥签名
+            # （testkey 包无法覆盖安装，也会触发 App 自身的签名 pin）。先签临时文件，失败不破坏原 APK。
+            "$BUILD_TOOLS/zipalign" -f -p 4 "$out" "$WORK/aligned-$base"
+            "$BUILD_TOOLS/apksigner" sign \
+              --ks "$STORE_FILE" --ks-pass "pass:$STORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASSWORD" \
+              --v1-signing-enabled true --v2-signing-enabled true \
+              --v3-signing-enabled true --v4-signing-enabled true \
+              --out "$WORK/signed-$base" "$WORK/aligned-$base"
+            mv -f "$WORK/signed-$base" "$apk"
+            echo "[dex2c] $base hardened, re-aligned and re-signed with the release key"
+          done
+          echo "Dex2C hardening applied to every release APK."
+
       - name: 收集 APK + SHA256SUMS + mapping
         run: |
           set -euo pipefail

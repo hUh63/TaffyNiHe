@@ -128,3 +128,9 @@
 -keepclassmembers class org.eclipse.elk.** { *; }
 -keep class org.eclipse.emf.** { *; }
 -keepclassmembers class org.eclipse.emf.** { *; }
+
+# ─── Dex2C (dcc) 加固：保持 backup 加密实现类名与方法名 ───────────────────────
+# tools/dex2c/filter.txt 以「类描述符+方法名+方法描述符」精确匹配方法（amimo/dcc 的
+# MethodFilter），若 R8 重命名了该类，filter 会匹配不到，dcc 将不产出加固 APK 并让发布
+# 失败（这是刻意的硬失败）。转换后的方法在 dex 中变为 native，由 lib/<abi>/libnc.so 提供。
+-keep class com.soreverse.mcp.core.BackupCrypto { *; }

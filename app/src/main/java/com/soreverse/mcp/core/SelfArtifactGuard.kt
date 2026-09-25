@@ -16,13 +16,44 @@ import java.io.File
  *  1. 运行中 APK 路径（packageCodePath / sourceDir canonical）——无论装在哪；
  *  2. nativeLibraryDir——安装目录里塔菲自带的 SO；
  *  3. 签名层（懒检查 + 缓存）：任意位置的 APK 副本，若签名者摘要与
- *     [com.soreverse.mcp.nativecore.SignatureVerifier] 内嵌 pin 一致，即为自身副本
+ *     [com.soreverse.mcp.nativecore.NativeProbe] 内嵌 pin 一致，即为自身副本
  *     （位置无关，防改名字/挪目录绕过）。
  *  另含 `lib/<abi>/<name>.so` APK 条目引用判定：条目名命中自身库名即拦截。
  */
 object SelfArtifactGuard {
 
     private val digestCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    // ------------------------------------------------------- 身份隔离（quarantine）
+
+    /**
+     * 已被证实属于自身 artifact 的标识（桥接调用回包暴露的 workspace id / 摘要等）。
+     * 上游 1.0.22 (#113) 借鉴：外部 APK MCP（如 MT 管理器）把相对路径解析到它自己的目录，
+     * 参数层的路径检查覆盖不到；而后续调用只会带上 open 返回的 workspace id —— 因此身份
+     * 必须从「结果」里取：一旦结果指向自身包名，就记住它，此后一切提及它的调用一律拒绝。
+     */
+    private val quarantined = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** 记住 [values] 为自身 artifact 标识。 */
+    fun quarantine(values: Collection<String>) {
+        values.map { it.trim() }.filter { it.isNotEmpty() }.forEach(quarantined::add)
+    }
+
+    /** 清空已记住的标识。 */
+    fun clearQuarantine() {
+        quarantined.clear()
+    }
+
+    /** [value] 是否命名或内嵌了已知的自身 artifact 标识。 */
+    fun isQuarantined(value: String): Boolean {
+        val v = value.trim()
+        if (v.isEmpty() || quarantined.isEmpty()) return false
+        if (quarantined.contains(v)) return true
+        val base = baseName(v)
+        if (base != v && quarantined.contains(base)) return true
+        // 内嵌形态，例如 `…/TaffyNiHe_1.3.53.apk!lib/arm64-v8a/librz_native.so`
+        return quarantined.any { v.contains(it) }
+    }
 
     // ------------------------------------------------------------- 自身标识
 
@@ -78,6 +109,8 @@ object SelfArtifactGuard {
      */
     fun isSelfArtifact(context: Context, value: String): Boolean {
         if (value.isBlank()) return false
+        // 已被结果层判定为自身产物的标识，之后任何形态的引用都直接拒绝。
+        if (isQuarantined(value)) return true
         if (isSelfApkPath(context, value)) return true
         if (isSelfBundledSo(context, value)) return true
         if (isOwnLibEntryReference(context, value)) return true
@@ -86,7 +119,7 @@ object SelfArtifactGuard {
         if (clean.endsWith(".apk", true) && clean.startsWith("/")) {
             return digestCache.computeIfAbsent(canonical(clean)) { p ->
                 runCatching {
-                    com.soreverse.mcp.nativecore.SignatureVerifier.isSelfSignedApk(p)
+                    com.soreverse.mcp.nativecore.NativeProbe.isOwnApk(p)
                 }.getOrDefault(false)
             }
         }
@@ -146,3 +179,6 @@ object SelfArtifactGuard {
     private fun sameFile(a: String, b: String): Boolean =
         a == b || runCatching { File(a).canonicalFile == File(b).canonicalFile }.getOrDefault(a == b)
 }
+
+/** [value] 的最后一个路径段（两种分隔符都认），用于隔离标识的基名比对。 */
+private fun baseName(value: String): String = value.trim().substringAfterLast('/').substringAfterLast('\\')

@@ -140,11 +140,30 @@ class UnidbgEmulator(private val context: Context) {
                             AppLog.i("Unidbg native libunicorn.so loaded (64-bit runtime)")
                         }
                         .onFailure { e ->
-                            unicornLoaded = false
-                            AppLog.w(
-                                "libunicorn.so 未加载（该 64 位设备将无法用 Unicorn2 后端）: ${e.message}；" +
-                                    "若为 32 位包属正常，否则请确认 release 包内置了 unidbg unicorn2 JNI 桥"
-                            )
+                            // 上游 1.0.22 (#115) 借鉴: jniLibs 直载失败时回落到会话真正使用的加载
+                            // 路径 —— Unicorn2Factory 的静态初始化会走 unidbg 自有 NativeLoader
+                            // （可从 jar 内置资源解出并 System.load）。探测必须与真实加载路径一致，
+                            // 否则会出现「unidbg_session 可用、emulate_call 被探测闸门误拦」。
+                            val viaFactory = runCatching {
+                                Class.forName(
+                                    "com.github.unidbg.arm.backend.Unicorn2Factory",
+                                    true,
+                                    UnidbgEmulator::class.java.classLoader
+                                )
+                            }.isSuccess
+                            if (viaFactory) {
+                                unicornLoaded = true
+                                AppLog.i(
+                                    "libunicorn.so 未经 jniLibs 直载，已由 Unidbg NativeLoader 加载成功" +
+                                        "（直载失败原因: ${e.message}）"
+                                )
+                            } else {
+                                unicornLoaded = false
+                                AppLog.w(
+                                    "libunicorn.so 未加载（该 64 位设备将无法用 Unicorn2 后端）: ${e.message}；" +
+                                        "若为 32 位包属正常，否则请确认 release 包内置了 unidbg unicorn2 JNI 桥"
+                                )
+                            }
                         }
                 } else {
                     unicornLoaded = false

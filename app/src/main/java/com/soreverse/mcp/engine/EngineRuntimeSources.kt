@@ -214,9 +214,13 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     if (archiveEntry.isNotBlank() && !archiveEntry.endsWith(".so", ignoreCase = true)) error("NOT_ELF_INPUT: $path is an APK/JAR entry, not an ELF SO file. Use apk_analyze or an APK MCP tool.")
     val keyFallback = "local:$path"
     val src = findSource(path) ?: resolveLocalSoSource(path) ?: error("SO path not found: $path")
-    // 上游 1.0.18 借鉴: 禁止分析自身 Artifact（包名/签名匹配 → 拦截，防误操作/自我分析）
-    if (src.source == "apk" && src.apkPath != null && com.soreverse.mcp.nativecore.NativeProbe.isOwnApk(src.apkPath)) {
-        error("SELF_ANALYSIS_FORBIDDEN: 塔菲逆核不能分析自身 APK 内嵌的 SO ${src.apkPath}")
+    // 上游 1.0.20/1.0.22 (#113) 借鉴: 禁止分析自身 Artifact。工作目录来源携带的两种形态
+    // 都要查：完整引用（`apk:<rel>!lib/<abi>/x.so`，按条目名命中自身库）与 APK 路径
+    // （工作目录相对路径，需要可读文件才能判的检查放在下面读入字节之后）。
+    val selfHit = listOfNotNull(src.path, src.apkPath)
+        .firstOrNull { it.isNotBlank() && SelfArtifactGuard.isSelfArtifact(context, it) }
+    if (selfHit != null) {
+        error("SELF_ANALYSIS_FORBIDDEN: 塔菲逆核不能打开/查看/修改自身 artifact（$selfHit）")
     }
     val key = sourceKey(src).ifBlank { keyFallback }
     workspaceBySourceKey[key]?.let { existingId -> workspaces[existingId]?.let { return it } }
@@ -227,6 +231,11 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
             runCatching { f.readBytes() }.getOrElse { error("SO path not found: $path") }
         }
         else -> (workDir ?: error("No work directory selected")).readSource(src)
+    }
+    // 按内容识别（上游 #113）：从 APK 解出并改过名的自身库副本既无路径也无 entry 名可判，
+    // 工作目录又是经 SAF 读取的；因此对即将分析的字节再做一次包名标识校验。
+    if (containsPackageIdentifier(original)) {
+        error("SELF_ANALYSIS_FORBIDDEN: 塔菲逆核不能打开/查看/修改自身 artifact ${src.path}")
     }
     require(original.size >= 4 && original[0] == 0x7f.toByte() && original[1] == 'E'.code.toByte() && original[2] == 'L'.code.toByte() && original[3] == 'F'.code.toByte()) { "NOT_ELF_INPUT: ${src.path} is not an ELF SO file. Use apk_analyze or an APK MCP tool." }
     val prepared = prepareAnalysisInput(original)
@@ -365,4 +374,22 @@ internal fun EngineRuntime.soDownloadMaxBytes(): Long {
     }.getOrDefault(heapCapMiB)
     val capMiB = minOf(heapCapMiB, storageFreeMiB).coerceIn(64L, 2048L)
     return capMiB * 1024L * 1024L
+}
+
+/** [bytes] 是否携带塔菲自身的包名标识（applicationId）。 */
+internal fun containsPackageIdentifier(bytes: ByteArray): Boolean {
+    val marker = com.soreverse.mcp.BuildConfig.APPLICATION_ID
+    if (marker.isBlank()) return false
+    return containsSubsequence(bytes, marker.toByteArray(Charsets.US_ASCII)) ||
+        containsSubsequence(bytes, marker.toByteArray(Charsets.UTF_16LE))
+}
+
+private fun containsSubsequence(haystack: ByteArray, needle: ByteArray): Boolean {
+    if (needle.isEmpty() || haystack.size < needle.size) return false
+    for (i in 0..(haystack.size - needle.size)) {
+        var j = 0
+        while (j < needle.size && haystack[i + j] == needle[j]) j++
+        if (j == needle.size) return true
+    }
+    return false
 }

@@ -35,4 +35,18 @@ object DownloadMirrorPolicy {
         val xget = original.replaceFirst("https://github.com", "https://xget.xi-xu.me/gh")
         return (prefixes.map { it + original } + replacements + xget + original).distinct()
     }
+
+    /**
+     * 完整性产物（SHA-256 校验和文件）的候选地址。与 APK 下载不同，这类请求绝不能
+     * 走第三方镜像：被攻陷/攻击者控制的镜像可以把 APK 与校验和一起伪造，或干脆丢掉
+     * 校验和请求以逼出一次未校验安装。因此 GitHub release 资产只取官方 github.com
+     * 地址；非 GitHub 来源本来就没有镜像集，原样返回。
+     *
+     * 上游 1.0.22 (#131) 借鉴。
+     */
+    fun checksumCandidates(original: String): List<String> = if (original.startsWith("https://github.com/")) {
+        listOf(original)
+    } else {
+        candidates(original)
+    }
 }

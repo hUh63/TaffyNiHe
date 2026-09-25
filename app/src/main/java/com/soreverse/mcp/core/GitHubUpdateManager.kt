@@ -309,19 +309,16 @@ class GitHubUpdateManager(private val context: Context) {
                 }
                 require(downloaded) { lastFailure?.message ?: "All download mirrors failed" }
                 emit(UpdateDownloadEvent.Verifying)
-                // Checksum verification is best-effort: the payload has already
-                // been validated as a well-formed APK/ZIP above. If the checksum
-                // asset cannot be fetched in time (mirror down / slow / missing),
-                // we must NOT hang or hard-fail the whole update — we downgrade to
-                // an unverified-but-installable result instead of dying on one
-                // tree. A checksum that is fetched AND mismatches is still a hard
-                // failure (that means tampering / corruption).
+                // 上游 1.0.22 (#131) 借鉴: 只要 release 发布了 checksum 资产，校验就是强制
+                // 的 —— 取不到或对不上都中止安装。旧的「取不到就降级为未校验安装」会让
+                // 控制任一镜像的攻击者只需丢掉 checksum 请求就能强制一次未校验安装。
+                // 只有完全没有 checksum 资产的 release 才允许未校验安装（且不写 .verified
+                // 标记，一旦出现 checksum 会重新校验）。
                 val verifiedHash = release.checksumUrl?.let { url ->
                     runCatching { verifyChecksum(partial, url, target.name) }
-                        .onFailure { emit(UpdateDownloadEvent.VerifySkipped(it.message ?: "checksum unavailable")) }
                         .getOrElse { failure ->
-                            if (failure is ChecksumMismatchException) throw failure
-                            null
+                            partial.delete()
+                            throw failure
                         }
                 } ?: run {
                     emit(UpdateDownloadEvent.VerifySkipped("no checksum published"))
@@ -357,10 +354,10 @@ class GitHubUpdateManager(private val context: Context) {
             val actualHash = runCatching { fileSha256(file) }.getOrNull() ?: return null
             return file.takeIf { actualHash == expectedHash }
         }
-        // No verified marker (checksum was unavailable at download time). Fall back
-        // to a structural check so a previously downloaded APK is still reusable
-        // instead of forcing a slow re-download that would likely be unverifiable
-        // again anyway.
+        // 上游 1.0.22 (#131) 借鉴: 没有 .verified 标记说明这份文件从未被哈希校验过。
+        // 只有当 release 完全没有 checksum 资产时才允许复用；一旦存在 checksum，就必须
+        // 重新下载，让强制校验跑在真实字节上，而不是相信 ZIP magic 这种结构性检查。
+        if (release.checksumUrl != null) return null
         val looksLikeApk = runCatching {
             file.inputStream().use {
                 val header = ByteArray(4)
@@ -459,10 +456,9 @@ class GitHubUpdateManager(private val context: Context) {
     private suspend fun verifyChecksum(file: File, url: String, assetName: String = file.name): String {
         var expected: String? = null
         var lastFailure: Throwable? = null
-        // Bound the total time spent chasing checksum mirrors so a slow/hanging
-        // mirror cannot make the whole update appear stuck. Try a limited number
-        // of ranked candidates, each already under probeClient/client timeouts.
-        val candidates = rankedDownloadUrls(url) {}.take(CHECKSUM_MIRROR_ATTEMPTS)
+        // 上游 1.0.22 (#131) 借鉴: 只走官方域候选（DownloadMirrorPolicy.checksumCandidates）
+        // —— 绝不让校验和经由 APK 可能来自的那些第三方镜像下发。
+        val candidates = DownloadMirrorPolicy.checksumCandidates(url)
         for (candidate in candidates) {
             try {
                 val request = Request.Builder().url(candidate).header("User-Agent", "SOMCP/${BuildConfig.VERSION_NAME}").build()
@@ -481,9 +477,8 @@ class GitHubUpdateManager(private val context: Context) {
                 lastFailure = error
             }
         }
-        // Could not obtain a checksum -> signal "unavailable" (soft failure that
-        // the caller downgrades to an unverified install), NOT a mismatch.
-        val expectedHash = expected ?: throw ChecksumUnavailableException(lastFailure?.message ?: "All checksum mirrors failed")
+        // 取不到 checksum -> 硬失败，向调用方抛出并中止安装（不再有软降级）。
+        val expectedHash = expected ?: throw ChecksumUnavailableException(lastFailure?.message ?: "Checksum fetch failed")
         val actual = fileSha256(file)
         // Obtained a checksum but it does not match -> hard failure (tampering).
         if (!actual.equals(expectedHash, true)) throw ChecksumMismatchException("APK SHA-256 verification failed")

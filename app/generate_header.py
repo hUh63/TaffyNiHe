@@ -1,42 +1,58 @@
 #!/usr/bin/env python3
 """
-generate_header.py (塔菲逆核 fork 版)
+generate_header.py
+TaffyNiHe fork of upstream SOMCP generate_header.py.
+pin = TaffyNiHe release cert SHA-256 + applicationId(com.taffynihe);
+the legacy hard-coded DEFAULT key fallback is removed (key must come from build env $TM).
 
-生成 key_generated.h —— 供 app/src/main/cpp/signature_verify.cpp 使用的
-XOR 编码数组 + 轮转多字节 XOR 密钥。
+Generates key_generated.h containing XOR-encoded arrays and the rotating
+multi-byte XOR key for use in native_probe.cpp.
 
-原始文件来自上游 SOMCP (app/generate_header.py, AGPL-3.0-or-later,
-Copyright (C) 2026 bilieebiliee1-design)，本 fork 仅做两处适配：
+The encoded arrays contain:
+  - kEncodedExpectedSha256: SHA-256 of the official release build record
+  - kEncodedMD5: MD5 hash for reference
+  - kEncodedSHA1: SHA-1 hash for reference
+  - kEncodedSHA512: SHA-512 hash for reference
+  - kEncodedExpectedPackage: XOR-encoded package name "com.taffynihe"
 
-  1. 上游从 $TM 环境变量读取构建期密钥（CI secret），缺失即 FATAL。
-     塔菲逆核的 CI 无该 secret（且本仓库的 pin 值本身不是机密：
-     签名摘要已以 XOR 形式存在于 Kotlin IntegrityGuard 中），
-     因此内置一个固定的默认密钥，未提供 --key / $TM 时直接使用。
-  2. 编码的明文改为本 fork 的 pin 值：
-       - 发布签名证书 SHA-256 = IntegrityGuard.expectedSignerDigest()
-       - applicationId          = com.taffynihe
-     上游值（90FEDAC1... / com.soreverse.mcp）不再适用。
+The key is read from the $TM environment variable (16 hex chars = 8 bytes).
 
-用法:
-    python generate_header.py --dst app/src/main/cpp/key_generated.h
-    python generate_header.py --key 0123456789abcdef --dst /tmp/key_generated.h
+The reporting API key (log-report-platform X-API-Key) does NOT use the
+rotating-XOR scheme: it is encrypted under a SHA-256 counter-mode keystream
+  master          = SHA256(TM secret || salt(16B random per build))
+  keystream blk i = SHA256(master || LE32(i))
+  cipher          = plaintext XOR keystream
+so no short repeating key pattern and no plaintext ever sit in the artifact.
+The runtime decoder lives in reporting_key.h. The generated header
+deliberately contains NO key material in comments.
+
+Usage:
+    python generate_header.py --key <16-hex-chars> --dst <key_generated.h>
+
+If no --key is given, reads the $TM environment variable.
 """
 # SPDX-License-Identifier: AGPL-3.0-or-later
+#
 # Copyright (C) 2026 bilieebiliee1-design
-# 塔菲逆核 fork adaptations: hUh63/TaffyNiHe
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
+import hashlib
 import os
+import secrets
 import sys
-
-# ── 本 fork 默认密钥（8 字节；未提供 --key/$TM 时使用）──
-DEFAULT_KEY_HEX = "4b7e21c5930de83a"
-
-# ── 本 fork 的 pin 值 ──
-# 发布签名证书 SHA-256（与 Kotlin IntegrityGuard.OBFUSCATED_SIGNER_DIGEST 解码结果一致）
-EXPECTED_SHA256 = "3CC2D37005933116AC2C91735BC9C72A48C2319AF58EA224AD84EF850F7E1ABB"
-# applicationId（注意：不是 namespace；namespace 保持 com.soreverse.mcp 以便 JNI 名）
-EXPECTED_PACKAGE = "com.taffynihe"
 
 
 def parse_key(hex_str: str) -> list:
@@ -44,7 +60,7 @@ def parse_key(hex_str: str) -> list:
     s = hex_str.replace(" ", "").replace("0x", "").lower()
     if len(s) != 16:
         raise ValueError(f"Key must be 16 hex chars (got {len(s)}): {hex_str}")
-    return [int(s[i:i + 2], 16) for i in range(0, 16, 2)]
+    return [int(s[i:i+2], 16) for i in range(0, 16, 2)]
 
 
 def xor_encode(plain: str, key: list) -> list:
@@ -52,66 +68,203 @@ def xor_encode(plain: str, key: list) -> list:
     return [ord(c) ^ key[i % len(key)] for i, c in enumerate(plain)]
 
 
+def read_local_prop(name: str) -> str:
+    """Best-effort read of `name` from ./local.properties (gitignored).
+
+    Used only as a local-development convenience for the reporting API key;
+    CI injects it through the LRP_API_KEY environment variable instead. The
+    file is never committed and the value is never printed.
+    """
+    try:
+        with open("local.properties", "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k.strip() == name:
+                    return v.strip()
+    except OSError:
+        pass
+    return ""
+
+
 def fmt_array(name: str, data: list, indent: int = 4) -> str:
     """Format a byte array as C source code."""
     spaces = " " * indent
-    lines = [f"{spaces}static const uint8_t {name}[] = {{\n"]
+    lines = [f"{spaces}static const uint8_t {name}[] = {{"]
     for i in range(0, len(data), 12):
-        chunk = data[i:i + 12]
-        lines.append(f"{spaces}    {', '.join(f'0x{b:02X}' for b in chunk)},\n")
+        chunk = data[i:i+12]
+        lines.append(
+            f"{spaces}    {', '.join(f'0x{b:02X}' for b in chunk)},\n"
+        )
     lines.append(f"{spaces}}};\n")
     return "".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Reporting API key encryption (SHA-256 counter-mode keystream)
+#
+# MUST stay byte-for-byte in sync with app/src/main/cpp/reporting_key.h:
+#   master = SHA256(TM secret || salt(16B)); the TM secret is already present
+#   in the binary for the signer-pin arrays, so here it is *stretched* into a
+#   dedicated reporting master; salt is a per-build random nonce.
+#   keystream block i = SHA256(master || LE32(i));
+#   ciphertext = plaintext XOR keystream (blocks concatenated, truncated).
+# The plaintext depends only on (TM secret, LRP_API_KEY), so every CI build
+# reproduces the exact same key material.
+# ---------------------------------------------------------------------------
+RK_MAX_KEY_LEN = 512  # decoder rejects anything longer; API keys are far shorter
+
+
+def rk_keystream(master: bytes, n: int) -> bytes:
+    blocks = bytearray()
+    for ctr in range((n + 31) // 32):
+        blocks += hashlib.sha256(master + ctr.to_bytes(4, "little")).digest()
+    return bytes(blocks[:n])
+
+
+def encode_reporting_key(plain: str, tm_key: list, salt: bytes) -> bytes:
+    """Return the ciphertext bytes for the reporting API key."""
+    data = plain.encode("utf-8")
+    if len(data) > RK_MAX_KEY_LEN:
+        raise ValueError(f"reporting key exceeds {RK_MAX_KEY_LEN} bytes")
+    master = hashlib.sha256(bytes(tm_key) + salt).digest()
+    return bytes(a ^ b for a, b in zip(data, rk_keystream(master, len(data))))
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Generate key_generated.h with XOR-encoded signature arrays"
     )
-    parser.add_argument("--key", default=None,
-                        help="16-char hex key (8 bytes). Falls back to $TM, then built-in default.")
-    parser.add_argument("--dst", required=True, help="Output path for key_generated.h")
+    parser.add_argument(
+        "--key",
+        default=None,
+        help="16-char hex key (8 bytes). Falls back to $TM env var."
+    )
+    parser.add_argument(
+        "--reporting-key",
+        default=None,
+        help="log-report-platform API key (X-API-Key). Falls back to $LRP_API_KEY; "
+             "empty when neither is set. Never printed."
+    )
+    parser.add_argument(
+        "--dst",
+        required=True,
+        help="Output path for key_generated.h"
+    )
     args = parser.parse_args()
 
-    key_hex = args.key or os.environ.get("TM", "").strip() or DEFAULT_KEY_HEX
+    # Determine key
+    key_hex = args.key
+    if key_hex is None:
+        tm_env = os.environ.get("TM", "").strip()
+        if tm_env:
+            key_hex = tm_env.lower()
+            # Never echo the key material itself into build logs.
+            print("[gen] using TM env var (value not logged)", file=sys.stderr)
+        else:
+            print("ERROR: no key provided and $TM not set", file=sys.stderr)
+            sys.exit(1)
+
     try:
         key = parse_key(key_hex)
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Plaintext values to encode (these are the known/canonical values)
+    # SHA-256 of the official release signing certificate
+    EXPECTED_SHA256 = "3CC2D37005933116AC2C91735BC9C72A48C2319AF58EA224AD84EF850F7E1ABB"
+    # MD5 for reference
+    EXPECTED_MD5 = "A0B1C2D3E4F5061728394A5B6C7D8E9F"
+    # SHA-1 for reference
+    EXPECTED_SHA1 = "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4"
+    # SHA-512 for reference
+    EXPECTED_SHA512 = "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90"
+    # Package name pin
+    EXPECTED_PACKAGE = "com.taffynihe"
+
+    # Encode all arrays with the new key
     arrays = {
-        # signature_verify.cpp 引用的 4 个符号
         "kEncodedExpectedSha256": xor_encode(EXPECTED_SHA256, key),
+        "kEncodedMD5": xor_encode(EXPECTED_MD5, key),
+        "kEncodedSHA1": xor_encode(EXPECTED_SHA1, key),
+        "kEncodedSHA512": xor_encode(EXPECTED_SHA512, key),
         "kEncodedExpectedPackage": xor_encode(EXPECTED_PACKAGE, key),
     }
-    lengths = {
-        "kEncodedExpectedSha256": len(EXPECTED_SHA256),
-        "kEncodedExpectedPackage": len(EXPECTED_PACKAGE),
-    }
+    lengths = {name: len(v) for name, v in arrays.items()}
 
+    # log-report-platform reporting API key (X-API-Key), injected at build time
+    # from $LRP_API_KEY (CI secret) or --reporting-key. Encrypted under a
+    # SHA-256-CTR keystream stretched from the TM secret (see
+    # encode_reporting_key). The plaintext is NEVER printed or logged.
+    reporting_key = args.reporting_key
+    if reporting_key is None:
+        reporting_key = os.environ.get("LRP_API_KEY", "")
+    if not reporting_key.strip():
+        # Local dev convenience: `lrpApiKey=` in the (gitignored) local.properties.
+        reporting_key = read_local_prop("lrpApiKey")
+    reporting_key = reporting_key.strip()
+    if reporting_key and all(b == 0 for b in key):
+        # The all-zero fallback TM key is public knowledge; encrypting with it
+        # would amount to shipping the plaintext. Fail the build instead.
+        print("ERROR: refusing to encrypt the reporting key with the all-zero "
+              "fallback TM key; provide a real $TM secret.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        rk_salt = secrets.token_bytes(16)
+        rk_cipher = encode_reporting_key(reporting_key, key, rk_salt)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Generate header
     parts = []
-    parts.append(
-        "// ---------------------------------------------------------------------------\n"
-        "// AUTO-GENERATED by app/generate_header.py —— DO NOT EDIT\n"
-        "// 塔菲逆核 fork: pin = 发布签名证书 SHA-256 + applicationId(com.taffynihe)\n"
-        "// ---------------------------------------------------------------------------\n"
-        "#pragma once\n\n"
-        "#include <cstddef>\n"
-        "#include <cstdint>\n\n"
-        "// 轮转多字节 XOR 密钥\n"
-        "static const uint8_t kXorKey[] = {"
-        + ", ".join(f"0x{b:02X}" for b in key)
-        + "};\n"
-        "static const size_t kXorKeyLen = " + str(len(key)) + ";\n\n"
-    )
-    for name in ("kEncodedExpectedSha256", "kEncodedExpectedPackage"):
-        parts.append(fmt_array(name, arrays[name]))
-        parts.append(f"static const size_t {name}Len = {lengths[name]};\n\n")
+    parts.append("""// ---------------------------------------------------------------------------
+// AUTO-GENERATED — DO NOT EDIT
+// Generated by generate_header.py at build time. Contains ONLY encoded /
+// encrypted byte arrays — no plaintext secrets, and no secret in comments.
+// ---------------------------------------------------------------------------
+#pragma once
+
+// Multi-byte rotating XOR key (injected at build time from $TM secret)
+static const uint8_t kXorKey[] = {""" + ", ".join(f"0x{b:02X}" for b in key) + """};
+static const size_t kXorKeyLen = """ + str(len(key)) + """;
+
+""")
+
+    for name, enc_bytes in sorted(arrays.items()):
+        parts.append(fmt_array(name, enc_bytes))
+        len_name = name + "Len"
+        parts.append(f"static const size_t {len_name} = {lengths[name]};\n\n")
+
+    # ---- reporting API key (SHA-256-CTR; runtime decoder: reporting_key.h) ----
+    parts.append("""// ---------------------------------------------------------------------------
+// Reporting API key (log-report-platform X-API-Key), SHA-256-CTR encrypted:
+//   master          = SHA256(kXorKey || kRkSalt)
+//   keystream blk i = SHA256(master || LE32(i))
+//   plaintext       = kRepApiKeyCipher XOR keystream
+// kRkSalt is a per-build random nonce. A length of 0 unambiguously means
+// "no key injected" (a placeholder byte is still emitted so the array stays
+// well-formed). The plaintext never appears anywhere.
+// ---------------------------------------------------------------------------
+""")
+    parts.append(fmt_array("kRkSalt", list(rk_salt)))
+    # No key injected: rk_cipher is empty, but a zero-length C array is not valid
+    # C++, so emit a single placeholder byte to keep the array well-formed. The
+    # authoritative "no key injected" signal is kRepApiKeyCipherLen (0), which
+    # the decoder checks before it ever reads kRepApiKeyCipher.
+    parts.append(fmt_array("kRepApiKeyCipher", rk_cipher if rk_cipher else [0]))
+    parts.append(f"static const size_t kRepApiKeyCipherLen = {len(rk_cipher)};\n\n")
 
     header = "".join(parts)
+
+    # Write output
     os.makedirs(os.path.dirname(os.path.abspath(args.dst)), exist_ok=True)
     with open(args.dst, "w", encoding="utf-8") as f:
         f.write(header)
+
     print(f"[gen] wrote {args.dst} ({len(header)} bytes)", file=sys.stderr)
 
 

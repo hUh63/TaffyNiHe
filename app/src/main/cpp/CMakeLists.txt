@@ -75,10 +75,47 @@ if(LIEF_AVAILABLE)
 endif()
 
 add_library(rz_native SHARED ${RZ_SOURCES})
-# 逆核 v1.3.6: native 级防篡改（直接读 APK 文件系统的 META-INF PKCS7 证书，
-# 绕过可被 kstools/ApkSignatureKiller hook 的 PackageManager Binder）。
-# 需要 zlib(inflate) + android log；pin 值见同目录 key_generated.h。
-target_sources(rz_native PRIVATE zstd_compat_stub.cpp signature_verify.cpp)
+
+# ─── 构建期生成 key_generated.h（对齐上游 SOMCP v1.0.21 / PR #130）───────────
+# pin（发布签名证书 SHA-256 + applicationId）与轮转 XOR 密钥都写在这份头文件里；
+# 密钥来自构建环境 $TM（16 hex = 8 字节），不再依赖仓库内硬编码的 fallback 走发布路径。
+# 上报 API Key（$LRP_API_KEY）按 SHA-256-CTR 密钥流加密后注入（解码器 reporting_key.h，用后擦除）。
+set(KEY_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/key_generated.h")
+set(GEN_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/../../../../app/generate_header.py")
+if(DEFINED ENV{TM} AND NOT "$ENV{TM}" STREQUAL "")
+    set(XOR_KEY "$ENV{TM}")
+    message(STATUS "[xor-key] generating key_generated.h from TM secret")
+elseif(REQUIRE_NATIVE_BACKENDS)
+    message(FATAL_ERROR "[xor-key] TM environment variable not set.")
+else()
+    set(XOR_KEY "0000000000000000")
+    message(WARNING "[xor-key] TM not set; using public fallback key (NOT for release builds)")
+endif()
+if(DEFINED ENV{LRP_API_KEY} AND NOT "$ENV{LRP_API_KEY}" STREQUAL "")
+    message(STATUS "[reporting-key] LRP_API_KEY present; injecting into native key_generated.h")
+else()
+    message(STATUS "[reporting-key] LRP_API_KEY not set; reports will be sent without an API key")
+endif()
+find_program(PY3 NAMES python3 python REQUIRED)
+execute_process(
+    COMMAND "${PY3}" "${GEN_SCRIPT}" --key "${XOR_KEY}" --dst "${KEY_GENERATED}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../../../.."
+    RESULT_VARIABLE GEN_RESULT
+)
+if(NOT GEN_RESULT EQUAL 0)
+    message(FATAL_ERROR "[xor-key] generation failed. Check generate_header.py output.")
+endif()
+message(STATUS "[xor-key] using header: ${KEY_GENERATED}")
+
+# 逆核 v1.3.54: native 级防篡改。native_probe.cpp 直接读 APK 文件系统的
+# META-INF PKCS7 证书（绕过可被 kstools/ApkSignatureKiller hook 的 PackageManager
+# Binder），并做 v2/v3 真实验签 + apksig 1MiB 分块内容摘要重算。
+# 需要 zlib(inflate) + android log；pin 值来自上面构建期生成的 key_generated.h。
+target_include_directories(rz_native PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_sources(rz_native PRIVATE zstd_compat_stub.cpp native_probe.cpp)
 
 add_library(blutter_bridge SHARED blutter_bridge.cpp)
 target_link_libraries(blutter_bridge PRIVATE dl log)

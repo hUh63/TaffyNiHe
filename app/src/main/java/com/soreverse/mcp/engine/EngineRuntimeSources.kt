@@ -126,7 +126,7 @@ internal fun EngineRuntime.analyzeApk(path: String, entryLimit: Int = 500): JSON
     if (path.isBlank()) return@guarded err("INVALID_ARGUMENT", "APK path is required", "path", path)
     val local = File(path)
     // 上游 1.0.18 借鉴: 禁止分析自身 Artifact（签名匹配 → 拦截，防误操作/自我分析）
-    if (local.isFile && com.soreverse.mcp.nativecore.SignatureVerifier.isSelfSignedApk(local.absolutePath)) {
+    if (local.isFile && com.soreverse.mcp.nativecore.NativeProbe.isOwnApk(local.absolutePath)) {
         return@guarded err("SELF_ANALYSIS_FORBIDDEN", "塔菲逆核不能分析自身 APK（签名匹配），请选择其他 APK", "path", path)
     }
     if (local.isFile && local.length() > ApkAnalyzer.MAX_INPUT_BYTES) return@guarded err("APK_LIMIT_EXCEEDED", "APK exceeds ${ApkAnalyzer.MAX_INPUT_BYTES / 1024 / 1024} MiB input limit", "path", path)
@@ -178,6 +178,16 @@ internal fun EngineRuntime.listWorkspaces(): JSONObject = guarded {
 }
 
 internal fun EngineRuntime.close(workspaceId: String): JSONObject = guarded {
+    // 上游 1.0.22 (#44) 借鉴: 释放绑定到该 workspace 的 unidbg 会话 —— 立即回收其 native
+    // VM 与内存中驻留的 SO 副本，而不是拖到进程结束或下一次 clearCaches。
+    emulatorSessions.entries.removeAll { (_, session) ->
+        if (session.workspaceId == workspaceId) {
+            session.live?.let(unidbg::closeSession)
+            true
+        } else {
+            false
+        }
+    }
     workspaces.remove(workspaceId)
     pageStore.clear()
     searchCache.clear()
@@ -205,7 +215,7 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     val keyFallback = "local:$path"
     val src = findSource(path) ?: resolveLocalSoSource(path) ?: error("SO path not found: $path")
     // 上游 1.0.18 借鉴: 禁止分析自身 Artifact（包名/签名匹配 → 拦截，防误操作/自我分析）
-    if (src.source == "apk" && src.apkPath != null && com.soreverse.mcp.nativecore.SignatureVerifier.isSelfSignedApk(src.apkPath)) {
+    if (src.source == "apk" && src.apkPath != null && com.soreverse.mcp.nativecore.NativeProbe.isOwnApk(src.apkPath)) {
         error("SELF_ANALYSIS_FORBIDDEN: 塔菲逆核不能分析自身 APK 内嵌的 SO ${src.apkPath}")
     }
     val key = sourceKey(src).ifBlank { keyFallback }

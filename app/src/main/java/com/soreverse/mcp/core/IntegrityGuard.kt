@@ -1,6 +1,7 @@
 package com.soreverse.mcp.core
 
 import android.app.Activity
+import com.soreverse.mcp.nativecore.NativeProbe
 import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -85,30 +86,31 @@ object IntegrityGuard {
             val expected = expectedSignerDigest()
             val actual = signingCertificateDigests(context).map { it.normalizeDigest() }
             // 上游 1.0.19 借鉴: APK 完整性校验（native mmap/CRC 优先，Kotlin fallback）
-            val integrityCode = com.soreverse.mcp.nativecore.SignatureVerifier.verifyApkIntegrity(context)
+            val integrityCode = NativeProbe.probeArchive(context)
             // 上游 1.0.20 借鉴: v2/v3 APK Signing Block 证书校验——防"签名方案混淆重打包"
             // （攻击者保留 v1 真证书、把 v2/v3 块换成自己密钥）。
-            // ⚠ 降级为"警告不阻断"：v1(PackageManager) 已匹配 pin 时，v2/v3 不匹配只可能是
-            // 用户用签名工具自行重签（逆向工具用户常态，如 MT/NP 去签名校验后重签），
-            // 而非攻击（攻击者无法在保留 v1 真证书的同时替换 v2/v3——那需要原签名密钥）。
-            // 此前直接判失败导致官方包也进不去（真实环境证书链/多 signer 提取差异），
-            // 已在 v1.0.72 修复为软警告。
-            val v23Digest = runCatching {
-                com.soreverse.mcp.nativecore.ApkSigningBlock.signingBlockCertDigest(
-                    context.packageCodePath
+            // ⚠ 提示不阻断：v1(PackageManager) 已匹配 pin 时，v2/v3 不匹配只可能是用户
+            // 用签名工具自行重签（逆向工具用户常态），而非攻击。仅作为可疑信号记录。
+            val v23Warning = runCatching {
+                val norm = NativeProbe.fingerprintV234Of(context) ?: return@runCatching ""
+                if (norm == expected || actual.any { it == norm }) ""
+                else "v2/v3 signing block signer differs from v1 (possible signing-scheme confusion, v1 still verified)"
+            }.getOrDefault("")
+            // 上游 v1.0.22 (#111) 借鉴: v2/v3 真实验签 + apksig 1MiB 分块内容摘要重算。
+            // 与上面仅提示的 v23Warning 不同，这一项是硬判定：签名有效但内容被改（或签名
+            // 与 pin 不符）时 native 侧直接终止进程，Kotlin 侧读到 bitmask 后同样判失败。
+            val blockCode = NativeProbe.verifyBlock(context)
+            val blockTampered = NativeProbe.isTamper(blockCode)
+            if (blockTampered) {
+                Result(
+                    trusted = false,
+                    reason = "v2/v3 signature/content re-verification FAILED (code=0x${blockCode.toString(16)})",
+                    expected = expected,
+                    actual = actual,
+                    threats = listOf("apk-content-tamper"),
+                    integrityCode = integrityCode,
                 )
-            }.getOrNull()
-            val v23Warning = when (v23Digest) {
-                null -> ""                                   // 无 v2/v3 块（纯 v1 签名）
-                com.soreverse.mcp.nativecore.ApkSigningBlock.PARSE_ERROR ->
-                    "v2/v3 signing block parse error (warning)"
-                else -> {
-                    val norm = v23Digest.normalizeDigest()
-                    if (norm == expected || actual.any { it == norm }) ""
-                    else "v2/v3 signing block signer differs from v1 (possible signing-scheme confusion, v1 still verified)"
-                }
-            }
-            if (expected.isBlank()) {
+            } else if (expected.isBlank()) {
                 Result(true, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
             } else {
                 val signerTrusted = actual.any { it == expected }

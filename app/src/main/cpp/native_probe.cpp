@@ -18,28 +18,27 @@
  */
 
 /**
- * signature_verify.cpp
+ * native_probe.cpp
  *
- * Native APK signature verification.
+ * Filesystem-level package record reader.
  *
- * WHY THIS IS NEEDED (context from ApkSignatureKiller / kstools):
- *   Cracking tools like kstools and ApkSignatureKiller work by hooking the
- *   Java-level PackageManager.getPackageInfo() method at the Binder layer.
- *   When the app calls getPackageInfo() with GET_SIGNATURES or
- *   GET_SIGNING_CERTIFICATES, the hook replaces the returned signature array
- *   with the original signer's certificate, so tampered/re-signed APKs appear
- *   to have the original signature.
+ * WHY THE FILE IS READ DIRECTLY:
+ *   The package metadata exposed through the Java PackageManager Binder
+ *   interface can be substituted in place by runtime patching frameworks. When
+ *   the app calls getPackageInfo() with GET_SIGNATURES or
+ *   GET_SIGNING_CERTIFICATES, such a hook replaces the returned certificate
+ *   array with the original one, so a repackaged build appears to carry the
+ *   original record.
  *
- * HOW THIS COUNTERS THAT:
- *   This code reads the APK file directly from the filesystem, parses the ZIP
- *   central directory, extracts the META-INF/ *.RSA/.DSA/.EC signature file,
- *   and returns the embedded X.509 certificate. Because it accesses the APK
- *   file at the filesystem level rather than through the Java PackageManager
- *   API, it cannot be intercepted by the Binder-level hook used by kstools
- *   and ApkSignatureKiller.
+ * WHAT THIS DOES INSTEAD:
+ *   This code reads the package file directly from the filesystem, parses the
+ *   ZIP central directory, extracts the META-INF/ *.RSA/.DSA/.EC entry, and
+ *   returns the embedded X.509 record. Because it accesses the file at the
+ *   filesystem level rather than through the Java PackageManager API, a
+ *   Binder-level substitution cannot reach it.
  *
- *   The calling Kotlin code then computes the SHA-256 digest of the certificate
- *   and compares it against the expected value from BuildConfig.
+ *   The calling Kotlin code then computes the SHA-256 fingerprint of the
+ *   record and compares it against the pinned release value.
  */
 
 #include <jni.h>
@@ -56,7 +55,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#define LOG_TAG "SignatureVerify"
+#define LOG_TAG "NativeProbe"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 // ---------------------------------------------------------------------------
@@ -209,27 +208,27 @@ static bool read_u64le(const uint8_t* p, size_t off, size_t end, uint64_t* out) 
 // ---------------------------------------------------------------------------
 // APK Signature Scheme v2 / v3 verification support
 //
-// WHY (context from google/apksigner and APKSignatureBypassDemo):
+// WHY (compare with google/apksigner's strongest-scheme rule):
 //   Modern APKs are signed with up to three schemes: v1 (JAR) whose signing
 //   certificate lives in META-INF/ *.RSA, and v2/v3 whose signing certificate
 //   lives in the "APK Signing Block" located immediately before the ZIP
 //   central directory.
 //
-//   Google/apksigner verifies the highest available scheme and treats the
+//   Android reads the highest available scheme and treats the
 //   schemes as independent. A subtle, well-known bypass (demonstrated by
-//   APKSignatureBypassDemo, and discussed on the apksigner docs page) works by
-//   exploiting the difference between v1 and v2/v3 verification:
+//   a documented scheme-confusion case) works by
+//   exploiting the difference between v1 and v2/v3 handling:
 //     * an attacker preserves the ORIGINAL META-INF/ *.RSA v1 signature files
 //       (so a checker that only reads v1 sees the genuine certificate and
 //       passes the digest comparison), while
 //     * re-signing the same APK with a NEW key in the v2/v3 APK Signing Block
 //       (which cryptographically covers the file content), so the system
-//       install/verification path accepts the attacker's key.
-//   A verifier that validates only the v1 certificate therefore accepts a
+//       install path accepts the attacker's key.
+//   A check that reads only the v1 certificate therefore accepts a
 //   repackaged APK controlled by the attacker - exactly the failure mode our
 //   own previous implementation was exposed to.
 //
-//   The counter-measure implemented here is to ALSO read the signing
+//   This implementation therefore ALSO reads the signing
 //   certificate from the v2/v3 APK Signing Block. Because the v2/v3 signature
 //   covers the whole file, an attacker cannot keep our certificate there while
 //   using their own key; requiring the v2/v3 signer digest to match the pin
@@ -407,7 +406,7 @@ static int find_apk_sign_block_cert(const uint8_t* apk, size_t apk_size,
     if (!scheme_reported) return 0; // signing block present but no valid v2/v3 signer
 
     // Prefer the highest available scheme (v3 over v2) unless the caller asked
-    // otherwise, mirroring Android's "verify the strongest scheme" behaviour.
+    // otherwise, mirroring Android's "strongest scheme wins" behaviour.
     std::vector<uint8_t> chosen;
     if (prefer_v3 && !v3_cert.empty()) chosen = std::move(v3_cert);
     else if (!v2_cert.empty()) chosen = std::move(v2_cert);
@@ -729,25 +728,29 @@ static bool crc32_matches_inflated(const uint8_t* compressed, size_t compressed_
 }
 
 // ---------------------------------------------------------------------------
-// Obfuscated expected signer digest  (塔菲逆核 fork)
+// Obfuscated expected signer digest
 //
-// 发布签名证书的 SHA-256 hex 以轮转多字节 XOR 编码存放在 key_generated.h，
-// 因此不会以明文出现在 .so 字符串表里。
+// The SHA-256 hex string of the official release signing certificate is
+// stored with a rotating multi-byte XOR cipher so it never appears as a
+// plain-text literal in the binary. The encoded arrays and key are defined
+// in key_generated.h (generated at build time from the TM GitHub secret).
 //
-// 本 fork 的编码值由 app/generate_header.py 生成，明文 pin =
-// IntegrityGuard.expectedSignerDigest()（发布签名证书摘要）+ applicationId
-// "com.taffynihe"（注意 namespace 仍为 com.soreverse.mcp，以匹配 JNI 函数名）。
-//
-// 上游 SOMCP 的 CI 从 $TM secret 构建期生成该头文件；塔菲逆核无该 secret，
-// 故 key_generated.h 直接入库（值非机密：签名摘要本身已以 XOR 形式存在于 Kotlin 中）。
+// The expected hash below is:
+//   90FEDAC1F020C6C5D1DD1A635DB5C3B7579F5B87647E2C2C00966D3BCB0F8B6F
+// ---------------------------------------------------------------------------
+// All encoded arrays and the XOR key are defined in key_generated.h:
+//   #include "key_generated.h"  (at line 787 below)
 // ---------------------------------------------------------------------------
 
 #include "key_generated.h"
-
+#include "reporting_key.h"  // pulls in sha256_impl.h (shared SHA-256 primitives)
 
 /**
  * Decodes a rotating multi-byte XOR-encoded hex string into a plain hex string.
  * Each byte is XOR'd with kXorKey[i % kXorKeyLen] (from key_generated.h).
+ *
+ * Used only for the signer-pin arrays. The reporting API key deliberately
+ * does NOT go through this scheme — see reporting_key.h.
  */
 static std::string decode_xor_hex(const uint8_t* encoded, size_t len) {
     std::string result;
@@ -763,91 +766,11 @@ static std::string decode_xor_hex(const uint8_t* encoded, size_t len) {
 //
 // Self-contained implementation so the signer digest and APK hashes can be
 // computed without Java MessageDigest, which hooking frameworks
-// (TweakMe / SigKill / SignatureKiller) are able to intercept at the Java
+// cannot intercept at the Java
 // layer. The Java -> native bridge itself cannot be hooked the same way.
+// The primitives (struct Sha256 + transform/init/update/final) live in
+// sha256_impl.h, shared with reporting_key.h and its host unit test.
 // ---------------------------------------------------------------------------
-struct Sha256 {
-    uint32_t state[8];
-    uint64_t bitlen;
-    uint8_t buffer[64];
-    size_t buflen;
-};
-
-static const uint32_t kSha256K[64] = {
-    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-};
-
-static inline uint32_t rotr32(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
-
-static void sha256_transform(Sha256* s, const uint8_t* chunk) {
-    uint32_t w[64];
-    for (int i = 0; i < 16; i++) {
-        w[i] = ((uint32_t)chunk[i * 4] << 24) | ((uint32_t)chunk[i * 4 + 1] << 16) |
-               ((uint32_t)chunk[i * 4 + 2] << 8) | ((uint32_t)chunk[i * 4 + 3]);
-    }
-    for (int i = 16; i < 64; i++) {
-        uint32_t s0 = rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^ (w[i - 15] >> 3);
-        uint32_t s1 = rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^ (w[i - 2] >> 10);
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-    }
-    uint32_t a = s->state[0], b = s->state[1], c = s->state[2], d = s->state[3];
-    uint32_t e = s->state[4], f = s->state[5], g = s->state[6], h = s->state[7];
-    for (int i = 0; i < 64; i++) {
-        uint32_t S1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
-        uint32_t ch = (e & f) ^ (~e & g);
-        uint32_t t1 = h + S1 + ch + kSha256K[i] + w[i];
-        uint32_t S0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
-        uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-        uint32_t t2 = S0 + maj;
-        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
-    }
-    s->state[0] += a; s->state[1] += b; s->state[2] += c; s->state[3] += d;
-    s->state[4] += e; s->state[5] += f; s->state[6] += g; s->state[7] += h;
-}
-
-static void sha256_init(Sha256* s) {
-    s->state[0] = 0x6a09e667; s->state[1] = 0xbb67ae85;
-    s->state[2] = 0x3c6ef372; s->state[3] = 0xa54ff53a;
-    s->state[4] = 0x510e527f; s->state[5] = 0x9b05688c;
-    s->state[6] = 0x1f83d9ab; s->state[7] = 0x5be0cd19;
-    s->bitlen = 0;
-    s->buflen = 0;
-}
-
-static void sha256_update(Sha256* s, const uint8_t* data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        s->buffer[s->buflen++] = data[i];
-        s->bitlen += 8;
-        if (s->buflen == 64) {
-            sha256_transform(s, s->buffer);
-            s->buflen = 0;
-        }
-    }
-}
-
-static void sha256_final(Sha256* s, uint8_t out[32]) {
-    uint64_t bitlen = s->bitlen;
-    uint8_t pad = 0x80;
-    sha256_update(s, &pad, 1);
-    uint8_t zero = 0;
-    while (s->buflen != 56) sha256_update(s, &zero, 1);
-    uint8_t len_bytes[8];
-    for (int i = 0; i < 8; i++) len_bytes[7 - i] = static_cast<uint8_t>(bitlen >> (i * 8));
-    sha256_update(s, len_bytes, 8);
-    for (int i = 0; i < 8; i++) {
-        out[i * 4]     = static_cast<uint8_t>(s->state[i] >> 24);
-        out[i * 4 + 1] = static_cast<uint8_t>(s->state[i] >> 16);
-        out[i * 4 + 2] = static_cast<uint8_t>(s->state[i] >> 8);
-        out[i * 4 + 3] = static_cast<uint8_t>(s->state[i]);
-    }
-}
 
 /**
  * Computes the SHA-256 of [data] and returns it as an UPPERCASE hex string.
@@ -872,6 +795,866 @@ static std::string sha256_hex(const uint8_t* data, size_t len) {
     return out;
 }
 
+/**
+ * Block-oriented SHA-256 update.
+ *
+ * sha256_update() advances one byte at a time, which is fine for the small
+ * inputs it was written for (a certificate, a package name) but would dominate
+ * startup time when hashing a whole APK section. Same state machine, buffered.
+ */
+static void sha256_update_bulk(Sha256* s, const uint8_t* data, size_t len) {
+    if (s->buflen) {
+        size_t take = 64 - s->buflen;
+        if (take > len) take = len;
+        std::memcpy(s->buffer + s->buflen, data, take);
+        s->buflen += take;
+        s->bitlen += static_cast<uint64_t>(take) * 8;
+        data += take;
+        len -= take;
+        if (s->buflen == 64) {
+            sha256_transform(s, s->buffer);
+            s->buflen = 0;
+        }
+    }
+    while (len >= 64) {
+        sha256_transform(s, data);
+        data += 64;
+        len -= 64;
+        s->bitlen += 512;
+    }
+    if (len) {
+        std::memcpy(s->buffer, data, len);
+        s->buflen = len;
+        s->bitlen += static_cast<uint64_t>(len) * 8;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SHA-512 (FIPS 180-4)
+//
+// Required by the APK Signature Scheme v2/v3 verification below: apksigner
+// picks RSASSA-PKCS1-v1_5 with SHA-512 (algorithm id 0x0104) for a 4096-bit
+// RSA release key, and the recorded content digest is keyed by that same
+// algorithm, so the SHA-512 digest of the APK content is what the block
+// commits to.
+// ---------------------------------------------------------------------------
+struct Sha512 {
+    uint64_t state[8];
+    uint64_t bitlen;
+    uint8_t buffer[128];
+    size_t buflen;
+};
+
+static const uint64_t kSha512K[80] = {
+    0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL,
+    0x3956c25bf348b538ULL, 0x59f111f1b605d019ULL, 0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL,
+    0xd807aa98a3030242ULL, 0x12835b0145706fbeULL, 0x243185be4ee4b28cULL, 0x550c7dc3d5ffb4e2ULL,
+    0x72be5d74f27b896fULL, 0x80deb1fe3b1696b1ULL, 0x9bdc06a725c71235ULL, 0xc19bf174cf692694ULL,
+    0xe49b69c19ef14ad2ULL, 0xefbe4786384f25e3ULL, 0x0fc19dc68b8cd5b5ULL, 0x240ca1cc77ac9c65ULL,
+    0x2de92c6f592b0275ULL, 0x4a7484aa6ea6e483ULL, 0x5cb0a9dcbd41fbd4ULL, 0x76f988da831153b5ULL,
+    0x983e5152ee66dfabULL, 0xa831c66d2db43210ULL, 0xb00327c898fb213fULL, 0xbf597fc7beef0ee4ULL,
+    0xc6e00bf33da88fc2ULL, 0xd5a79147930aa725ULL, 0x06ca6351e003826fULL, 0x142929670a0e6e70ULL,
+    0x27b70a8546d22ffcULL, 0x2e1b21385c26c926ULL, 0x4d2c6dfc5ac42aedULL, 0x53380d139d95b3dfULL,
+    0x650a73548baf63deULL, 0x766a0abb3c77b2a8ULL, 0x81c2c92e47edaee6ULL, 0x92722c851482353bULL,
+    0xa2bfe8a14cf10364ULL, 0xa81a664bbc423001ULL, 0xc24b8b70d0f89791ULL, 0xc76c51a30654be30ULL,
+    0xd192e819d6ef5218ULL, 0xd69906245565a910ULL, 0xf40e35855771202aULL, 0x106aa07032bbd1b8ULL,
+    0x19a4c116b8d2d0c8ULL, 0x1e376c085141ab53ULL, 0x2748774cdf8eeb99ULL, 0x34b0bcb5e19b48a8ULL,
+    0x391c0cb3c5c95a63ULL, 0x4ed8aa4ae3418acbULL, 0x5b9cca4f7763e373ULL, 0x682e6ff3d6b2b8a3ULL,
+    0x748f82ee5defb2fcULL, 0x78a5636f43172f60ULL, 0x84c87814a1f0ab72ULL, 0x8cc702081a6439ecULL,
+    0x90befffa23631e28ULL, 0xa4506cebde82bde9ULL, 0xbef9a3f7b2c67915ULL, 0xc67178f2e372532bULL,
+    0xca273eceea26619cULL, 0xd186b8c721c0c207ULL, 0xeada7dd6cde0eb1eULL, 0xf57d4f7fee6ed178ULL,
+    0x06f067aa72176fbaULL, 0x0a637dc5a2c898a6ULL, 0x113f9804bef90daeULL, 0x1b710b35131c471bULL,
+    0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL, 0x431d67c49c100d4cULL,
+    0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL,
+};
+
+static inline uint64_t rotr64(uint64_t x, uint64_t n) {
+    return (x >> n) | (x << (64 - n));
+}
+
+static void sha512_transform(Sha512* s, const uint8_t* chunk) {
+    uint64_t w[80];
+    for (int i = 0; i < 16; i++) {
+        uint64_t v = 0;
+        for (int j = 0; j < 8; j++) v = (v << 8) | chunk[i * 8 + j];
+        w[i] = v;
+    }
+    for (int i = 16; i < 80; i++) {
+        const uint64_t s0 = rotr64(w[i - 15], 1) ^ rotr64(w[i - 15], 8) ^ (w[i - 15] >> 7);
+        const uint64_t s1 = rotr64(w[i - 2], 19) ^ rotr64(w[i - 2], 61) ^ (w[i - 2] >> 6);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    uint64_t a = s->state[0], b = s->state[1], c = s->state[2], d = s->state[3];
+    uint64_t e = s->state[4], f = s->state[5], g = s->state[6], h = s->state[7];
+    for (int i = 0; i < 80; i++) {
+        const uint64_t s1 = rotr64(e, 14) ^ rotr64(e, 18) ^ rotr64(e, 41);
+        const uint64_t ch = (e & f) ^ (~e & g);
+        const uint64_t t1 = h + s1 + ch + kSha512K[i] + w[i];
+        const uint64_t s0 = rotr64(a, 28) ^ rotr64(a, 34) ^ rotr64(a, 39);
+        const uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
+        const uint64_t t2 = s0 + maj;
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    s->state[0] += a; s->state[1] += b; s->state[2] += c; s->state[3] += d;
+    s->state[4] += e; s->state[5] += f; s->state[6] += g; s->state[7] += h;
+}
+
+static void sha512_init(Sha512* s) {
+    s->state[0] = 0x6a09e667f3bcc908ULL; s->state[1] = 0xbb67ae8584caa73bULL;
+    s->state[2] = 0x3c6ef372fe94f82bULL; s->state[3] = 0xa54ff53a5f1d36f1ULL;
+    s->state[4] = 0x510e527fade682d1ULL; s->state[5] = 0x9b05688c2b3e6c1fULL;
+    s->state[6] = 0x1f83d9abfb41bd6bULL; s->state[7] = 0x5be0cd19137e2179ULL;
+    s->bitlen = 0;
+    s->buflen = 0;
+}
+
+static void sha512_update(Sha512* s, const uint8_t* data, size_t len) {
+    if (s->buflen) {
+        size_t take = 128 - s->buflen;
+        if (take > len) take = len;
+        std::memcpy(s->buffer + s->buflen, data, take);
+        s->buflen += take;
+        s->bitlen += static_cast<uint64_t>(take) * 8;
+        data += take;
+        len -= take;
+        if (s->buflen == 128) {
+            sha512_transform(s, s->buffer);
+            s->buflen = 0;
+        }
+    }
+    while (len >= 128) {
+        sha512_transform(s, data);
+        data += 128;
+        len -= 128;
+        s->bitlen += 1024;
+    }
+    if (len) {
+        std::memcpy(s->buffer, data, len);
+        s->buflen = len;
+        s->bitlen += static_cast<uint64_t>(len) * 8;
+    }
+}
+
+static void sha512_final(Sha512* s, uint8_t out[64]) {
+    const uint64_t bitlen = s->bitlen;
+    // 0x80, then zero padding so that the 16-byte length field lands on the
+    // second-to-last 128-byte block boundary.
+    uint8_t pad[128];
+    std::memset(pad, 0, sizeof(pad));
+    pad[0] = 0x80;
+    const size_t padlen = (s->buflen < 112) ? (112 - s->buflen) : (240 - s->buflen);
+    sha512_update(s, pad, padlen);
+    uint8_t len_bytes[16];
+    std::memset(len_bytes, 0, sizeof(len_bytes));
+    for (int i = 0; i < 8; i++) {
+        len_bytes[15 - i] = static_cast<uint8_t>(bitlen >> (i * 8));
+    }
+    sha512_update(s, len_bytes, sizeof(len_bytes));
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            out[i * 8 + j] = static_cast<uint8_t>(s->state[i] >> (56 - j * 8));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Modular exponentiation on 32-bit limbs (Montgomery / CIOS)
+//
+// Verifying a v2/v3 signature needs exactly one thing from public-key
+// arithmetic: signature^e mod n with the public exponent from the pinned
+// signing certificate (65537 in practice). Implementing that here keeps the
+// check self-contained (no crypto library ships with the NDK) and portable to
+// the 32-bit ABIs, where __int128 - the usual shortcut for a textbook
+// multiply-reduce - does not exist.
+//
+// Montgomery multiplication is used because it replaces the division step of
+// a naive modular multiply with a multiply-and-shift, leaving only 32x32->64
+// bit products, which are exact on every ABI.
+// ---------------------------------------------------------------------------
+static const size_t kBnMaxLimbs = 256; // 8192-bit ceiling, 128 limbs for the 4096-bit release key
+
+static int bn_cmp(const uint32_t* a, const uint32_t* b, size_t limbs) {
+    for (size_t i = limbs; i-- > 0;) {
+        if (a[i] != b[i]) return (a[i] > b[i]) ? 1 : -1;
+    }
+    return 0;
+}
+
+static void bn_sub_inplace(uint32_t* a, const uint32_t* b, size_t limbs) {
+    uint32_t borrow = 0;
+    for (size_t i = 0; i < limbs; i++) {
+        const uint64_t d = static_cast<uint64_t>(a[i]) - b[i] - borrow;
+        a[i] = static_cast<uint32_t>(d);
+        borrow = (d >> 32) ? 1u : 0u;
+    }
+}
+
+static void bn_double_mod(uint32_t* a, const uint32_t* n, size_t limbs) {
+    uint32_t carry = 0;
+    for (size_t i = 0; i < limbs; i++) {
+        const uint32_t next = a[i] >> 31;
+        a[i] = (a[i] << 1) | carry;
+        carry = next;
+    }
+    if (carry || bn_cmp(a, n, limbs) >= 0) bn_sub_inplace(a, n, limbs);
+}
+
+// -n^-1 mod 2^32 by Newton iteration on the odd modulus word n0.
+static uint32_t bn_mont_n0inv(uint32_t n0) {
+    uint32_t x = 1;
+    for (int i = 0; i < 5; i++) {
+        x = x * (2u - n0 * x);
+    }
+    return static_cast<uint32_t>(0u - x);
+}
+
+static void bn_mont_mul(const uint32_t* a, const uint32_t* b, const uint32_t* n,
+                        uint32_t n0, size_t limbs, uint32_t* out) {
+    uint32_t t[kBnMaxLimbs + 2];
+    std::memset(t, 0, (limbs + 2) * sizeof(uint32_t));
+    for (size_t i = 0; i < limbs; i++) {
+        uint64_t carry = 0;
+        const uint64_t bi = b[i];
+        for (size_t j = 0; j < limbs; j++) {
+            const uint64_t uv =
+                static_cast<uint64_t>(t[j]) + static_cast<uint64_t>(a[j]) * bi + carry;
+            t[j] = static_cast<uint32_t>(uv);
+            carry = uv >> 32;
+        }
+        uint64_t uv = static_cast<uint64_t>(t[limbs]) + carry;
+        t[limbs] = static_cast<uint32_t>(uv);
+        t[limbs + 1] = static_cast<uint32_t>(uv >> 32);
+
+        // Add m*n so that the low word cancels: m = t[0] * (-n^-1) mod 2^32.
+        const uint32_t m = static_cast<uint32_t>(t[0] * n0);
+        uv = static_cast<uint64_t>(t[0]) + static_cast<uint64_t>(m) * n[0];
+        carry = uv >> 32;
+        for (size_t j = 1; j < limbs; j++) {
+            uv = static_cast<uint64_t>(t[j]) + static_cast<uint64_t>(m) * n[j] + carry;
+            t[j - 1] = static_cast<uint32_t>(uv);
+            carry = uv >> 32;
+        }
+        uv = static_cast<uint64_t>(t[limbs]) + carry;
+        t[limbs - 1] = static_cast<uint32_t>(uv);
+        t[limbs] = t[limbs + 1] + static_cast<uint32_t>(uv >> 32);
+    }
+    if (t[limbs] != 0 || bn_cmp(t, n, limbs) >= 0) bn_sub_inplace(t, n, limbs);
+    std::memcpy(out, t, limbs * sizeof(uint32_t));
+}
+
+static bool bn_from_be(const uint8_t* be, size_t len, uint32_t* out, size_t limbs) {
+    if (!be || len == 0 || len > limbs * 4) return false;
+    std::memset(out, 0, limbs * sizeof(uint32_t));
+    for (size_t i = 0; i < len; i++) {
+        const size_t bit = (len - 1 - i) * 8;
+        out[bit / 32] |= static_cast<uint32_t>(be[i]) << (bit % 32);
+    }
+    return true;
+}
+
+static void bn_to_be(const uint32_t* in, size_t limbs, uint8_t* out) {
+    for (size_t i = 0; i < limbs; i++) {
+        const uint32_t w = in[limbs - 1 - i];
+        out[i * 4]     = static_cast<uint8_t>(w >> 24);
+        out[i * 4 + 1] = static_cast<uint8_t>(w >> 16);
+        out[i * 4 + 2] = static_cast<uint8_t>(w >> 8);
+        out[i * 4 + 3] = static_cast<uint8_t>(w);
+    }
+}
+
+// DigestInfo prefixes (RFC 8017, EMSA-PKCS1-v1_5) for the two SHA-2 digests
+// apksigner pairs with an RSA key.
+static const uint8_t kDigestInfoSha256[19] = {
+    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+    0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20
+};
+static const uint8_t kDigestInfoSha512[19] = {
+    0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+    0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40
+};
+
+/**
+ * RSASSA-PKCS1-v1_5 verification: recovers the encoded message from the
+ * signature with the public key and compares it against
+ *   0x00 0x01 0xFF..FF 0x00 || DigestInfo || digest
+ *
+ * @return true when the signature is valid for [expected_digest].
+ */
+static bool rsa_pkcs1_v15_verify(const uint8_t* sig, size_t sig_len,
+                                 const uint8_t* modulus, size_t modulus_len,
+                                 uint32_t exponent,
+                                 const uint8_t* digest_info, size_t digest_info_len,
+                                 const uint8_t* expected_digest, size_t digest_len) {
+    if (!sig || !modulus || !expected_digest || modulus_len == 0) return false;
+    if (sig_len != modulus_len || modulus_len > kBnMaxLimbs * 4) return false;
+
+    const size_t limbs = (modulus_len + 3) / 4;
+    uint32_t n[kBnMaxLimbs], base[kBnMaxLimbs], acc[kBnMaxLimbs];
+    uint32_t r[kBnMaxLimbs], tmp[kBnMaxLimbs];
+    if (!bn_from_be(modulus, modulus_len, n, limbs)) return false;
+    if ((n[0] & 1u) == 0) return false; // Montgomery requires an odd modulus
+    if (!bn_from_be(sig, sig_len, base, limbs)) return false;
+
+    const uint32_t n0 = bn_mont_n0inv(n[0]);
+
+    // R^2 mod n, by doubling 1 for two full limb-widths of bits: the first
+    // pass yields R mod n, the second R^2 mod n. Doubling with a conditional
+    // subtraction needs no division.
+    std::memset(r, 0, limbs * sizeof(uint32_t));
+    r[0] = 1;
+    for (int pass = 0; pass < 2; pass++) {
+        for (size_t i = 0; i < 32 * limbs; i++) bn_double_mod(r, n, limbs);
+    }
+
+    bn_mont_mul(base, r, n, n0, limbs, tmp);   // signature in Montgomery form
+    std::memcpy(base, tmp, limbs * sizeof(uint32_t));
+    std::memset(acc, 0, limbs * sizeof(uint32_t));
+    acc[0] = 1;
+    bn_mont_mul(acc, r, n, n0, limbs, tmp);    // 1 in Montgomery form
+    std::memcpy(acc, tmp, limbs * sizeof(uint32_t));
+
+    if (exponent == 0) return false;
+    bool started = false;
+    for (int bit = 31; bit >= 0; bit--) {
+        const bool set = ((exponent >> bit) & 1u) != 0;
+        if (!started) {
+            if (!set) continue;
+            started = true;
+        }
+        bn_mont_mul(acc, acc, n, n0, limbs, tmp); // square
+        std::memcpy(acc, tmp, limbs * sizeof(uint32_t));
+        if (set) {
+            bn_mont_mul(acc, base, n, n0, limbs, tmp); // multiply
+            std::memcpy(acc, tmp, limbs * sizeof(uint32_t));
+        }
+    }
+
+    std::memset(r, 0, limbs * sizeof(uint32_t));
+    r[0] = 1;
+    bn_mont_mul(acc, r, n, n0, limbs, tmp); // leave Montgomery form
+    std::memcpy(acc, tmp, limbs * sizeof(uint32_t));
+
+    const size_t em_len = limbs * 4;
+    std::vector<uint8_t> em(em_len);
+    bn_to_be(acc, limbs, em.data());
+
+    const size_t t_len = digest_info_len + digest_len;
+    if (em_len < t_len + 11) return false;
+    if (em[0] != 0x00 || em[1] != 0x01) return false;
+    size_t i = 2;
+    while (i < em_len && em[i] == 0xFF) i++;
+    if (i - 2 < 8) return false;              // PS must be at least 8 bytes
+    if (i >= em_len || em[i] != 0x00) return false;
+    if (em_len - (i + 1) != t_len) return false;
+    if (std::memcmp(em.data() + i + 1, digest_info, digest_info_len) != 0) return false;
+    if (std::memcmp(em.data() + i + 1 + digest_info_len, expected_digest, digest_len) != 0) {
+        return false;
+    }
+    return true;
+}
+
+// RSA OID 1.2.840.113549.1.1.1 (rsaEncryption), DER value octets.
+static const uint8_t kRsaEncryptionOid[9] = {
+    0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01
+};
+
+/**
+ * Extracts (n, e) from a SubjectPublicKeyInfo:
+ *   SEQUENCE { SEQUENCE { OID rsaEncryption, NULL }, BIT STRING { SEQUENCE {
+ *     INTEGER modulus, INTEGER publicExponent } } }
+ */
+static bool spki_to_rsa(const DerNode& spki, std::vector<uint8_t>& out_modulus,
+                        uint32_t* out_exponent) {
+    if (spki.tag != 0x30 || spki.children.size() < 2) return false;
+    const DerNode& alg = spki.children[0];
+    const DerNode& bits = spki.children[1];
+    if (alg.tag != 0x30 || alg.children.empty()) return false;
+    if (alg.children[0].tag != 0x06) return false;
+    const std::vector<uint8_t>& oid = alg.children[0].value;
+    if (oid.size() != sizeof(kRsaEncryptionOid) ||
+        std::memcmp(oid.data(), kRsaEncryptionOid, sizeof(kRsaEncryptionOid)) != 0) {
+        return false;
+    }
+    if (bits.tag != 0x03 || bits.value.size() < 2) return false;
+    if (bits.value[0] != 0x00) return false; // no unused bits in a DER key blob
+
+    const DerNode key = parse_der(bits.value.data() + 1, 0, bits.value.size() - 1);
+    if (key.tag != 0x30 || key.children.size() < 2) return false;
+    if (key.children[0].tag != 0x02 || key.children[1].tag != 0x02) return false;
+
+    // INTEGER values may carry a leading zero octet to stay positive.
+    const std::vector<uint8_t>& mod = key.children[0].value;
+    const std::vector<uint8_t>& exp = key.children[1].value;
+    size_t mod_skip = 0;
+    while (mod_skip + 1 < mod.size() && mod[mod_skip] == 0x00) mod_skip++;
+    size_t exp_skip = 0;
+    while (exp_skip + 1 < exp.size() && exp[exp_skip] == 0x00) exp_skip++;
+    if (mod.size() - mod_skip == 0) return false;
+    if (exp.size() - exp_skip == 0 || exp.size() - exp_skip > 4) return false;
+
+    out_modulus.assign(mod.begin() + mod_skip, mod.end());
+    uint32_t e = 0;
+    for (size_t i = exp_skip; i < exp.size(); i++) e = (e << 8) | exp[i];
+    *out_exponent = e;
+    return true;
+}
+
+/**
+ * Reads the public key out of an X.509 certificate. The certificate is the
+ * object the pin commits to, so its key - not the redundant "public key" field
+ * of the signing block - is what the signature is verified against.
+ */
+static bool cert_to_rsa(const std::vector<uint8_t>& cert, std::vector<uint8_t>& out_modulus,
+                        uint32_t* out_exponent) {
+    if (cert.size() < 2) return false;
+    const DerNode root = parse_der(cert.data(), 0, cert.size());
+    if (root.tag != 0x30 || root.children.empty()) return false;
+    // Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue }
+    for (const auto& child : root.children[0].children) {
+        if (child.tag != 0x30) continue;
+        if (spki_to_rsa(child, out_modulus, out_exponent)) return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// APK Signature Scheme v2/v3 — cryptographic verification
+//
+// WHAT THE EXISTING CHECKS DO NOT COVER
+//   Comparing the signing certificate in the v2/v3 block against the pinned
+//   digest only proves that the block *names* the release signer. The block is
+//   a plain blob: whoever swaps a single byte inside lib/ or classes.dex can
+//   leave the original block in place (its signature is then simply stale) and
+//   install the result on any device whose own signature verification is
+//   bypassed. The certificate comparison still passes, because nothing in it
+//   verifies a signature or looks at the file content.
+//
+// WHAT IS DONE HERE
+//   1. The signature in the block is verified with the public key of the
+//      pinned certificate, over the exact bytes of the "signed data" field.
+//      That proves the digests inside the block were produced by the holder of
+//      the release key.
+//   2. The APK content digest is recomputed the way google/apksig defines it
+//      and compared with the digest recorded in the block. That proves every
+//      byte of the file content is the one the release key holder signed.
+//
+//   Together these make "edit a file, keep the original signature files" fail
+//   even when the installer's own verification is bypassed.
+// ---------------------------------------------------------------------------
+static const uint32_t kSigAlgoRsaPkcs1Sha256 = 0x0103;
+static const uint32_t kSigAlgoRsaPkcs1Sha512 = 0x0104;
+
+// google/apksig ApkSigningBlockUtils.CONTENT_DIGESTED_CHUNK_MAX_SIZE_BYTES
+static const size_t kContentChunkMaxBytes = 1024 * 1024;
+
+enum : int {
+    kBlockOk                = 0,
+    kBlockReadFailed        = 1 << 0, // APK unreadable / not a ZIP
+    kBlockNotFound          = 1 << 1, // no v2/v3 signing block
+    kBlockMalformed         = 1 << 2, // block present but structurally invalid
+    kBlockCertMismatch      = 1 << 3, // signer is not the pinned release signer
+    kBlockSigAlgoUnsupported = 1 << 4, // signature algorithm not implemented here
+    kBlockSigInvalid        = 1 << 5, // signature does not verify (tampering)
+    kBlockContentMismatch   = 1 << 6, // content digest mismatch (tampering)
+    kBlockDigestUnsupported = 1 << 7, // no digest recorded for that algorithm
+};
+
+struct SignerMaterial {
+    const uint8_t* signed_data = nullptr;
+    size_t signed_data_len = 0;
+    uint32_t sig_algo = 0;
+    const uint8_t* sig = nullptr;
+    size_t sig_len = 0;
+    const uint8_t* content_digest = nullptr;
+    size_t content_digest_len = 0;
+    std::vector<uint8_t> cert;
+};
+
+/** Parses the first signer of a v2 (is_v3 == false) or v3 scheme block value. */
+static bool parse_scheme_signer(const uint8_t* val, size_t val_len, bool is_v3,
+                                SignerMaterial* out) {
+    if (!val || val_len == 0 || !out) return false;
+    out->signed_data = nullptr;
+    out->signed_data_len = 0;
+    out->sig_algo = 0;
+    out->sig = nullptr;
+    out->sig_len = 0;
+    out->content_digest = nullptr;
+    out->content_digest_len = 0;
+    out->cert.clear();
+
+    // Block value := LengthPrefixed( sequence of LengthPrefixed( signer ) )
+    uint32_t signers_len = 0;
+    if (!read_u32le(val, 0, val_len, &signers_len)) return false;
+    const size_t signers = 4;
+    if (!in_bounds(signers, signers_len, val_len)) return false;
+    const size_t signers_end = signers + signers_len;
+
+    uint32_t signer_len = 0;
+    if (!read_u32le(val, signers, signers_end, &signer_len)) return false;
+    if (!in_bounds(signers + 4, signer_len, signers_end)) return false;
+    const size_t signer = signers + 4;
+    const size_t signer_end = signer + signer_len;
+
+    // signer.signedData
+    uint32_t sd_len = 0;
+    if (!read_u32le(val, signer, signer_end, &sd_len)) return false;
+    if (!in_bounds(signer + 4, sd_len, signer_end)) return false;
+    const size_t sd = signer + 4;
+    const size_t sd_end = sd + sd_len;
+
+    // signedData.digests := sequence of (algo u32, LengthPrefixed digest)
+    uint32_t digests_len = 0;
+    if (!read_u32le(val, sd, sd_end, &digests_len)) return false;
+    if (!in_bounds(sd + 4, digests_len, sd_end)) return false;
+    const size_t digests = sd + 4;
+    const size_t digests_end = digests + digests_len;
+
+    // signedData.certificates (second field in both v2 and v3)
+    uint32_t certs_len = 0;
+    if (!read_u32le(val, digests_end, sd_end, &certs_len)) return false;
+    if (!in_bounds(digests_end + 4, certs_len, sd_end)) return false;
+    const size_t certs = digests_end + 4;
+    const size_t certs_end = certs + certs_len;
+
+    uint32_t cert_len = 0;
+    if (!read_u32le(val, certs, certs_end, &cert_len)) return false;
+    if (!in_bounds(certs + 4, cert_len, certs_end)) return false;
+    out->cert.assign(val + certs + 4, val + certs + 4 + cert_len);
+
+    out->signed_data = val + sd;
+    out->signed_data_len = sd_len;
+
+    // signer.signatures: directly after the signed data in v2; v3 inserts a
+    // minSdk/maxSdk uint32 pair between them.
+    const size_t sigs_field = sd_end + (is_v3 ? 8 : 0);
+    if (!in_bounds(sigs_field, 4, signer_end)) return false;
+    uint32_t sigs_len = 0;
+    if (!read_u32le(val, sigs_field, signer_end, &sigs_len)) return false;
+    if (!in_bounds(sigs_field + 4, sigs_len, signer_end)) return false;
+    const size_t sigs = sigs_field + 4;
+    const size_t sigs_end = sigs + sigs_len;
+
+    // first signature record := LengthPrefixed( algo u32, LengthPrefixed sig )
+    uint32_t rec_len = 0;
+    if (!read_u32le(val, sigs, sigs_end, &rec_len)) return false;
+    if (!in_bounds(sigs + 4, rec_len, sigs_end)) return false;
+    const size_t rec = sigs + 4;
+    const size_t rec_end = rec + rec_len;
+    uint32_t algo = 0;
+    uint32_t sig_len = 0;
+    if (!read_u32le(val, rec, rec_end, &algo)) return false;
+    if (!read_u32le(val, rec + 4, rec_end, &sig_len)) return false;
+    if (!in_bounds(rec + 8, sig_len, rec_end)) return false;
+    out->sig_algo = algo;
+    out->sig = val + rec + 8;
+    out->sig_len = sig_len;
+
+    // Recorded content digest, keyed by the same algorithm id as the signature.
+    size_t pos = digests;
+    while (pos + 4 <= digests_end) {
+        uint32_t item_len = 0;
+        if (!read_u32le(val, pos, digests_end, &item_len)) break;
+        if (item_len < 8) break;
+        const size_t item = pos + 4;
+        const size_t item_end = item + item_len;
+        if (!in_bounds(item, item_len, digests_end)) break;
+        uint32_t item_algo = 0;
+        uint32_t digest_len = 0;
+        if (read_u32le(val, item, item_end, &item_algo) &&
+            read_u32le(val, item + 4, item_end, &digest_len) &&
+            in_bounds(item + 8, digest_len, item_end)) {
+            if (item_algo == out->sig_algo && out->content_digest == nullptr) {
+                out->content_digest = val + item + 8;
+                out->content_digest_len = digest_len;
+            }
+        }
+        pos = item_end;
+    }
+
+    return !out->cert.empty() && out->sig != nullptr;
+}
+
+/** Finds one signing-block pair by its 4-byte id. */
+static bool find_block_pair(const uint8_t* apk, size_t apk_size, size_t block_start,
+                            size_t block_end, uint32_t scheme_id,
+                            size_t* out_off, size_t* out_len) {
+    if (block_start + 8 > block_end) return false;
+    size_t p = block_start + 8; // skip the leading uint64 size field
+    while (p + 8 <= block_end) {
+        uint64_t pair_size = 0;
+        if (!read_u64le(apk, p, block_end, &pair_size)) return false;
+        if (pair_size < 4) return false;
+        const uint64_t value_len = pair_size - 4;
+        const size_t value = p + 12;
+        if (value > block_end || value_len > block_end - value) return false;
+        uint32_t id = 0;
+        if (!read_u32le(apk, p + 8, block_end, &id)) return false;
+        if (id == scheme_id) {
+            *out_off = value;
+            *out_len = static_cast<size_t>(value_len);
+            return true;
+        }
+        p = value + static_cast<size_t>(value_len);
+    }
+    return false;
+}
+
+/**
+ * Recomputes the APK content digest the way google/apksig defines it
+ * (ApkSigningBlockUtils.computeOneMbChunkContentDigests):
+ *
+ *   - the content is three sections, digested in order: everything before the
+ *     APK Signing Block, the ZIP central directory, and the EOCD - the last
+ *     with its "offset of central directory" field rewritten to the offset of
+ *     the APK Signing Block;
+ *   - each section is cut into consecutive 1 MiB chunks;
+ *   - a chunk digest is H(0xA5 || uint32_le(chunkSize) || chunkBytes);
+ *   - the result is H(0x5A || uint32_le(chunkCount) || all chunk digests).
+ *
+ * The 0xA5/0x5A chunk framing is what makes this differ from a plain hash of
+ * the concatenated bytes, and the rewritten EOCD field is what keeps the
+ * signing block itself out of the digest while still covering the whole file.
+ */
+static bool compute_content_digest(const uint8_t* apk, size_t apk_size,
+                                   size_t block_start, uint64_t central_dir_offset,
+                                   size_t eocd_pos, bool use_sha512,
+                                   std::vector<uint8_t>& out) {
+    out.clear();
+    if (!apk || apk_size < sizeof(ZipEocd)) return false;
+    if (block_start > apk_size) return false;
+    if (central_dir_offset > eocd_pos) return false;
+    if (sum_exceeds(eocd_pos, sizeof(ZipEocd), apk_size)) return false;
+
+    uint8_t eocd[sizeof(ZipEocd)];
+    std::memcpy(eocd, apk + eocd_pos, sizeof(eocd));
+    // SetZipEocdCentralDirectoryOffset(modifiedEocd, beforeApkSigningBlock.size())
+    const uint32_t block_start32 = static_cast<uint32_t>(block_start);
+    eocd[16] = static_cast<uint8_t>(block_start32);
+    eocd[17] = static_cast<uint8_t>(block_start32 >> 8);
+    eocd[18] = static_cast<uint8_t>(block_start32 >> 16);
+    eocd[19] = static_cast<uint8_t>(block_start32 >> 24);
+
+    const uint8_t* sections[3];
+    size_t sizes[3];
+    sections[0] = apk;
+    sizes[0] = block_start;
+    sections[1] = apk + central_dir_offset;
+    sizes[1] = eocd_pos - static_cast<size_t>(central_dir_offset);
+    sections[2] = eocd;
+    sizes[2] = sizeof(eocd);
+
+    const size_t digest_len = use_sha512 ? 64 : 32;
+    std::vector<uint8_t> chunk_digests;
+    uint32_t chunk_count = 0;
+
+    for (int s = 0; s < 3; s++) {
+        size_t off = 0;
+        while (off < sizes[s]) {
+            const size_t take = (sizes[s] - off < kContentChunkMaxBytes)
+                                    ? (sizes[s] - off)
+                                    : kContentChunkMaxBytes;
+            const uint8_t prefix[5] = {
+                0xA5,
+                static_cast<uint8_t>(take),
+                static_cast<uint8_t>(take >> 8),
+                static_cast<uint8_t>(take >> 16),
+                static_cast<uint8_t>(take >> 24),
+            };
+            uint8_t dg[64];
+            if (use_sha512) {
+                Sha512 h;
+                sha512_init(&h);
+                sha512_update(&h, prefix, sizeof(prefix));
+                sha512_update(&h, sections[s] + off, take);
+                sha512_final(&h, dg);
+            } else {
+                Sha256 h;
+                sha256_init(&h);
+                sha256_update_bulk(&h, prefix, sizeof(prefix));
+                sha256_update_bulk(&h, sections[s] + off, take);
+                sha256_final(&h, dg);
+            }
+            chunk_digests.insert(chunk_digests.end(), dg, dg + digest_len);
+            if (chunk_count == UINT32_MAX) return false;
+            chunk_count++;
+            off += take;
+        }
+    }
+
+    const uint8_t head[5] = {
+        0x5A,
+        static_cast<uint8_t>(chunk_count),
+        static_cast<uint8_t>(chunk_count >> 8),
+        static_cast<uint8_t>(chunk_count >> 16),
+        static_cast<uint8_t>(chunk_count >> 24),
+    };
+    out.resize(digest_len);
+    if (use_sha512) {
+        Sha512 h;
+        sha512_init(&h);
+        sha512_update(&h, head, sizeof(head));
+        sha512_update(&h, chunk_digests.data(), chunk_digests.size());
+        sha512_final(&h, out.data());
+    } else {
+        Sha256 h;
+        sha256_init(&h);
+        sha256_update_bulk(&h, head, sizeof(head));
+        sha256_update_bulk(&h, chunk_digests.data(), chunk_digests.size());
+        sha256_final(&h, out.data());
+    }
+    return true;
+}
+
+/** Normalizes a fingerprint/digest string for comparison (hex only, uppercase). */
+static std::string normalize_hex(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (char c : in) {
+        if (c >= '0' && c <= '9') {
+            out.push_back(c);
+        } else if (c >= 'a' && c <= 'f') {
+            out.push_back(static_cast<char>(c - 'a' + 'A'));
+        } else if (c >= 'A' && c <= 'F') {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+/**
+ * Verifies the v2/v3 signature record of the package at [apk]/[apk_size].
+ *
+ * @param pinned   pinned SHA-256 of the release signing certificate (hex)
+ * @param fatal    set to true only when the result proves tampering: the
+ *                 pinned signer is present but the signature or the content
+ *                 digest does not match. Any other outcome (absent block,
+ *                 unparsable record, algorithm not implemented here) is
+ *                 reported but not marked fatal - those states are already
+ *                 rejected by the certificate-pin checks in the caller, and a
+ *                 future key type must not turn into an unrecoverable startup
+ *                 kill.
+ * @return a kBlock* bitmask
+ */
+static int verify_sign_block(const uint8_t* apk, size_t apk_size, size_t eocd_pos,
+                             uint64_t central_dir_offset, const std::string& pinned,
+                             bool* fatal) {
+    *fatal = false;
+    if (!apk || apk_size < sizeof(ZipEocd)) return kBlockReadFailed;
+    if (pinned.empty()) return kBlockOk; // nothing to verify against
+    if (central_dir_offset < 24 || central_dir_offset > apk_size) return kBlockMalformed;
+
+    // Footer of the signing block: uint64 size | "APK Sig Block 42".
+    const size_t magic_off = static_cast<size_t>(central_dir_offset) - 16;
+    if (std::memcmp(apk + magic_off, kApkSigBlockMagic, sizeof(kApkSigBlockMagic)) != 0) {
+        return kBlockNotFound;
+    }
+    uint64_t block_size = 0;
+    if (!read_u64le(apk, magic_off - 8, apk_size, &block_size)) return kBlockMalformed;
+    // The declared size counts everything after the leading size field, i.e. the
+    // pairs, the trailing size field and the 16-byte magic. The block therefore
+    // starts at (central directory offset - block_size - 8).
+    if (block_size > static_cast<uint64_t>(magic_off) + 8) return kBlockMalformed;
+    const size_t block_start =
+        static_cast<size_t>(magic_off) + 8 - static_cast<size_t>(block_size);
+    const size_t block_end = magic_off - 8; // end of the ID-value pair region
+    if (block_start > block_end) return kBlockMalformed;
+    // The content digest covers [0, blockStart), so the leading size field must
+    // mirror the footer for the boundary to be well defined.
+    uint64_t leading_size = 0;
+    if (!read_u64le(apk, block_start, apk_size, &leading_size) ||
+        leading_size != block_size) {
+        return kBlockMalformed;
+    }
+
+    // Prefer v3 over v2, mirroring Android's "strongest scheme wins".
+    size_t val = 0;
+    size_t val_len = 0;
+    bool is_v3 = true;
+    if (!find_block_pair(apk, apk_size, block_start, block_end, kApkSigSchemeV3BlockId,
+                         &val, &val_len)) {
+        is_v3 = false;
+        if (!find_block_pair(apk, apk_size, block_start, block_end,
+                             kApkSigSchemeV2BlockId, &val, &val_len)) {
+            return kBlockNotFound;
+        }
+    }
+
+    SignerMaterial m;
+    if (!parse_scheme_signer(apk + val, val_len, is_v3, &m)) return kBlockMalformed;
+
+    // 1. The signer record must be the pinned release signer.
+    const std::string cert_digest = sha256_hex(m.cert.data(), m.cert.size());
+    if (cert_digest != pinned) {
+        LOGE("v2/v3 signer digest does not match the pinned identity (%s)", is_v3 ? "v3" : "v2");
+        return kBlockCertMismatch;
+    }
+
+    // 2. Only RSASSA-PKCS1-v1_5 is implemented; anything else is reported so
+    //    the caller can log it instead of failing closed on an unknown scheme.
+    const uint8_t* digest_info = nullptr;
+    size_t digest_len = 0;
+    if (m.sig_algo == kSigAlgoRsaPkcs1Sha512) {
+        digest_info = kDigestInfoSha512;
+        digest_len = 64;
+    } else if (m.sig_algo == kSigAlgoRsaPkcs1Sha256) {
+        digest_info = kDigestInfoSha256;
+        digest_len = 32;
+    } else {
+        LOGE("v2/v3 signature algorithm 0x%08x is not verifiable here; "
+             "signature left unverified", m.sig_algo);
+        return kBlockSigAlgoUnsupported;
+    }
+
+    // 3. The signature must verify over the signed data with the key inside the
+    //    pinned certificate.
+    std::vector<uint8_t> modulus;
+    uint32_t exponent = 0;
+    if (!cert_to_rsa(m.cert, modulus, &exponent)) {
+        LOGE("pinned certificate carries no RSA public key; signature left unverified");
+        return kBlockSigAlgoUnsupported;
+    }
+    std::vector<uint8_t> signed_digest(digest_len);
+    if (digest_len == 64) {
+        Sha512 h;
+        sha512_init(&h);
+        sha512_update(&h, m.signed_data, m.signed_data_len);
+        sha512_final(&h, signed_digest.data());
+    } else {
+        Sha256 h;
+        sha256_init(&h);
+        sha256_update_bulk(&h, m.signed_data, m.signed_data_len);
+        sha256_final(&h, signed_digest.data());
+    }
+    if (!rsa_pkcs1_v15_verify(m.sig, m.sig_len, modulus.data(), modulus.size(), exponent,
+                              digest_info, 19, signed_digest.data(), digest_len)) {
+        LOGE("v2/v3 signature over the signed data does NOT verify with the pinned signer");
+        *fatal = true;
+        return kBlockSigInvalid;
+    }
+
+    // 4. The recorded content digest must match a freshly computed one, so the
+    //    signature covers this exact file rather than an older revision of it.
+    if (m.content_digest == nullptr || m.content_digest_len != digest_len) {
+        LOGE("no content digest recorded for signature algorithm 0x%08x", m.sig_algo);
+        return kBlockDigestUnsupported;
+    }
+    std::vector<uint8_t> actual;
+    if (!compute_content_digest(apk, apk_size, block_start, central_dir_offset, eocd_pos,
+                                digest_len == 64, actual)) {
+        return kBlockMalformed;
+    }
+    if (actual.size() != m.content_digest_len ||
+        std::memcmp(actual.data(), m.content_digest, actual.size()) != 0) {
+        LOGE("APK content digest does not match the digest signed by the pinned signer");
+        *fatal = true;
+        return kBlockContentMismatch;
+    }
+
+    LOGI("v2/v3 signature and content digest verified (%s)", is_v3 ? "v3" : "v2");
+    return kBlockOk;
+}
+
 // ---------------------------------------------------------------------------
 // Package name pin
 //
@@ -893,28 +1676,28 @@ static std::string sha256_hex(const uint8_t* data, size_t len) {
 // Errors are reported as a bitmask so callers can log the precise failure.
 // ---------------------------------------------------------------------------
 enum : int {
-    kIntegrityOk                = 0,
-    kIntegrityReadFailed        = 1 << 0, // APK unreadable / empty
-    kIntegrityEocdNotFound      = 1 << 1, // not a valid ZIP
-    kIntegrityCentralDirInvalid = 1 << 2, // central directory out of bounds
-    kIntegrityMissingClasses    = 1 << 3, // classes.dex absent
-    kIntegrityMissingManifest   = 1 << 4, // AndroidManifest.xml absent
-    kIntegrityMissingArsc       = 1 << 5, // resources.arsc absent
-    kIntegrityMissingSignature  = 1 << 6, // META-INF/ *.{RSA,DSA,EC} absent
-    kIntegrityMissingNative     = 1 << 7, // lib/<abi>/librz_native.so absent
-    kIntegrityCrcMismatch       = 1 << 8, // classes.dex content CRC mismatch
-    kIntegrityMissingApkSigV234 = 1 << 9, // no v2/v3 APK Signing Block signer
+    kProbeOk                = 0,
+    kProbeReadFailed        = 1 << 0, // APK unreadable / empty
+    kProbeEocdNotFound      = 1 << 1, // not a valid ZIP
+    kProbeCentralDirInvalid = 1 << 2, // central directory out of bounds
+    kProbeMissingClasses    = 1 << 3, // classes.dex absent
+    kProbeMissingManifest   = 1 << 4, // AndroidManifest.xml absent
+    kProbeMissingArsc       = 1 << 5, // resources.arsc absent
+    kProbeMissingEnvelope  = 1 << 6, // META-INF/ *.{RSA,DSA,EC} absent
+    kProbeMissingNative     = 1 << 7, // lib/<abi>/librz_native.so absent
+    kProbeCrcMismatch       = 1 << 8, // classes.dex content CRC mismatch
+    kProbeMissingBlockV234 = 1 << 9, // no v2/v3 APK Signing Block signer
 };
 
 // The bundled native library name is librz_native.so: CMakeLists.txt declares
 // "add_library(rz_native SHARED ...)" (which yields librz_native.so), and the
 // Kotlin side loads it via System.loadLibrary("rz_native"). The integrity
-// check below therefore verifies that this exact library ships inside the APK
-// under lib/<abi>/, so a repackaged build that strips the native verification
+// check below therefore ensures that this exact library ships inside the APK
+// under lib/<abi>/, so a repackaged build that strips the native probe
 // code is rejected.
 
-static int verify_apk_integrity(const uint8_t* apk, size_t apk_size) {
-    if (!apk || apk_size < sizeof(ZipEocd)) return kIntegrityReadFailed;
+static int probe_archive(const uint8_t* apk, size_t apk_size) {
+    if (!apk || apk_size < sizeof(ZipEocd)) return kProbeReadFailed;
 
     // Locate the End of Central Directory scanning backwards (the trailing
     // comment may be up to 64 KiB).
@@ -928,13 +1711,13 @@ static int verify_apk_integrity(const uint8_t* apk, size_t apk_size) {
         if (e.signature == 0x06054b50) { eocd_pos = i; found = true; break; }
         if (i == 0) break;
     }
-    if (!found) return kIntegrityEocdNotFound;
+    if (!found) return kProbeEocdNotFound;
 
     ZipEocd eocd;
     std::memcpy(&eocd, apk + eocd_pos, sizeof(ZipEocd));
     if (static_cast<uint64_t>(eocd.central_dir_offset) +
             static_cast<uint64_t>(eocd.central_dir_size) > apk_size) {
-        return kIntegrityCentralDirInvalid;
+        return kProbeCentralDirInvalid;
     }
 
     bool has_classes = false, has_manifest = false, has_arsc = false;
@@ -944,7 +1727,7 @@ static int verify_apk_integrity(const uint8_t* apk, size_t apk_size) {
     // Detect presence of a v2/v3 APK Signing Block. An official apksigner-
     // signed SOMCP build always carries one; its absence next to a preserved
     // v1 signature is the signature of a scheme-confusion repack and is
-    // reported as kIntegrityMissingApkSigV234.
+    // reported as kProbeMissingBlockV234.
     size_t cd_pos = eocd.central_dir_offset;
     bool has_apk_sign_block = false;
     {
@@ -1032,14 +1815,14 @@ static int verify_apk_integrity(const uint8_t* apk, size_t apk_size) {
         cd_pos = static_cast<size_t>(next_cd);
     }
 
-    int result = kIntegrityOk;
-    if (!has_classes) result |= kIntegrityMissingClasses;
-    if (!has_manifest) result |= kIntegrityMissingManifest;
-    if (!has_arsc) result |= kIntegrityMissingArsc;
-    if (!has_signature) result |= kIntegrityMissingSignature;
-    if (!has_native) result |= kIntegrityMissingNative;
-    if (!has_apk_sign_block) result |= kIntegrityMissingApkSigV234;
-    if (crc_fail) result |= kIntegrityCrcMismatch;
+    int result = kProbeOk;
+    if (!has_classes) result |= kProbeMissingClasses;
+    if (!has_manifest) result |= kProbeMissingManifest;
+    if (!has_arsc) result |= kProbeMissingArsc;
+    if (!has_signature) result |= kProbeMissingEnvelope;
+    if (!has_native) result |= kProbeMissingNative;
+    if (!has_apk_sign_block) result |= kProbeMissingBlockV234;
+    if (crc_fail) result |= kProbeCrcMismatch;
     return result;
 }
 
@@ -1053,21 +1836,45 @@ static int verify_apk_integrity(const uint8_t* apk, size_t apk_size) {
  * at runtime, so it does not appear as a plain-text literal in the .so binary.
  */
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeGetExpectedSignerDigest(
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeGetPinnedFingerprint(
     JNIEnv* env, jobject thiz) {
     std::string digest = decode_xor_hex(kEncodedExpectedSha256, kEncodedExpectedSha256Len);
     return env->NewStringUTF(digest.c_str());
 }
 
-// 塔菲逆核 fork: 上游在此导出 nativeGetReportingApiKey（给其第三方崩溃上报服务喂 X-API-Key）。
-// 本 fork 不做任何第三方数据上报，该导出已整体移除（该 key 在本仓库也从未注入，恒为空占位）。
+/**
+ * Returns the log-report-platform reporting API key (sent by the client as the
+ * X-API-Key request header). The value is injected into the native layer at
+ * build time (see key_generated.h / generate_header.py) and stored encrypted
+ * under a SHA-256-CTR keystream stretched from the build secret; it is decoded
+ * here into a stack buffer which is wiped right after the jstring is created,
+ * so the plaintext never appears in the .so binary, in source, or in any log.
+ * Returns an empty string when no key was injected.
+ */
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeGetReportingKey(
+    JNIEnv* env, jobject thiz) {
+    if (kRepApiKeyCipherLen == 0 || kRepApiKeyCipherLen > rk::kMaxKeyLen) {
+        return env->NewStringUTF("");
+    }
+    uint8_t buf[rk::kMaxKeyLen + 1];
+    size_t n = rk::decode_api_key(buf, rk::kMaxKeyLen);
+    if (n == 0) {
+        return env->NewStringUTF("");
+    }
+    buf[n] = 0;
+    jstring key = env->NewStringUTF(reinterpret_cast<const char*>(buf));
+    rk::secure_zero(buf, n + 1);
+    if (!key) env->ExceptionClear();
+    return key ? key : env->NewStringUTF("");
+}
 
 /**
  * Reads the APK file directly from the filesystem and extracts the first
  * X.509 signing certificate from the META-INF/ *.RSA/.DSA/.EC signature file.
  *
  * This bypasses the Java PackageManager API, which is what kstools and
- * ApkSignatureKiller hook to replace signatures.
+ * a Binder-level substitution of the package metadata.
  *
  * @param env       JNI environment
  * @param thiz      JNI object
@@ -1075,7 +1882,7 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeGetExpectedSignerDiges
  * @return          DER-encoded X.509 certificate bytes, or null on failure
  */
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkCertificate(
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeReadEnvelope(
     JNIEnv* env, jobject thiz, jstring apkPath) {
 
     if (!apkPath) {
@@ -1218,7 +2025,7 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkCertificate(
                     LOGI("Read signature file: %s (%zu bytes)", filename.c_str(), signature_file_data.size());
                     break;
                 } else {
-                    LOGI("Signature file %s is compressed (type %u), decompressing",
+                    LOGI("Envelope entry %s is compressed (type %u), decompressing",
                          filename.c_str(), entry.compression);
                     if (entry.compression == 8) {
                         // Raw DEFLATE stream (no zlib/gzip wrapper): feed the
@@ -1259,7 +2066,7 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkCertificate(
         return nullptr;
     }
 
-    LOGI("Signature file size: %zu bytes", signature_file_data.size());
+    LOGI("Envelope entry size: %zu bytes", signature_file_data.size());
 
     // Extract certificate from PKCS7 signature
     auto cert = extract_certificate_from_pkcs7(signature_file_data);
@@ -1296,11 +2103,11 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkCertificate(
  * repacking, where an attacker keeps the original v1 signature files and
  * re-signs only with a new key via v2/v3. Because the v2/v3 signature
  * cryptographically covers the entire file, its certificate cannot be
- * preserved while the signing key changes; verifying THIS certificate against
+ * preserved while the signing key changes; matching THIS record against
  * the pin therefore closes that bypass.
  *
  * The highest available scheme is preferred (v3 over v2), mirroring Android's
- * "verify the strongest scheme" behaviour.
+ * "strongest scheme wins" behaviour.
  *
  * @param env       JNI environment
  * @param thiz      JNI object
@@ -1309,7 +2116,7 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkCertificate(
  *                  has no v2/v3 signing block or the block is malformed.
  */
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkV234Certificate(
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeReadEnvelopeV234(
     JNIEnv* env, jobject thiz, jstring apkPath) {
 
     if (!apkPath) {
@@ -1362,10 +2169,10 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkV234Certificate
                                       eocd.central_dir_offset,
                                       /*prefer_v3=*/true, cert);
     if (rc != 1 || cert.empty()) {
-        LOGI("v2/v3 check: no signing certificate found (rc=%d): %s", rc, path.c_str());
+        LOGI("v2/v3 probe: no record found (rc=%d): %s", rc, path.c_str());
         return nullptr;
     }
-    LOGI("Extracted v2/v3 signing certificate: %zu bytes", cert.size());
+    LOGI("Extracted v2/v3 record: %zu bytes", cert.size());
 
     jbyteArray result = env->NewByteArray(static_cast<jsize>(cert.size()));
     if (!result) {
@@ -1378,7 +2185,7 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkV234Certificate
 }
 
 /**
- * Verifies that the running package name matches the pinned value
+ * Matches the running package id against the pinned value
  * ("com.soreverse.mcp"). The expected value is stored XOR-obfuscated in the
  * binary, so a repackaged build with a changed applicationId is rejected here
  * even if the Java context reports a spoofed package name.
@@ -1386,11 +2193,11 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeReadApkV234Certificate
  * @return JNI_TRUE if [packageName] matches the pin, JNI_FALSE otherwise.
  */
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeVerifyPackageName(
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeMatchPackageId(
     JNIEnv* env, jobject thiz, jstring packageName) {
 
     if (!packageName) {
-        LOGE("nativeVerifyPackageName: packageName is null");
+        LOGE("nativeMatchPackageId: packageName is null");
         return JNI_FALSE;
     }
 
@@ -1409,33 +2216,33 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeVerifyPackageName(
              expected.c_str(), actual.c_str());
         return JNI_FALSE;
     }
-    LOGI("Package name verified: %s", expected.c_str());
+    LOGI("Package id matched: %s", expected.c_str());
     return JNI_TRUE;
 }
 
 /**
- * Verifies the integrity of the APK at [apkPath] by parsing its ZIP central
+ * Probes the integrity of the APK at [apkPath] by parsing its ZIP central
  * directory directly from the filesystem:
  *   - structural sanity (EOCD / central directory bounds);
  *   - presence of critical entries (classes.dex, AndroidManifest.xml,
  *     resources.arsc, META-INF signature file, lib/<abi>/librz_native.so);
  *   - CRC32 of the classes.dex payload vs. the central directory value.
  *
- * @return 0 on success, or a bitmask of kIntegrity* flags on failure.
+ * @return 0 on success, or a bitmask of kProbe* flags on failure.
  */
 extern "C" JNIEXPORT jint JNICALL
-Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeVerifyApkIntegrity(
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeProbeArchive(
     JNIEnv* env, jobject thiz, jstring apkPath) {
 
     if (!apkPath) {
         LOGE("apkPath is null");
-        return kIntegrityReadFailed;
+        return kProbeReadFailed;
     }
 
     const char* path_cstr = env->GetStringUTFChars(apkPath, nullptr);
     if (!path_cstr) {
         LOGE("Failed to read apkPath");
-        return kIntegrityReadFailed;
+        return kProbeReadFailed;
     }
     std::string path(path_cstr);
     env->ReleaseStringUTFChars(apkPath, path_cstr);
@@ -1443,14 +2250,101 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeVerifyApkIntegrity(
     MappedApk apk;
     if (!apk.map(path.c_str())) {
         LOGE("Failed to map APK for integrity check: %s", path.c_str());
-        return kIntegrityReadFailed;
+        return kProbeReadFailed;
     }
 
-    int result = verify_apk_integrity(apk.data(), apk.size());
-    if (result != kIntegrityOk) {
+    int result = probe_archive(apk.data(), apk.size());
+    if (result != kProbeOk) {
         LOGE("APK integrity check FAILED (code=0x%X): %s", result, path.c_str());
     }
     return result;
+}
+
+/** Locates the ZIP End Of Central Directory record (scanning back over any comment). */
+static bool find_eocd_pos(const uint8_t* apk, size_t apk_size, size_t* out_pos) {
+    if (!apk || apk_size < sizeof(ZipEocd)) return false;
+    size_t pos = apk_size - sizeof(ZipEocd);
+    const size_t search_start = (apk_size > 65557) ? apk_size - 65557 : 0;
+    for (size_t i = pos; i >= search_start && i < apk_size; i--) {
+        ZipEocd e;
+        if (sum_exceeds(i, sizeof(ZipEocd), apk_size)) continue;
+        std::memcpy(&e, apk + i, sizeof(ZipEocd));
+        if (e.signature == 0x06054b50) {
+            *out_pos = i;
+            return true;
+        }
+        if (i == 0) break;
+    }
+    return false;
+}
+
+/**
+ * Verifies the v2/v3 signature record of the running package.
+ *
+ * Unlike the certificate comparison in [nativeReadEnvelopeV234], which only
+ * proves that the signing block names the pinned signer, this verifies the
+ * signature itself and recomputes the signed content digest (see
+ * verify_sign_block). A mismatch of either proves tampering and is fatal
+ * here, inside the native call: the process is terminated before this
+ * function returns, so rewriting the value the call returns cannot turn a
+ * mismatch into a pass.
+ *
+ * Codes other than [kBlockSigInvalid] / [kBlockContentMismatch] are reported
+ * for logging only; those states (no signing block, non-RSA signature
+ * algorithm, ...) are already covered by the certificate-pin checks.
+ *
+ * @return a kBlock* bitmask (0 == verified)
+ */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeVerifyBlock(
+    JNIEnv* env, jobject thiz, jstring apkPath) {
+
+    if (!apkPath) {
+        LOGE("apkPath is null");
+        return kBlockReadFailed;
+    }
+
+    const char* path_cstr = env->GetStringUTFChars(apkPath, nullptr);
+    if (!path_cstr) {
+        LOGE("Failed to read apkPath");
+        return kBlockReadFailed;
+    }
+    std::string path(path_cstr);
+    env->ReleaseStringUTFChars(apkPath, path_cstr);
+
+    MappedApk apk;
+    if (!apk.map(path.c_str())) {
+        LOGE("Failed to map APK for signature verification: %s", path.c_str());
+        return kBlockReadFailed;
+    }
+
+    size_t eocd_pos = 0;
+    if (!find_eocd_pos(apk.data(), apk.size(), &eocd_pos)) {
+        LOGE("EOCD not found while verifying the signature block");
+        return kBlockReadFailed;
+    }
+
+    ZipEocd eocd;
+    std::memcpy(&eocd, apk.data() + eocd_pos, sizeof(eocd));
+    if (sum_exceeds(eocd.central_dir_offset, eocd.central_dir_size, apk.size())) {
+        return kBlockMalformed;
+    }
+
+    const std::string pinned =
+        normalize_hex(decode_xor_hex(kEncodedExpectedSha256, kEncodedExpectedSha256Len));
+
+    bool fatal = false;
+    const int code = verify_sign_block(apk.data(), apk.size(), eocd_pos,
+                                       eocd.central_dir_offset, pinned, &fatal);
+    if (fatal) {
+        LOGE("APK signature verification FAILED (code=0x%X): %s", code, path.c_str());
+        ::_exit(173);
+    }
+    if (code != kBlockOk) {
+        LOGE("APK signature verification inconclusive (code=0x%X), not treated as tampering",
+             code);
+    }
+    return code;
 }
 
 /**
@@ -1463,7 +2357,7 @@ Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeVerifyApkIntegrity(
  * @return uppercase hex SHA-256 string, or null on failure.
  */
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_soreverse_mcp_nativecore_SignatureVerifier_nativeComputeSha256Hex(
+Java_com_soreverse_mcp_nativecore_NativeProbe_nativeComputeSha256Hex(
     JNIEnv* env, jobject thiz, jbyteArray data) {
 
     if (!data) {

@@ -125,7 +125,13 @@ class SettingsStore(context: Context) {
 
     var authEnabled: Boolean
         get() = prefs.getBoolean("authEnabled", false)
-        set(value) = prefs.edit().putBoolean("authEnabled", value).apply()
+        set(value) {
+            val wasEnabled = prefs.getBoolean("authEnabled", false)
+            prefs.edit().putBoolean("authEnabled", value).apply()
+            // 上游 1.0.22 (#130) 借鉴: 开启认证时轮换 accessToken，作废认证关闭期间
+            // 可能已经泄露出去的旧 token（例如旧版 app_config 读取路径）。
+            if (value && !wasEnabled) resetAccessToken()
+        }
 
     var accessToken: String
         get() {

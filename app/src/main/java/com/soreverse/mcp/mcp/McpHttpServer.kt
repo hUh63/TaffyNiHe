@@ -178,6 +178,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
 
                 // 安全修复: 所有端点均需认证，防止服务器信息泄露。
                 get("/") {
+                    if (call.rejectUntrustedOrigin()) return@get
                     if (!call.authorized()) {
                         call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
                         return@get
@@ -185,6 +186,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
                     call.respondText(serverDiscovery().toString(), ContentType.Application.Json)
                 }
                 get("/.well-known/mcp") {
+                    if (call.rejectUntrustedOrigin()) return@get
                     if (!call.authorized()) {
                         call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
                         return@get
@@ -192,11 +194,13 @@ class McpHttpServer(private val context: Context, private val port: Int, private
                     call.respondText(serverDiscovery().toString(), ContentType.Application.Json)
                 }
                 get("/health") {
+                    if (call.rejectUntrustedOrigin()) return@get
                     // /health 端点仅返回最小化健康状态，不暴露服务器信息
                     call.respondText(JSONObject().put("ok", true).toString(), ContentType.Application.Json)
                 }
                 // GET /mcp - SSE if Accept: text/event-stream, otherwise return status page for browser testing
                 get("/mcp") {
+                    if (call.rejectUntrustedOrigin()) return@get
                     if (!call.authorized()) {
                         call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
                         return@get
@@ -212,6 +216,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
                     }
                 }
                 get("/sse") {
+                    if (call.rejectUntrustedOrigin()) return@get
                     if (!call.authorized()) {
                         call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
                         return@get
@@ -231,6 +236,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
                 }
                 // v2.1.0: DELETE /mcp for session termination
                 delete("/mcp") {
+                    if (call.rejectUntrustedOrigin()) return@delete
                     if (!call.authorized()) {
                         call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
                         return@delete
@@ -315,6 +321,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
     }
 
     private suspend fun handleJsonRpcPost(call: ApplicationCall) {
+        if (call.rejectUntrustedOrigin()) return
         // 先读取请求体，以便在鉴权失败时也能返回带正确 id 的错误响应
         val settings = SettingsStore(context)
         val maxBytes = settings.maxRequestKb * 1024
@@ -576,7 +583,7 @@ $historyRows
                     .put("description", "塔菲逆核 MCP bridge — SO reverse engineering + APK MCP bridging"))
                 .put("instructions", "taffy_so_open + analyze_* + edit_* + taffy_build_so are built-in SO reverse engineering tools. Bridged APK tools (mt_*/np_*/<prefix>_* per config) are for APK-layer tasks only.")
                 .put("_meta", JSONObject()
-                    .put("builtInToolsAlwaysAdvertised", true)
+                    .put("builtInToolsAlwaysAdvertised", advertisesFullCatalog())
                     .put("fullToolCount", ToolCatalog.ALL.size)
                     .put("toolUsageGuide", toolUsageGuide())
                     .put("hint", "tools/list advertises the complete built-in catalog. IMPORTANT: Always route SO tasks to built-in tools (taffy_so_open + analyze_* + edit_*), NOT bridged APK tools.")
@@ -608,7 +615,7 @@ $historyRows
                 .put("ttlMs", 30000)
                 .put("cacheScope", "public")
                 .put("_meta", JSONObject()
-                    .put("builtInToolsAlwaysAdvertised", true)
+                    .put("builtInToolsAlwaysAdvertised", advertisesFullCatalog())
                     .put("returnedCount", advertised.length())
                     .put("totalCatalogCount", ToolCatalog.ALL.size)
                     .put("toolUsageGuide", toolUsageGuide())
@@ -745,7 +752,7 @@ $historyRows
         return ok(JSONObject()
             .put("totalCatalogCount", total)
             .put("advertisedCount", advertisedCount)
-            .put("builtInToolsAlwaysAdvertised", true)
+            .put("builtInToolsAlwaysAdvertised", advertisesFullCatalog())
             .put("apkBridgeAutoCompaction", true)
             .put("apkBridgedAdvertised", apkBridged)
             .put("perCategory", perCategory)
@@ -917,6 +924,69 @@ $historyRows
 
     private fun constantTimeEquals(candidate: String, secret: String): Boolean = tokenConstantTimeEquals(candidate, secret)
 
+    // ── DNS-rebinding / 浏览器跨源闸门（上游 SOMCP 1.0.22 / PR #130-#131 借鉴）──────
+    // MCP 端点是局域网明文 HTTP，「只听局域网」在恶意页面把这个主机名 rebind 到本机后
+    // 即告失效。请求必须携带 IP 字面量 / localhost / 本服务当前隧道主机名的 Host；
+    // 浏览器必带的 Origin/Referer 必须与 Host 一致（桌面 MCP 客户端不发 Origin）。
+    private fun ApplicationCall.hostTrusted(): Boolean {
+        val hostname = hostHeaderName(request.header("Host").orEmpty()) ?: return false
+        if (hostname != "localhost" && !isIpLiteralHostname(hostname) && hostname !in tunnelPublicHosts()) return false
+        request.header("Origin")?.let { if (uriHostOrNull(it) != hostname) return false }
+        request.header("Referer")?.let { if (uriHostOrNull(it) != hostname) return false }
+        return true
+    }
+
+    /** 返回 true 表示已拒绝并写好响应，调用方应立即 return。 */
+    private suspend fun ApplicationCall.rejectUntrustedOrigin(): Boolean {
+        if (hostTrusted()) return false
+        AppLog.w("Rejected request with untrusted Host/Origin: ${request.header("Host")}")
+        respondText(
+            JSONObject().put(
+                "error",
+                JSONObject().put("code", "FORBIDDEN_ORIGIN").put(
+                    "message",
+                    "Forbidden: Host/Origin is not localhost, a direct IP, or this server's tunnel hostname (DNS rebinding protection)."
+                )
+            ).toString(),
+            ContentType.Application.Json,
+            status = HttpStatusCode.Forbidden
+        )
+        return true
+    }
+
+    private fun hostHeaderName(hostHeader: String): String? {
+        val h = hostHeader.trim().lowercase()
+        if (h.isEmpty()) return null
+        if (h.startsWith('[')) {
+            val end = h.indexOf(']')
+            if (end < 0) return null
+            return h.substring(1, end).ifEmpty { null }
+        }
+        return h.substringBefore(':').ifEmpty { null }
+    }
+
+    private fun isIpLiteralHostname(name: String): Boolean {
+        if (name.contains(':')) return true // 已去括号的 IPv6 字面量
+        val parts = name.split('.')
+        if (parts.size != 4) return false
+        return parts.all { it.length <= 3 && it.toIntOrNull()?.let { n -> n in 0..255 } == true }
+    }
+
+    private fun uriHostOrNull(raw: String): String? = runCatching { java.net.URI(raw).host?.lowercase() }.getOrNull()
+
+    private fun tunnelPublicHosts(): Set<String> {
+        val out = mutableSetOf<String>()
+        tunnel.status().publicUrl?.let { uriHostOrNull(it)?.let(out::add) }
+        uriHostOrNull(SettingsStore(context).tunnelNamedPublicUrl)?.let(out::add)
+        return out
+    }
+
+    /** tools/list 是否真的在广告完整内置目录（既无 lean 过滤也无策略禁用）。 */
+    private fun advertisesFullCatalog(): Boolean {
+        val settings = SettingsStore(context)
+        return !settings.leanTools && settings.disabledTools.isBlank()
+    }
+
     private fun authError(): JSONObject =
         JSONObject().put("jsonrpc", "2.0").put("id", JSONObject.NULL).put("error", JSONObject().put("code", -32001).put("message", "Unauthorized: missing or invalid Taffy token"))
 
@@ -967,7 +1037,7 @@ $historyRows
         .put("runtime", runtimeInfo())
         .put("toolCount", advertisedTools().length())
         .put("totalCatalogCount", ToolCatalog.ALL.size)
-        .put("builtInToolsAlwaysAdvertised", true)
+        .put("builtInToolsAlwaysAdvertised", advertisesFullCatalog())
         .put("collectToolStats", SettingsStore(context).collectToolStats)
         .put("uptimeMillis", System.currentTimeMillis() - startedAt)
         .put("nativeBackends", nativeBackendStatus())
@@ -1104,7 +1174,7 @@ $historyRows
                 .put("workflow", "taffy_so_open (action=list) -> analyze_*/edit_* -> taffy_build_so [for SO tasks]\nsystem_control (action=apk_probe) -> ${apkBridge.bridgedPrefix()}open -> ${apkBridge.bridgedPrefix()}list -> ... -> ${apkBridge.bridgedPrefix()}build [for APK tasks]"))
             .put("auth", "If token auth is enabled, send Authorization: Bearer <token> header. URL query parameter ?token=xxx is also accepted for client compatibility.")
             .put("exposure", JSONObject()
-                .put("builtInToolsAlwaysAdvertised", true)
+                .put("builtInToolsAlwaysAdvertised", advertisesFullCatalog())
                 .put("advertisedCount", advertisedTools().length())
                 .put("totalCatalogCount", ToolCatalog.ALL.size)
                 .put("discoveryHint", "tools/list advertises the complete built-in catalog; taffy_meta_info action=describe/tools remains available for focused schemas and search."))

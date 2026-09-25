@@ -561,7 +561,19 @@ object ToolCatalog {
         when (a.str("action", "analyze")) {
             "capabilities" -> (e.capabilityRegistry().optJSONObject("backends")?.optJSONObject("rizin")?.let { ok(it) }
                 ?: err("CAPABILITY_UNAVAILABLE", "rizin 能力信息不可用"))
-            "command" -> e.rzCommand(a.str("workspaceId"), a.str("editSessionId"), a.str("command"), a.bool("unsafe", false))
+            "command" -> {
+                // 上游 1.0.22 (#130) 借鉴: 把「unsafe 需要已认证的 MCP 访问」从文档承诺
+                // 变成服务端强制 —— authEnabled=false 时所有调用者都是未认证的，此时必须在
+                // 这里拒绝，而不是把 unsafe 透传到 native 黑名单。
+                if (a.bool("unsafe", false) && !s.authEnabled) {
+                    err(
+                        "AUTH_REQUIRED",
+                        "unsafe=true is refused while token authentication is disabled. Enable Settings > Service > Require access token, then call with Authorization: Bearer <token>."
+                    )
+                } else {
+                    e.rzCommand(a.str("workspaceId"), a.str("editSessionId"), a.str("command"), a.bool("unsafe", false))
+                }
+            }
             "analyze" -> e.rzAnalyze(a.str("workspaceId"), a.str("editSessionId"))
             "functions" -> e.rzFunctions(a.str("workspaceId"), a.str("editSessionId"), a.intValue("limit", s.defaultLimit), a.str("cursor"))
             "cfg" -> e.rzCfg(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"))

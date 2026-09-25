@@ -320,7 +320,7 @@ private fun EditorGutter(
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 19.sp,
                     ),
-                    color = if (active) MaterialTheme.colorScheme.primary else Color(0xFF607D8B),
+                    color = if (active) MaterialTheme.colorScheme.primary else TerminalColors.dim,
                     textAlign = TextAlign.End,
                 )
             }
@@ -1340,7 +1340,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                     (idx + 1).toString(),
                                     modifier = Modifier.width(50.dp).padding(end = 6.dp),
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = if (idx + 1 == curLn) AppPalette.teal else Color(0xFF607D8B),
+                                    color = if (idx + 1 == curLn) AppPalette.teal else TerminalColors.dim,
                                     textAlign = TextAlign.End,
                                 )
                                 Text(
@@ -1389,7 +1389,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                                 CodeHighlighter.Lang.JSON -> "{ \"key\": \"value\" }"
                                                 else -> if (zh) "纯文本" else "plain text"
                                             },
-                                            color = Color(0xFF607D8B), fontFamily = FontFamily.Monospace,
+                                            color = TerminalColors.dim, fontFamily = FontFamily.Monospace,
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
                                             modifier = Modifier.padding(6.dp),
                                         )
@@ -1410,7 +1410,7 @@ internal fun SettingsEditorPage(t: UiText) {
                             .align(Alignment.TopEnd)
                             .padding(6.dp)
                             .clip(RoundedCornerShape(AppShape.xs))
-                            .background(Color(0xCC0B0F14))
+                            .background(TerminalColors.bg.copy(alpha = 0.82f))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
@@ -1421,7 +1421,7 @@ internal fun SettingsEditorPage(t: UiText) {
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .heightIn(max = 190.dp)
-                            .background(Color(0xF20E141C), RoundedCornerShape(AppShape.md)),
+                            .background(TerminalColors.bg.copy(alpha = 0.96f), RoundedCornerShape(AppShape.md)),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(

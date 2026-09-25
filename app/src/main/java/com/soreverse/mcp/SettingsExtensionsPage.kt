@@ -1,9 +1,6 @@
 package com.soreverse.mcp
 
 import android.widget.Toast
-import com.soreverse.mcp.core.ReadLimits
-import com.soreverse.mcp.core.readTextCapped
-import com.soreverse.mcp.core.readBytesCapped
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -13,21 +10,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,16 +35,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.PythonRuntime
+import com.soreverse.mcp.core.ReadLimits
+import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.WorkspacePolicy
 import com.soreverse.mcp.core.XedExtensionConverter
+import com.soreverse.mcp.core.readBytesCapped
+import com.soreverse.mcp.core.readTextCapped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,23 +58,52 @@ import java.io.File
 /** 官方插件市场源（GitHub raw；任何提供 index.json 的仓库均可作源）。 */
 private const val DEFAULT_MARKET_URL = "https://raw.githubusercontent.com/hUh63/TaffyNiHe/main/plugins/index.json"
 
+/** 页内小动作按钮（文字胶囊，风格与全局工具条一致）。 */
+@Composable
+private fun ExtBtn(
+    label: String,
+    enabled: Boolean = true,
+    accent: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val bgc = when {
+        !enabled -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.35f)
+        accent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val fgc = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+        accent -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Box(
+        Modifier
+            .height(28.dp)
+            .clip(RoundedCornerShape(AppShape.sm))
+            .background(bgc)
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 9.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontSize = AppText.label, color = fgc, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
 /**
  * 设置 → 扩展系统：塔菲 Python 插件的完整生态（借鉴 Xed-Editor 扩展系统 + 本土化）。
  *
- * - 插件管理: 列表 / 运行 / 编辑(跳编辑器) / 删除 / 新建(模板) / 导入
- * - 智能导入: .py 直接装；Xed 的 .apk/.zip 自动走 XedExtensionConverter 转换为塔菲插件
- * - taffy_ext API: log/workspace/files/read/write/mcp —— 插件可调用塔菲全部 MCP 工具
- * - 内置教程: 插件规范 / API 速查 / 示例 / Xed 转换说明
+ * 图形化重构（Exbin 范式，与其余 11 页统一）：
+ *  - 卡片列表替代长文本：插件/市场条目 = AppCard + DataRow（chip + 主副标题 + 等宽元信息）
+ *  - 实时搜索 + 「显示/总数」计数（SearchCountBar）
+ *  - 教程/运行输出 = TerminalPane（统一终端框，可选中复制）
+ *  - 破坏性操作二次确认（ConfirmDialog）、耗时操作可取消遮罩（BusyOverlay）
+ *  - 全部配色/圆角走 AppShape / MaterialTheme token，不再硬编码
  */
 @Composable
 internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val zh = t.zh
-    val clipboard = LocalClipboardManager.current
-    val bg = Color(0xFF0B0F14)
-    val fg = Color(0xFFD6E2F0)
-    val dim = Color(0xFF8E8E93)
 
     val pluginsRoot = remember { File(context.filesDir, "plugins").apply { mkdirs() } }
     var tab by remember { mutableStateOf(0) }   // 0=插件 1=教程 2=市场
@@ -87,7 +115,9 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     var deleteTarget by remember { mutableStateOf<File?>(null) }
     var newId by remember { mutableStateOf("") }
     var newName by remember { mutableStateOf("") }
-    // ── 市场状态 ──
+    var pluginQuery by remember { mutableStateOf("") }
+    var marketQuery by remember { mutableStateOf("") }
+    // 市场状态
     val marketPrefs = remember { context.getSharedPreferences("so_reverse_mcp", android.content.Context.MODE_PRIVATE) }
     var marketSource by remember {
         mutableStateOf(marketPrefs.getString("extension_market_url", DEFAULT_MARKET_URL) ?: DEFAULT_MARKET_URL)
@@ -95,6 +125,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     var marketItems by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var marketLoading by remember { mutableStateOf(false) }
     var marketMsg by remember { mutableStateOf("") }
+    var marketMsgOk by remember { mutableStateOf(true) }
     val scroll = rememberScrollState()
 
     fun appendOut(s: String) { output = (output + s).takeLast(30000) }
@@ -108,7 +139,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     LaunchedEffect(Unit) { refresh() }
 
     fun fetchMarket(url: String = marketSource.trim()) {
-        if (url.isBlank()) { marketMsg = if (zh) "请填写市场源地址" else "Market URL required"; return }
+        if (url.isBlank()) { marketMsg = if (zh) "请填写市场源地址" else "Market URL required"; marketMsgOk = false; return }
         marketLoading = true
         marketMsg = ""
         scope.launch {
@@ -128,16 +159,17 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                     for (i in 0 until arr.length()) list.add(arr.getJSONObject(i))
                     marketItems = list
                     marketMsg = if (zh) "已拉取 ${list.size} 个插件" else "${list.size} plugins"
+                    marketMsgOk = true
                     marketPrefs.edit().putString("extension_market_url", url).apply()
-                }.onFailure { marketMsg = (if (zh) "清单解析失败: " else "Bad index: ") + it.message }
-            }.onFailure { marketMsg = (if (zh) "拉取失败（检查网络/地址，需可访问 GitHub raw）: " else "Fetch failed: ") + it.message }
+                }.onFailure { marketMsg = (if (zh) "清单解析失败: " else "Bad index: ") + it.message; marketMsgOk = false }
+            }.onFailure { marketMsg = (if (zh) "拉取失败（检查网络/地址，需可访问 GitHub raw）: " else "Fetch failed: ") + it.message; marketMsgOk = false }
         }
     }
 
     fun installFromMarket(o: JSONObject) {
         val id = o.optString("id", "").ifBlank { o.optString("name", "plugin").replace(Regex("[^A-Za-z0-9_.-]"), "_") }
         val fileUrl = o.optString("file", "")
-        if (fileUrl.isBlank()) { marketMsg = "插件缺少 file 字段"; return }
+        if (fileUrl.isBlank()) { marketMsg = "插件缺少 file 字段"; marketMsgOk = false; return }
         marketLoading = true
         scope.launch {
             val r = withContext(Dispatchers.IO) {
@@ -189,8 +221,11 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                 }
             }
             marketLoading = false
-            r.onSuccess { marketMsg = if (zh) "已安装: $id（在「插件」tab 查看）" else "Installed: $id"; refresh() }
-                .onFailure { marketMsg = (if (zh) "安装失败: " else "Install failed: ") + it.message }
+            r.onSuccess {
+                marketMsg = if (zh) "已安装: $id（在「插件」tab 查看）" else "Installed: $id"
+                marketMsgOk = true
+                refresh()
+            }.onFailure { marketMsg = (if (zh) "安装失败: " else "Install failed: ") + it.message; marketMsgOk = false }
         }
     }
 
@@ -252,7 +287,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         running = true
         appendOut("──── 运行插件: ${dir.name} ────\n")
         scope.launch {
-            val settings = com.soreverse.mcp.core.SettingsStore(context)
+            val settings = SettingsStore(context)
             val ws = WorkspacePolicy.workDirPath(context) ?: ""
             // 沙箱: 禁外网（仅放行塔菲 MCP 端口）/ 禁子进程 / 写白名单=工作区+插件目录
             val sandboxWrite = listOf(ws, dir.absolutePath).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
@@ -287,7 +322,6 @@ meta = {
     "description": "塔菲逆核插件",
     "source": "taffy",
 }
-
 
 def run(ext):
     # 插件入口。ext 即 taffy_ext —— 塔菲宿主能力全在这里。
@@ -324,143 +358,222 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
         message = if (zh) "已创建插件: $clean（点「编辑」开始写代码）" else "Created: $clean"
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            if (zh) "扩展系统 · Python 插件生态" else "Extensions · Python plugin ecosystem",
-            style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface,
-        )
+    val filteredPlugins = remember(plugins, pluginQuery) {
+        val q = pluginQuery.trim()
+        if (q.isEmpty()) plugins else plugins.filter { it.name.contains(q, true) }
+    }
+    val filteredMarket = remember(marketItems, marketQuery) {
+        val q = marketQuery.trim()
+        if (q.isEmpty()) marketItems else marketItems.filter {
+            it.optString("name").contains(q, true) || it.optString("id").contains(q, true) ||
+                it.optString("description").contains(q, true)
+        }
+    }
 
-        // ── Tab 切换 ──
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text(if (zh) "插件" else "Plugins") })
-            FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text(if (zh) "教程 / API" else "Guide / API") })
-            FilterChip(selected = tab == 2, onClick = { tab = 2; if (marketItems.isEmpty()) fetchMarket() }, label = { Text(if (zh) "市场" else "Market") })
+    Column(
+        Modifier.fillMaxSize().verticalScroll(scroll).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // Tab 条（FlowRow：窄屏不截断）
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(
+                selected = tab == 0,
+                onClick = { tab = 0 },
+                label = { Text("${if (zh) "插件" else "Plugins"} ${plugins.size}", fontSize = AppText.label) },
+            )
+            FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text(if (zh) "教程 / API" else "Guide / API", fontSize = AppText.label) })
+            FilterChip(
+                selected = tab == 2,
+                onClick = { tab = 2; if (marketItems.isEmpty() && !marketLoading) fetchMarket() },
+                label = { Text("${if (zh) "市场" else "Market"} ${if (marketItems.isEmpty()) "" else marketItems.size}", fontSize = AppText.label) },
+            )
         }
 
-        if (tab == 2) {
-            // ── 市场 ──
-            OutlinedTextField(
-                value = marketSource,
-                onValueChange = { marketSource = it },
-                label = { Text(if (zh) "市场源（index.json，默认官方 GitHub）" else "Market URL (index.json)") },
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = fg),
-                colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = bg, unfocusedContainerColor = bg, focusedTextColor = fg, unfocusedTextColor = fg, cursorColor = AppPalette.blue),
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { fetchMarket() }, enabled = !marketLoading, modifier = Modifier.weight(1f)) {
-                    Text(if (marketLoading) "…" else if (zh) "刷新市场" else "Refresh", fontSize = AppText.body)
-                }
-            }
-            if (marketMsg.isNotEmpty()) Text(marketMsg, style = MaterialTheme.typography.bodySmall, color = if (marketMsg.startsWith(if (zh) "拉取失败" else "Fetch failed")) AppPalette.red else AppPalette.green)
-            if (marketItems.isEmpty() && !marketLoading) {
-                Text(
-                    if (zh) "市场为空或未拉取。任何 GitHub 仓库只要提供 index.json（数组：id/name/version/author/description/file）即可作为源——file 指向插件 .py 的可下载地址。" else "Provide an index.json array (id/name/version/author/description/file) on any GitHub repo.",
-                    style = MaterialTheme.typography.bodySmall, color = dim,
+        when (tab) {
+            // ═══════════ 教程 / API ═══════════
+            1 -> {
+                InlineHint(
+                    if (zh) "内置教程随 app 离线可用；长按可选中复制。"
+                    else "Built-in guide, works offline. Long-press to select & copy.",
                 )
-            }
-            marketItems.forEach { o ->
-                val mid = o.optString("id", o.optString("name"))
-                val installed = File(pluginsRoot, mid).let { File(it, "plugin.py").isFile }
-                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(AppShape.lg)).padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(o.optString("name", mid), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1)
-                        Text("v${o.optString("version", "1.0")}", style = MaterialTheme.typography.labelSmall, color = dim)
-                    }
-                    if (o.optString("author").isNotBlank()) Text("by ${o.optString("author")}", style = MaterialTheme.typography.labelSmall, color = dim, fontSize = AppText.label)
-                    if (o.optString("description").isNotBlank()) Text(o.optString("description"), style = MaterialTheme.typography.bodySmall, color = dim, fontSize = AppText.label, maxLines = 3)
-                    OutlinedButton(
-                        onClick = { installFromMarket(o) },
-                        enabled = !marketLoading && !installed,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    ) { Text(if (installed) if (zh) "已安装" else "Installed" else if (zh) "安装" else "Install", fontSize = AppText.label) }
-                }
-            }
-        } else if (tab == 1) {
-            // ── 教程 ──
-            SelectionContainer {
-                Text(
-                    EXTENSION_GUIDE,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
-                    color = fg,
-                    modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AppShape.lg)).padding(12.dp),
+                TerminalPane(
+                    text = EXTENSION_GUIDE,
+                    title = if (zh) "教程 / API 速查" else "Guide / API",
+                    placeholder = "—",
+                    maxHeight = 460.dp,
                 )
-            }
-        } else {
-            // ── 操作行 ──
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { showNewDialog = true }, modifier = Modifier.weight(1f)) {
-                    Text(if (zh) "＋ 新建插件" else "＋ New plugin", fontSize = AppText.body)
-                }
-                OutlinedButton(
-                    onClick = { importLauncher.launch(arrayOf("*/*", "application/zip", "application/vnd.android.package-archive", "text/x-python")) },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (zh) "导入（.py/.apk/.zip）" else "Import", fontSize = AppText.body)
-                }
-            }
-            if (message.isNotEmpty()) {
-                Text(message, style = MaterialTheme.typography.bodySmall, color = AppPalette.green)
             }
 
-            // ── 插件列表 ──
-            if (plugins.isEmpty()) {
-                Text(
-                    if (zh) "还没有插件 —— 点「新建插件」从模板开始，或「导入」已有的 .py / Xed 扩展 .apk" else "No plugins yet — create from template or import .py / Xed .apk",
-                    style = MaterialTheme.typography.bodySmall, color = dim,
-                )
-            }
-            plugins.forEach { dir ->
-                val meta = runCatching { JSONObject(File(dir, "meta.json").readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrElse { JSONObject() }
-                val name = meta.optString("name", dir.name)
-                val version = meta.optString("version", "1.0")
-                val source = meta.optString("source", "taffy")
-                val desc = meta.optString("description", "")
-                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(AppShape.lg)).padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), maxLines = 1)
-                        Text(
-                            if (source == "xed") "Xed 转换" else "taffy",
-                            style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
-                            color = if (source == "xed") AppPalette.orange else AppPalette.green,
-                            modifier = Modifier.background((if (source == "xed") AppPalette.orange else AppPalette.green).copy(alpha = 0.14f), RoundedCornerShape(AppShape.sm)).padding(horizontal = 6.dp, vertical = 2.dp),
+            // ═══════════ 市场 ═══════════
+            2 -> {
+                AppCard(title = if (zh) "市场源" else "Market source") {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = marketSource,
+                            onValueChange = { marketSource = it },
+                            label = { Text(if (zh) "index.json 地址（任何 GitHub 仓库均可作源）" else "index.json URL") },
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
                         )
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ExtBtn(if (zh) "刷新市场" else "Refresh", enabled = !marketLoading, accent = true) { fetchMarket() }
+                            ExtBtn(if (zh) "用默认源" else "Default") { marketSource = DEFAULT_MARKET_URL; fetchMarket() }
+                        }
                     }
-                    Text("v$version · ${dir.name}", style = MaterialTheme.typography.labelSmall, color = dim, fontSize = AppText.label)
-                    if (desc.isNotBlank()) Text(desc, style = MaterialTheme.typography.bodySmall, color = dim, fontSize = AppText.label, maxLines = 2)
-                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { runPlugin(dir) }, enabled = !running, modifier = Modifier.weight(1f)) { Text(if (zh) "运行" else "Run", fontSize = AppText.label) }
-                        OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "编辑" else "Edit", fontSize = AppText.label) }
-                        OutlinedButton(onClick = { deleteTarget = dir }, modifier = Modifier.weight(1f)) { Text(if (zh) "删除" else "Delete", fontSize = AppText.label) }
-                    }
-                    if (source == "xed") {
-                        val promptFile = File(dir, "AI_CONVERT_PROMPT.txt")
-                        if (promptFile.isFile) {
-                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                OutlinedButton(onClick = {
-                                    clipboard.setText(AnnotatedString(promptFile.readTextCapped(ReadLimits.META_JSON_BYTES)))
-                                    Toast.makeText(context, if (zh) "AI 转换 prompt 已复制——粘贴给 AI 即可自动生成完整 plugin.py" else "AI convert prompt copied", Toast.LENGTH_LONG).show()
-                                }, modifier = Modifier.weight(1f)) { Text(if (zh) "🤖 AI 全自动转换" else "🤖 AI convert", fontSize = AppText.label) }
-                                OutlinedButton(onClick = { EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath; onDest(SettingsDest.Python) }, modifier = Modifier.weight(1f)) { Text(if (zh) "看转换报告" else "Report", fontSize = AppText.label) }
-                            }
-                            Text(
-                                if (zh) "逻辑无法从字节码自动翻译——点上方按钮复制 prompt 给 AI，自动产出完整 plugin.py 后在编辑器粘贴保存" else "Copy the AI prompt to auto-generate full plugin.py",
-                                style = MaterialTheme.typography.labelSmall, color = AppPalette.orange, fontSize = AppText.label,
+                }
+                if (marketMsg.isNotEmpty()) {
+                    InlineHint(marketMsg, tone = if (marketMsgOk) HintTone.Ok else HintTone.Error)
+                }
+                if (marketItems.isNotEmpty()) {
+                    SearchCountBar(
+                        query = marketQuery,
+                        onQueryChange = { marketQuery = it },
+                        shown = filteredMarket.size,
+                        total = marketItems.size,
+                        placeholder = if (zh) "搜索市场插件" else "Search market",
+                    )
+                }
+                if (filteredMarket.isEmpty()) {
+                    InlineHint(
+                        if (marketLoading) (if (zh) "拉取中…" else "Loading…")
+                        else if (zh) "市场为空或未拉取。任何 GitHub 仓库只要提供 index.json（数组：id/name/version/author/description/file）即可作为源——file 指向插件 .py 或 zip 的可下载地址。"
+                        else "Provide an index.json array (id/name/version/author/description/file) on any GitHub repo.",
+                    )
+                } else {
+                    filteredMarket.forEach { o ->
+                        val mid = o.optString("id", o.optString("name"))
+                        val installed = File(File(pluginsRoot, mid), "plugin.py").isFile
+                        AppCard {
+                            DataRow(
+                                title = o.optString("name", mid),
+                                subtitle = "by ${o.optString("author", "?").ifBlank { "?" }}",
+                                meta = o.optString("description").ifBlank { null },
+                                leading = { TypeChip("v${o.optString("version", "1.0")}", AppPalette.blue) },
+                                trailingText = if (installed) (if (zh) "已安装" else "installed") else null,
+                                onClick = { if (!installed && !marketLoading) installFromMarket(o) },
                             )
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                ExtBtn(
+                                    if (installed) (if (zh) "已安装" else "Installed") else (if (zh) "安装" else "Install"),
+                                    enabled = !marketLoading && !installed,
+                                    accent = !installed,
+                                ) { installFromMarket(o) }
+                                Spacer(Modifier.weight(1f))
+                                Text(mid, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                            Spacer(Modifier.height(6.dp))
                         }
                     }
                 }
             }
 
-            // ── 输出区（统一终端框）──
-            TerminalPane(
-                text = output,
-                title = if (zh) "运行输出" else "Output",
-                onClear = { output = "" },
-                placeholder = if (zh) "点插件的「运行」查看输出…" else "Run a plugin to see output…",
-                maxHeight = 300.dp,
-            )
+            // ═══════════ 插件 ═══════════
+            else -> {
+                // 操作行
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ExtBtn(if (zh) "＋ 新建插件" else "＋ New plugin", accent = true) { showNewDialog = true }
+                    ExtBtn(if (zh) "导入 .py / Xed .apk / .zip" else "Import") {
+                        importLauncher.launch(arrayOf("*/*", "application/zip", "application/vnd.android.package-archive", "text/x-python"))
+                    }
+                    ExtBtn(if (zh) "刷新" else "Refresh") { refresh() }
+                }
+                if (message.isNotEmpty()) {
+                    InlineHint(message, tone = HintTone.Ok)
+                }
+
+                if (plugins.isNotEmpty()) {
+                    SearchCountBar(
+                        query = pluginQuery,
+                        onQueryChange = { pluginQuery = it },
+                        shown = filteredPlugins.size,
+                        total = plugins.size,
+                        placeholder = if (zh) "搜索插件" else "Search plugins",
+                    )
+                }
+
+                if (plugins.isEmpty()) {
+                    InlineHint(
+                        if (zh) "还没有插件 —— 点「新建插件」从模板开始，或「导入」已有的 .py / Xed 扩展 .apk"
+                        else "No plugins yet — create from template or import .py / Xed .apk",
+                    )
+                } else if (filteredPlugins.isEmpty()) {
+                    InlineHint(if (zh) "没有匹配的插件" else "No matching plugin")
+                } else {
+                    filteredPlugins.forEach { dir ->
+                        val meta = runCatching { JSONObject(File(dir, "meta.json").readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrElse { JSONObject() }
+                        val name = meta.optString("name", dir.name)
+                        val version = meta.optString("version", "1.0")
+                        val source = meta.optString("source", "taffy")
+                        val desc = meta.optString("description", "")
+                        val isXed = source == "xed"
+                        AppCard {
+                            DataRow(
+                                title = name,
+                                subtitle = "v$version · ${dir.name}",
+                                meta = desc.ifBlank { null },
+                                leading = {
+                                    TypeChip(
+                                        if (isXed) (if (zh) "Xed 转换" else "Xed") else "taffy",
+                                        if (isXed) AppPalette.orange else AppPalette.green,
+                                    )
+                                },
+                                onClick = {
+                                    EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath
+                                    onDest(SettingsDest.Python)
+                                },
+                            )
+                            FlowRow(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                ExtBtn(if (zh) "运行" else "Run", enabled = !running, accent = true) { runPlugin(dir) }
+                                ExtBtn(if (zh) "编辑" else "Edit") {
+                                    EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath
+                                    onDest(SettingsDest.Python)
+                                }
+                                ExtBtn(if (zh) "删除" else "Delete") { deleteTarget = dir }
+                                if (isXed) {
+                                    val promptFile = File(dir, "AI_CONVERT_PROMPT.txt")
+                                    if (promptFile.isFile) {
+                                        ExtBtn("🤖 " + (if (zh) "AI 全自动转换" else "AI convert")) {
+                                            copyToClipboard(context, promptFile.readTextCapped(ReadLimits.META_JSON_BYTES))
+                                            Toast.makeText(context, if (zh) "AI 转换 prompt 已复制——粘贴给 AI 即可自动生成完整 plugin.py" else "AI convert prompt copied", Toast.LENGTH_LONG).show()
+                                        }
+                                        ExtBtn(if (zh) "看转换报告" else "Report") {
+                                            EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath
+                                            onDest(SettingsDest.Python)
+                                        }
+                                    }
+                                }
+                            }
+                            if (isXed) {
+                                Text(
+                                    if (zh) "字节码逻辑无法自动翻译——用「AI 全自动转换」复制 prompt 给 AI，产出完整 plugin.py 后粘贴保存"
+                                    else "Bytecode logic can't be auto-translated — use AI convert then paste the generated plugin.py",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AppPalette.orange,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
+                    }
+                }
+
+                // 运行输出（统一终端框）
+                TerminalPane(
+                    text = output,
+                    title = if (zh) "运行输出" else "Output",
+                    onClear = { output = "" },
+                    placeholder = if (zh) "点插件的「运行」查看输出…" else "Run a plugin to see output…",
+                    maxHeight = 300.dp,
+                )
+            }
         }
     }
 
@@ -468,20 +581,25 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
     if (showNewDialog) {
         AlertDialog(
             onDismissRequest = { showNewDialog = false },
-            title = { Text(if (zh) "新建插件" else "New plugin") },
+            title = { Text(if (zh) "新建插件" else "New plugin", fontSize = AppText.title) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = newId,
                         onValueChange = { newId = it },
-                        label = { Text(if (zh) "插件 ID（英文/数字）" else "Plugin ID") },
+                        label = { Text(if (zh) "插件 ID（英文/数字）" else "Plugin ID", fontSize = AppText.label) },
                         singleLine = true,
                     )
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
-                        label = { Text(if (zh) "显示名称" else "Display name") },
+                        label = { Text(if (zh) "显示名称" else "Display name", fontSize = AppText.label) },
                         singleLine = true,
+                    )
+                    Text(
+                        if (zh) "将生成标准结构：plugin.py + meta.json + README.md" else "Creates plugin.py + meta.json + README.md",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             },
@@ -496,21 +614,20 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
         )
     }
 
-    // ── 删除确认 ──
+    // ── 删除确认（统一二次确认）──
     deleteTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text(if (zh) "删除插件" else "Delete plugin") },
-            text = { Text(if (zh) "确定删除「${target.name}」？此操作不可恢复。" else "Delete \"${target.name}\"? This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    runCatching { target.deleteRecursively() }
-                    deleteTarget = null
-                    refresh()
-                    message = if (zh) "已删除" else "Deleted"
-                }) { Text(if (zh) "删除" else "Delete", color = MaterialTheme.colorScheme.error) }
+        ConfirmDialog(
+            title = if (zh) "删除插件" else "Delete plugin",
+            message = if (zh) "确定删除「${target.name}」？此操作不可恢复。" else "Delete \"${target.name}\"? This cannot be undone.",
+            confirmText = if (zh) "删除" else "Delete",
+            destructive = true,
+            onConfirm = {
+                runCatching { target.deleteRecursively() }
+                deleteTarget = null
+                refresh()
+                message = if (zh) "已删除" else "Deleted"
             },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(if (zh) "取消" else "Cancel") } },
+            onDismiss = { deleteTarget = null },
         )
     }
 

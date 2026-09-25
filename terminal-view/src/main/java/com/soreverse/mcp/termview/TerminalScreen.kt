@@ -72,13 +72,14 @@ fun TerminalScreen(
     inputEnabled: Boolean = true,
     busy: Boolean = false,
     outputMaxHeight: Dp = 380.dp,
+    autoScroll: Boolean = true,
     onSend: () -> Unit = {},
     onClear: (() -> Unit)? = null,
     onCopy: (() -> Unit)? = null,
 ) {
     val scroll = rememberScrollState()
-    LaunchedEffect(text) {
-        runCatching { scroll.scrollTo(scroll.maxValue) }
+    LaunchedEffect(text, autoScroll) {
+        if (autoScroll) runCatching { scroll.scrollTo(scroll.maxValue) }
     }
 
     Column(

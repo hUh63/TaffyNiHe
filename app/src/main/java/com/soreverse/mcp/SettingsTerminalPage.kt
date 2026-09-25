@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.PermissionManager
+import com.soreverse.mcp.termview.TerminalScreen
 import com.soreverse.mcp.core.PythonRuntime
 import com.soreverse.mcp.core.RootShell
 import com.soreverse.mcp.core.WorkspacePolicy
@@ -306,27 +307,17 @@ internal fun SettingsTerminalPage(t: UiText) {
             }
         }
 
-        // ── 终端显示区（可选中复制）──
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clip(RoundedCornerShape(AppShape.lg))
-                .background(TerminalColors.bg)
-                .border(1.dp, TerminalColors.fg.copy(alpha = 0.10f), RoundedCornerShape(AppShape.lg)),
-        ) {
-            SelectionContainer {
-                Text(
-                    sessionOutput.ifEmpty { if (zh) "启动会话后在此显示终端输出…" else "Terminal output appears here after starting…" },
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, lineHeight = 17.sp),
-                    color = if (sessionOutput.isEmpty()) TerminalColors.dim else TerminalColors.fg,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(outputScroll)
-                        .padding(12.dp),
-                )
-            }
-        }
+        // ── 终端显示区（渲染统一走 :terminal-view 模块的 TerminalScreen；本页自管输入行与软键）──
+        TerminalScreen(
+            text = sessionOutput,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            title = if (sessionActive) "terminal · $sessionChannel" else "terminal",
+            placeholder = if (zh) "启动会话后在此显示终端输出…" else "Terminal output appears here after starting…",
+            inputEnabled = false,
+            autoScroll = follow,
+            onCopy = { if (sessionOutput.isNotBlank()) copyToClipboard(context, sessionOutput) },
+            onClear = { sessionOutput = "" },
+        )
 
         // ── 终端软键 ──
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

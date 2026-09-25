@@ -525,7 +525,7 @@ private fun EngineRuntime.fallbackByteSearch(bytes: ByteArray, elf: ElfFile, pat
     var pos = boundedStart
     val maxHits = 5000
     while (pos <= boundedEnd - parsed.size && hits.length() < maxHits) {
-        if (parsed.indices.all { parsed[it] == null || bytes[pos + it] == parsed[it] }) {
+        if (parsed.matchesAt(bytes, pos)) {
             val va = offsetToVa(elf, pos.toLong())
             hits.put(JSONObject().put("fileOffset", hex(pos.toLong())).put("va", va?.let(::hex) ?: JSONObject.NULL).put("section", sectionForOffset(elf, pos.toLong())?.name ?: "").put("length", parsed.size))
             pos += parsed.size.coerceAtLeast(1)
@@ -535,18 +535,79 @@ private fun EngineRuntime.fallbackByteSearch(bytes: ByteArray, elf: ElfFile, pat
     }
     return hits
 }
-private fun EngineRuntime.parseHexPattern(pattern: String): List<Byte?>? {
-    val tokens = pattern.trim().split(Regex("[\\s,]+"), 0).filter { it.isNotBlank() }
-    if (tokens.isEmpty()) return null
-    if (tokens.size == 1 && !tokens[0].contains('?')) {
-        val compact = tokens[0]
-        if (compact.length % 2 != 0 || !compact.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) return null
-        return compact.chunked(2).map { it.toInt(16).toByte() }
-    }
-    return tokens.map { token ->
-        if (token == "??" || token == "?") null else token.toIntOrNull(16)?.takeIf { it in 0..255 }?.toByte() ?: return null
+private class ParsedBytePattern(val values: ByteArray, val masks: ByteArray) {
+    val size: Int get() = values.size
+
+    fun matchesAt(bytes: ByteArray, pos: Int): Boolean {
+        for (i in values.indices) {
+            if ((bytes[pos + i].toInt() xor values[i].toInt()) and (masks[i].toInt() and 0xFF) != 0) {
+                return false
+            }
+        }
+        return true
     }
 }
+
+private fun parsePatternNibble(c: Char): Int? = when (c) {
+    in '0'..'9' -> c - '0'
+    in 'a'..'f' -> c - 'a' + 10
+    in 'A'..'F' -> c - 'A' + 10
+    else -> null
+}
+
+/**
+ * Kotlin-side fallback parser for `search_bytes` patterns. Mirrors the native
+ * normalization in `rizin_core.cpp` (`normalizeBytePattern`: drop whitespace /
+ * commas, `?` -> `.`) and then implements the full documented grammar
+ * (README "pattern 语法"): compact/spaced hex, per-nibble `.` wildcards, and
+ * the `bytes:mask` form. The native path hands the same normalized string to
+ * rizin, so both paths now accept exactly the same syntax.
+ */
+private fun EngineRuntime.parseHexPattern(pattern: String): ParsedBytePattern? {
+    val normalized = buildString(pattern.length) {
+        for (c in pattern) {
+            when {
+                c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',' -> {}
+                c == '?' -> append('.')
+                else -> append(c)
+            }
+        }
+    }
+    if (normalized.isEmpty()) return null
+    val sep = normalized.indexOf(':')
+    val hexPart = if (sep >= 0) normalized.substring(0, sep) else normalized
+    val maskPart = if (sep >= 0) normalized.substring(sep + 1) else null
+    if (hexPart.isEmpty()) return null
+    if (hexPart.length % 2 != 0) return null
+    if (maskPart != null && (maskPart.isEmpty() || maskPart.length != hexPart.length)) return null
+    val count = hexPart.length / 2
+    val values = ByteArray(count)
+    val masks = ByteArray(count)
+    for (i in 0 until count) {
+        var value = 0
+        var mask = 0
+        for (j in 0..1) {
+            val c = hexPart[i * 2 + j]
+            val digit = if (c == '.') 0 else parsePatternNibble(c) ?: return null
+            val nibbleMask = if (c == '.') 0 else 0xF
+            value = (value shl 4) or digit
+            mask = (mask shl 4) or nibbleMask
+        }
+        if (maskPart != null) {
+            var userMask = 0
+            for (j in 0..1) {
+                val digit = parsePatternNibble(maskPart[i * 2 + j]) ?: return null
+                userMask = (userMask shl 4) or digit
+            }
+            mask = mask and userMask
+            value = value and userMask
+        }
+        values[i] = value.toByte()
+        masks[i] = mask.toByte()
+    }
+    return ParsedBytePattern(values, masks)
+}
+
 private fun EngineRuntime.enrichRizinSearchHits(elf: ElfFile, hits: JSONArray) {
     for (i in 0 until hits.length()) {
         val hit = hits.optJSONObject(i) ?: continue

@@ -404,6 +404,17 @@ internal fun SettingsEditorPage(t: UiText) {
     var editorViewport by remember { mutableStateOf(0) }
     LaunchedEffect(code) { if (code.length > 200_000) viewerMode = true }
 
+    // ── 文本读写原语（须定义在其它局部函数之前：Kotlin 局部函数不支持前向引用）──
+    fun setCode(text: String) {
+        code = text
+        tf = TextFieldValue(text, selection = TextRange(text.length))
+    }
+
+    fun setCodeAt(text: String, caret: Int) {
+        code = text
+        tf = TextFieldValue(text, selection = TextRange(caret.coerceIn(0, text.length)))
+    }
+
     // ── 撤销/重做 ──
     val undoStack = remember { mutableStateListOf<String>() }
     val redoStack = remember { mutableStateListOf<String>() }
@@ -468,16 +479,6 @@ internal fun SettingsEditorPage(t: UiText) {
             bakDir.listFiles { it -> it.name.startsWith(f.name) }
                 ?.sortedByDescending { it.lastModified() }?.drop(5)?.forEach { it.delete() }
         }
-    }
-
-    fun setCode(text: String) {
-        code = text
-        tf = TextFieldValue(text, selection = TextRange(text.length))
-    }
-
-    fun setCodeAt(text: String, caret: Int) {
-        code = text
-        tf = TextFieldValue(text, selection = TextRange(caret.coerceIn(0, text.length)))
     }
 
     fun loadWsFile(path: String) {

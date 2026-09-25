@@ -375,6 +375,21 @@ jobs:
           sys.exit(1 if missing else 0)
           PY
 
+          # dcc 自带的 tools/signapk.jar 是 2019 年的实现，依赖 JDK 8 才有的
+          # sun.misc.BASE64Encoder（JDK 9+ 已移除），在 CI 的 JDK 17 上必然抛
+          # NoClassDefFoundError 并让 dcc 不产出 APK。我们并不使用 dcc 的 testkey 签名
+          # （下面会用发布密钥 zipalign+apksigner 重签），因此把 sign() 短路为直接产出未签名 APK。
+          python3 - "$WORK/dcc/dcc.py" <<'PY'
+          import sys
+          p = sys.argv[1]
+          s = open(p, encoding='utf-8').read()
+          old = "        sign(unsigned_apk, outapk)"
+          new = "        shutil.copyfile(unsigned_apk, outapk)  # patched for JDK17: dcc signapk needs JDK8 sun.misc.BASE64Encoder; we re-sign below"
+          assert s.count(old) == 1, s.count(old)
+          open(p, 'w', encoding='utf-8').write(s.replace(old, new))
+          print('[dex2c] patched dcc sign() -> emit unsigned APK (re-signed with release key below)')
+          PY
+
           cd "$WORK/dcc"
           for apk in "$GITHUB_WORKSPACE"/app/build/outputs/apk/release/*.apk; do
             base="$(basename "$apk")"

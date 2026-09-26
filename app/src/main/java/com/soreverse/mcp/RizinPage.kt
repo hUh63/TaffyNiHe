@@ -20,7 +20,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -203,8 +202,8 @@ internal fun RizinPage(t: UiText) {
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 8.dp),
+            .padding(horizontal = 8.dp)
+            .padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         GlassGroup {
@@ -247,15 +246,7 @@ internal fun RizinPage(t: UiText) {
         ) {
             RzTab.values().forEach { tt ->
                 val enabled = workspaceId.isNotBlank() || tt == RzTab.Overview
-                FilterChip(
-                    selected = tab == tt,
-                    onClick = {
-                        tab = tt
-                        if (tt == RzTab.Strings) loadStringsIfNeeded()
-                    },
-                    enabled = enabled,
-                    label = { Text(if (zh) tt.zhName else tt.enName) },
-                )
+                ToolChip(if (zh) tt.zhName else tt.enName, selected = tab == tt, enabled = enabled) { tab = tt; if (tt == RzTab.Strings) loadStringsIfNeeded() }
             }
         }
 
@@ -399,7 +390,7 @@ private fun RzDisasmTab(zh: Boolean, title: String, text: String, pseudo: String
                     text,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                 )
             }
         }
@@ -409,7 +400,7 @@ private fun RzDisasmTab(zh: Boolean, title: String, text: String, pseudo: String
                     pseudo,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                 )
             }
         }
@@ -450,7 +441,7 @@ private fun RzCommandTab(
         }
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("afl", "izz", "iI", "iS", "ii").forEach { c ->
-                FilterChip(selected = false, onClick = { onValue(c) }, label = { Text(c, fontFamily = FontFamily.Monospace) }, enabled = enabled)
+                ToolChip(c, enabled = enabled) { onValue(c) }
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {

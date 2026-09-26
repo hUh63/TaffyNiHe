@@ -12,7 +12,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -161,38 +160,28 @@ internal fun SettingsLinuxPage(t: UiText) {
             footer = if (zh) "选择执行目标后运行命令；脚本写文件后执行，规避引号问题" else "Pick target distro then run",
         ) {
             FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 distros.forEach { (name, _, installed) ->
-                    FilterChip(
-                        selected = target == name,
-                        enabled = installed,
-                        onClick = { target = name },
-                        label = { Text(name) },
-                    )
+                    ToolChip(name, selected = target == name, enabled = installed) { target = name }
                 }
             }
             FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 quickCommands.forEach { (script, label) ->
-                    FilterChip(
-                        selected = false,
-                        onClick = { runIn(target, script) },
-                        label = { Text(label) },
-                        enabled = busy == null,
-                    )
+                    ToolChip(label, enabled = busy == null) { runIn(target, script) }
                 }
             }
             OutlinedTextField(
                 value = cmd,
                 onValueChange = { cmd = it },
                 placeholder = { Text(if (zh) "输入命令，如 uname -a 或 apk add python3" else "e.g. uname -a or apk add python3", style = MaterialTheme.typography.bodySmall) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 minLines = 1,
                 maxLines = 4,
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -202,7 +191,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                     if (c.isNotEmpty()) runIn(target, c)
                 }),
             )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PrimaryActionButton(
                     (if (zh) "在 " else "Run in ") + target,
                     {

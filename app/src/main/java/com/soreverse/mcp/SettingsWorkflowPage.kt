@@ -92,7 +92,7 @@ internal fun SettingsWorkflowPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 8.dp),
+        Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         GlassGroup(title = if (zh) "图例" else "Legend") {
@@ -167,7 +167,7 @@ internal fun SettingsWorkflowPage(t: UiText, onDest: (SettingsDest) -> Unit) {
 private fun LegendRow(text: String, color: androidx.compose.ui.graphics.Color, dashed: Boolean) {
     val density = LocalDensity.current
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

@@ -12,7 +12,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -140,23 +139,19 @@ internal fun SettingsGitPage(t: UiText) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .imePadding()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 8.dp),
+            .padding(horizontal = 8.dp)
+            .padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // ── 环境 + 仓库 ──
         GlassGroup(title = if (zh) "内核环境" else "Rootfs") {
             FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 distros.forEach { d ->
-                    FilterChip(
-                        selected = distro == d.name,
-                        onClick = { distro = d.name; output = "" },
-                        label = { Text("${d.name} · ${d.pkgMgr}") },
-                    )
+                    ToolChip("${d.name} · ${d.pkgMgr}", selected = distro == d.name) { distro = d.name; output = "" }
                 }
             }
             DataRow(
@@ -190,14 +185,14 @@ internal fun SettingsGitPage(t: UiText) {
             OutlinedTextField(
                 value = repoInput,
                 onValueChange = { repoInput = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 placeholder = { Text(if (zh) "仓库目录（默认塔菲工作区）" else "Repo dir (default: taffy workspace)", style = MaterialTheme.typography.bodySmall) },
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { repoPath = repoInput; refreshTick++ }),
             )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PrimaryActionButton(
                     if (zh) "应用目录并刷新" else "Apply & refresh",
                     { repoPath = repoInput; refreshTick++ },
@@ -209,7 +204,7 @@ internal fun SettingsGitPage(t: UiText) {
         // ── 基础操作 ──
         GlassGroup(title = if (zh) "基础操作" else "Basics") {
             FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -241,14 +236,14 @@ internal fun SettingsGitPage(t: UiText) {
             OutlinedTextField(
                 value = commitMsg,
                 onValueChange = { commitMsg = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 placeholder = { Text(if (zh) "提交说明" else "Commit message", style = MaterialTheme.typography.bodySmall) },
                 textStyle = MaterialTheme.typography.bodySmall,
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (commitMsg.isNotBlank()) { /* 交由按钮 */ } }),
             )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PrimaryActionButton(
                     if (zh) "暂存并提交" else "Add & commit",
                     {
@@ -272,13 +267,13 @@ internal fun SettingsGitPage(t: UiText) {
             OutlinedTextField(
                 value = remoteUrl,
                 onValueChange = { remoteUrl = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 placeholder = { Text("https://github.com/user/repo.git", style = MaterialTheme.typography.bodySmall) },
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 singleLine = true,
             )
             FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -339,5 +334,5 @@ internal fun SettingsGitPage(t: UiText) {
 
 @Composable
 private fun ActionChip(label: String, enabled: Boolean, onClick: () -> Unit) {
-    FilterChip(selected = false, onClick = onClick, enabled = enabled, label = { Text(label, fontFamily = FontFamily.Monospace) })
+    ToolChip(label, enabled = enabled) { onClick() }
 }

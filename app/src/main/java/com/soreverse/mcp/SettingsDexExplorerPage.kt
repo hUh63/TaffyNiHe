@@ -151,7 +151,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
     }
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 8.dp),
+        Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         GlassGroup {
@@ -177,7 +177,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                     sel.replace('/', '.'),
                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                 )
                 DataRow(
                     title = if (zh) "返回类列表" else "Back to class list",

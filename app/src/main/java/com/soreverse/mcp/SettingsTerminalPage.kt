@@ -20,7 +20,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -267,14 +266,14 @@ internal fun SettingsTerminalPage(t: UiText) {
     )
 
     Column(
-        Modifier.fillMaxSize().imePadding().padding(horizontal = 12.dp).padding(bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.fillMaxSize().imePadding().padding(horizontal = 8.dp).padding(bottom = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         // ── 会话控制条 ──
         GlassGroup {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -290,13 +289,9 @@ internal fun SettingsTerminalPage(t: UiText) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                FilterChip(
-                    selected = follow,
-                    onClick = { follow = !follow },
-                    label = { Text(if (zh) "跟随" else "Follow") },
-                )
+                ToolChip(if (zh) "跟随" else "Follow", selected = follow) { follow = !follow }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (sessionActive) {
                     SecondaryActionButton(if (zh) "重启" else "Restart", { startSession() }, Modifier.weight(1f))
                     SecondaryActionButton(if (zh) "结束" else "Stop", { stopSession() }, Modifier.weight(1f))
@@ -319,20 +314,16 @@ internal fun SettingsTerminalPage(t: UiText) {
         )
 
         // ── 终端软键 ──
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             termKeys.forEach { (k, label) ->
-                FilterChip(
-                    selected = false,
-                    onClick = { terminalKey(k) },
-                    label = { Text(label, fontFamily = FontFamily.Monospace) },
-                )
+                ToolChip(label) { terminalKey(k) }
             }
         }
 
         // ── 快捷命令 ──
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             quick.forEach { (c, label) ->
-                FilterChip(selected = false, onClick = { send(c) }, label = { Text(label) }, enabled = sessionActive)
+                ToolChip(label, enabled = sessionActive) { send(c) }
             }
         }
 

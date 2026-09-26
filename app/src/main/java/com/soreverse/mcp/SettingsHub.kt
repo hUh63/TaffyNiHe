@@ -67,6 +67,13 @@ import com.soreverse.mcp.core.GitHubRelease
 import com.soreverse.mcp.core.GitHubUpdateManager
 import com.soreverse.mcp.core.SettingsStore
 
+/** 功能/工具页：不走「设置子页」范式，使用各自的沉浸式顶栏（见 [ToolPageScaffold]）。 */
+private val toolPageDests = setOf(
+    SettingsDest.Rizin, SettingsDest.Edbg, SettingsDest.Capture, SettingsDest.Sandbox,
+    SettingsDest.Workflow, SettingsDest.ApkEdit, SettingsDest.DexExplorer, SettingsDest.Linux,
+    SettingsDest.Terminal, SettingsDest.Git, SettingsDest.Extensions,
+)
+
 private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Root -> t.settings
     SettingsDest.ServiceConfig -> if (t.zh) "服务配置" else "Service Configuration"
@@ -235,11 +242,14 @@ internal fun SettingsHub(
         color = MaterialTheme.colorScheme.background,
     ) {
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(
-            title = settingsTitle(t, dest),
-            showBack = true,
-            onBack = onBack,
-        )
+        // 工具/功能页自带沉浸顶栏，不再套「设置子页」标题；其余设置页保持统一标题栏。
+        if (dest !in toolPageDests) {
+            ScreenHeader(
+                title = settingsTitle(t, dest),
+                showBack = true,
+                onBack = onBack,
+            )
+        }
         Box(Modifier.fillMaxSize()) {
         when (dest) {
             SettingsDest.ServiceConfig -> SettingsServiceConfigPage(t, settings)
@@ -259,19 +269,19 @@ internal fun SettingsHub(
             SettingsDest.Workspace -> SettingsWorkspacePage(t, settings, { onDest(SettingsDest.ServiceConfig) }, { onDest(SettingsDest.TempWorkspace) })
             SettingsDest.Permissions -> SettingsPermissionsPage(t)
             SettingsDest.LogcatViewer -> LogcatViewerPage(t)
-            SettingsDest.Edbg -> EdbgPage(t)
-            SettingsDest.DexExplorer -> SettingsDexExplorerPage(t)
-            SettingsDest.ApkEdit -> SettingsApkEditPage(t)
+            SettingsDest.Edbg -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { EdbgPage(t) }
+            SettingsDest.DexExplorer -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsDexExplorerPage(t) }
+            SettingsDest.ApkEdit -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsApkEditPage(t) }
             SettingsDest.Snapshots -> SettingsSnapshotsPage(t)
-            SettingsDest.Workflow -> SettingsWorkflowPage(t, onDest)
-            SettingsDest.Rizin -> RizinPage(t)
-            SettingsDest.Capture -> CapturePage(t)
-            SettingsDest.Linux -> SettingsLinuxPage(t)
-            SettingsDest.Terminal -> SettingsTerminalPage(t)
-            SettingsDest.Git -> SettingsGitPage(t)
-            SettingsDest.Extensions -> SettingsExtensionsPage(t, onDest)
+            SettingsDest.Workflow -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsWorkflowPage(t, onDest) }
+            SettingsDest.Rizin -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { RizinPage(t) }
+            SettingsDest.Capture -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { CapturePage(t) }
+            SettingsDest.Linux -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsLinuxPage(t) }
+            SettingsDest.Terminal -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsTerminalPage(t) }
+            SettingsDest.Git -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsGitPage(t) }
+            SettingsDest.Extensions -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsExtensionsPage(t, onDest) }
             SettingsDest.Help -> SettingsHelpPage(t)
-            SettingsDest.Sandbox -> SettingsSandboxPage(t)
+            SettingsDest.Sandbox -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsSandboxPage(t) }
             // 编辑器已是顶层独立页面：子页路由到此处时直接切到 Editor tab（覆盖扩展页 / 工作流页的跳转）
             SettingsDest.Python -> LaunchedEffect(Unit) { onOpenEditor() }
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)

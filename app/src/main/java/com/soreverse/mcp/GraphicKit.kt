@@ -3,6 +3,7 @@ package com.soreverse.mcp
 import android.content.ClipData
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -185,6 +186,39 @@ internal fun TypeChip(text: String, color: Color = MaterialTheme.colorScheme.pri
             .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
         Text(text, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** 紧凑动作/切换 chip（工具页高密度操作条用；比 FilterChip 省约 40% 高度）。 */
+@Composable
+internal fun ToolChip(
+    label: String,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    accent: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val bg = when {
+        !enabled -> cs.surfaceContainerHigh.copy(alpha = 0.35f)
+        selected || accent -> cs.primary.copy(alpha = 0.20f)
+        else -> cs.surfaceContainerHigh
+    }
+    val fg = when {
+        !enabled -> cs.onSurfaceVariant.copy(alpha = 0.4f)
+        selected || accent -> cs.primary
+        else -> cs.onSurface
+    }
+    Box(
+        Modifier
+            .heightIn(min = 28.dp)
+            .clip(RoundedCornerShape(AppShape.sm))
+            .background(bg)
+            .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = fg, maxLines = 1)
     }
 }
 

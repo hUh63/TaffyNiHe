@@ -89,6 +89,63 @@ internal fun ScreenHeader(
     }
 }
 
+/**
+ * 沉浸式工具页外壳：紧凑顶栏（返回 + 标题 + 动作槽）+ 全幅内容区。
+ *
+ * 取代「设置子页」范式（大标题 [ScreenHeader] + 页面内边距）——功能页要的是空间，
+ * 不是又一层设置排版。顶栏默认 ~42dp，比 [ScreenHeader] 省约 1/3 纵向空间。
+ */
+@Composable
+internal fun ToolPageScaffold(
+    title: String,
+    subtitle: String? = null,
+    onBack: (() -> Unit)? = null,
+    actions: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = if (onBack != null) 2.dp else 14.dp, end = 6.dp, top = 1.dp, bottom = 1.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onBack != null) {
+                IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        "返回",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            actions?.invoke()
+        }
+        Box(Modifier.fillMaxSize()) { content() }
+    }
+}
+
 @Composable
 internal fun GlassGroup(
     title: String? = null,

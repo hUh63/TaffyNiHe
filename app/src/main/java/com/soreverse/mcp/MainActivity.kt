@@ -59,6 +59,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -328,6 +329,7 @@ private fun SoReverseApp() {
     var availableRelease by remember { mutableStateOf<GitHubRelease?>(null) }
     var showUpdatePrompt by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(MainTab.Home) }
+    var editorMounted by remember { mutableStateOf(false) }
     var settingsDest by remember { mutableStateOf(SettingsDest.Root) }
     var language by remember { mutableStateOf(settings.language) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
@@ -502,6 +504,24 @@ private fun SoReverseApp() {
                             .fillMaxSize(),
                     ) {
                         val animMs = if (reduceMotion) 0 else 180
+                        // 编辑器独立页：常驻挂载以保活（切走时移出可视区——不销毁、不接收触摸）
+                        val editorActive = tab == MainTab.Editor
+                        if (editorActive) editorMounted = true
+                        if (editorMounted) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .then(if (editorActive) Modifier else Modifier.offset(y = -20000.dp)),
+                            ) {
+                                EditorScreen(t)
+                            }
+                        }
+                        if (!editorActive) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.background),
+                            ) {
                         AnimatedContent(
                             targetState = tab,
                             transitionSpec = {
@@ -566,7 +586,7 @@ private fun SoReverseApp() {
                                         tab = MainTab.Tools
                                     },
                                 )
-                                MainTab.Editor -> EditorScreen(t)
+                                MainTab.Editor -> Box(Modifier.fillMaxSize())
                                 MainTab.Settings -> SettingsHub(
                                     modifier = Modifier,
                                     backProgress = backProgress,
@@ -604,6 +624,8 @@ private fun SoReverseApp() {
                                     onLogs = { showLogs = true },
                                     onOpenEditor = { settingsDest = SettingsDest.Root; toolCategory = null; tab = MainTab.Editor },
                                 )
+                            }
+                        }
                             }
                         }
                     }

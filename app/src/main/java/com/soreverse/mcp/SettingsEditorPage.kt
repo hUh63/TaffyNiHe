@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -394,6 +395,7 @@ internal fun SettingsEditorPage(t: UiText) {
     var readOnly by remember { mutableStateOf(false) }
     var showExtraKeys by remember { mutableStateOf(true) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    var showLangMenu by remember { mutableStateOf(false) }
     // 面板 / 命令面板
     var panel by remember { mutableStateOf<EditorPanel?>(null) }
     var showCommandPalette by remember { mutableStateOf(false) }
@@ -1174,49 +1176,35 @@ internal fun SettingsEditorPage(t: UiText) {
         Modifier
             .fillMaxSize()
             .imePadding()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // 模式选择
-        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(CodeHighlighter.Lang.entries.toList()) { m ->
-                FilterChip(
-                    selected = mode == m,
-                    onClick = {
-                        mode = m
-                        if (m == CodeHighlighter.Lang.EXT) {
-                            val ext = File(currentFilePath).extension
-                            CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(ext)
-                                ?: com.soreverse.mcp.core.EditorSyntaxPacks.packs.firstOrNull()
-                        }
-                    },
-                    label = { Text(langLabel(m, zh), fontSize = AppText.label, maxLines = 1) },
-                )
-            }
-        }
-
-        // 多 tab 条
+        // 文件标签条（紧凑 chip；语言选择已移入底部状态栏，节省一整行）
         LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             items(tabs.size) { i ->
                 val tabItem = tabs[i]
-                FilterChip(
-                    selected = i == activeTab,
-                    onClick = { switchTab(i) },
-                    label = {
+                val sel = i == activeTab
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(AppShape.sm))
+                        .background(if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.20f) else MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable { switchTab(i) }
+                        .padding(start = 9.dp, end = if (sel) 2.dp else 9.dp, top = 5.dp, bottom = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        (if (sel && dirty) "● " else "") + (if (tabItem.untitled) (if (zh) "草稿" else "Draft") else tabItem.name),
+                        fontSize = AppText.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.widthIn(max = 150.dp),
+                    )
+                    if (sel) {
                         Text(
-                            (if (i == activeTab && dirty) "• " else "") + (if (tabItem.untitled) (if (zh) "草稿" else "Draft") else tabItem.name),
-                            fontSize = AppText.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            "×", fontSize = AppText.bodyStrong, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clip(RoundedCornerShape(AppShape.xs)).clickable { closeTab(i) }.padding(horizontal = 4.dp),
                         )
-                    },
-                    trailingIcon = {
-                        Text(
-                            "×",
-                            fontSize = AppText.label,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.clip(RoundedCornerShape(AppShape.xs)).clickable { closeTab(i) }.padding(horizontal = 3.dp),
-                        )
-                    },
-                )
+                    }
+                }
             }
         }
 
@@ -1234,6 +1222,9 @@ internal fun SettingsEditorPage(t: UiText) {
                             enabled = cmd.enabled(host),
                             accent = cmd.isOn(host),
                         ) { cmd.perform(host) }
+                    }
+                    items(textActions) { action ->
+                        if (action.showWhen(host)) MiniAction(label = action.label(zh)) { action.perform(host) }
                     }
                 }
             }
@@ -1256,15 +1247,6 @@ internal fun SettingsEditorPage(t: UiText) {
                             )
                         }
                     }
-                }
-            }
-        }
-
-        // 内联动作条（EditorTextActions：内置 + 运行时注册的扩展动作）
-        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(textActions) { action ->
-                if (action.showWhen(host)) {
-                    MiniAction(label = action.label(zh)) { action.perform(host) }
                 }
             }
         }
@@ -1552,7 +1534,30 @@ internal fun SettingsEditorPage(t: UiText) {
                     color = AppPalette.orange,
                 )
             }
-            Text(langLabel(mode, zh), style = MaterialTheme.typography.labelSmall, color = AppPalette.teal)
+            Box {
+                Text(
+                    langLabel(mode, zh) + " ▾",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AppPalette.teal,
+                    modifier = Modifier.clip(RoundedCornerShape(AppShape.xs)).clickable { showLangMenu = true }.padding(horizontal = 2.dp),
+                )
+                DropdownMenu(expanded = showLangMenu, onDismissRequest = { showLangMenu = false }) {
+                    CodeHighlighter.Lang.entries.forEach { m ->
+                        DropdownMenuItem(
+                            text = { Text((if (mode == m) "✓ " else "") + langLabel(m, zh)) },
+                            onClick = {
+                                mode = m
+                                if (m == CodeHighlighter.Lang.EXT) {
+                                    val ext = File(currentFilePath).extension
+                                    CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(ext)
+                                        ?: com.soreverse.mcp.core.EditorSyntaxPacks.packs.firstOrNull()
+                                }
+                                showLangMenu = false
+                            },
+                        )
+                    }
+                }
+            }
             Text(
                 (if (dirty) "● " else "✓ ") + (if (zh) "未保存" else "unsaved"),
                 style = MaterialTheme.typography.labelSmall,

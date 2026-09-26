@@ -7295,11 +7295,47 @@ private fun rzText(res: JSONObject?): String =
     if (res == null) "" else res.optString("stdout").ifBlank { res.optString("text") }.trim()
 
 /** 取 JSON 数组（来自 rzCommand 文本）。 */
-private fun rzArray(res: JSONObject?): List<JSONObject> {
-    val t = rzText(res)
+private fun rzArray(res: JSONObject?): List<JSONObject> = rzArrayText(rzText(res))
+
+/** 把已取到的文本按 JSON 数组解析为对象列表（非数组返回空）。 */
+private fun rzArrayText(t: String): List<JSONObject> {
     if (t.isBlank()) return emptyList()
     val a = runCatching { JSONArray(t) }.getOrNull() ?: return emptyList()
     return (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+}
+
+/**
+ * 解析 rizin 0.9.x `agCj` 的全局调用图 JSON（**对象**，不是数组）：
+ *   {"nodes":[{"id":0,"title":"main","offset":...,"out_nodes":[1,2]}]}
+ * 节点名在 "title"（没有 "name"），出边 "out_nodes" 存的是**节点 id**。
+ * 旧实现按「数组 + name/imports」解析，导致全局调用图恒为空 → 被降级成函数清单（表现为“不可用”）。
+ */
+private fun parseRizinGraph(text: String): Pair<List<JSONObject>, List<Pair<String, String>>> {
+    if (text.isBlank()) return emptyList<JSONObject>() to emptyList()
+    val root = runCatching { JSONObject(text) }.getOrNull() ?: return emptyList<JSONObject>() to emptyList()
+    val arr = root.optJSONArray("nodes") ?: return emptyList<JSONObject>() to emptyList()
+    val idToName = HashMap<String, String>()
+    val nodes = ArrayList<JSONObject>(arr.length())
+    for (i in 0 until arr.length()) {
+        val n = arr.optJSONObject(i) ?: continue
+        val id = n.opt("id")?.toString() ?: i.toString()
+        val title = n.optString("title").ifBlank { n.optString("name") }
+        val off = n.opt("offset")
+        val name = title.ifBlank { hexAddr(off) }.ifBlank { "node$id" }
+        idToName[id] = name
+        nodes.add(JSONObject().put("id", id).put("name", name).apply { if (off != null) put("offset", off) })
+    }
+    val edges = ArrayList<Pair<String, String>>()
+    for (i in 0 until arr.length()) {
+        val n = arr.optJSONObject(i) ?: continue
+        val from = idToName[n.opt("id")?.toString() ?: i.toString()] ?: continue
+        val outs = n.optJSONArray("out_nodes") ?: continue
+        for (k in 0 until outs.length()) {
+            val to = idToName[outs.opt(k)?.toString() ?: continue] ?: continue
+            edges.add(from to to)
+        }
+    }
+    return nodes to edges
 }
 
 /** 数字（hex 字符串或 int）→ Long。 */
@@ -7337,14 +7373,21 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         val res = withContext(Dispatchers.IO) {
             runCatching {
                 val eng = EngineProvider.get(context)
-                val g = rzArray(eng.rzCommand(ws, "", "agCj"))
-                if (g.isNotEmpty()) Triple(g, emptyList<Pair<String, String>>(), "")
+                // rizin 0.9.x 的 agCj 输出是对象 {"nodes":[{id,title,offset,out_nodes}]}，不是数组；
+                // 旧实现按数组解析 → 恒为空 → 全局调用图被误判「不可用」。这里按真实结构解析。
+                val raw = rzText(eng.rzCommand(ws, "", "agCj"))
+                var g = parseRizinGraph(raw)
+                if (g.first.isEmpty()) {
+                    val legacy = rzArrayText(raw)
+                    if (legacy.isNotEmpty()) g = parseCallGraph(legacy)
+                }
+                if (g.first.isNotEmpty()) Triple(g.first, g.second, "")
                 else {
                     // 降级：函数列表（含各自规模），无全局边
                     val fns = rzArray(eng.rzCommand(ws, "", "aflj"))
                     Triple(fns, emptyList(), if (fns.isEmpty())
                         (if (zh) "rizin 未返回调用图（agC 不可用或未分析），也无法列出函数" else "no call graph / functions from rizin")
-                    else (if (zh) "全局调用图 (agC) 不可用，已降级为函数清单" else "agC unavailable; fell back to function list"))
+                    else (if (zh) "未取得全局调用图，已降级为函数清单" else "no global call graph; fell back to function list"))
                 }
             }.getOrNull()
         }

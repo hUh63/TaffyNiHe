@@ -46,6 +46,115 @@ object IntegrityGuard {
 
     @Volatile private var cached: Pair<Long, Result>? = null
 
+    /**
+     * 深检快照（`probeArchive` 的 dex-CRC 结构检查 + `verifyBlock` 的真实验签/内容摘要）。
+     * 两者都是数十 MB～整包级别的重活，因此只允许在后台低频执行一次并缓存。
+     */
+    private data class DeepSnapshot(val at: Long, val probeCode: Int, val blockCode: Int)
+
+    @Volatile private var deepCache: DeepSnapshot? = null
+
+    /** 深检结果有效期：同一份 APK 的内容不会变，缓存久一点没有安全损失。 */
+    private const val DEEP_TTL_MS = 10 * 60_000L
+
+    private val deepLock = Any()
+    @Volatile private var deepRecheckStarted = false
+
+    /** 深检缓存中是否已判定「签名有效但内容被改」。未做过深检时返回 false（不误判）。 */
+    private fun deepTampered(): Boolean {
+        val cachedDeep = deepCache ?: return false
+        if (System.currentTimeMillis() - cachedDeep.at > DEEP_TTL_MS) return false
+        return NativeProbe.isTamper(cachedDeep.blockCode)
+    }
+
+    /** 深检缓存中的 probe（结构 + dex CRC）错误码；未做过深检时返回 0（不误判）。 */
+    private fun deepProbeCode(): Int {
+        val cachedDeep = deepCache ?: return 0
+        if (System.currentTimeMillis() - cachedDeep.at > DEEP_TTL_MS) return 0
+        return cachedDeep.probeCode
+    }
+
+    /**
+     * 重量级校验：v2/v3 真实验签 + 全量内容摘要重算（上游 #111）。
+     *
+     * ⚠ 必须只在后台低频调用（见 [scheduleDeepRecheck]）：单次要读完整包并做数百次
+     * SHA-256，放在主线程或高频路径上会直接卡死 UI。
+     * 结果写入 [deepCache] 供 [verify] 复用，因此在 [DEEP_TTL_MS] 内重复调用几乎零成本。
+     */
+    fun deepVerify(context: Context): Result {
+        deepCache?.let { snap ->
+            if (System.currentTimeMillis() - snap.at < DEEP_TTL_MS) {
+                return verify(context).let { base ->
+                    if (NativeProbe.isTamper(snap.blockCode)) {
+                        base.copy(
+                            trusted = false,
+                            reason = "v2/v3 signature/content re-verification FAILED (code=0x${snap.blockCode.toString(16)})",
+                            threats = (base.threats + "apk-content-tamper").distinct(),
+                        )
+                    } else if (snap.probeCode != 0) {
+                        base.copy(
+                            trusted = false,
+                            reason = "archive probe failed (code=0x${snap.probeCode.toString(16)})",
+                            integrityCode = snap.probeCode,
+                        )
+                    } else {
+                        base
+                    }
+                }
+            }
+        }
+        val code = NativeProbe.verifyBlock(context)
+        val probe = NativeProbe.probeArchive(context)
+        deepCache = DeepSnapshot(System.currentTimeMillis(), probe, code)
+        AppLog.i("Integrity deep check: probeCode=0x${probe.toString(16)} blockCode=0x${code.toString(16)}")
+        return deepVerify(context)
+    }
+
+    /**
+     * 后台周期深检（对齐上游 SOMCP v1.0.21 的 schedulePeriodicRecheck）：
+     * 首次 10 秒后跑一次，之后每 2-5 分钟随机一次 —— 随机间隔让「先绕过启动检查、
+     * 再打补丁」的计划难以掐时间。
+     *
+     * 终止条件刻意收得很窄：**只有** 深检结果为「确定性篡改」（签名有效但内容/签名数据
+     * 对不上，此时 native 侧本就已判定 fatal）**且** v1 pin 匹配时才杀进程。
+     * 「签名者 ≠ pin」（用户自行重签，native 返回 CERT_MISMATCH 非 fatal）只记日志不杀，
+     * 保持塔菲逆核对逆向用户自行重签的既有兼容策略。
+     */
+    fun scheduleDeepRecheck(context: Context) {
+        synchronized(deepLock) {
+            if (deepRecheckStarted) return
+            deepRecheckStarted = true
+        }
+        val app = context.applicationContext ?: context
+        Thread({
+            var delay = 10_000L
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    Thread.sleep(delay)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                delay = 120_000L + kotlin.random.Random.nextLong(180_000L)
+                val result = runCatching { deepVerify(app) }.getOrNull() ?: continue
+                if (!result.trusted && result.threats.contains("apk-content-tamper")) {
+                    val pinned = expectedSignerDigest()
+                    val pinMatched = pinned.isNotBlank() && result.actual.any { it == pinned }
+                    if (pinMatched) {
+                        AppLog.e("INTEGRITY DEEP CHECK FAILED: pinned-signer archive modified at runtime")
+                        recordFailure(app, result)
+                        exitProcess(173)
+                    } else {
+                        AppLog.w("Integrity deep check: archive signature differs from the pinned signer (re-signed build?) — not terminating")
+                    }
+                }
+            }
+        }).apply {
+            isDaemon = true
+            name = "taffy-integrity-deep"
+            start()
+        }
+    }
+
     /** 失败记录的「签名」，用于去重（避免每 3 秒轮询时刷屏日志/写盘）。 */
     @Volatile private var lastFailureSignature: String = ""
 
@@ -85,8 +194,10 @@ object IntegrityGuard {
         val result = runCatching {
             val expected = expectedSignerDigest()
             val actual = signingCertificateDigests(context).map { it.normalizeDigest() }
-            // 上游 1.0.19 借鉴: APK 完整性校验（native mmap/CRC 优先，Kotlin fallback）
-            val integrityCode = NativeProbe.probeArchive(context)
+            // 上游 1.0.19 借鉴: APK 完整性校验（ZIP 结构 + 关键条目 + classes.dex CRC32）。
+            // ⚠ 性能：dex CRC 需要遍历/解压 classes.dex（数十 MB），同样不能出现在本方法
+            // 这种高频路径上；这里只读后台深检缓存（见 [deepVerify]）。
+            val integrityCode = deepProbeCode()
             // 上游 1.0.20 借鉴: v2/v3 APK Signing Block 证书校验——防"签名方案混淆重打包"
             // （攻击者保留 v1 真证书、把 v2/v3 块换成自己密钥）。
             // ⚠ 提示不阻断：v1(PackageManager) 已匹配 pin 时，v2/v3 不匹配只可能是用户
@@ -97,10 +208,12 @@ object IntegrityGuard {
                 else "v2/v3 signing block signer differs from v1 (possible signing-scheme confusion, v1 still verified)"
             }.getOrDefault("")
             // 上游 v1.0.22 (#111) 借鉴: v2/v3 真实验签 + apksig 1MiB 分块内容摘要重算。
-            // 与上面仅提示的 v23Warning 不同，这一项是硬判定：签名有效但内容被改（或签名
-            // 与 pin 不符）时 native 侧直接终止进程，Kotlin 侧读到 bitmask 后同样判失败。
-            val blockCode = NativeProbe.verifyBlock(context)
-            val blockTampered = NativeProbe.isTamper(blockCode)
+            // ⚠ 性能：这一项要 mmap 整个 APK 并对全部内容重算分块 SHA-256（发布包约 190MB，
+            // ≈190 次哈希 + 一次 RSA 验签），单次数百毫秒级。它绝不能出现在高频路径上
+            // （本方法被 UI 每 3 秒轮询、被前台服务反复调用）—— 否则主线程会被反复阻塞，
+            // 表现为整机「一卡一卡」。因此这里只**读深检结果缓存**，真正的验签由
+            // [deepVerify] 在后台低频执行（启动一次 + 之后 2-5 分钟随机一次）。
+            val blockTampered = deepTampered()
             if (blockTampered) {
                 Result(
                     trusted = false,

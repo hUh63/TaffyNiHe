@@ -35,6 +35,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Memory
@@ -118,7 +119,9 @@ import com.soreverse.mcp.core.SettingsStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -139,22 +142,39 @@ class MainActivity : ComponentActivity() {
 private fun IntegrityGate(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
-    var result by remember { mutableStateOf(IntegrityGuard.verify(context.applicationContext)) }
-    LaunchedEffect(result.trusted) {
-        while (result.trusted) {
+    // v1.3.55 性能修复: 完整性校验会读安装包（native 侧 mmap + 结构/指纹检查），
+    // 旧实现直接在 remember 里同步调用、并在**主线程**每 3 秒轮询一次 —— 这是"整机一卡一卡"
+    // 的直接原因。现在：首次校验与轮询都放到 IO 线程，且轮询只走轻量路径
+    // （重量级的 dex-CRC 结构检查与 v2/v3 真实验签已移入后台低频深检，见 IntegrityGuard）。
+    var result by remember { mutableStateOf<IntegrityGuard.Result?>(null) }
+    LaunchedEffect(Unit) {
+        result = withContext(Dispatchers.IO) { IntegrityGuard.verify(context.applicationContext) }
+    }
+    LaunchedEffect(result?.trusted) {
+        while (result?.trusted == true) {
             delay(3_000)
-            result = IntegrityGuard.verify(context.applicationContext)
+            result = withContext(Dispatchers.IO) { IntegrityGuard.verify(context.applicationContext) }
         }
     }
-    if (result.trusted) {
+    val r = result
+    if (r == null) {
+        // 首帧：校验尚未返回，先给一个极简启动态，避免白屏/阻塞首帧。
+        MaterialTheme(colorScheme = appleDarkColors()) {
+            Box(Modifier.fillMaxSize().background(AppleColors.Dark.background), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AppleColors.Dark.label)
+            }
+        }
+        return
+    }
+    if (r.trusted) {
         content()
         return
     }
     // v1.3.9 (上游 v1.0.21 借鉴)：只有「签名者摘要明确不匹配」才倒计时退出。
     // 其他失败（native 库加载失败 UnsatisfiedLinkError、PackageManager 异常、v2/v3 解析差异等）
     // 一律不自动杀进程 —— 旧行为会让一次误判直接变成"启动即退出"的死循环，且没有任何记录可查。
-    val hardFail = result.expected.isNotBlank() && result.actual.isNotEmpty() &&
-        result.reason == "application signature mismatch"
+    val hardFail = r.expected.isNotBlank() && r.actual.isNotEmpty() &&
+        r.reason == "application signature mismatch"
     val lastFailure = remember { IntegrityGuard.lastFailure(context.applicationContext) }
     var remaining by remember { mutableStateOf(10) }
     var proceed by remember { mutableStateOf(false) }
@@ -188,10 +208,10 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
                                 "完整性校验未通过（原因不是签名不匹配，可能是运行环境或原生库问题）。本次不会自动退出，原因已记录，可点「仍然使用」继续。"
                             },
                         )
-                        Text("原因: ${result.reason}", style = MaterialTheme.typography.bodySmall)
-                        if (result.expected.isNotBlank()) Text("期望: ${result.expected.take(16)}...${result.expected.takeLast(16)}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                        if (result.actual.isNotEmpty()) Text("实际: ${result.actual.joinToString { it.take(16) + "..." + it.takeLast(16) }}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                        if (result.threats.isNotEmpty()) Text("威胁: ${result.threats.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        Text("原因: ${r.reason}", style = MaterialTheme.typography.bodySmall)
+                        if (r.expected.isNotBlank()) Text("期望: ${r.expected.take(16)}...${r.expected.takeLast(16)}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        if (r.actual.isNotEmpty()) Text("实际: ${r.actual.joinToString { it.take(16) + "..." + it.takeLast(16) }}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        if (r.threats.isNotEmpty()) Text("威胁: ${r.threats.joinToString()}", style = MaterialTheme.typography.bodySmall)
                         if (lastFailure != null) {
                             Text("上次失败记录: $lastFailure", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

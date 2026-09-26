@@ -21,6 +21,9 @@ class SoReverseApplication : Application() {
         RizinNativeEngine.configureGhidra(this)
         PermissionManager.init(this)
         val integrity = IntegrityGuard.verify(this)
+        // v1.3.55: 深度校验（ZIP 结构 + classes.dex CRC32 + v2/v3 真实验签 + 全量内容摘要）
+        // 很重，不能放在启动主线程上；交给后台线程低频执行（首次 10 秒后，之后 2-5 分钟一次）。
+        runCatching { IntegrityGuard.scheduleDeepRecheck(this) }
         if (!integrity.trusted) AppLog.e("Integrity check failed: ${integrity.reason}; expected=${integrity.expected}; actual=${integrity.actual.joinToString()}")
         AppLog.i("SOMCP initialized (toolStatsPersist=${settings.toolStatsPersist})")
         // 启动信息写入应用日志：无系统权限时 Logcat 查看器显示应用日志兜底，保证有内容可看

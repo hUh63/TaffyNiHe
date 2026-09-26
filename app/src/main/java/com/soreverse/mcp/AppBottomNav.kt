@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -21,6 +22,7 @@ private val navItems = listOf(
     NavItem(MainTab.Home, "首页", "Home", Icons.Filled.Home),
     NavItem(MainTab.Tools, "分析", "Analyze", Icons.Filled.Science),
     NavItem(MainTab.Tasks, "任务", "Tasks", Icons.Filled.Folder),
+    NavItem(MainTab.Editor, "编辑器", "Editor", Icons.Filled.Code),
     NavItem(MainTab.Settings, "设置", "Settings", Icons.Filled.Settings),
 )
 

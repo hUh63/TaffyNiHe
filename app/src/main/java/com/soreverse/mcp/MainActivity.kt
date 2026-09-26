@@ -566,6 +566,7 @@ private fun SoReverseApp() {
                                         tab = MainTab.Tools
                                     },
                                 )
+                                MainTab.Editor -> EditorScreen(t)
                                 MainTab.Settings -> SettingsHub(
                                     modifier = Modifier,
                                     backProgress = backProgress,
@@ -601,6 +602,7 @@ private fun SoReverseApp() {
                                     onBack = { settingsDest = SettingsDest.Root },
                                     onHome = { tab = MainTab.Home; toolCategory = null },
                                     onLogs = { showLogs = true },
+                                    onOpenEditor = { settingsDest = SettingsDest.Root; toolCategory = null; tab = MainTab.Editor },
                                 )
                             }
                         }

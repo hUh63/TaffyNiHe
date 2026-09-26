@@ -48,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -141,6 +142,7 @@ internal fun SettingsHub(
     dest: SettingsDest,
     onDest: (SettingsDest) -> Unit,
     onLogs: () -> Unit = {},
+    onOpenEditor: () -> Unit = {},
     onBack: () -> Unit,
     onHome: (() -> Unit)? = null,
 ) {
@@ -191,7 +193,7 @@ internal fun SettingsHub(
                     SettingsGroup(if (t.zh) "开发环境" else "Dev environment") {
                         SettingsNavRow(t, SettingsDest.Linux, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Terminal, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Python, onDest); GroupDivider()
+                        NavRow(settingsTitle(t, SettingsDest.Python), null, settingsIcon(SettingsDest.Python), onClick = onOpenEditor); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Git, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Workspace, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.TempWorkspace, onDest); GroupDivider()
@@ -270,7 +272,8 @@ internal fun SettingsHub(
             SettingsDest.Extensions -> SettingsExtensionsPage(t, onDest)
             SettingsDest.Help -> SettingsHelpPage(t)
             SettingsDest.Sandbox -> SettingsSandboxPage(t)
-            SettingsDest.Python -> SettingsEditorPage(t)
+            // 编辑器已是顶层独立页面：子页路由到此处时直接切到 Editor tab（覆盖扩展页 / 工作流页的跳转）
+            SettingsDest.Python -> LaunchedEffect(Unit) { onOpenEditor() }
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }

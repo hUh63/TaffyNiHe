@@ -74,6 +74,13 @@ object IntegrityGuard {
         return cachedDeep.probeCode
     }
 
+    /** 深检缓存中的 v2/v3 验签错误码（仅用于日志/诊断文案）；未做过深检时返回 0。 */
+    private fun deepBlockCode(): Int {
+        val cachedDeep = deepCache ?: return 0
+        if (System.currentTimeMillis() - cachedDeep.at > DEEP_TTL_MS) return 0
+        return cachedDeep.blockCode
+    }
+
     /**
      * 重量级校验：v2/v3 真实验签 + 全量内容摘要重算（上游 #111）。
      *
@@ -217,7 +224,7 @@ object IntegrityGuard {
             if (blockTampered) {
                 Result(
                     trusted = false,
-                    reason = "v2/v3 signature/content re-verification FAILED (code=0x${blockCode.toString(16)})",
+                    reason = "v2/v3 signature/content re-verification FAILED (code=0x${deepBlockCode().toString(16)})",
                     expected = expected,
                     actual = actual,
                     threats = listOf("apk-content-tamper"),

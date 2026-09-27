@@ -2329,47 +2329,6 @@ private fun rowsOf(json: String?, view: String): List<AnalysisRow> {
     return out
 }
 
-/** CardRow 列表（12dp 圆角行 + 选中态高亮 + 分隔线）。 */
-@Composable
-private fun AnalysisRowList(
-    rows: List<AnalysisRow>,
-    zh: Boolean,
-    icon: ImageVector,
-    selectedTitle: String = "",
-    onPick: (AnalysisRow) -> Unit,
-) {
-    val cs = MaterialTheme.colorScheme
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        items(rows, key = { r -> r.key }) { row ->
-            val selected = selectedTitle.isNotBlank() && row.title == selectedTitle
-            Box(
-                Modifier.fillMaxWidth().padding(horizontal = 2.dp)
-                    .clip(RoundedCornerShape(AppShape.md))
-                    .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent),
-            ) {
-                CardRow(
-                    title = row.title,
-                    meta = row.meta.ifBlank { null },
-                    icon = icon,
-                    iconTint = if (selected) cs.primary else cs.onSurfaceVariant,
-                    trailing = {
-                        if (selected) {
-                            Text(
-                                if (zh) "已选" else "on",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = AppText.label,
-                                color = cs.primary,
-                            )
-                        }
-                    },
-                    onClick = { onPick(row) },
-                )
-            }
-            GroupDivider()
-        }
-    }
-}
-
 // ───────────────────────── 取数（均在工作区内，失败一律落成 error JSON） ─────────────────────────
 
 private fun rawListCall(
@@ -2823,42 +2782,7 @@ private fun hexVal(s: String): Long = runCatching {
     if (v.startsWith("0x", true)) v.substring(2).toLong(16) else v.toLong()
 }.getOrDefault(0L)
 
-/** 表头单元格：可点排序，当前排序列显示箭头。 */
-@Composable
-private fun SortHeader(
-    label: String,
-    active: Boolean,
-    asc: Boolean,
-    alignEnd: Boolean = false,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val cs = MaterialTheme.colorScheme
-    Row(
-        modifier.clickable { onClick() }.padding(vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = AppText.label,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (active) cs.primary else cs.onSurfaceVariant,
-            maxLines = 1,
-        )
-        if (active) {
-            Icon(
-                if (asc) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                null,
-                tint = cs.primary,
-                modifier = Modifier.size(13.dp),
-            )
-        }
-    }
-}
-
-/** 函数表：地址(等宽，点击复制) | 名称 + 类型 | 大小；表头可点排序。 */
+/** 函数列表：卡片范式（图标 + 名称 + 地址/大小 + 类型 chip），搜索 + 排序。 */
 @Composable
 private fun FunctionsView(
     tools: ToolPagesState,
@@ -3818,62 +3742,60 @@ private fun CfgView(
 
 // ───────────────────────── 列表视图（字符串 / 符号 / 导入 / 段节） ─────────────────────────
 
-/** 列表视图共用的小表头（各视图自定义列）. */
+/** 卡片列表（结构类视图共用：图标 + 标题 + 地址/元信息 + 类型 chip）。 */
 @Composable
-private fun ListCols(vararg cols: Pair<String, androidx.compose.ui.unit.Dp?>) {
-    val cs = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        cols.forEach { (label, w) ->
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                color = cs.onSurfaceVariant,
-                maxLines = 1,
-                modifier = if (w == null) Modifier.weight(1f) else Modifier.width(w),
-            )
-        }
-    }
-}
-
-/** 列表视图共用的外壳：表头 + 分割线 + 行内容（内部横滚不换行）。 */
-@Composable
-private fun ListShell(
-    headers: List<Pair<String, androidx.compose.ui.unit.Dp?>>,
+private fun AnalysisCardList(
     rows: kotlin.collections.List<AnalysisRow>,
-    expandedKey: String?,
+    icon: ImageVector,
+    selectedTitle: String = "",
     onPick: (AnalysisRow) -> Unit,
-    cell: @Composable (AnalysisRow) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier.fillMaxSize()
-            .clip(RoundedCornerShape(AppShape.md))
-            .background(cs.surfaceContainerHigh)
-            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        contentPadding = PaddingValues(bottom = 12.dp),
     ) {
-        ListCols(*headers.toTypedArray())
-        GroupDivider()
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-            items(rows, key = { r -> r.key }) { row ->
-                Column(
-                    Modifier.fillMaxWidth()
-                        .background(if (row.key == expandedKey) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
-                        .clickable { onPick(row) }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                ) {
-                    cell(row)
+        items(rows, key = { r -> r.key }) { row ->
+            val selected = selectedTitle.isNotBlank() && row.title == selectedTitle
+            val shape = RoundedCornerShape(AppShape.md)
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(shape)
+                    .background(if (selected) cs.primary.copy(alpha = 0.12f) else cs.surfaceContainerHigh)
+                    .border(BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.5f) else cs.outlineVariant), shape)
+                    .clickable { onPick(row) }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(icon, null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        row.title.ifBlank { "--" },
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) cs.primary else cs.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val meta = listOf(row.va, row.meta).filter { it.isNotBlank() }.joinToString(" · ")
+                    if (meta.isNotBlank()) {
+                        Text(
+                            meta,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                            color = cs.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                GroupDivider()
             }
         }
     }
 }
 
-/** 列表视图通用外壳（取数 + 状态分支）。 */
+/** 列表视图通用外壳（取数 + 状态分支 + 卡片列表）。 */
 @Composable
 private fun ListScaffold(
     tools: ToolPagesState,
@@ -3882,10 +3804,8 @@ private fun ListScaffold(
     view: String,
     limit: Int,
     onRefresh: () -> Unit,
-    headers: List<Pair<String, androidx.compose.ui.unit.Dp?>>,
     rowsFromJson: (String?) -> kotlin.collections.List<AnalysisRow>,
     onPick: (AnalysisRow) -> Unit,
-    cell: @Composable (AnalysisRow) -> Unit,
 ) {
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
@@ -3930,12 +3850,10 @@ private fun ListScaffold(
                     primaryLabel = if (zh) "刷新" else "Refresh",
                     onPrimary = onRefresh,
                 )
-                else -> ListShell(
-                    headers = headers,
+                else -> AnalysisCardList(
                     rows = rows,
-                    expandedKey = null,
+                    icon = analysisViewIcon(view),
                     onPick = onPick,
-                    cell = cell,
                 )
             }
         }
@@ -3951,15 +3869,9 @@ private fun StringsView(
     onRefresh: () -> Unit,
     onPick: (AnalysisRow) -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
     ListScaffold(
         tools = tools, zh = zh, context = context, view = "strings", limit = 400,
         onRefresh = onRefresh,
-        headers = listOf(
-            (if (zh) "地址" else "ADDR") to 86.dp,
-            (if (zh) "长度" else "LEN") to 46.dp,
-            (if (zh) "内容" else "VALUE") to null,
-        ),
         rowsFromJson = { json ->
             val arr = itemsArray(json)
             (0 until arr.length()).mapNotNull { i ->
@@ -3978,39 +3890,7 @@ private fun StringsView(
             }
         },
         onPick = onPick,
-    ) { row ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                row.va.ifBlank { "--" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.width(86.dp),
-            )
-            Text(
-                row.meta.substringBefore(" · ").ifBlank { "-" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.width(46.dp),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    row.title,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                    color = cs.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val enc = row.meta.substringAfter(" · ", "")
-                if (enc.isNotBlank()) {
-                    Text(enc, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1)
-                }
-            }
-        }
-    }
+    )
 }
 
 /** 符号：地址 | 类型 | 绑定 | 名称（demangled 优先）。 */
@@ -4022,15 +3902,9 @@ private fun SymbolsView(
     onRefresh: () -> Unit,
     onPick: (AnalysisRow) -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
     ListScaffold(
         tools = tools, zh = zh, context = context, view = "symbols", limit = 400,
         onRefresh = onRefresh,
-        headers = listOf(
-            (if (zh) "地址" else "ADDR") to 86.dp,
-            (if (zh) "类型" else "TYPE") to 58.dp,
-            (if (zh) "名称" else "NAME") to null,
-        ),
         rowsFromJson = { json ->
             val arr = itemsArray(json)
             (0 until arr.length()).mapNotNull { i ->
@@ -4050,39 +3924,7 @@ private fun SymbolsView(
             }
         },
         onPick = onPick,
-    ) { row ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                row.va.ifBlank { "--" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.width(86.dp),
-            )
-            Text(
-                row.meta.substringBefore(" · ").ifBlank { "-" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.tertiary,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.width(58.dp),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    row.title,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                    color = cs.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val rest = row.meta.substringAfter(" · ", "")
-                if (rest.isNotBlank()) {
-                    Text(rest, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }
+    )
 }
 
 /** 导入：名称 | 类型 | 绑定 | 库/节。 */
@@ -4094,14 +3936,9 @@ private fun ImportsView(
     onRefresh: () -> Unit,
     onPick: (AnalysisRow) -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
     ListScaffold(
         tools = tools, zh = zh, context = context, view = "imports", limit = 400,
         onRefresh = onRefresh,
-        headers = listOf(
-            (if (zh) "类型" else "TYPE") to 58.dp,
-            (if (zh) "名称" else "NAME") to null,
-        ),
         rowsFromJson = { json ->
             val arr = itemsArray(json)
             (0 until arr.length()).mapNotNull { i ->
@@ -4120,31 +3957,7 @@ private fun ImportsView(
             }
         },
         onPick = onPick,
-    ) { row ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                row.meta.substringBefore(" · ").ifBlank { "-" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.tertiary,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.width(58.dp),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    row.title,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                    color = cs.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val rest = row.meta.substringAfter(" · ", "")
-                if (rest.isNotBlank()) {
-                    Text(rest, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }
+    )
 }
 
 /** 段节：名称 | 地址 | 大小 | 权限徽标。 */
@@ -4156,16 +3969,9 @@ private fun SectionsView(
     onRefresh: () -> Unit,
     onPick: (AnalysisRow) -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
     ListScaffold(
         tools = tools, zh = zh, context = context, view = "sections", limit = 400,
         onRefresh = onRefresh,
-        headers = listOf(
-            (if (zh) "名称" else "NAME") to 120.dp,
-            (if (zh) "地址" else "ADDR") to 86.dp,
-            (if (zh) "大小" else "SIZE") to 62.dp,
-            (if (zh) "权限" else "PERM") to 56.dp,
-        ),
         rowsFromJson = { json ->
             val arr = itemsArray(json)
             (0 until arr.length()).mapNotNull { i ->
@@ -4184,47 +3990,7 @@ private fun SectionsView(
             }
         },
         onPick = onPick,
-    ) { row ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                row.title,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.onSurface,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.width(120.dp),
-            )
-            Text(
-                row.va.ifBlank { "--" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.width(86.dp),
-            )
-            Text(
-                row.meta.substringBefore(" · ").ifBlank { "-" },
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                color = cs.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                textAlign = TextAlign.End,
-                modifier = Modifier.width(62.dp),
-            )
-            val perm = row.meta.substringAfter(" · ", "")
-            Row(Modifier.width(56.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                permChars(perm).forEach { (ch, on) ->
-                    Text(
-                        ch,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = AppText.label,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (on) cs.primary else cs.onSurfaceVariant.copy(alpha = 0.35f),
-                    )
-                }
-            }
-        }
-    }
+    )
 }
 
 private fun permChars(perm: String): List<Pair<String, Boolean>> {

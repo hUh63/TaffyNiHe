@@ -269,7 +269,7 @@ internal fun AnalysisWorkspace(
                 GroupDivider()
 
                 // ── 当前视图内容区 ──
-                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
                     when (view) {
                         "functions" -> FunctionsView(
                             tools = tools, zh = zh, context = context,
@@ -2494,7 +2494,7 @@ private fun AnalysisNavRail(current: String, zh: Boolean, onPick: (String) -> Un
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier
-            .width(56.dp)
+            .width(46.dp)
             .fillMaxHeight()
             .background(cs.surface.copy(alpha = 0.55f))
             .verticalScroll(rememberScrollState())
@@ -2504,7 +2504,7 @@ private fun AnalysisNavRail(current: String, zh: Boolean, onPick: (String) -> Un
         analysisNavItems.forEach { item ->
             val selected = item.key == current
             Box(
-                Modifier.fillMaxWidth().height(48.dp).clickable { onPick(item.key) },
+                Modifier.fillMaxWidth().height(42.dp).clickable { onPick(item.key) },
                 contentAlignment = Alignment.Center,
             ) {
                 if (selected) {
@@ -2524,7 +2524,7 @@ private fun AnalysisNavRail(current: String, zh: Boolean, onPick: (String) -> Un
                         item.icon,
                         contentDescription = if (zh) item.short else item.en,
                         tint = if (selected) cs.primary else cs.onSurfaceVariant,
-                        modifier = Modifier.size(19.dp),
+                        modifier = Modifier.size(17.dp),
                     )
                     Text(
                         if (zh) item.short else item.en,

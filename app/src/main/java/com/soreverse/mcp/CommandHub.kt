@@ -155,17 +155,17 @@ internal fun CommandHubScreen(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .safeDrawingPadding()
-            .padding(bottom = 24.dp),
+            .padding(bottom = 16.dp),
     ) {
         // ── Large Title 区 ──
-        Column(Modifier.padding(horizontal = 20.dp)) {
-            Spacer(Modifier.height(10.dp))
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (zh) "塔菲逆核" else "Taffy NieHe",
-                        fontSize = 30.sp,
-                        lineHeight = 34.sp,
+                        fontSize = 24.sp,
+                        lineHeight = 29.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -178,7 +178,7 @@ internal fun CommandHubScreen(
                 }
                 ConnPill(running = running, zh = zh)
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(8.dp))
         }
 
         // ── 引擎卡片 ──
@@ -291,7 +291,7 @@ private fun IosGroupHeader(text: String) {
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 32.dp, end = 16.dp, top = 20.dp, bottom = 7.dp),
+        modifier = Modifier.padding(start = 32.dp, end = 16.dp, top = 12.dp, bottom = 5.dp),
     )
 }
 
@@ -312,9 +312,9 @@ private fun IosRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 46.dp)
+            .heightIn(min = 40.dp)
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

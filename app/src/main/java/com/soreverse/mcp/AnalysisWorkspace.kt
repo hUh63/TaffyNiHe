@@ -3584,6 +3584,7 @@ private fun CfgView(
     var cfgLayout by remember { mutableStateOf("layered") }
     var cfgContent by remember { mutableStateOf("summary") }
     var cfgInsns by remember { mutableStateOf<Map<Long, List<String>>>(emptyMap()) }
+    var cfgPanelOpen by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
@@ -3690,15 +3691,23 @@ private fun CfgView(
                     Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Text(
-                        text = if (fnLabel.isBlank()) (if (zh) "控制流图" else "Control Flow Graph") else fnLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = AppText.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = cs.primary,
-                    )
+                    Row(
+                        Modifier.clickable { cfgPanelOpen = !cfgPanelOpen },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(if (cfgPanelOpen) "▾" else "▸", color = cs.primary, fontSize = AppText.bodyStrong)
+                        Text(
+                            text = if (fnLabel.isBlank()) (if (zh) "控制流图" else "Control Flow Graph") else fnLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = AppText.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = cs.primary,
+                        )
+                    }
+                    if (cfgPanelOpen) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -3735,6 +3744,7 @@ private fun CfgView(
                             }
                         }
                         SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
+                    }
                     }
                 }
             }

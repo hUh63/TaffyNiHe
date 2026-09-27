@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FlashOn
@@ -199,9 +198,30 @@ internal fun CommandHubScreen(
         // ── 工作台（宫格：一行 4 个，省纵向空间） ──
         IosGroupHeader(if (zh) "工作台" else "Workbench")
         SatGrid(
-            items = sats + Satellite(Icons.Filled.Analytics, if (zh) "全部工具" else "All tools", MainTab.Home, null, 2),
+            items = sats,
             onNavigate = onNavigate,
         )
+        // 「全部工具」入口：一行小字（不做格子）
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 2.dp)
+                .clip(RoundedCornerShape(AppShape.sm))
+                .clickable { onNavigate(MainTab.Home, null) }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                if (zh) "全部工具" else "All tools",
+                fontSize = AppText.label,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(14.dp),
+            )
+        }
 
         // ── 服务状态 ──
         IosGroupHeader(if (zh) "服务" else "Service")

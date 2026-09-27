@@ -3822,7 +3822,6 @@ private fun ListScaffold(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
             SmallAction(if (zh) "函数列表" else "Functions") { tools.analysisView = "functions" }
             Text(
                 if (zh) "${rows.size} 项" else "${rows.size} items",
@@ -4724,7 +4723,6 @@ private fun RzViewScaffold(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
             SmallAction(if (zh) "函数列表" else "Functions") { tools.analysisView = "functions" }
             if (count > 0) {
                 Text(

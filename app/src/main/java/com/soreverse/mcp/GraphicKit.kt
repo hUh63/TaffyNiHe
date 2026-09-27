@@ -520,26 +520,24 @@ internal fun Modifier.holdable(
         coroutineScope {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false)
-                var held = true
                 var longTriggered = false
                 var repeated = false
                 val job = launch {
                     delay(initialDelayMillis)
-                    if (held) {
-                        longTriggered = currentOnLongClick()
-                        if (repeatOnHold) {
-                            repeated = true
-                            while (held) {
-                                currentOnClick()
-                                delay(repeatDelayMillis)
-                            }
+                    longTriggered = currentOnLongClick()
+                    if (repeatOnHold) {
+                        repeated = true
+                        while (true) {
+                            currentOnClick()
+                            delay(repeatDelayMillis)
                         }
                     }
                 }
-                waitForUpOrCancellation(pass = PointerEventPass.Initial)
-                held = false
+                // Main pass：一旦父级（如横向滚动的 LazyRow）消费了拖动，这里返回 null（手势取消），
+                // 此时不再补一次单击 —— 修复“滑动软键行时会误输入”。
+                val up = waitForUpOrCancellation()
                 job.cancel()
-                if (!longTriggered && !repeated) currentOnClick()
+                if (up != null && !longTriggered && !repeated) currentOnClick()
             }
         }
     }

@@ -7375,8 +7375,15 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                 val eng = EngineProvider.get(context)
                 // rizin 0.9.x 的 agCj 输出是对象 {"nodes":[{id,title,offset,out_nodes}]}，不是数组；
                 // 旧实现按数组解析 → 恒为空 → 全局调用图被误判「不可用」。这里按真实结构解析。
-                val raw = rzText(eng.rzCommand(ws, "", "agCj"))
-                var g = parseRizinGraph(raw)
+                // 全局调用图依赖 rizin 的调用关系分析（aac）；native 每次命令只跑了 aa，
+                // 直接 agCj 常为空 → 先补一次 aac 再取图。
+                var raw = ""
+                var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList<Pair<String, String>>()
+                for (c in listOf("aac; agCj", "agCj")) {
+                    raw = rzText(eng.rzCommand(ws, "", c))
+                    g = parseRizinGraph(raw)
+                    if (g.first.isNotEmpty()) break
+                }
                 if (g.first.isEmpty()) {
                     val legacy = rzArrayText(raw)
                     if (legacy.isNotEmpty()) g = parseCallGraph(legacy)
@@ -7726,7 +7733,6 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
                 text.take(6000), zh = zh, onCopy = { copyToClipboard(context, text, zh) },
             )
         }
-    }
         GroupDivider()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -7754,6 +7760,7 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
         if (files.isEmpty()) {
             MonoLine(if (zh) "还没有导出文件。生成的 CSV/TSV/PNG 会出现在这里。" else "No exports yet.", cs.onSurfaceVariant, AppText.label)
         }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -196,29 +196,12 @@ internal fun CommandHubScreen(
             )
         }
 
-        // ── 工作台 ──
+        // ── 工作台（宫格：一行 4 个，省纵向空间） ──
         IosGroupHeader(if (zh) "工作台" else "Workbench")
-        IosGroup {
-            sats.forEachIndexed { i, sat ->
-                IosRow(
-                    icon = sat.icon,
-                    iconTint = satelliteColor(sat.accent),
-                    iconBg = satelliteColor(sat.accent),
-                    title = sat.label,
-                    onClick = { onNavigate(sat.tab, sat.toolCategory) },
-                )
-                if (i != sats.lastIndex) IosDivider()
-            }
-            IosDivider()
-            IosRow(
-                icon = Icons.Filled.Analytics,
-                iconTint = MaterialTheme.colorScheme.tertiary,
-                iconBg = MaterialTheme.colorScheme.tertiary,
-                title = if (zh) "全部工具" else "All tools",
-                subtitle = "${ToolCatalog.ALL.size}",
-                onClick = { onNavigate(MainTab.Home, null) },
-            )
-        }
+        SatGrid(
+            items = sats + Satellite(Icons.Filled.Analytics, if (zh) "全部工具" else "All tools", MainTab.Home, null, 2),
+            onNavigate = onNavigate,
+        )
 
         // ── 服务状态 ──
         IosGroupHeader(if (zh) "服务" else "Service")
@@ -284,6 +267,49 @@ private fun IosGroup(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /** iOS 分组标题：小号灰色，左侧 32dp 对齐（与卡片内文字列对齐）。 */
+@Composable
+private fun SatGrid(
+    items: List<Satellite>,
+    onNavigate: (MainTab, String?) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items.chunked(4).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { sat ->
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(AppShape.md))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .clickable { onNavigate(sat.tab, sat.toolCategory) }
+                            .padding(vertical = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(satelliteColor(sat.accent)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(sat.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                        }
+                        Text(
+                            sat.label,
+                            fontSize = AppText.label,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun IosGroupHeader(text: String) {
     Text(

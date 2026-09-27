@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -211,7 +210,7 @@ internal fun EdbgPage(t: UiText) {
     val deployed = envJson?.optBoolean("deployed") == true
 
     LazyColumn(
-        Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 8.dp),
+        Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // ── 环境卡 ──
@@ -240,16 +239,8 @@ internal fun EdbgPage(t: UiText) {
         // ── 分区 Tab ──
         item {
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(
-                    selected = tab == "session",
-                    onClick = { tab = "session" },
-                    label = { Text(if (zh) "调试" else "Debug") },
-                )
-                FilterChip(
-                    selected = tab == "decompile",
-                    onClick = { tab = "decompile" },
-                    label = { Text(if (zh) "反编译" else "Decompile") },
-                )
+                ToolChip(if (zh) "调试" else "Debug", selected = tab == "session") { tab = "session" }
+                ToolChip(if (zh) "反编译" else "Decompile", selected = tab == "decompile") { tab = "decompile" }
             }
         }
 
@@ -305,7 +296,7 @@ internal fun EdbgPage(t: UiText) {
                     OutlinedTextField(
                         value = pkgInput,
                         onValueChange = { pkgInput = it },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                         placeholder = { Text(if (zh) "目标包名" else "Target package", maxLines = 1) },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodySmall,
@@ -313,7 +304,7 @@ internal fun EdbgPage(t: UiText) {
                     OutlinedTextField(
                         value = libInput,
                         onValueChange = { libInput = it },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                         placeholder = { Text(if (zh) "库名（可选）" else "Library (optional)", maxLines = 1) },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodySmall,
@@ -321,7 +312,7 @@ internal fun EdbgPage(t: UiText) {
                     OutlinedTextField(
                         value = brkInput,
                         onValueChange = { brkInput = it },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                         placeholder = { Text(if (zh) "断点偏移（如 0x1234）" else "Break offset (e.g. 0x1234)", maxLines = 1) },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -360,35 +351,20 @@ internal fun EdbgPage(t: UiText) {
             }
             item {
                 GlassGroup(title = if (zh) "快捷命令" else "Quick commands") {
-                    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("c", "s", "finish", "run", "bt").forEach { quick ->
-                            FilterChip(
-                                selected = false,
-                                onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
-                                enabled = sessionActive && !busy,
-                                label = { Text(quick, fontFamily = FontFamily.Monospace) },
-                            )
+                            ToolChip(quick, enabled = sessionActive && !busy) { if (sessionActive) { cmdInput = quick; runAction("cmd") } }
                         }
-                        FilterChip(
-                            selected = false,
-                            onClick = { if (sessionActive && brkInput.isNotBlank()) { cmdInput = "b ${brkInput.trim()}"; runAction("cmd") } },
-                            enabled = sessionActive && !busy && brkInput.isNotBlank(),
-                            label = { Text("b ${brkInput.ifBlank { "0x…" }}", fontFamily = FontFamily.Monospace) },
-                        )
+                        ToolChip("b ${brkInput.ifBlank { "0x…" }}", enabled = sessionActive && !busy && brkInput.isNotBlank()) { if (sessionActive && brkInput.isNotBlank()) { cmdInput = "b ${brkInput.trim()}"; runAction("cmd") } }
                         listOf("hbreak", "watch", "info regs", "x/16gx \$pc").forEach { quick ->
-                            FilterChip(
-                                selected = false,
-                                onClick = { if (sessionActive) { cmdInput = quick; runAction("cmd") } },
-                                enabled = sessionActive && !busy,
-                                label = { Text(quick, fontFamily = FontFamily.Monospace) },
-                            )
+                            ToolChip(quick, enabled = sessionActive && !busy) { if (sessionActive) { cmdInput = quick; runAction("cmd") } }
                         }
                     }
                 }
             }
             item {
                 GlassGroup(title = if (zh) "调试命令" else "Debug command") {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = cmdInput,
                             onValueChange = { cmdInput = it },

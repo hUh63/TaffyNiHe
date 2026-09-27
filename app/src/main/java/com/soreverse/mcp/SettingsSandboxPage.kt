@@ -206,7 +206,7 @@ internal fun SettingsSandboxPage(t: UiText) {
             PrimaryActionButton(
                 if (zh) "选择 APK 并安装" else "Pick APK & Install",
                 { pickApk.launch("application/vnd.android.package-archive") },
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
             )
         }
 
@@ -218,15 +218,15 @@ internal fun SettingsSandboxPage(t: UiText) {
                 value = pkg,
                 onValueChange = { pkg = it },
                 placeholder = { Text(if (zh) "包名，如 com.example.app" else "package name") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 singleLine = true,
             )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PrimaryActionButton(if (zh) "启动" else "Launch", { runOp("launch") }, Modifier.weight(1f))
                 SecondaryActionButton(if (zh) "停止" else "Stop", { pendingAction = "stop" }, Modifier.weight(1f))
                 SecondaryActionButton(if (zh) "卸载" else "Uninstall", { pendingAction = "uninstall" }, Modifier.weight(1f))
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SecondaryActionButton(if (zh) "日志" else "Logs", { runOp("logs") }, Modifier.weight(1f))
                 SecondaryActionButton(if (zh) "崩溃收集" else "Crash", { runOp("crash") }, Modifier.weight(1f))
             }
@@ -236,7 +236,7 @@ internal fun SettingsSandboxPage(t: UiText) {
             title = if (zh) "进程看门狗" else "Watchdog",
             footer = if (zh) "轮询指定时长，观察进程存活/被杀时刻（需 root/Shizuku，可取消）" else "Poll liveness for a duration (needs root/Shizuku, cancellable)",
         ) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = watchSec,
                     onValueChange = { watchSec = it.filter { c -> c.isDigit() } },
@@ -257,7 +257,7 @@ internal fun SettingsSandboxPage(t: UiText) {
             PrimaryActionButton(
                 if (zh) "开始看门狗" else "Start Watchdog",
                 { runOp("watch") },
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
             )
         }
 

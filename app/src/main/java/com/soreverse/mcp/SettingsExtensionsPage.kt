@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -376,17 +375,9 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
     ) {
         // Tab 条（FlowRow：窄屏不截断）
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(
-                selected = tab == 0,
-                onClick = { tab = 0 },
-                label = { Text("${if (zh) "插件" else "Plugins"} ${plugins.size}", fontSize = AppText.label) },
-            )
-            FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text(if (zh) "教程 / API" else "Guide / API", fontSize = AppText.label) })
-            FilterChip(
-                selected = tab == 2,
-                onClick = { tab = 2; if (marketItems.isEmpty() && !marketLoading) fetchMarket() },
-                label = { Text("${if (zh) "市场" else "Market"} ${if (marketItems.isEmpty()) "" else marketItems.size}", fontSize = AppText.label) },
-            )
+            ToolChip("${if (zh) "插件" else "Plugins"} ${plugins.size}", selected = tab == 0) { tab = 0 }
+            ToolChip(if (zh) "教程 / API" else "Guide / API", selected = tab == 1, enabled = true) { tab = 1 }
+            ToolChip("${if (zh) "市场" else "Market"} ${if (marketItems.isEmpty()) "" else marketItems.size}", selected = tab == 2) { tab = 2; if (marketItems.isEmpty() && !marketLoading) fetchMarket() }
         }
 
         when (tab) {
@@ -454,7 +445,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                 onClick = { if (!installed && !marketLoading) installFromMarket(o) },
                             )
                             Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
@@ -528,7 +519,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                 },
                             )
                             FlowRow(
-                                Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 ExtBtn(if (zh) "运行" else "Run", enabled = !running, accent = true) { runPlugin(dir) }
@@ -557,7 +548,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                     else "Bytecode logic can't be auto-translated — use AI convert then paste the generated plugin.py",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = AppPalette.orange,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                                 )
                             }
                             Spacer(Modifier.height(6.dp))

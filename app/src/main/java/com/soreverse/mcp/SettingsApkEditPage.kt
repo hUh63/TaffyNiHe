@@ -14,7 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -177,8 +176,8 @@ internal fun SettingsApkEditPage(t: UiText) {
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 8.dp),
+            .padding(horizontal = 8.dp)
+            .padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // ── 文件卡 ──
@@ -216,7 +215,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                         "… +${permissions.size - 40}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 14.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp),
                     )
                 }
                 DataRow(
@@ -233,7 +232,7 @@ internal fun SettingsApkEditPage(t: UiText) {
         // ── ① 包名 ──
         GlassGroup(title = if (zh) "① 修改包名" else "① Package name") {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedTextField(
@@ -257,13 +256,13 @@ internal fun SettingsApkEditPage(t: UiText) {
             OutlinedTextField(
                 value = permInput,
                 onValueChange = { permInput = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 label = { Text("android.permission.XXX") },
             )
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SecondaryActionButton(
@@ -285,24 +284,24 @@ internal fun SettingsApkEditPage(t: UiText) {
         // ── ③ 组件 ──
         GlassGroup(title = if (zh) "③ 组件" else "③ Components") {
             FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 listOf("activity", "service", "receiver", "provider").forEach { ct ->
-                    FilterChip(selected = compType == ct, onClick = { compType = ct }, label = { Text(ct) })
+                    ToolChip(ct, selected = compType == ct, enabled = true) { compType = ct }
                 }
             }
             OutlinedTextField(
                 value = compInput,
                 onValueChange = { compInput = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 label = { Text(if (zh) "组件类名 (com.x.Y)" else "component class") },
             )
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SecondaryActionButton(
@@ -324,7 +323,7 @@ internal fun SettingsApkEditPage(t: UiText) {
         // ── ④ debuggable / meta-data ──
         GlassGroup(title = if (zh) "④ debuggable / meta-data" else "④ debuggable / meta-data") {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SecondaryActionButton(
@@ -339,7 +338,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                 )
             }
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedTextField(
@@ -360,7 +359,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                 )
             }
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SecondaryActionButton(

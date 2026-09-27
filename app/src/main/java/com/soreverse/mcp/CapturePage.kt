@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -201,13 +200,13 @@ internal fun CapturePage(t: UiText) {
     }
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(bottom = 8.dp),
+        Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(selected = tab == "http", onClick = { tab = "http" }, label = { Text(if (zh) "HTTP 抓包" else "HTTP capture") })
-            FilterChip(selected = tab == "tools", onClick = { tab = "tools" }, label = { Text(if (zh) "采集工具" else "Tools") })
-            FilterChip(selected = tab == "guide", onClick = { tab = "guide" }, label = { Text(if (zh) "教程" else "Guide") })
+            ToolChip(if (zh) "HTTP 抓包" else "HTTP capture", selected = tab == "http", enabled = true) { tab = "http" }
+            ToolChip(if (zh) "采集工具" else "Tools", selected = tab == "tools", enabled = true) { tab = "tools" }
+            ToolChip(if (zh) "教程" else "Guide", selected = tab == "guide", enabled = true) { tab = "guide" }
         }
 
         when (tab) {
@@ -248,7 +247,7 @@ internal fun CapturePage(t: UiText) {
                 )
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("全部", "HTTPS", "HTTP", "GET", "POST", "CONNECT").forEach { m ->
-                        FilterChip(selected = methodFilter == m, onClick = { methodFilter = m }, label = { Text(m) })
+                        ToolChip(m, selected = methodFilter == m, enabled = true) { methodFilter = m }
                     }
                 }
 
@@ -330,16 +329,16 @@ internal fun CapturePage(t: UiText) {
                     }
 
                     GlassGroup(title = if (zh) "快捷采集" else "Quick collect") {
-                        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            FilterChip(selected = false, onClick = { callTool("info") }, label = { Text(if (zh) "接口信息" else "Interfaces") }, enabled = !busy)
-                            FilterChip(selected = false, onClick = { callTool("conn") }, label = { Text(if (zh) "连接列表" else "Connections") }, enabled = !busy && privOk)
-                            FilterChip(selected = false, onClick = { callTool("traffic") }, label = { Text(if (zh) "流量统计" else "Traffic") }, enabled = !busy)
-                            FilterChip(selected = false, onClick = { callTool("dns") }, label = { Text("DNS") }, enabled = !busy)
+                        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ToolChip(if (zh) "接口信息" else "Interfaces", selected = false, enabled = !busy) { callTool("info") }
+                            ToolChip(if (zh) "连接列表" else "Connections", selected = false, enabled = !busy && privOk) { callTool("conn") }
+                            ToolChip(if (zh) "流量统计" else "Traffic", selected = false, enabled = !busy) { callTool("traffic") }
+                            ToolChip("DNS", selected = false, enabled = !busy) { callTool("dns") }
                         }
                     }
 
                     GlassGroup(title = if (zh) "tcpdump 抓包" else "tcpdump capture") {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedTextField(
                                 value = ifaceInput,
                                 onValueChange = { ifaceInput = it },
@@ -357,7 +356,7 @@ internal fun CapturePage(t: UiText) {
                                 textStyle = MaterialTheme.typography.bodySmall,
                             )
                         }
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (sniffing) {
                                 TextButton(onClick = { callTool("sniff_stop") }) {
                                     Icon(Icons.Default.Stop, null, modifier = Modifier.size(14.dp))

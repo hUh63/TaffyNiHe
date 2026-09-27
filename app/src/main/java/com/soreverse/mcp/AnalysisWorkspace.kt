@@ -1170,16 +1170,20 @@ private fun ResultStream(tools: ToolPagesState, zh: Boolean) {
     val current = tabs.getOrNull(selectedTab)
     Column(Modifier.fillMaxSize().padding(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            Text("${selectedTab + 1}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.size(6.dp))
-            Surface(onClick = { viewMode = (viewMode + 1) % 3 }, shape = RoundedCornerShape(AppShape.xs), color = MaterialTheme.colorScheme.surfaceVariant) {
-                Text(
-                    when (viewMode) { 0 -> (if (zh) "简洁" else "Simple"); 1 -> (if (zh) "详细" else "Detail"); else -> (if (zh) "汇编" else "Asm") },
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+            if (tabs.isNotEmpty()) {
+                Text("${(selectedTab + 1).coerceAtMost(tabs.size)}/${tabs.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.size(6.dp))
+            }
+            if (current != null) {
+                Surface(onClick = { viewMode = (viewMode + 1) % 3 }, shape = RoundedCornerShape(AppShape.xs), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Text(
+                        when (viewMode) { 0 -> (if (zh) "简洁" else "Simple"); 1 -> (if (zh) "详细" else "Detail"); else -> (if (zh) "汇编" else "Asm") },
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
         Spacer(Modifier.size(4.dp))
@@ -2221,13 +2225,17 @@ private fun errJson(message: String): String = JSONObject()
     .toString()
 
 /** 从引擎返回的 JSON 里取出 error.message（无错返回空串）。 */
+/** org.json 的 optString 遇到 JSON null 会返回字面量 "null"，这里统一洗掉。 */
+private fun String?.cleanNull(): String =
+    if (this == null || this == "null" || this == "None" || this == "undefined") "" else this
+
 private fun errMessageOf(json: String?): String {
     if (json.isNullOrBlank()) return ""
     val o = runCatching { JSONObject(json) }.getOrNull() ?: return ""
     if (o.optBoolean("ok", true)) return ""
-    return o.optJSONObject("error")?.optString("message").orEmpty()
-        .ifBlank { o.optJSONObject("error")?.optString("code").orEmpty() }
-        .ifBlank { o.optString("message") }
+    return o.optJSONObject("error")?.optString("message").orEmpty().cleanNull()
+        .ifBlank { o.optJSONObject("error")?.optString("code").orEmpty().cleanNull() }
+        .ifBlank { o.optString("message").cleanNull() }
 }
 
 private fun buildMeta(addr: String, size: Long, kind: String): String {
@@ -2893,7 +2901,7 @@ private fun FunctionsView(
             value = query,
             onValueChange = { tools.functionQuery = it },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
             shape = RoundedCornerShape(AppShape.sm),
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
@@ -2906,13 +2914,23 @@ private fun FunctionsView(
             },
         )
         Spacer(Modifier.size(6.dp))
-        FlowRow(
+        // 排序 chip + 计数（目标样式：无表头，靠卡片内的地址/大小行承载）
+        Row(
             Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
-            SmallAction(if (zh) "对象树" else "Objects", onClick = onOpenTree)
+            listOf(
+                "addr" to (if (zh) "地址" else "ADDR"),
+                "name" to (if (zh) "名称" else "NAME"),
+                "size" to (if (zh) "大小" else "SIZE"),
+            ).forEach { (key, label) ->
+                SmallAction(
+                    label = label + if (sortBy == key) (if (asc) " ↑" else " ↓") else "",
+                    active = sortBy == key,
+                ) { toggleSort(key) }
+            }
+            Spacer(Modifier.weight(1f))
             Text(
                 if (zh) "${shown.size} 个函数" else "${shown.size} functions",
                 style = MaterialTheme.typography.labelSmall,
@@ -2946,68 +2964,54 @@ private fun FunctionsView(
                     primaryLabel = if (zh) "刷新" else "Refresh",
                     onPrimary = onRefresh,
                 )
-                else -> Column(
-                    Modifier.fillMaxSize()
-                        .clip(RoundedCornerShape(AppShape.md))
-                        .background(cs.surfaceContainerHigh)
-                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+                else -> LazyColumn(
+                    Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(bottom = 12.dp),
                 ) {
-                    // 表头
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        SortHeader(if (zh) "地址" else "ADDR", sortBy == "addr", asc, modifier = Modifier.width(90.dp)) { toggleSort("addr") }
-                        SortHeader(if (zh) "名称" else "NAME", sortBy == "name", asc, modifier = Modifier.weight(1f)) { toggleSort("name") }
-                        SortHeader(if (zh) "大小" else "SIZE", sortBy == "size", asc, alignEnd = true, modifier = Modifier.width(58.dp)) { toggleSort("size") }
-                    }
-                    GroupDivider()
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-                        items(shown, key = { r -> r.addr + "|" + r.name }) { r ->
-                            val selected = r.name == tools.selectedFunctionName
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
-                                    .clickable { onSelect(r.name, r.addr) }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
+                    items(shown, key = { r -> r.addr + "|" + r.name }) { r ->
+                        val selected = r.name == tools.selectedFunctionName
+                        val shape = RoundedCornerShape(AppShape.md)
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(shape)
+                                .background(if (selected) cs.primary.copy(alpha = 0.12f) else cs.surfaceContainerHigh)
+                                .border(BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.5f) else cs.outlineVariant), shape)
+                                .clickable { onSelect(r.name, r.addr) }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Memory,
+                                null,
+                                tint = if (selected) cs.primary else cs.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Column(Modifier.weight(1f)) {
                                 Text(
-                                    r.addr.ifBlank { "--" },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = if (selected) cs.primary else cs.onSurfaceVariant,
+                                    r.name,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = if (selected) cs.primary else cs.onSurface,
                                     maxLines = 1,
-                                    modifier = Modifier.width(90.dp).clickable { copyToClipboard(context, r.addr, zh) },
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                Column(Modifier.weight(1f).padding(end = 4.dp)) {
-                                    Text(
-                                        r.name,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (selected) cs.primary else cs.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (r.kind.isNotBlank()) {
-                                        Text(
-                                            r.kind,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontSize = AppText.label,
-                                            color = cs.onSurfaceVariant,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                }
                                 Text(
-                                    if (r.size >= 0L) "${r.size}" else "--",
+                                    buildString {
+                                        if (r.addr.isNotBlank()) append(r.addr)
+                                        if (r.size >= 0L) {
+                                            if (isNotEmpty()) append(" · ")
+                                            append("${r.size} B")
+                                        }
+                                    }.ifBlank { "--" },
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                                     color = cs.onSurfaceVariant,
                                     maxLines = 1,
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier.width(58.dp),
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            GroupDivider()
+                            if (r.kind.isNotBlank()) TypeChip(r.kind)
                         }
                     }
                 }
@@ -3476,12 +3480,12 @@ private fun PseudoView(
     val body = tools.pseudoJson
     val err = errMessageOf(body)
     val obj = remember(body) { runCatching { JSONObject(body) }.getOrNull() }
-    val pseudo = remember(body) { obj?.optString("pseudocode").orEmpty() }
+    val pseudo = remember(body) { obj?.optString("pseudocode").cleanNull().orEmpty() }
     val bounds = remember(body) { obj?.optJSONObject("functionBounds") }
     val coverage = remember(body) { obj?.optJSONObject("pseudocodeCoverage") }
     val typeInf = remember(body) { obj?.optJSONObject("typeInference") }
-    val warn = obj?.optString("boundaryWarning").orEmpty()
-    val usedEngine = obj?.optString("engine").orEmpty()
+    val warn = obj?.optString("boundaryWarning").cleanNull().orEmpty()
+    val usedEngine = obj?.optString("engine").cleanNull().orEmpty()
 
     val allLines = remember(pseudo) { if (pseudo.isBlank()) emptyList() else pseudo.split("\n") }
     val truncated = allLines.size > 3000
@@ -4965,7 +4969,7 @@ private fun RzViewScaffold(
                 )
             }
             Text(
-                cmd,
+                "${if (zh) "命令" else "cmd"}: $cmd",
                 style = MaterialTheme.typography.labelSmall,
                 fontSize = AppText.label,
                 fontFamily = FontFamily.Monospace,

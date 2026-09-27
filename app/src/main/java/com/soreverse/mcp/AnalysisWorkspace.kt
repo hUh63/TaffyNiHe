@@ -5011,7 +5011,7 @@ private fun RzViewScaffold(
     }
 }
 
-/** 键/值表（ELF 头、哈希等）。 */
+/** 键/值表（ELF 头、哈希、版本、动态等）。嵌套对象/数组折叠为可展开子块，不再倒原始 JSON。 */
 @Composable
 private fun RzKeyValueTable(obj: JSONObject, zh: Boolean) {
     val cs = MaterialTheme.colorScheme
@@ -5028,30 +5028,111 @@ private fun RzKeyValueTable(obj: JSONObject, zh: Boolean) {
             .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
-            Text(if (zh) "字段" else "FIELD", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(150.dp))
+            Text(if (zh) "字段" else "FIELD", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(116.dp))
             Text(if (zh) "值" else "VALUE", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
         }
         GroupDivider()
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
             items(keys) { k ->
-                val v = jsonScalar(obj.opt(k))
-                if (v.isBlank()) return@items
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
-                    Text(
-                        k,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                        color = cs.onSurfaceVariant,
-                        modifier = Modifier.width(150.dp),
-                    )
-                    Text(
-                        v,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                        color = cs.onSurface,
-                    )
+                val raw = obj.opt(k)
+                if (raw is JSONObject) {
+                    RzNestedRow(k, raw, zh)
+                } else if (raw is JSONArray) {
+                    RzNestedRow(k, raw, zh)
+                } else {
+                    val v = jsonScalar(raw)
+                    if (v.isBlank()) return@items
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            k,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier.width(116.dp),
+                        )
+                        Text(
+                            v,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                            color = cs.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    GroupDivider()
                 }
-                GroupDivider()
             }
         }
+    }
+}
+
+/** 嵌套值的摘要（如 "对象 · 6 项" / "数组 · 12 项"）。 */
+private fun nestedSummary(v: Any, zh: Boolean): String = when (v) {
+    is JSONObject -> if (zh) "对象 · ${v.length()} 项" else "obj · ${v.length()}"
+    is JSONArray -> if (zh) "数组 · ${v.length()} 项" else "arr · ${v.length()}"
+    else -> ""
+}
+
+/** 嵌套行：点开显示缩进美化后的结构化内容（限 120 行防卡顿）。 */
+@Composable
+private fun RzNestedRow(key: String, value: Any, zh: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(AppShape.sm)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(if (open) "▾" else "▸", color = cs.primary, fontSize = AppText.bodyStrong)
+            Text(
+                key,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                color = cs.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            TypeChip(nestedSummary(value, zh), cs.onSurfaceVariant)
+        }
+        if (open) {
+            val full = remember(value) {
+                runCatching {
+                    when (value) {
+                        is JSONObject -> value.toString(2)
+                        is JSONArray -> value.toString(2)
+                        else -> value.toString()
+                    }
+                }.getOrNull().orEmpty()
+            }
+            val lines = remember(full) { full.split("\n") }
+            val capped = lines.size > 120
+            val shown = if (capped) lines.take(120).joinToString("\n") else full
+            Box(
+                Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
+                    .clip(shape)
+                    .background(cs.surface)
+                    .border(BorderStroke(1.dp, cs.outlineVariant), shape)
+                    .padding(8.dp),
+            ) {
+                Column {
+                    Text(
+                        shown,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        color = cs.onSurface,
+                        lineHeight = 14.sp,
+                    )
+                    if (capped) {
+                        Text(
+                            if (zh) "… 共 ${lines.size} 行（已截断）" else "… ${lines.size} lines (truncated)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        GroupDivider()
     }
 }
 

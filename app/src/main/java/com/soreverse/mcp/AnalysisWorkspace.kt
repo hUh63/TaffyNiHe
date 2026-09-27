@@ -253,6 +253,7 @@ internal fun AnalysisWorkspace(
 
     var showDrawer by remember { mutableStateOf(false) }
 
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         // ── 顶栏（≡ 抽屉 + 当前函数 + 刷新 + ⋮） ──
         AnalysisAppBar(
@@ -422,6 +423,7 @@ internal fun AnalysisWorkspace(
             onPick = { tools.analysisView = it; showDrawer = false },
             onDismiss = { showDrawer = false },
         )
+    }
     }
 
     showString?.let { row ->

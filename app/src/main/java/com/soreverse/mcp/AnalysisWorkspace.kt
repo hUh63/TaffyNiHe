@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.AlertDialog
@@ -86,6 +87,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -248,28 +251,30 @@ internal fun AnalysisWorkspace(
 
     val view = tools.analysisView
 
+    var showDrawer by remember { mutableStateOf(false) }
+
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            // ── 左侧图标导航栏（Exbin NavigationRail 的等价物） ──
-            AnalysisNavRail(current = view, zh = zh) { tools.analysisView = it }
+        // ── 顶栏（≡ 抽屉 + 当前函数 + 刷新 + ⋮） ──
+        AnalysisAppBar(
+            state = state,
+            tools = tools,
+            zh = zh,
+            view = view,
+            onOpenDrawer = { showDrawer = true },
+            onPickFunction = { tools.analysisView = "functions" },
+            onRefresh = refreshAll,
+            onOpenTree = { showTree = true },
+            onOpenOutput = { tools.analysisView = "results" },
+            onOpenTask = onOpenTask,
+        )
+        GroupDivider()
+        // ── 一级 / 二级 Tab ──
+        AnalysisMainTabs(current = view, zh = zh) { tools.analysisView = it }
+        AnalysisSubTabs(current = view, zh = zh) { tools.analysisView = it }
+        GroupDivider()
 
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                // ── 顶部条：当前函数（可点换）+ 地址 + 该视图相关操作 ──
-                AnalysisTopBar(
-                    state = state,
-                    tools = tools,
-                    zh = zh,
-                    view = view,
-                    onPickFunction = { tools.analysisView = "functions" },
-                    onRefresh = refreshAll,
-                    onOpenTree = { showTree = true },
-                    onOpenOutput = { tools.analysisView = "results" },
-                    onOpenTask = onOpenTask,
-                )
-                GroupDivider()
-
-                // ── 当前视图内容区 ──
-                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
+        // ── 当前视图内容区 ──
+        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
                     when (view) {
                         "functions" -> FunctionsView(
                             tools = tools, zh = zh, context = context,
@@ -407,8 +412,16 @@ internal fun AnalysisWorkspace(
                         }
                     }
                 }
-            }
-        }
+    }
+
+    // ── 抽屉（47 个视图全量索引） ──
+    if (showDrawer) {
+        AnalysisDrawer(
+            current = view,
+            zh = zh,
+            onPick = { tools.analysisView = it; showDrawer = false },
+            onDismiss = { showDrawer = false },
+        )
     }
 
     showString?.let { row ->
@@ -2044,6 +2057,24 @@ private fun analysisViewLabel(view: String, zh: Boolean): String =
 private fun analysisViewIcon(view: String): ImageVector =
     analysisNavItems.firstOrNull { it.key == view }?.icon ?: Icons.Filled.ListAlt
 
+/**
+ * 导航分组：主 Tab = 一级分组，组内 views = 子 Tab。
+ * 47 个视图全部落在这 6 组里，抽屉作为全量索引。
+ */
+private data class AnalysisNavGroup(val key: String, val short: String, val en: String, val views: List<String>)
+
+private val analysisNavGroups = listOf(
+    AnalysisNavGroup("fns", "函数", "Functions", listOf("functions", "search", "funcinfo", "comments")),
+    AnalysisNavGroup("disasm", "反汇编", "Disasm", listOf("disasm", "pseudo", "cfg", "globalc", "insnexp", "asm2c", "asm2flow")),
+    AnalysisNavGroup("struct", "结构", "Structure", listOf("sections", "segments", "elfhdr", "relocs", "dynamic", "libraries", "hashes", "versions", "entries", "symbols", "imports", "strings")),
+    AnalysisNavGroup("analyze", "分析", "Analyze", listOf("callgraph", "xrefs", "vtable", "addrview", "funcsig", "jnireg", "hardening", "rootdrill", "data", "unpack", "export", "analyze")),
+    AnalysisNavGroup("edit", "编辑", "Edit", listOf("edit", "asm", "regs")),
+    AnalysisNavGroup("tools", "工具", "Tools", listOf("hex", "base", "demangle", "strdec", "bytediff", "xor", "tools", "hub", "results")),
+)
+
+private fun analysisGroupOf(view: String): AnalysisNavGroup =
+    analysisNavGroups.firstOrNull { view in it.views } ?: analysisNavGroups.first()
+
 // ───────────────────────── 通用小工具 ─────────────────────────
 
 /** 小号动作按钮（Exbin 风：圆角 + 1dp 描边 + 无阴影）。 */
@@ -2489,52 +2520,141 @@ private suspend fun resolveCfgEntry(
 
 // ───────────────────────── 左侧导航栏 ─────────────────────────
 
+/** 一级 Tab：6 个功能分组，粉色下划线指示器（对齐目标样式）。 */
 @Composable
-private fun AnalysisNavRail(current: String, zh: Boolean, onPick: (String) -> Unit) {
+private fun AnalysisMainTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier
-            .width(46.dp)
-            .fillMaxHeight()
-            .background(cs.surface.copy(alpha = 0.55f))
-            .verticalScroll(rememberScrollState())
-            .padding(vertical = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    val active = analysisGroupOf(current)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        analysisNavItems.forEach { item ->
-            val selected = item.key == current
-            Box(
-                Modifier.fillMaxWidth().height(42.dp).clickable { onPick(item.key) },
-                contentAlignment = Alignment.Center,
+        analysisNavGroups.forEach { g ->
+            val selected = g.key == active.key
+            Column(
+                Modifier.clickable { onPick(g.views.first()) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (selected) {
-                    Box(
-                        Modifier.align(Alignment.CenterStart)
-                            .width(3.dp)
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp))
-                            .background(cs.primary),
-                    )
-                }
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(1.dp),
-                ) {
-                    Icon(
-                        item.icon,
-                        contentDescription = if (zh) item.short else item.en,
-                        tint = if (selected) cs.primary else cs.onSurfaceVariant,
-                        modifier = Modifier.size(17.dp),
-                    )
-                    Text(
-                        if (zh) item.short else item.en,
-                        fontSize = 9.sp,
-                        lineHeight = 10.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                        color = if (selected) cs.primary else cs.onSurfaceVariant,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    )
+                Text(
+                    if (zh) g.short else g.en,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = AppText.bodyStrong,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) cs.primary else cs.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Spacer(Modifier.size(4.dp))
+                Box(
+                    Modifier.height(2.dp)
+                        .width(if (selected) 18.dp else 0.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(if (selected) cs.primary else Color.Transparent),
+                )
+            }
+        }
+    }
+}
+
+/** 二级 Tab：当前分组内的视图（横向滚动 chip）。 */
+@Composable
+private fun AnalysisSubTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val group = analysisGroupOf(current)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        group.views.forEach { key ->
+            val selected = key == current
+            val shape = RoundedCornerShape(AppShape.pill)
+            Row(
+                Modifier.clip(shape)
+                    .background(if (selected) cs.primary.copy(alpha = 0.14f) else Color.Transparent)
+                    .border(BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.5f) else cs.outlineVariant), shape)
+                    .clickable { onPick(key) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(analysisViewIcon(key), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(13.dp))
+                Text(
+                    analysisViewLabel(key, zh),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) cs.primary else cs.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+    }
+}
+
+/** 抽屉：47 个视图的全量索引（按分组）。 */
+@Composable
+private fun AnalysisDrawer(current: String, zh: Boolean, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable { onDismiss() },
+    ) {
+        Column(
+            Modifier.width(272.dp).fillMaxHeight()
+                .background(cs.surface)
+                .clickable { }
+                .padding(vertical = 8.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(analysisViewIcon(current), null, tint = cs.primary, modifier = Modifier.size(18.dp))
+                Text(
+                    if (zh) "分析视图" else "Analysis views",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = AppText.title,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onSurface,
+                )
+            }
+            GroupDivider()
+            LazyColumn(Modifier.fillMaxSize()) {
+                analysisNavGroups.forEach { g ->
+                    item(key = "h-${g.key}") {
+                        Text(
+                            if (zh) g.short else g.en,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = cs.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, top = 12.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(g.views, key = { it }) { key ->
+                        val selected = key == current
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
+                                .clickable { onPick(key) }
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(analysisViewIcon(key), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                            Text(
+                                analysisViewLabel(key, zh),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = AppText.body,
+                                color = if (selected) cs.primary else cs.onSurface,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2544,86 +2664,100 @@ private fun AnalysisNavRail(current: String, zh: Boolean, onPick: (String) -> Un
 // ───────────────────────── 顶部条 ─────────────────────────
 
 @Composable
-private fun AnalysisTopBar(
+private fun AnalysisAppBar(
     state: WorkspaceState,
     tools: ToolPagesState,
     zh: Boolean,
     view: String,
+    onOpenDrawer: () -> Unit,
     onPickFunction: () -> Unit,
     onRefresh: () -> Unit,
     onOpenTree: () -> Unit,
     onOpenOutput: () -> Unit,
     onOpenTask: () -> Unit,
 ) {
-    val metrics = LocalUiMetrics.current
     val cs = MaterialTheme.colorScheme
     val fnName = tools.selectedFunctionName
     val fnVa = tools.selectedFunctionVa
-    val chipShape = RoundedCornerShape(AppShape.md)
     val busy = tools.viewLoading.isNotBlank() || tools.cfgLoading
+    var menu by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = metrics.pagePad, end = 6.dp, top = 6.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+    Row(
+        Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        IconButton(onClick = onOpenDrawer) {
+            Icon(Icons.Filled.Menu, contentDescription = if (zh) "全部视图" else "All views", tint = cs.onSurfaceVariant)
+        }
+        // 标题区：当前函数（点一下 → 函数列表换一个）
+        Column(
+            Modifier.weight(1f).clip(RoundedCornerShape(AppShape.sm))
+                .clickable(onClick = onPickFunction)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
         ) {
-            // 当前函数（点一下 → 函数列表换一个）
-            Row(
-                Modifier.weight(1f).clip(chipShape)
-                    .background(cs.surfaceContainerHigh)
-                    .border(BorderStroke(1.dp, cs.outlineVariant), chipShape)
-                    .clickable(onClick = onPickFunction)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(Icons.Filled.Memory, null, tint = cs.primary, modifier = Modifier.size(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (fnName.isBlank()) (if (zh) "未选择函数" else "No function") else fnName,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = AppText.bodyStrong,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (fnName.isBlank()) cs.primary else cs.onSurface,
-                    )
-                    Text(
-                        if (fnName.isBlank()) {
-                            if (zh) "点这里去函数列表" else "tap to open function list"
-                        } else {
-                            "${fnVa.ifBlank { "--" }} · ${analysisViewLabel(view, zh)}"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = AppText.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = cs.onSurfaceVariant,
-                    )
-                }
+            Text(
+                if (fnName.isBlank()) (if (zh) "未选择函数" else "No function") else fnName,
+                style = MaterialTheme.typography.titleMedium,
+                fontSize = AppText.title,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (fnName.isBlank()) cs.primary else cs.onSurface,
+            )
+            Text(
+                if (fnName.isBlank()) {
+                    if (zh) "点这里去函数列表" else "tap for function list"
+                } else {
+                    "${fnVa.ifBlank { "--" }} · ${analysisViewLabel(view, zh)}"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onRefresh) {
+            if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            else Icon(Icons.Filled.Refresh, contentDescription = if (zh) "刷新" else "Refresh", tint = cs.primary)
+        }
+        Box {
+            IconButton(onClick = { menu = true }) {
+                Icon(Icons.Filled.MoreVert, contentDescription = if (zh) "更多" else "More", tint = cs.onSurfaceVariant)
             }
-            IconButton(onClick = onRefresh) {
-                if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Filled.Refresh, contentDescription = if (zh) "刷新" else "Refresh", tint = cs.primary)
-            }
-            IconButton(onClick = onOpenTree) {
-                Icon(Icons.Filled.ListAlt, contentDescription = if (zh) "对象树" else "Objects", tint = cs.onSurfaceVariant)
-            }
-            IconButton(onClick = onOpenOutput) {
-                Icon(Icons.Filled.Terminal, contentDescription = if (zh) "输出" else "Output", tint = cs.onSurfaceVariant)
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (zh) "换函数" else "Pick function", fontSize = AppText.body) },
+                    leadingIcon = { Icon(Icons.Filled.Memory, null, modifier = Modifier.size(18.dp)) },
+                    onClick = { menu = false; onPickFunction() },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (zh) "对象树" else "Object tree", fontSize = AppText.body) },
+                    leadingIcon = { Icon(Icons.Filled.ListAlt, null, modifier = Modifier.size(18.dp)) },
+                    onClick = { menu = false; onOpenTree() },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (zh) "输出结果" else "Results", fontSize = AppText.body) },
+                    leadingIcon = { Icon(Icons.Filled.Terminal, null, modifier = Modifier.size(18.dp)) },
+                    onClick = { menu = false; onOpenOutput() },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (zh) "当前任务" else "Task", fontSize = AppText.body) },
+                    leadingIcon = { Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(18.dp)) },
+                    onClick = { menu = false; onOpenTask() },
+                )
             }
         }
-
-        FlowRow(
-            Modifier.fillMaxWidth().padding(horizontal = metrics.pagePad),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            WorkspacePicker(state, zh)
-            TaskChip(state, zh, onOpenTask)
-        }
-        Spacer(Modifier.size(6.dp))
+    }
+    // 文件 / 任务选择条
+    FlowRow(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        WorkspacePicker(state, zh)
+        TaskChip(state, zh, onOpenTask)
     }
 }
 

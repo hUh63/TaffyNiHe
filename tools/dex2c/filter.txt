@@ -39,8 +39,14 @@
 # BackupCrypto and its member names intact via an explicit -keep rule added for
 # Dex2C, therefore this line matches the shipped dex without consulting
 # mapping.txt. (That keep rule is load-bearing: without it R8 renames the class
-# under AGP 9.4.1 and dcc reports "no compiled methods".) Verified
-# against the 1.0.21 release dex: all 10 methods are matched and generate C.
+# under AGP 9.4.1 and dcc reports "no compiled methods", which the workflow
+# turns into a hard error via the compiled_methods.txt assertion.)
+#
+# Conversion count is NOT "all methods of the class": dcc skips constructors,
+# <clinit>, methods already native, and conflict methods it cannot rewrite.
+# Observed on v1.3.59 release APKs (NDK 30, AGP 9.4.1, skip r8): 3 methods per
+# ABI (encrypt / isEncrypted / decrypt or deriveKey). Expect this number to move
+# when R8's inlining changes - it is a coverage signal, not a contract.
 # Every class added here needs the same guarantee - either an existing -keep
 # rule, or the R8-renamed name read back from build/outputs/mapping/release/.
 Lcom/soreverse/mcp/core/BackupCrypto;

@@ -61,12 +61,30 @@
 
 | 依赖 | 冻结版本 | 为什么不能升 |
 |---|---|---|
-| `com.alibaba:fastjson` | 1.2.83 | unidbg 的 `McpTools.dispatchTool(String, com.alibaba.fastjson.JSONObject)` 签名要求 1.2.x 的类名（`UnidbgEmulator.sessionNativeToolCall` 反射调用它）。升 2.x 类名变成 `com.alibaba.fastjson2.*`，反射直接失败。1.2.83 已是 1.2 系列末版；本项目只用它构造对象传给 unidbg，不做反序列化解析。 |
-| `capstone`（本地 patched jar） | 3.1.8 | unidbg-api:0.9.9 的 pom 指定 3.1.8；官方 capstone 已到 6.0.0-alpha，但与 unidbg 的 JNI/绑定不兼容。 |
-| `keystone`（本地 patched jar） | 0.9.7 | 同 capstone；且 0.9.7 已是上游 Maven 上的最新版（项目已停更）。 |
-| `unicorn` | 1.0.15 | unidbg-api:0.9.9 pom 指定，JNI 桥与之配套。 |
+| `capstone`（本地 patched jar） | 3.1.8（= capstone 4.0 API） | zhkl0228 fork 的 Java 绑定，Maven 上**最新就是 3.1.8**（2022-07 起停更，`capstone.Capstone.CS_API_MAJOR=4`）。它同时提供 unidbg 依赖的 `capstone.api.*` 抽象层（Disassembler / Instruction / DisassemblerFactory / arm,arm64 Operand…）。官方 capstone 5.x/6.x 是**另一套 Java 绑定**（没有 `capstone.api.*`）+ 不同 JNI ABI，升它要连 unidbg 一起改（见下）。 |
+| `keystone`（本地 patched jar） | 0.9.7 | 同 capstone；0.9.7 已是上游 Maven 最新（项目停更）。 |
+| `unicorn` | 1.0.15 | unidbg-api:0.9.9 pom 指定，JNI 桥（unicorn2 分支）与之配套。 |
 | `commons-codec` / `commons-collections4` / `commons-io` | 1.21.0 / 4.5.0 / 2.21.0 | unidbg-api pom 指定。 |
 | `demumble` / `apk-parser` | 1.0.4 / 2.6.10 | unidbg 及其传递依赖指定。 |
+
+> ✅ **已解除冻结**：`com.alibaba:fastjson` **1.2.83 → 2.0.65**。关键点是 —— 2.x 系列**不是**
+> 「换了包名的 fastjson2」，而是 fastjson2 官方发布的 **fastjson1-compatible 兼容层**
+> （artifactId 仍是 `com.alibaba:fastjson`，保留 `com.alibaba.fastjson.JSONObject / JSONArray /
+> JSON / util.IOUtils` 全套类名与 API，内核换成 fastjson2，AutoType 默认关闭）。
+> 因此 unidbg 的 `McpTools.dispatchTool(String, com.alibaba.fastjson.JSONObject)` 反射调用
+> **无需改动** —— 不需要「改写 unidbg 本地 patched jar」。已用 JVM 冒烟测试逐条验证
+> unidbg 用到的全部 fastjson 成员（`JSONObject()`/`JSONObject(boolean)`/`JSONObject(Map)`/
+> `put/get/getJSONObject/getJSONArray/getString/getBoolean*`/`toJSONString()`/`JSONArray.add|getString|size|isEmpty`/
+> `JSON.parseObject(String)`/`IOUtils.close(Closeable)`）均在兼容层存在且行为正常。
+
+#### 关于「改写 unidbg 本地 patched jar 来升 capstone」
+capstone 与 fastjson 的情形**不同**：fastjson 的 2.x 兼容层保住了类名，故零改动；
+而 capstone 的 Java 绑定本身就是 zhkl0228 自研的 `capstone.api.*` 薄封装，unidbg 有
+16 个类（`AbstractARMEmulator` / `AbstractARM64Emulator` / `ARM` / `McpTools` / `AssemblyCodeDumper` …）
+直接引用 `capstone.api.*` 与 `capstone.Capstone$OpInfo`，官方 5/6.x **没有这一层**。
+要在新 capstone 上跑通必须：(1) 用 ASM/重编译把 unidbg 里对这些类型的引用整体改写到新绑定；
+(2) 为新绑定重造 4 个 ABI 的 `libcapstone.so`。投入大、回归面广，收益只是「新指令解码覆盖」，
+故**暂不做**，登记为已知限制。
 
 > ⚠️ 关键点：本项目的 unidbg 用**本地 patched jar**（`app/libs/unidbg-*-0.9.9-android-patched.jar`），
 > 不参与 Gradle 版本解析 —— 它的传递依赖必须在 `build.gradle.kts` 里**手工对齐**。
@@ -82,6 +100,7 @@
 | NDK | 30.0.16248370 | 28.2 → 30；4 ABI 原生库（rizin+LIEF、unidbg、xAnSo）全部重新构建通过 |
 | LIEF | 1.0.0 | 0.16.1 → 1.0.0：`LIEF::to_json` 在 1.0 拆到 `LIEF::ELF::to_json`，用 `LIEF_VERSION_MAJOR` 宏兼容两代；补丁集同步换代 |
 | rizin / unidbg | v0.9.1 / 0.9.9 | 均为上游最新（rizin main 仍有编译 bug，故 pin tag） |
+| fastjson | `com.alibaba:fastjson:2.0.65` | 1.2.83 → 2.0.65：改用官方 **fastjson1 兼容层**（内核 fastjson2，AutoType 默认关闭），保 `com.alibaba.fastjson.*` 类名，unidbg 反射零改动 |
 | cloudflared / frida-server | 2026.9.3 / 17.19.0 | CI 注入，版本常量在 `build-multiabi.yml` |
 
 ## 升级作业规范（升级依赖时的检查清单）

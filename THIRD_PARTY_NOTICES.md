@@ -37,7 +37,7 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 
 | 组件 | 文件 | 上游 | 许可 |
 |---|---|---|---|
-| Capstone Java 绑定 | `capstone-3.1.8-android-patched.jar` | 上游 capstone Java binding | BSD-3-Clause |
+| Capstone Java 绑定 | `capstone-3.1.8-android-patched.jar`（zhkl0228 fork；Maven 最新即 3.1.8，含自研 `capstone.api.*` 层，随 unidbg JNI 契约冻结） | [zhkl0228/capstone](https://github.com/zhkl0228/capstone) | BSD-3-Clause |
 | Keystone Java 绑定 | `keystone-0.9.7-android-patched.jar` | 上游 keystone Java binding | GPL-2.0 ⚠️ 待复核 |
 | unidbg | `unidbg-android-0.9.9-android-patched.jar`<br>`unidbg-api-0.9.9-android-patched.jar` | [zhkl0228/unidbg](https://github.com/zhkl0228/unidbg) | Apache-2.0 |
 
@@ -47,26 +47,28 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 |---|---|---|---|
 | unidbg unicorn2 后端 | `com.github.zhkl0228:unidbg-unicorn2:0.9.9` | zhkl0228/unidbg | Apache-2.0 |
 | unicorn Java 绑定 | `com.github.zhkl0228:unicorn:1.0.15` | zhkl0228 | GPL-2.0 ⚠️ 待复核 |
-| jadx | `io.github.skylot:jadx-core` / `jadx-dex-input:1.5.1` | [skylot/jadx](https://github.com/skylot/jadx) | Apache-2.0 |
-| ARSCLib | `io.github.reandroid:ARSCLib:1.3.5` | [REAndroid/ARSCLib](https://github.com/REAndroid/ARSCLib) | Apache-2.0 |
+| jadx | `io.github.skylot:jadx-core` / `jadx-dex-input:1.5.6` | [skylot/jadx](https://github.com/skylot/jadx) | Apache-2.0 |
+| ARSCLib | `io.github.reandroid:ARSCLib:1.4.0` | [REAndroid/ARSCLib](https://github.com/REAndroid/ARSCLib) | Apache-2.0 |
 | APKEditor | `com.github.REAndroid:APKEditor:V1.4.9` | [REAndroid/APKEditor](https://github.com/REAndroid/APKEditor) | Apache-2.0 |
-| smali / baksmali / dexlib2 | `com.android.tools.smali:smali*:3.0.9` | [google/smali](https://github.com/google/smali) | BSD-3-Clause |
-| apksig | `com.android.tools.build:apksig:8.7.3` | Android Open Source Project | Apache-2.0 |
-| Bouncy Castle | `org.bouncycastle:bcpkix-jdk18on:1.78.1` | [bcgit/bc-java](https://github.com/bcgit/bc-java) | MIT（BC 许可） |
+| smali / baksmali / dexlib2 | `com.android.tools.smali:smali*:3.0.10` | [google/smali](https://github.com/google/smali) | BSD-3-Clause |
+| DexKit | `org.luckypray:dexkit:2.3.0` | [Luckypray/DexKit](https://github.com/Luckypray/DexKit) | Apache-2.0 |
+| apksig | `com.android.tools.build:apksig:9.4.1` | Android Open Source Project | Apache-2.0 |
+| Bouncy Castle | `org.bouncycastle:bcpkix-jdk18on:1.86` | [bcgit/bc-java](https://github.com/bcgit/bc-java) | MIT（BC 许可） |
 | apk-parser | `net.dongliu:apk-parser:2.6.10` | net.dongliu/apk-parser | Apache-2.0 |
-| Eclipse ELK | `org.eclipse.elk:*:0.9.1` | [eclipse-elk/elk](https://github.com/eclipse-elk/elk) | EPL-2.0 |
-| Ktor | `io.ktor:*:3.5.1` | JetBrains | Apache-2.0 |
-| OkHttp | `com.squareup.okhttp3:okhttp*:5.4.0` | Square | Apache-2.0 |
+| demumble | `com.github.zhkl0228:demumble:1.0.4` | zhkl0228/demumble | Apache-2.0 |
+| Eclipse ELK | `org.eclipse.elk:*:0.12.0` | [eclipse-elk/elk](https://github.com/eclipse-elk/elk) | EPL-2.0 |
+| Ktor | `io.ktor:*:3.6.0` | JetBrains | Apache-2.0 |
+| OkHttp | `com.squareup.okhttp3:okhttp*:5.5.0` | Square | Apache-2.0 |
 | kotlinx-serialization-json | `org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0` | JetBrains | Apache-2.0 |
 | Compose / androidx | `androidx.compose.*`、`androidx.activity` | Google | Apache-2.0 |
 | Shizuku | `dev.rikka.shizuku:api` / `:provider:13.1.5` | [RikkaApps/Shizuku](https://github.com/RikkaApps/Shizuku) | Apache-2.0 |
-| Dhizuku API | `io.github.iamr0s:Dhizuku-API:2.5.3` | [iamr0s/Dhizuku](https://github.com/iamr0s/Dhizuku) | GPL-3.0 |
-| JNA | `net.java.dev.jna:jna:5.10.0@aar` | java-native-access/jna | LGPL-2.1 或 Apache-2.0（双许可） |
-| jsoup | `org.jsoup:jsoup:1.22.2` | jsoup | MIT |
-| Fastjson | `com.alibaba:fastjson:1.2.83` | Alibaba | Apache-2.0 |
+| Dhizuku API | `io.github.iamr0s:Dhizuku-API:2.6.0` | [iamr0s/Dhizuku](https://github.com/iamr0s/Dhizuku) | GPL-3.0 |
+| JNA | `net.java.dev.jna:jna:5.19.1@aar` | java-native-access/jna | LGPL-2.1 或 Apache-2.0（双许可） |
+| jsoup | `org.jsoup:jsoup:1.23.2` | jsoup | MIT |
+| Fastjson | `com.alibaba:fastjson:2.0.65`（**fastjson1 兼容层**，内核为 fastjson2） | Alibaba | Apache-2.0 |
 | Argon2Kt | `com.lambdapioneer.argon2kt:argon2kt:1.6.0` | lambdapioneer/argon2kt | MIT |
-| commons-codec / commons-io / commons-collections4 | `commons-*` | Apache Software Foundation | Apache-2.0 |
-| slf4j-api | `org.slf4j:slf4j-api:2.0.16` | QOS.ch | MIT |
+| commons-codec / commons-io / commons-collections4 | `commons-codec:1.21.0` / `commons-io:2.21.0` / `commons-collections4:4.5.0` | Apache Software Foundation | Apache-2.0 |
+| slf4j-api | `org.slf4j:slf4j-api:2.0.20` | QOS.ch | MIT |
 | markdown（rikkaHub） | `com.github.rikkahub:markdown:d79a97cc8e` | [rikkahub/rikkahub](https://github.com/rikkahub/rikkahub) | AGPL-3.0 ⚠️ **重点待复核** |
 | JUnit / org.json | 仅测试期 | — | EPL-1.0 / JSON License |
 

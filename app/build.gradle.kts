@@ -153,6 +153,9 @@ android {
                 // 且都位于同一路径 —— 签名文件对 APK 无意义，直接排除。
                 "META-INF/BCRSA204.RSA",
                 "META-INF/BCRSA204.SF",
+                // fastjson2 与 fastjson2-extension 都带 multi-release 的 module-info（Android 用不到），
+                // 两个 jar 同路径重名会撞 mergeReleaseJavaResource，直接排除。
+                "META-INF/versions/9/module-info.class",
             )
             // 这些必须保留一份但不能重复
             pickFirsts += setOf(
@@ -202,11 +205,12 @@ dependencies {
     implementation("io.github.iamr0s:Dhizuku-API:2.6.0")
 
     // ⚠️ 以下 unidbg 配套依赖的版本由 unidbg-api:0.9.9 的 pom 决定，**不要单独升级**：
-    //    unicorn 1.0.15 / capstone 3.1.8 / keystone 0.9.7 / fastjson 1.2.83 /
+    //    unicorn 1.0.15 / capstone 3.1.8 / keystone 0.9.7 /
     //    commons-codec 1.21.0 / commons-collections4 4.5.0 / commons-io 2.21.0 / demumble 1.0.4 / apk-parser 2.6.10
-    //    unidbg 用的是本地 patched jar（不参与 Gradle 版本解析），传递依赖必须手工对齐；
-    //    fastjson 更是 unidbg McpTools.dispatchTool(String, com.alibaba.fastjson.JSONObject) 的签名要求，
-    //    升到 2.x 会让反射调用（UnidbgEmulator.sessionNativeToolCall）直接失效。
+    //    unidbg 用的是本地 patched jar（不参与 Gradle 版本解析），传递依赖必须手工对齐。
+    //    capstone/keystone 是 zhkl0228 fork 的 Java 绑定，随 unidbg 的 JNI 契约冻结
+    //    （上游 maven 最新即为 3.1.8/0.9.7，官方 capstone 5/6.x 的绑定与 JNI ABI 不兼容，见 DEPENDENCIES.md）。
+    //    注：fastjson 已从本清单移出 —— 见下方 fastjson 依赖处（改用 fastjson1-compatible 兼容层）。
     implementation(files("libs/unidbg-api-0.9.9-android-patched.jar"))
     implementation(files("libs/unidbg-android-0.9.9-android-patched.jar"))
     implementation(files("libs/capstone-3.1.8-android-patched.jar"))
@@ -224,7 +228,14 @@ dependencies {
     // LayeredMetaDataProvider.<clinit> 上报 Missing class。
     implementation("org.eclipse.xtext:org.eclipse.xtext.xbase.lib:2.44.0")
     implementation("commons-io:commons-io:2.21.0")  // unidbg 0.9.9 锁定版本，勿单独升级
-    implementation("com.alibaba:fastjson:1.2.83")  // unidbg 0.9.9 锁定版本，勿单独升级
+    // fastjson：1.2.83 → 2.0.65（未单独升级「普通 2.x」，而是官方 fastjson1 兼容层）。
+    // com.alibaba:fastjson 的 2.x 系列是 fastjson2 项目发布的 “fastjson1-compatible” 发行版：
+    // 保留 com.alibaba.fastjson.* 的类名与 API（JSONObject/JSONArray/JSON/util.IOUtils 全在），
+    // 内核换成 fastjson2（AutoType 默认关闭）。因此 unidbg 的
+    // McpTools.dispatchTool(String, com.alibaba.fastjson.JSONObject) 反射调用
+    // （UnidbgEmulator.sessionNativeToolCall / 其 getDeclaredMethod("dispatchTool", String, ...)）
+    // 无需改 unidbg jar 也继续可用。传递依赖：fastjson2-extension → fastjson2。
+    implementation("com.alibaba:fastjson:2.0.65")
     implementation("com.lambdapioneer.argon2kt:argon2kt:1.6.0")
 
     // 逆核: 内置逆向静态分析工具(纯 Java, 作为 MCP 工具聚合)。

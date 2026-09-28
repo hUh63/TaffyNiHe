@@ -76,6 +76,29 @@
 -dontwarn org.eclipse.xtext.**
 -dontwarn org.glassfish.jersey.**
 
+# ── Fastjson2（com.alibaba:fastjson:2.x = 官方 fastjson1 兼容层，内核 fastjson2）──
+# 兼容层 / fastjson2-extension 里带了一批“可选第三方集成”类（spring / jersey / servlet /
+# jaxrs / retrofit / netty / airlift / arrow / redisson / odps 等），Android 上不存在这些库；
+# 一旦被 R8 判定为可达就会报 Missing class，逐包 dontwarn。
+# （java.awt.** 已在下方 ELK 段落 dontwarn；okhttp3 是本工程已有依赖，无需处理）
+# fastjson2 内部大量使用反射/运行期生成，整体保留（与同文件里 capstone/unidbg/jna 的处置一致）。
+-keep class com.alibaba.fastjson.** { *; }
+-keep class com.alibaba.fastjson2.** { *; }
+-dontwarn com.alibaba.fastjson.**
+-dontwarn com.alibaba.fastjson2.**
+-dontwarn sun.misc.**
+-dontwarn java.beans.**
+-dontwarn javax.servlet.**
+-dontwarn javax.ws.rs.**
+-dontwarn org.springframework.**
+-dontwarn org.apache.commons.logging.**
+-dontwarn retrofit2.**
+-dontwarn io.airlift.**
+-dontwarn io.netty.**
+-dontwarn org.apache.arrow.**
+-dontwarn org.redisson.**
+-dontwarn com.aliyun.odps.**
+
 -keep class com.dsmcp.** {
     *;
 }

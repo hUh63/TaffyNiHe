@@ -149,11 +149,20 @@ android {
                 // OSGi jar 签名/辅助元数据（ELK/EMF 多 jar 重复），Android 上无用
                 "META-INF/ECLIPSE_.RSA",
                 "META-INF/ECLIPSE_.SF",
+                // BouncyCastle 1.86 起 bcpkix/bcutil/bcprov 三个 jar 各自带 JAR 签名，
+                // 且都位于同一路径 —— 签名文件对 APK 无意义，直接排除。
+                "META-INF/BCRSA204.RSA",
+                "META-INF/BCRSA204.SF",
             )
             // 这些必须保留一份但不能重复
             pickFirsts += setOf(
                 "META-INF/MANIFEST.MF",
                 "META-INF/eclipse.inf",
+                // smali×3 + apksig 都带裸 LICENSE；BouncyCastle 1.86 三个 jar 都带 LICENSE.md；
+                // 保留一份即可（内容同类许可文件）。
+                "LICENSE",
+                "META-INF/LICENSE.md",
+                "META-INF/versions/9/OSGI-INF/MANIFEST.MF",
             )
             // ELK 的算法 provider 是 SPI 注册文件：各 jar 内容不同，必须【合并】而非取第一个，
             // 否则只注册到部分布局算法。

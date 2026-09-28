@@ -15,7 +15,10 @@ android {
     // 写死 Java_com_soreverse_mcp_...，改了要连 C++ 一起改极易崩且用户看不见。
     // applicationId(系统/商店识别的真实包名)改成我们自己的 com.taffynihe。
     namespace = "com.soreverse.mcp"
-    compileSdk = 36
+    // Android 引入 minor SDK 版本后，compose 1.12.x（compose-bom 2026.08/09）要求 compileSdk >= 37：
+    // 平台在 stable 渠道以 platforms;android-37.1 / 37.2 形式提供，故显式指定 minor。
+    compileSdk = 37
+    compileSdkMinor = 2
     ndkVersion = "28.2.13676358"
 
     defaultConfig {

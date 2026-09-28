@@ -292,6 +292,9 @@ internal fun AnalysisWorkspace(
     }
 
     val view = tools.analysisView
+    // 每个工具里上次停留的模式：切回同一个工具时回到原处，而不是每次都跳回第一个模式
+    var lastModeByTool by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(view) { lastModeByTool = lastModeByTool + (analysisToolOf(view).key to view) }
 
     var showDrawer by remember { mutableStateOf(false) }
 
@@ -311,9 +314,10 @@ internal fun AnalysisWorkspace(
             onOpenTask = onOpenTask,
         )
         GroupDivider()
-        // ── 一级 / 二级 Tab ──
-        AnalysisMainTabs(current = view, zh = zh) { tools.analysisView = it }
-        AnalysisSubTabs(current = view, zh = zh) { tools.analysisView = it }
+        // ── 域 / 工具 / 模式 ──
+        AnalysisDomainTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
+        AnalysisToolTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
+        AnalysisModeTabs(current = view, zh = zh) { tools.analysisView = it }
         GroupDivider()
 
         // ── 当前视图内容区 ──
@@ -2114,22 +2118,70 @@ private fun analysisViewIcon(view: String): ImageVector =
     analysisNavItems.firstOrNull { it.key == view }?.icon ?: Icons.Filled.ListAlt
 
 /**
- * 导航分组：主 Tab = 一级分组，组内 views = 子 Tab。
- * 47 个视图全部落在这 6 组里，抽屉作为全量索引。
+ * 导航：域（一级 Tab）→ 工具（二级 chip）→ 模式（三级 chip）。
+ * 47 个视图全部落在这 5 域 18 工具里，抽屉作为全量索引。
  */
-private data class AnalysisNavGroup(val key: String, val short: String, val en: String, val views: List<String>)
+private data class AnalysisTool(val key: String, val short: String, val en: String, val modes: List<String>)
 
-private val analysisNavGroups = listOf(
-    AnalysisNavGroup("fns", "函数", "Functions", listOf("functions", "search", "funcinfo", "comments")),
-    AnalysisNavGroup("disasm", "反汇编", "Disasm", listOf("disasm", "pseudo", "cfg", "globalc", "insnexp", "asm2c", "asm2flow")),
-    AnalysisNavGroup("struct", "结构", "Structure", listOf("sections", "segments", "elfhdr", "relocs", "dynamic", "libraries", "hashes", "versions", "entries", "symbols", "imports", "strings")),
-    AnalysisNavGroup("analyze", "分析", "Analyze", listOf("callgraph", "xrefs", "vtable", "addrview", "funcsig", "jnireg", "hardening", "rootdrill", "data", "unpack", "export", "analyze")),
-    AnalysisNavGroup("edit", "编辑", "Edit", listOf("edit", "asm", "regs")),
-    AnalysisNavGroup("tools", "工具", "Tools", listOf("hex", "base", "demangle", "strdec", "bytediff", "xor", "tools", "hub", "results")),
+private data class AnalysisDomain(val key: String, val short: String, val en: String, val tools: List<AnalysisTool>)
+
+/**
+ * 导航模型：域 → 工具 → 模式。
+ *
+ * 之前 47 个视图平铺成一行 chip，同类数据（ELF 的九张表、交叉引用的五种视角）混在一起，
+ * 想找某个视图只能横向滚动翻。现在按「同一份数据只出现在一个工具里」聚合：
+ * 47 个视图 → 5 个域 / 18 个工具 / 每个工具 1-5 个模式（模式只有 1 个时不出模式行）。
+ */
+private val analysisDomains = listOf(
+    // 函数域：定位「哪个函数、被谁引用、长什么样」
+    AnalysisDomain("fns", "函数", "Functions", listOf(
+        AnalysisTool("fn", "函数", "Fns", listOf("functions", "funcinfo", "comments")),
+        AnalysisTool("find", "搜索", "Find", listOf("search")),
+        AnalysisTool("refs", "引用", "Refs", listOf("callgraph", "xrefs", "vtable", "addrview")),
+        AnalysisTool("sig", "签名", "Sig", listOf("funcsig", "jnireg")),
+    )),
+    // 代码域：同一个函数的几种看法 + 改它
+    AnalysisDomain("code", "代码", "Code", listOf(
+        AnalysisTool("asm", "汇编", "Asm", listOf("disasm", "insnexp", "regs")),
+        AnalysisTool("pseudo", "伪C", "Pseudo", listOf("pseudo", "globalc", "asm2c")),
+        AnalysisTool("cfg", "CFG", "CFG", listOf("cfg", "asm2flow")),
+        AnalysisTool("patch", "修改", "Patch", listOf("edit", "asm")),
+    )),
+    // 结构域：ELF 的静态事实，同一来源的几张表合并
+    AnalysisDomain("data", "结构", "Structure", listOf(
+        AnalysisTool("hdr", "头部", "Header", listOf("elfhdr", "entries", "hashes", "versions")),
+        AnalysisTool("sec", "段节", "Sections", listOf("sections", "segments", "relocs", "dynamic", "libraries")),
+        AnalysisTool("sym", "符号", "Sym", listOf("symbols", "imports")),
+        AnalysisTool("str", "字符串", "Str", listOf("strings", "hex")),
+    )),
+    // 分析域：判定与产物
+    AnalysisDomain("judge", "分析", "Analyze", listOf(
+        AnalysisTool("hard", "加固", "Hard", listOf("hardening", "rootdrill", "unpack")),
+        AnalysisTool("ai", "AI", "AI", listOf("analyze")),
+        AnalysisTool("exp", "导出", "Export", listOf("export", "data")),
+    )),
+    // 工具域：和当前文件无关的通用小工具
+    AnalysisDomain("utils", "工具", "Tools", listOf(
+        AnalysisTool("conv", "转换", "Conv", listOf("base", "demangle", "strdec", "xor", "bytediff")),
+        AnalysisTool("mcp", "控制台", "Console", listOf("tools", "hub")),
+        AnalysisTool("out", "输出", "Out", listOf("results")),
+    )),
 )
 
-private fun analysisGroupOf(view: String): AnalysisNavGroup =
-    analysisNavGroups.firstOrNull { view in it.views } ?: analysisNavGroups.first()
+private fun analysisDomainOf(view: String): AnalysisDomain =
+    analysisDomains.firstOrNull { d -> d.tools.any { view in it.modes } } ?: analysisDomains.first()
+
+private fun analysisToolOf(view: String): AnalysisTool =
+    analysisDomainOf(view).tools.firstOrNull { view in it.modes } ?: analysisDomainOf(view).tools.first()
+
+/** 切回某个工具/域时回到上次停留的模式（没有记录就取第一个模式）。 */
+private fun rememberedView(tool: AnalysisTool, lastModeByTool: Map<String, String>): String =
+    lastModeByTool[tool.key]?.takeIf { it in tool.modes } ?: tool.modes.first()
+
+private fun rememberedView(domain: AnalysisDomain, lastModeByTool: Map<String, String>): String =
+    domain.tools.firstOrNull { lastModeByTool[it.key]?.takeIf { m -> m in it.modes } != null }
+        ?.let { rememberedView(it, lastModeByTool) }
+        ?: domain.tools.first().modes.first()
 
 // ───────────────────────── 通用小工具 ─────────────────────────
 
@@ -2537,25 +2589,27 @@ private suspend fun resolveCfgEntry(
     null
 }
 
-// ───────────────────────── 左侧导航栏 ─────────────────────────
+// ───────────────────────── 导航（域 → 工具 → 模式） ─────────────────────────
 
-/** 一级 Tab：6 个功能分组，粉色下划线指示器（对齐目标样式）。 */
+/** 一级：分析域（5 个，不需要横向滚动，等宽均分）。 */
 @Composable
-private fun AnalysisMainTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
+private fun AnalysisDomainTabs(
+    current: String,
+    zh: Boolean,
+    lastModeByTool: Map<String, String>,
+    onPick: (String) -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
-    val active = analysisGroupOf(current)
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        analysisNavGroups.forEach { g ->
-            val selected = g.key == active.key
+    val active = analysisDomainOf(current)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        analysisDomains.forEach { d ->
+            val selected = d.key == active.key
             Column(
-                Modifier.clickable { onPick(g.views.first()) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.weight(1f).clickable { onPick(rememberedView(d, lastModeByTool)) }.padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    if (zh) g.short else g.en,
+                    if (zh) d.short else d.en,
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = AppText.bodyStrong,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -2575,31 +2629,38 @@ private fun AnalysisMainTabs(current: String, zh: Boolean, onPick: (String) -> U
     }
 }
 
-/** 二级 Tab：当前分组内的视图（横向滚动 chip）。 */
+/** 二级：当前域里的工具（≤4 个）。 */
 @Composable
-private fun AnalysisSubTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
+private fun AnalysisToolTabs(
+    current: String,
+    zh: Boolean,
+    lastModeByTool: Map<String, String>,
+    onPick: (String) -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
-    val group = analysisGroupOf(current)
+    val domain = analysisDomainOf(current)
+    val active = analysisToolOf(current)
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        group.views.forEach { key ->
-            val selected = key == current
+        domain.tools.forEach { tool ->
+            val selected = tool.key == active.key
+            val target = rememberedView(tool, lastModeByTool)
             val shape = RoundedCornerShape(AppShape.pill)
             Row(
                 Modifier.clip(shape)
                     .background(if (selected) cs.primary.copy(alpha = 0.14f) else Color.Transparent)
                     .border(BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.5f) else cs.outlineVariant), shape)
-                    .clickable { onPick(key) }
+                    .clickable { onPick(target) }
                     .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(analysisViewIcon(key), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(13.dp))
+                Icon(analysisViewIcon(target), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(13.dp))
                 Text(
-                    analysisViewLabel(key, zh),
+                    if (zh) tool.short else tool.en,
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = AppText.label,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -2612,7 +2673,44 @@ private fun AnalysisSubTabs(current: String, zh: Boolean, onPick: (String) -> Un
     }
 }
 
-/** 抽屉：47 个视图的全量索引（按分组）。 */
+/** 三级：当前工具里的模式（同一份数据的几种看法）；只有 1 个模式时整行不出现。 */
+@Composable
+private fun AnalysisModeTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
+    val tool = analysisToolOf(current)
+    if (tool.modes.size <= 1) return
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            if (zh) "模式" else "Mode",
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant.copy(alpha = 0.7f),
+        )
+        tool.modes.forEach { key ->
+            val selected = key == current
+            val shape = RoundedCornerShape(AppShape.pill)
+            Text(
+                analysisViewLabel(key, zh),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) cs.primary else cs.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.clip(shape)
+                    .background(if (selected) cs.primary.copy(alpha = 0.12f) else Color.Transparent)
+                    .clickable { onPick(key) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+/** 抽屉：47 个视图的全量索引（域 / 工具 / 模式三级）。 */
 @Composable
 private fun AnalysisDrawer(current: String, zh: Boolean, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -2641,37 +2739,49 @@ private fun AnalysisDrawer(current: String, zh: Boolean, onPick: (String) -> Uni
             }
             GroupDivider()
             LazyColumn(Modifier.fillMaxSize()) {
-                analysisNavGroups.forEach { g ->
-                    item(key = "h-${g.key}") {
+                analysisDomains.forEach { d ->
+                    item(key = "d-${d.key}") {
                         Text(
-                            if (zh) g.short else g.en,
+                            if (zh) d.short else d.en,
                             style = MaterialTheme.typography.labelSmall,
                             fontSize = AppText.label,
                             color = cs.primary,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, top = 12.dp, bottom = 4.dp),
+                            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, top = 12.dp, bottom = 2.dp),
                         )
                     }
-                    items(g.views, key = { it }) { key ->
-                        val selected = key == current
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
-                                .clickable { onPick(key) }
-                                .padding(horizontal = 14.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(analysisViewIcon(key), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    d.tools.forEach { tool ->
+                        item(key = "t-${tool.key}") {
                             Text(
-                                analysisViewLabel(key, zh),
+                                if (zh) tool.short else tool.en,
                                 style = MaterialTheme.typography.bodySmall,
-                                fontSize = AppText.body,
-                                color = if (selected) cs.primary else cs.onSurface,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                fontSize = AppText.bodyStrong,
+                                color = cs.onSurface,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth().padding(start = 22.dp, top = 8.dp, bottom = 2.dp),
                             )
+                        }
+                        items(tool.modes, key = { it }) { key ->
+                            val selected = key == current
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
+                                    .clickable { onPick(key) }
+                                    .padding(start = 34.dp, end = 14.dp, top = 7.dp, bottom = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Icon(analysisViewIcon(key), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                                Text(
+                                    analysisViewLabel(key, zh),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = AppText.body,
+                                    color = if (selected) cs.primary else cs.onSurface,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }

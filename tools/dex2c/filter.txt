@@ -35,9 +35,11 @@
 # Scope: BackupCrypto only (first Dex2C target; see CHANGELOG 1.0.22).
 #
 # R8 minifies the release dex, so a class can only be listed here while it still
-# carries its original name after shrinking. proguard-rules.pro already keeps
-# BackupCrypto (and its member names) intact for other reasons, therefore this
-# line matches the shipped dex without going through mapping.txt. Verified
+# carries its original name after shrinking. proguard-rules.pro keeps
+# BackupCrypto and its member names intact via an explicit -keep rule added for
+# Dex2C, therefore this line matches the shipped dex without consulting
+# mapping.txt. (That keep rule is load-bearing: without it R8 renames the class
+# under AGP 9.4.1 and dcc reports "no compiled methods".) Verified
 # against the 1.0.21 release dex: all 10 methods are matched and generate C.
 # Every class added here needs the same guarantee - either an existing -keep
 # rule, or the R8-renamed name read back from build/outputs/mapping/release/.

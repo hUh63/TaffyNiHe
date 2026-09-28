@@ -1,3 +1,9 @@
+# Dex2C 加固目标：tools/dex2c/filter.txt 按【原始描述符】匹配方法
+# （Lcom/soreverse/mcp/core/BackupCrypto;），因此该类必须原样活过 R8 ——
+# 类名、成员名、方法体都不能被混淆/内联/删除，否则 dcc 会「no compiled methods」
+# 而静默产出空结果（AGP 9.4.1 的 R8 下曾复现）。
+-keep class com.soreverse.mcp.core.BackupCrypto { *; }
+
 -keep class com.soreverse.mcp.nativecore.RizinNativeEngine {
     *;
 }

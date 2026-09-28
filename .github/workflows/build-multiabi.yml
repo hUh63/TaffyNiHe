@@ -401,6 +401,28 @@ jobs:
           NDK_DIR="$WORK/ndk"
           test -f "$FILTER" || { echo "::error::缺少 $FILTER"; exit 1; }
 
+          # 诊断：dcc 靠 androguard 解析 dex。若目标类被 R8 改名、或 dex 版本过新
+          # （老 androguard 读不了），filter 会静默匹配 0 个方法并产出空结果。先把事实打出来。
+          FIRST_APK="$(ls "$GITHUB_WORKSPACE"/app/build/outputs/apk/release/*.apk 2>/dev/null | head -1)"
+          [ -n "$FIRST_APK" ] || { echo "::error::release 目录里没有 APK"; exit 1; }
+          python3 - "$FIRST_APK" <<'PY'
+          import sys, zipfile
+          apk = sys.argv[1]
+          z = zipfile.ZipFile(apk)
+          needle = b"Lcom/soreverse/mcp/core/BackupCrypto;"
+          hit = False
+          for n in z.namelist():
+              if n.startswith("classes") and n.endswith(".dex"):
+                  d = z.read(n)
+                  ok = needle in d
+                  hit = hit or ok
+                  print(f"  {n}: magic={d[:8]!r} BackupCrypto={'found' if ok else 'MISSING'}")
+          if not hit:
+              print("::error::release dex 里找不到 Lcom/soreverse/mcp/core/BackupCrypto; —— R8 改了类名（需 -keep）或 dex 版本过新（androguard 解析不了）")
+              sys.exit(1)
+          print("[dex2c] dex 含 BackupCrypto 描述符，dcc filter 应可匹配")
+          PY
+
           git clone --quiet https://github.com/amimo/dcc.git "$WORK/dcc"
           git -C "$WORK/dcc" checkout --quiet "$DCC_COMMIT"
           python3 -m venv "$WORK/venv"

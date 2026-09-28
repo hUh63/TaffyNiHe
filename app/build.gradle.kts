@@ -19,7 +19,7 @@ android {
     // 平台在 stable 渠道以 platforms;android-37.1 / 37.2 形式提供，故显式指定 minor。
     compileSdk = 37
     compileSdkMinor = 2
-    ndkVersion = "28.2.13676358"
+    ndkVersion = "30.0.16248370"
 
     defaultConfig {
         applicationId = "com.taffynihe"

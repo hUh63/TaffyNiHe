@@ -34,6 +34,7 @@ jobs:
     env:
       # 与 build-multiabi 保持一致：LIEF 版本同时驱动 clone 与缓存 key。
       LIEF_REF: 1.0.0
+      NDK_VERSION: 30.0.16248370
     strategy:
       fail-fast: false
       matrix:
@@ -64,14 +65,14 @@ jobs:
           set -e
           for i in 1 2 3 4; do
             echo "尝试安装 NDK (第 $i 次)..."
-            if sdkmanager --install "ndk;28.2.13676358" "platform-tools" > /dev/null 2>&1; then
+            if sdkmanager --install "ndk;$NDK_VERSION" "platform-tools" > /dev/null 2>&1; then
               echo "NDK 安装成功"; break
             fi
             [ "$i" = "4" ] && { echo "::error::sdkmanager 安装 NDK 连续失败"; exit 1; }
             sleep 15
           done
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/28.2.13676358" >> "$GITHUB_ENV"
-          echo "NDK=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "NDK=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: 安装原生构建工具
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config cmake
@@ -95,13 +96,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: rizin-build/${{ matrix.abi }}
-          key: rizin-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini') }}
+          key: rizin-${{ matrix.abi }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('rizin-cross-*.ini') }}
 
       - name: 缓存 LIEF 产物
         uses: actions/cache@v4
         with:
           path: third_party/lief-build/${{ matrix.abi }}
-          key: lief-${{ matrix.abi }}-${{ env.LIEF_REF }}-${{ hashFiles('third_party/patches/**') }}
+          key: lief-${{ matrix.abi }}-${{ env.LIEF_REF }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('third_party/patches/**') }}
 
       - name: 编译原生后端 (rizin + LIEF)
         env:

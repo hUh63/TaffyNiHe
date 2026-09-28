@@ -43,7 +43,7 @@ jobs:
       # 第三方源码版本集中在这里，便于同时更新 clone 与构建缓存 key（缓存不感知版本会
       # 直接复用旧 libLIEF.a，让升级看起来"成功"其实没生效）。
       LIEF_REF: 1.0.0
-      NDK_VERSION: 28.2.13676358
+      NDK_VERSION: 30.0.16248370
     strategy:
       fail-fast: false
       matrix:
@@ -109,13 +109,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: rizin-build/${{ matrix.abi }}
-          key: rizin-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini') }}
+          key: rizin-${{ matrix.abi }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('rizin-cross-*.ini') }}
 
       - name: 缓存 LIEF 产物
         uses: actions/cache@v4
         with:
           path: third_party/lief-build/${{ matrix.abi }}
-          key: lief-${{ matrix.abi }}-${{ env.LIEF_REF }}-${{ hashFiles('third_party/patches/**') }}
+          key: lief-${{ matrix.abi }}-${{ env.LIEF_REF }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('third_party/patches/**') }}
 
       - name: 编译 rizin + LIEF
         env:
@@ -273,6 +273,9 @@ jobs:
   package:
     name: package-multiabi-apk
     needs: prep
+    env:
+      # NDK 版本：Dex2C 加固步骤要按这个版本找 ndk-build。
+      NDK_VERSION: 30.0.16248370
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -345,7 +348,7 @@ jobs:
           DCC_COMMIT="17de4fd3202bd0e46735974211a43cda39fca5f3"  # dcc master @ 2024-02-07（上游钉死）
           APKTOOL_VERSION="2.12.1"
           BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          NDK_DIR="$ANDROID_HOME/ndk/28.2.13676358"
+          NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
           WORK="$RUNNER_TEMP/dex2c"
           FILTER="$GITHUB_WORKSPACE/tools/dex2c/filter.txt"
 

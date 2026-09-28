@@ -330,6 +330,8 @@ private fun SoReverseApp() {
     var showUpdatePrompt by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(MainTab.Home) }
     var editorMounted by remember { mutableStateOf(false) }
+    // 编辑器有未保存内容时，切换底部导航前的二次确认目标页（null = 无待确认）
+    var pendingLeave by remember { mutableStateOf<MainTab?>(null) }
     var settingsDest by remember { mutableStateOf(SettingsDest.Root) }
     var language by remember { mutableStateOf(settings.language) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }

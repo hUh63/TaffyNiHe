@@ -88,6 +88,46 @@ private fun ExtBtn(
     }
 }
 
+/** 当前 App 版本（versionName），用于扩展兼容性校验。 */
+private fun appVersionName(context: android.content.Context): String =
+    runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+    }.getOrDefault("")
+
+/** 语义化版本比较：current >= required（任一段非数字按 0 处理；required 为空视为兼容）。 */
+private fun versionAtLeast(current: String, required: String): Boolean {
+    if (required.isBlank()) return true
+    fun seg(s: String) = s.trim().trimStart('v').split('.', '-', '+', ' ')
+        .map { p -> p.takeWhile { ch -> ch.isDigit() }.toIntOrNull() ?: 0 }
+    val a = seg(current)
+    val b = seg(required)
+    for (i in 0 until maxOf(a.size, b.size)) {
+        val x = a.getOrElse(i) { 0 }
+        val y = b.getOrElse(i) { 0 }
+        if (x != y) return x > y
+    }
+    return true
+}
+
+// ── 扩展设置（声明式）：meta.json 的 settings 数组 → SharedPreferences → 运行时注入 TAFFY_EXT_SET_<KEY> ──
+private const val EXT_SETTINGS_PREFS = "taffy_ext_settings"
+
+private fun extSettingGet(context: android.content.Context, id: String, key: String, def: String): String =
+    runCatching {
+        context.getSharedPreferences(EXT_SETTINGS_PREFS, android.content.Context.MODE_PRIVATE).getString("$id.$key", def)
+    }.getOrNull() ?: def
+
+private fun extSettingSet(context: android.content.Context, id: String, key: String, value: String) {
+    runCatching {
+        context.getSharedPreferences(EXT_SETTINGS_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putString("$id.$key", value).apply()
+    }
+}
+
+/** 设置项的环境变量名：key → TAFFY_EXT_SET_<UPPER_SNAKE>。 */
+private fun extEnvName(key: String): String =
+    "TAFFY_EXT_SET_" + key.uppercase().replace(Regex("[^A-Z0-9_]"), "_")
+
 /**
  * 设置 → 扩展系统：塔菲 Python 插件的完整生态（借鉴 Xed-Editor 扩展系统 + 本土化）。
  *
@@ -112,6 +152,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     var message by remember { mutableStateOf("") }
     var showNewDialog by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<File?>(null) }
+    var settingsTarget by remember { mutableStateOf<File?>(null) }
     var newId by remember { mutableStateOf("") }
     var newName by remember { mutableStateOf("") }
     var pluginQuery by remember { mutableStateOf("") }
@@ -280,7 +321,8 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         val runner = PythonRuntime.supportScript(context, "plugin_runner.py")
         val cli = PythonRuntime.supportScript(context, "taffy_cli.py")
         if (runner == null || cli == null) { appendOut("[运行器不可用]\n"); return }
-        val entry = runCatching { JSONObject(File(dir, "meta.json").readTextCapped(ReadLimits.META_JSON_BYTES)).optString("entry", "plugin.py") }.getOrDefault("plugin.py")
+        val metaObj = runCatching { JSONObject(File(dir, "meta.json").readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrElse { JSONObject() }
+        val entry = metaObj.optString("entry", "plugin.py")
         val pluginPy = File(dir, entry)
         if (!pluginPy.isFile) { appendOut("[入口文件不存在: $entry]\n"); return }
         running = true
@@ -290,6 +332,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
             val ws = WorkspacePolicy.workDirPath(context) ?: ""
             // 沙箱: 禁外网（仅放行塔菲 MCP 端口）/ 禁子进程 / 写白名单=工作区+插件目录
             val sandboxWrite = listOf(ws, dir.absolutePath).filter { it.isNotBlank() }.joinToString(File.pathSeparator)
+            val extId = metaObj.optString("id", dir.name)
             val env = mapOf(
                 "TAFFY_WORKSPACE" to ws,
                 "TAFFY_PLUGIN_DIR" to dir.absolutePath,
@@ -299,7 +342,20 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                 "TAFFY_SANDBOX" to "1",
                 "TAFFY_SANDBOX_WRITE" to sandboxWrite,
                 "TAFFY_SANDBOX_NET" to "127.0.0.1:${settings.port}",
-            )
+            ) + run {
+                // 声明式设置项 → 环境变量（扩展在 Python 里读 os.environ 即可）
+                val out = LinkedHashMap<String, String>()
+                val arr = metaObj.optJSONArray("settings")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val o = arr.optJSONObject(i) ?: continue
+                        val k = o.optString("key")
+                        if (k.isBlank()) continue
+                        out[extEnvName(k)] = extSettingGet(context, extId, k, o.optString("default"))
+                    }
+                }
+                out
+            }
             val r = withContext(Dispatchers.IO) {
                 PythonRuntime.run(context, "", args = listOf(runner, pluginPy.absolutePath), timeoutSec = 180, extraEnv = env)
             }
@@ -502,10 +558,16 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                         val source = meta.optString("source", "taffy")
                         val desc = meta.optString("description", "")
                         val isXed = source == "xed"
+                        // 兼容性校验（对标 Xed-Editor 的 extension version compatibility warning）
+                        val minApp = meta.optString("minAppVersion", "")
+                        val appVer = appVersionName(context)
+                        val compatible = versionAtLeast(appVer, minApp)
+                        val settingItems = meta.optJSONArray("settings")
                         AppCard {
                             DataRow(
                                 title = name,
-                                subtitle = "v$version · ${dir.name}",
+                                subtitle = "v$version · ${dir.name}" +
+                                    if (compatible) "" else " · ⚠️ " + (if (zh) "需 App ≥ $minApp（当前 $appVer）" else "needs app ≥ $minApp (now $appVer)"),
                                 meta = desc.ifBlank { null },
                                 leading = {
                                     TypeChip(
@@ -522,7 +584,13 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                 Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                ExtBtn(if (zh) "运行" else "Run", enabled = !running, accent = true) { runPlugin(dir) }
+                                ExtBtn(if (zh) "运行" else "Run", enabled = !running && compatible, accent = true) { runPlugin(dir) }
+                                if (!compatible) {
+                                    ExtBtn(if (zh) "重新检查" else "Recheck") { refresh() }
+                                }
+                                if (settingItems != null && settingItems.length() > 0) {
+                                    ExtBtn(if (zh) "设置" else "Settings") { settingsTarget = dir }
+                                }
                                 ExtBtn(if (zh) "编辑" else "Edit") {
                                     EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath
                                     onDest(SettingsDest.Python)
@@ -619,6 +687,63 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                 message = if (zh) "已删除" else "Deleted"
             },
             onDismiss = { deleteTarget = null },
+        )
+    }
+
+    // ── 扩展设置（声明式：meta.json 的 settings 数组 → 运行时注入 TAFFY_EXT_SET_<KEY>）──
+    settingsTarget?.let { target ->
+        val smeta = runCatching { JSONObject(File(target, "meta.json").readTextCapped(ReadLimits.META_JSON_BYTES)) }.getOrElse { JSONObject() }
+        val sid = smeta.optString("id", target.name)
+        val items = smeta.optJSONArray("settings")
+        var tick by remember(target) { mutableStateOf(0) }
+        AlertDialog(
+            onDismissRequest = { settingsTarget = null; tick++ },
+            title = { Text((if (zh) "扩展设置 · " else "Settings · ") + smeta.optString("name", target.name)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (items == null || items.length() == 0) {
+                        Text(if (zh) "该扩展没有声明设置项。" else "This extension declares no settings.")
+                    } else {
+                        for (i in 0 until items.length()) {
+                            val o = items.optJSONObject(i) ?: continue
+                            val k = o.optString("key")
+                            if (k.isBlank()) continue
+                            val label = o.optString("label", k)
+                            val type = o.optString("type", "string")
+                            val cur = extSettingGet(context, sid, k, o.optString("default"))
+                            if (type == "bool") {
+                                val on = cur == "true" || cur == "1"
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .clickable {
+                                            extSettingSet(context, sid, k, if (on) "false" else "true")
+                                            tick++
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(label, modifier = Modifier.weight(1f), fontSize = AppText.body)
+                                    Text(
+                                        if (on) (if (zh) "开" else "on") else (if (zh) "关" else "off"),
+                                        fontSize = AppText.label,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            } else {
+                                var v by remember(k, tick) { mutableStateOf(cur) }
+                                OutlinedTextField(
+                                    value = v,
+                                    onValueChange = { v = it; extSettingSet(context, sid, k, it) },
+                                    label = { Text(label, fontSize = AppText.label) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { settingsTarget = null }) { Text(if (zh) "完成" else "Done") } },
         )
     }
 

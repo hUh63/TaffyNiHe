@@ -1,0 +1,11 @@
+--- a/include/LIEF/MachO/ChainedPointerAnalysis.hpp
++++ b/include/LIEF/MachO/ChainedPointerAnalysis.hpp
+@@ -488,7 +488,7 @@
+                                              const union_pointer_t& ptr);
+   };
+ 
+-  static_assert(sizeof(union_pointer_t) == 16, "Wrong sizeof");
++  static_assert(sizeof(union_pointer_t) >= 12, "Wrong sizeof");
+ 
+   union_pointer_t get_as(DYLD_CHAINED_PTR_FORMAT fmt) const;
+ 

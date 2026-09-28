@@ -31,6 +31,9 @@ jobs:
     name: engine-${{ matrix.abi }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      # 与 build-multiabi 保持一致：LIEF 版本同时驱动 clone 与缓存 key。
+      LIEF_REF: 1.0.0
     strategy:
       fail-fast: false
       matrix:
@@ -82,19 +85,23 @@ jobs:
             git clone --depth 1 --branch v0.9.1 https://github.com/rizinorg/rizin.git third_party/rizin-src
           fi
 
-      - name: 克隆 LIEF 0.16.1
+      - name: 克隆 LIEF
         run: |
           if [ ! -d third_party/lief-src ]; then
-            git clone --depth 1 --branch 0.16.1 https://github.com/lief-project/LIEF.git third_party/lief-src
+            git clone --depth 1 --branch "$LIEF_REF" https://github.com/lief-project/LIEF.git third_party/lief-src
           fi
 
-      - name: 缓存原生构建产物
+      - name: 缓存 rizin 产物
         uses: actions/cache@v4
         with:
-          path: |
-            rizin-build/${{ matrix.abi }}
-            third_party/lief-build/${{ matrix.abi }}
-          key: native-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini', 'third_party/patches/**') }}
+          path: rizin-build/${{ matrix.abi }}
+          key: rizin-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini') }}
+
+      - name: 缓存 LIEF 产物
+        uses: actions/cache@v4
+        with:
+          path: third_party/lief-build/${{ matrix.abi }}
+          key: lief-${{ matrix.abi }}-${{ env.LIEF_REF }}-${{ hashFiles('third_party/patches/**') }}
 
       - name: 编译原生后端 (rizin + LIEF)
         env:

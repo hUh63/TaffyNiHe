@@ -102,36 +102,36 @@ EOF
 done
 
 # --- LIEF: CMake cross-compile per ABI ---
-# LIEF (third_party/lief-src) has an upstream compile bug: with
-# LIEF_DISABLE_FROZEN=ON, CONST_MAP expands to std::unordered_map, but
-# src/OAT/utils.cpp calls lower_bound(), which std::unordered_map does not
-# provide. Apply our patch before building. Idempotent: once applied the
-# offending call is gone, so the guard below skips it.
-LIEF_PATCH="third_party/patches/lief-0.16.1-oat-lower_bound.patch"
-if [ -f "$LIEF_PATCH" ] && grep -q "oat2android\.lower_bound" "$LIEF_SRC/src/OAT/utils.cpp"; then
-    (cd "$LIEF_SRC" && git apply "$(pwd -P)/../patches/lief-0.16.1-oat-lower_bound.patch")
-    echo "[build-native] Applied LIEF patch: $LIEF_PATCH"
-fi
-# LIEF (third_party/lief-src) has an upstream compile bug: on 32-bit
-# Mach-O chain pointer analysis, union_pointer_t can be 12 bytes, but the
-# header hard-asserts sizeof(...) == 16. Relax to >=12 so i686/x86 Android
-# builds succeed. Idempotent: skipped once the assertion is updated.
-CHAIN_PATCH="third_party/patches/lief-0.16.1-chained-union-size.patch"
-CHAIN_HEADER="$LIEF_SRC/include/LIEF/MachO/ChainedPointerAnalysis.hpp"
-if [ -f "$CHAIN_PATCH" ] && grep -q 'union_pointer_t) == 16' "$CHAIN_HEADER"; then
-    (cd "$LIEF_SRC" && git apply "$(pwd -P)/../patches/lief-0.16.1-chained-union-size.patch")
-    echo "[build-native] Applied LIEF patch: $CHAIN_PATCH"
-fi
-# LIEF (third_party/lief-src) emits -Wunused-private-field (arch_) and
-# -Wunused-lambda-capture (elf_class) warnings under -Wall. These are avoided
-# by marking the field [[maybe_unused]] and dropping the unused capture.
-# Idempotent: skipped once the unused-arch_ declaration is annotated.
-WARN_PATCH="third_party/patches/lief-0.16.1-warnings.patch"
-WARN_HEADER="$LIEF_SRC/include/LIEF/ELF/NoteDetails/core/CorePrPsInfo.hpp"
-if [ -f "$WARN_PATCH" ] && grep -q '^  ARCH arch_ = ARCH::NONE;' "$WARN_HEADER"; then
-    (cd "$LIEF_SRC" && git apply "$(pwd -P)/../patches/lief-0.16.1-warnings.patch")
-    echo "[build-native] Applied LIEF patch: $WARN_PATCH"
-fi
+# --- LIEF 上游缺陷补丁（按版本选择，应用失败不中断）---
+# 背景：
+#  1) LIEF_DISABLE_FROZEN=ON 时 CONST_MAP 展开为 std::unordered_map，而 src/OAT/utils.cpp
+#     调用 lower_bound()（unordered_map 没有）→ 需要补丁改成等价扫描。
+#  2) 32 位 Mach-O 链式指针分析里 union_pointer_t 可能只有 12 字节，头文件却硬断言 == 16
+#     → i686/x86（armeabi-v7a/x86）会编译失败，放宽为 >= 12。
+#  3) 0.16.x 在 -Wall 下会报未使用私有字段/未使用 lambda 捕获（1.0 已上游修掉）。
+# 补丁上下文会随上游版本变化，因此**按 LIEF_REF 选补丁集**，并且应用失败只告警不中断
+# （否则上游修好之后旧补丁反而会把流水线弄红）。
+PATCH_DIR="third_party/patches"
+apply_lief_patch() {  # $1=补丁文件  $2=检测串  $3=目标文件
+    if [ -f "$1" ] && [ -f "$3" ] && grep -q "$2" "$3"; then
+        if (cd "$LIEF_SRC" && git apply "$(pwd -P)/../patches/$(basename "$1")" 2>/dev/null); then
+            echo "[build-native] Applied LIEF patch: $1"
+        else
+            echo "[build-native] WARN: LIEF patch not applicable (upstream may have fixed it): $1"
+        fi
+    fi
+}
+case "${LIEF_REF:-}" in
+  1.*)
+    apply_lief_patch "$PATCH_DIR/lief-1.0.0-oat-lower_bound.patch" "oat2android\.lower_bound" "$LIEF_SRC/src/OAT/utils.cpp"
+    apply_lief_patch "$PATCH_DIR/lief-1.0.0-chained-union-size.patch" 'sizeof(union_pointer_t) == 16' "$LIEF_SRC/include/LIEF/MachO/ChainedPointerAnalysis.hpp"
+    ;;
+  *)
+    apply_lief_patch "$PATCH_DIR/lief-0.16.1-oat-lower_bound.patch" "oat2android\.lower_bound" "$LIEF_SRC/src/OAT/utils.cpp"
+    apply_lief_patch "$PATCH_DIR/lief-0.16.1-chained-union-size.patch" 'union_pointer_t) == 16' "$LIEF_SRC/include/LIEF/MachO/ChainedPointerAnalysis.hpp"
+    apply_lief_patch "$PATCH_DIR/lief-0.16.1-warnings.patch" '^  ARCH arch_ = ARCH::NONE;' "$LIEF_SRC/include/LIEF/ELF/NoteDetails/core/CorePrPsInfo.hpp"
+    ;;
+esac
 for abi in "${APIS[@]}"; do
     build_dir="$LIEF_BUILD_ROOT/$abi"
     if [ -f "$build_dir/lib/libLIEF.a" ]; then

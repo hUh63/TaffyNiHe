@@ -92,9 +92,20 @@ internal class BlutterCoordinator(private val context: Context, private val stor
             }
         }
         val required = JSONObject().put("engineRevision", requirement.engineRevision ?: JSONObject.NULL).put("dartVersion", requirement.dartVersion ?: JSONObject.NULL).put("abi", requirement.abi).put("compressedPointers", requirement.compressedPointers).put("analysis", requirement.analysis)
-        val error = JSONObject().put("code", "FLUTTER_VERSION_NOT_SUPPORTED").put("message", "This release embeds only the Flutter 3.44.x / Dart 3.12.2 arm64-v8a Blutter runner. The target APK does not match that exact snapshot compatibility key.").put("recoverable", false).put("stage", "runner_selection").put("supportedFlutter", "3.44.x").put("supportedDart", "3.12.2").put("required", required)
+        // 支持矩阵以 runners.json 为唯一事实来源：文案从注册表动态生成，避免写死版本号后与清单脱节。
+        val supportedDart = registry.runners.mapNotNull { it.dartVersion }.distinct().sorted()
+        val supportedAbis = registry.runners.map { it.abi }.distinct()
+        val error = JSONObject().put("code", "FLUTTER_VERSION_NOT_SUPPORTED")
+            .put("message", "No embedded Blutter runner matches this fingerprint. Embedded runners cover Dart ${supportedDart.joinToString(" / ")} on ${supportedAbis.joinToString(", ")}; the target APK does not match any of those snapshot compatibility keys.")
+            .put("recoverable", false).put("stage", "runner_selection")
+            .put("supportedDart", JSONArray(supportedDart)).put("supportedAbis", JSONArray(supportedAbis))
+            .put("embeddedRunnerCount", registry.runners.size).put("required", required)
         store.update(jobId, "failed", "runner_selection", error)
-        return ok(JSONObject().put("jobId", jobId).put("status", "failed").put("inspection", inspection).put("requiredRunner", required).put("error", error).put("nextActions", JSONArray().put("use a Flutter 3.44.x APK built with Dart 3.12.2").put("inspect the APK fingerprint without running analysis")))
+        val nextActions = JSONArray()
+        if (supportedDart.isNotEmpty()) nextActions.put("use an APK whose Dart version is one of: ${supportedDart.joinToString(", ")}")
+        nextActions.put("inspect the APK fingerprint without running analysis")
+        nextActions.put("re-run action=packages to list the embedded runners and their coverage")
+        return ok(JSONObject().put("jobId", jobId).put("status", "failed").put("inspection", inspection).put("requiredRunner", required).put("error", error).put("nextActions", nextActions))
     }
 
     private fun status(jobId: String): JSONObject = store.get(jobId)?.let { ok(it) } ?: err("JOB_NOT_FOUND", "Blutter job was not found", "jobId", jobId)

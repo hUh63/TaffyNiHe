@@ -444,6 +444,8 @@ internal fun AnalysisWorkspace(
 
                         "analyze" -> AnalyzeModeView(tools, zh, context, refreshAll)
 
+                        "flutter" -> FlutterView(state = state, tools = tools, zh = zh, context = context)
+
                         "rootdrill" -> RootDrillView(tools, zh, context, refreshAll)
 
                         "edit" -> EditCenterView(tools, zh, context, refreshAll)
@@ -2106,6 +2108,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("funcinfo", "函数详情", "Detail", Icons.Filled.Description),
     AnalysisNavItem("comments", "注释", "Note", Icons.Filled.Description),
     AnalysisNavItem("analyze", "分析", "Ana", Icons.Filled.FlashOn),
+    AnalysisNavItem("flutter", "Flutter", "Flutter", Icons.Filled.Memory),
     AnalysisNavItem("rootdrill", "根下钻", "Root", Icons.Filled.Transform),
     AnalysisNavItem("edit", "编辑", "Edit", Icons.Filled.Build),
     AnalysisNavItem("globalc", "全局伪C", "GpC", Icons.Filled.Description),
@@ -2159,6 +2162,8 @@ private val analysisDomains = listOf(
         AnalysisTool("hard", "加固", "Hard", listOf("hardening", "rootdrill", "unpack")),
         AnalysisTool("ai", "AI", "AI", listOf("analyze")),
         AnalysisTool("exp", "导出", "Export", listOf("export", "data")),
+        // Flutter/Dart AOT：内置 Blutter Runner，全本地分析（后端早已存在，这里补上 UI 入口）
+        AnalysisTool("flutter", "Flutter", "Flutter", listOf("flutter")),
     )),
     // 工具域：和当前文件无关的通用小工具
     AnalysisDomain("utils", "工具", "Tools", listOf(

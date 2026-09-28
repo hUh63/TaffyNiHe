@@ -300,6 +300,8 @@ jobs:
           SM_BIN="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | head -1)"
           if [ -n "$SM_BIN" ]; then
             echo "$SM_BIN" >> "$GITHUB_PATH"
+            # GITHUB_PATH 只对后续 step 生效，本 step 内需显式入 PATH
+            export PATH="$SM_BIN:$PATH"
           else
             echo "::error::未找到 sdkmanager，无法安装 NDK"; exit 1
           fi

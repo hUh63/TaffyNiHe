@@ -435,6 +435,18 @@ jobs:
           set -euo pipefail
           mkdir -p apk-output
           find app/build/outputs/apk -name '*.apk' -exec cp {} apk-output/ \;
+          # v1.3.58: 发布资产名带版本号（taffy-<version>-<abi>.apk），下载后可直接辨认版本；
+          # 重命名必须发生在生成 SHA256SUMS 之前，否则校验和里的文件名会对不上。
+          VER=$(grep -E 'versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "${VER}" ]; then VER="${GITHUB_REF_NAME:-dev}-${GITHUB_SHA::7}"; fi
+          echo "版本号: ${VER}"
+          for apk in apk-output/*.apk; do
+            [ -f "$apk" ] || continue
+            base=$(basename "$apk")
+            abi=$(printf '%s' "$base" | sed -E 's/^app-(.+)-release\.apk$/\1/')
+            if [ "$abi" = "$base" ]; then abi="unknown"; fi
+            mv -f "$apk" "apk-output/taffy-${VER}-${abi}.apk"
+          done
           ls -lh apk-output/
           [ -f app/build/outputs/mapping/release/mapping.txt ] && cp app/build/outputs/mapping/release/mapping.txt apk-output/mapping.txt || true
           ( cd apk-output && sha256sum *.apk | tee SHA256SUMS )
@@ -463,7 +475,13 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG 已存在（复用 draft）"
           else
-            gh release create "$TAG" --draft --title "$TAG" --generate-notes
+            # v1.3.58: changelog 分段 —— 仓库根 RELEASE_NOTES.md 存在时用它做正文（分段：新增/修复/改动），
+            # 否则回退到 GitHub 自动生成的 notes。
+            if [ -f RELEASE_NOTES.md ]; then
+              gh release create "$TAG" --draft --title "TaffyNiHe $TAG" --notes-file RELEASE_NOTES.md
+            else
+              gh release create "$TAG" --draft --title "TaffyNiHe $TAG" --generate-notes
+            fi
           fi
           for f in apk-output/*.apk apk-output/SHA256SUMS apk-output/mapping.txt; do
             if [ ! -f "$f" ]; then
@@ -485,5 +503,9 @@ jobs:
               exit 1
             fi
           done
+          # 复用已存在 draft 的场景：正文也同步为最新 RELEASE_NOTES.md
+          if [ -f RELEASE_NOTES.md ]; then
+            gh release edit "$TAG" --notes-file RELEASE_NOTES.md || true
+          fi
           gh release edit "$TAG" --draft=false --prerelease=false
           echo "Release $TAG 已发布" 

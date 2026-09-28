@@ -388,28 +388,12 @@ jobs:
           KEY_PASSWORD="$(grep -E '^keyPassword=' "$KEYS" | head -1 | cut -d= -f2-)"
           [ -f "$STORE_FILE" ] || { echo "::error::keystore 不存在: $STORE_FILE"; exit 1; }
 
-          # dcc 只认 <ndk_dir>/ndk-build。注意 ndk-build 是脚本，靠自身所在目录
-          # 去定位同级的 build/ndk-build（NDK r23+ 的真正实现），因此【不能软链】——
-          # 软链会让它去 <shim>/build/ndk-build 找（不存在，exit 127）。
-          # 顶层存在时直接用 NDK 根目录；只有实现被挪到 build/ 下时才用转发脚本。
-          NB=""
-          for cand in "$NDK_BASE/ndk-build" "$NDK_BASE/build/ndk-build"; do
-            [ -x "$cand" ] && { NB="$cand"; break; }
-          done
-          [ -n "$NB" ] || { echo "::error::找不到 ndk-build（$NDK_BASE）"; ls -la "$NDK_BASE" 2>&1 | head -30; exit 1; }
-          echo "[dex2c] ndk-build = $NB"
-          if [ -x "$NDK_BASE/ndk-build" ] && [ -x "$NDK_BASE/build/ndk-build" ]; then
-            NDK_DIR="$NDK_BASE"
-          else
-            mkdir -p "$WORK/ndk"
-            cat > "$WORK/ndk/ndk-build" <<EOF2
-          #!/bin/sh
-          exec "$NB" "\$@"
-          EOF2
-            sed -i 's/^          //' "$WORK/ndk/ndk-build"
-            chmod +x "$WORK/ndk/ndk-build"
-            NDK_DIR="$WORK/ndk"
-          fi
+          # dcc 只认 <ndk_dir>/ndk-build，且 ndk-build 是靠自身所在目录去定位
+          # 同级的 build/ndk-build 的脚本 —— 所以【不能软链】（软链会让它去
+          # <shim>/build/ndk-build 找而 exit 127）。直接把 NDK 根目录交给 dcc。
+          NDK_DIR="${ANDROID_NDK_HOME:-$NDK_BASE}"
+          test -x "$NDK_DIR/ndk-build" || { echo "::error::ndk-build 不存在于 $NDK_DIR"; ls -la "$NDK_DIR" 2>&1 | head -30; exit 1; }
+          echo "[dex2c] ndk-build = $NDK_DIR/ndk-build"
           test -f "$FILTER" || { echo "::error::缺少 $FILTER"; exit 1; }
 
           # 诊断：dcc 靠 androguard 解析 dex。若目标类被 R8 改名、或 dex 版本过新

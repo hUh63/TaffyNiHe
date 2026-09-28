@@ -13,6 +13,7 @@
 #include <exception>
 
 #include <LIEF/LIEF.hpp>
+#include <LIEF/version.h>
 #include <LIEF/json.hpp>
 #include <LIEF/to_json.hpp>
 #include <LIEF/DEX.hpp>
@@ -186,7 +187,13 @@ Java_com_soreverse_mcp_engine_LiefEngine_nativeParseAny(
         if (parsed) json = LIEF::VDEX::to_json(*parsed);
     } else {
         auto parsed = LIEF::Parser::parse(data);
+        // LIEF 1.0 起把通用的 LIEF::to_json 拆到各格式命名空间（LIEF::ELF::to_json），
+        // 0.16 及以前只有 LIEF::to_json；用 LIEF_VERSION_MAJOR 宏（仅 1.0+ 定义）适配两代。
+#if defined(LIEF_VERSION_MAJOR)
+        if (parsed) json = LIEF::ELF::to_json(*parsed);
+#else
         if (parsed) json = LIEF::to_json(*parsed);
+#endif
     }
     if (json.empty()) return env->NewStringUTF("{\"error\":\"parse_failed\"}");
     return env->NewStringUTF(json.c_str());

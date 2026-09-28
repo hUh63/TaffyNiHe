@@ -102,7 +102,7 @@ EOF
 done
 
 # --- LIEF: CMake cross-compile per ABI ---
-# LIEF 0.16.1 (third_party/lief-src) has an upstream compile bug: with
+# LIEF (third_party/lief-src) has an upstream compile bug: with
 # LIEF_DISABLE_FROZEN=ON, CONST_MAP expands to std::unordered_map, but
 # src/OAT/utils.cpp calls lower_bound(), which std::unordered_map does not
 # provide. Apply our patch before building. Idempotent: once applied the
@@ -112,7 +112,7 @@ if [ -f "$LIEF_PATCH" ] && grep -q "oat2android\.lower_bound" "$LIEF_SRC/src/OAT
     (cd "$LIEF_SRC" && git apply "$(pwd -P)/../patches/lief-0.16.1-oat-lower_bound.patch")
     echo "[build-native] Applied LIEF patch: $LIEF_PATCH"
 fi
-# LIEF 0.16.1 (third_party/lief-src) has an upstream compile bug: on 32-bit
+# LIEF (third_party/lief-src) has an upstream compile bug: on 32-bit
 # Mach-O chain pointer analysis, union_pointer_t can be 12 bytes, but the
 # header hard-asserts sizeof(...) == 16. Relax to >=12 so i686/x86 Android
 # builds succeed. Idempotent: skipped once the assertion is updated.
@@ -122,7 +122,7 @@ if [ -f "$CHAIN_PATCH" ] && grep -q 'union_pointer_t) == 16' "$CHAIN_HEADER"; th
     (cd "$LIEF_SRC" && git apply "$(pwd -P)/../patches/lief-0.16.1-chained-union-size.patch")
     echo "[build-native] Applied LIEF patch: $CHAIN_PATCH"
 fi
-# LIEF 0.16.1 (third_party/lief-src) emits -Wunused-private-field (arch_) and
+# LIEF (third_party/lief-src) emits -Wunused-private-field (arch_) and
 # -Wunused-lambda-capture (elf_class) warnings under -Wall. These are avoided
 # by marking the field [[maybe_unused]] and dropping the unused capture.
 # Idempotent: skipped once the unused-arch_ declaration is annotated.

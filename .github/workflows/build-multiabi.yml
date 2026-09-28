@@ -39,6 +39,11 @@ jobs:
     name: prep-${{ matrix.abi }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      # 第三方源码版本集中在这里，便于同时更新 clone 与构建缓存 key（缓存不感知版本会
+      # 直接复用旧 libLIEF.a，让升级看起来"成功"其实没生效）。
+      LIEF_REF: 1.0.0
+      NDK_VERSION: 28.2.13676358
     strategy:
       fail-fast: false
       matrix:
@@ -67,13 +72,13 @@ jobs:
           set -e
           for i in 1 2 3 4; do
             echo "尝试安装 NDK (第 $i 次)..."
-            if sdkmanager --install "ndk;28.2.13676358" "platform-tools" > /dev/null 2>&1; then
+            if sdkmanager --install "ndk;$NDK_VERSION" "platform-tools" > /dev/null 2>&1; then
               echo "NDK 安装成功"; break
             fi
             [ "$i" = "4" ] && { echo "::error::sdkmanager 安装 NDK 连续失败"; exit 1; }
             sleep 15
           done
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config cmake golang-go
 
@@ -85,7 +90,7 @@ jobs:
           echo "rizin ref = $RIZIN_REF"
           [ -d third_party/rizin-src/librz/include ] || git clone --depth 1 --branch "$RIZIN_REF" https://github.com/rizinorg/rizin.git third_party/rizin-src
           [ -d third_party/xAnSo-src ] || git clone --depth 1 https://github.com/freakishfox/xAnSo.git third_party/xAnSo-src
-          [ -d third_party/lief-src ] || git clone --depth 1 --branch 0.16.1 https://github.com/lief-project/LIEF.git third_party/lief-src
+          [ -d third_party/lief-src ] || git clone --depth 1 --branch "$LIEF_REF" https://github.com/lief-project/LIEF.git third_party/lief-src
           [ -d third_party/zhkl-capstone-src ] || (git clone --depth 1 https://github.com/zhkl0228/capstone.git third_party/zhkl-capstone-src \
             || git clone --depth 1 --branch 4.0.2 https://github.com/capstone-engine/capstone.git third_party/zhkl-capstone-src)
           [ -d third_party/keystone-engine-src ] || git clone --depth 1 --branch 0.9.2 https://github.com/keystone-engine/keystone.git third_party/keystone-engine-src
@@ -100,13 +105,17 @@ jobs:
           [ -f third_party/unidbg-src/backend/unicorn2/src/main/native/unicorn.c ] || \
             git clone --depth 1 --branch v0.9.9 https://github.com/zhkl0228/unidbg.git third_party/unidbg-src
 
-      - name: 缓存 rizin/LIEF 产物
+      - name: 缓存 rizin 产物
         uses: actions/cache@v4
         with:
-          path: |
-            rizin-build/${{ matrix.abi }}
-            third_party/lief-build/${{ matrix.abi }}
-          key: native-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini', 'third_party/patches/**') }}
+          path: rizin-build/${{ matrix.abi }}
+          key: rizin-${{ matrix.abi }}-${{ hashFiles('rizin-cross-*.ini') }}
+
+      - name: 缓存 LIEF 产物
+        uses: actions/cache@v4
+        with:
+          path: third_party/lief-build/${{ matrix.abi }}
+          key: lief-${{ matrix.abi }}-${{ env.LIEF_REF }}-${{ hashFiles('third_party/patches/**') }}
 
       - name: 编译 rizin + LIEF
         env:
@@ -161,7 +170,7 @@ jobs:
           set -euo pipefail
           # 直接用官方 release 的 linux 二进制(与仓库内置 libcloudflared.so 同源)，
           # 避免在 CI 里依赖 Go 1.26 toolchain(GOOS=android 交叉编译不可用)。
-          CF_VER="2026.9.1"
+          CF_VER="2026.9.3"
           case "${{ matrix.abi }}" in
             arm64-v8a)   C=arm64 ;;
             armeabi-v7a) C=arm ;;
@@ -176,7 +185,7 @@ jobs:
       - name: 注入 frida-server
         run: |
           set -euo pipefail
-          FRIDA_VERSION="17.18.0"
+          FRIDA_VERSION="17.19.0"
           case "${{ matrix.abi }}" in
             arm64-v8a)   A=arm64 ;;
             armeabi-v7a) A=arm ;;

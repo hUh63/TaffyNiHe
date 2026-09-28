@@ -1,40 +1,50 @@
-# TaffyNiHe v1.3.58
+# TaffyNiHe v1.3.59
 
-## 🚀 新增
+本版为**依赖与工具链大版本升级**：功能与 v1.3.58 一致（分析页工具聚合、Flutter/Dart AOT 分析视图、原生可执行通道等见 v1.3.58 说明），重点是把整套技术栈推到当前最新可用版本。
 
-- **Flutter / Dart AOT 分析视图**：`分析页 → 分析域 → Flutter`。识别 APK 指纹（Dart 版本 / ABI / snapshot hash / engine revision / 压缩指针 / 指纹置信度）、自动匹配 APK 内置 Runner、提交作业并实时显示阶段，结果按 **库 / 类 / 函数 / 对象** 结构化浏览（含警告与产物清单），可随时取消。全本地，不上传 `libapp.so` / `libflutter.so`，不需要 Python / ADB / 网络。
-- **内置 Runner 清单可视化**：`设置 → Blutter` 直接读 `assets/blutter/runners.json` 渲染矩阵版本、4 套 Runner（Dart 3.11.5 / 3.12.2 / 3.13.0 / 3.13.1，arm64-v8a，压缩指针，snapshot 别名，sha256）、覆盖统计与未收录原因。
-- **原生可执行通道（execve + jniLibs）**：`设置 → 本地可执行`。Android 10 起应用私有目录禁止 `execve`，但 APK 安装解压出的 `nativeLibraryDir` 仍可执行 —— 把 Android PIE 可执行文件命名成 `lib<name>.so` 放进 `jniLibs/<abi>/` 即可在设备上直接运行，**免 root、免 proot、免 rootfs**。页面列出全部候选并给出 ELF 判定 / ABI 匹配 / 权限状态，支持前台执行（参数 + 超时 + 输出上限）、常驻后台（日志落盘 + pid）、进程管理与日志查看。参数直接作为 argv 传递，不经 shell。
-- **MCP 工具 `taffy_native_exec`**：上述通道的机器接口（`list / probe / run / daemon / ps / kill / log`），新增 `runtime` 工具类别。
-- **Linux 环境诊断（健康检查）**：`设置 → Linux 环境 → 环境诊断` 一键逐项体检 —— 执行通道 / proot 运行时与可执行权限 / rootfs 是否解压 / DNS 配置 / 端到端 `echo` 探针 / 可用存储，每项给出 ✅/⚠️/❌ 与具体原因，支持「复制报告」。（借鉴 Xed-Editor 的 Terminal Health Checks）
-- **降级模式提示**：无 root/Shizuku 且内置 proot 未就绪时，明确标注当前处于降级模式并给出修复路径。
-- **编辑器行排序命令**：`行排序 ↑ / ↓`，对选区覆盖的行排序（无选区则整篇），自动进入命令面板与自定义工具条候选。
-- **编辑器「离开前确认」**：切换底部导航时若有未保存内容先弹确认，开关持久化。
-- **扩展兼容性校验**：`meta.json` 可声明 `minAppVersion`，低于要求时显示 ⚠️ 原因并禁用「运行」。
-- **扩展设置项（声明式）**：`meta.json` 新增 `settings` 数组，扩展卡片出现「设置」按钮，持久化并注入为环境变量 `TAFFY_EXT_SET_<KEY>`。
+## 🔧 工具链
 
-## ✨ 改进
+- **Android Gradle Plugin 9.2.1 → 9.4.1**，**Kotlin 2.4.0 → 2.4.20**，**Gradle 9.4.1 → 9.8.0**。
+- **compileSdk 36 → 37（minor 2）**：compose 1.12.x 起要求 `compileSdk ≥ 37`（平台以 `platforms;android-37.2` 形式提供）；`targetSdk` 仍保持 36，不影响运行时行为。
+- **NDK 28.2.13676358 → 30.0.16248370**：4 个 ABI 的原生库（rizin+LIEF、unidbg/capstone/keystone/unicorn、xAnSo）全部重新构建通过。
 
-- **分析页工具聚合（不再零散）**：原先 47 个视图平铺成一行横向滚动的 chip，同类数据（ELF 的九张表、交叉引用的五种视角、反汇编的多个变体）混在一起。现改为 **域 → 工具 → 模式** 三级：5 个域（函数 / 代码 / 结构 / 分析 / 工具）、18 个工具、47 个模式一一对应，模式只有 1 个时不出模式行。切回同一个工具会回到上次停留的模式，抽屉改为三级索引。
-- **任务页「继续」真正接着做**：以前只切换状态、不重开文件，点了没反应；现在会重新打开任务主文件、重建共享工作区并回到分析页。原文件失效或 URI 授权过期时给出明确原因，并提供「重新选文件」。选择文件时持久化 URI 授权（应用重启后仍可继续历史任务）。
-- **任务页样式统一**：按 Exbin 风格重做（圆角卡片 + 1dp 描边 + 分组计数 + 状态徽标）。
-- **发布资产名带版本号**：APK 从 `app-<abi>-release.apk` 改为 `taffy-<版本>-<abi>.apk`。
-- **Release 正文改为分段 changelog**：按「新增 / 改进 / 修复 / 工程」分节。
+## ⬆️ 依赖升级
 
-## 🐛 修复
+**逆向工具链**
 
-- 修复「历史任务无法继续」：根因是恢复逻辑只改状态、不重新打开工作区。
-- 修复 `content://` 打开的文件在应用重启后无法再次打开（缺 `takePersistableUriPermission`）。
-- 修正与能力清单脱节的陈旧文案：工具描述与「不支持」报错里写死的 `Flutter 3.44.x / Dart 3.12.2` 改为从 `runners.json` 动态生成。
-- 修复编辑器未保存内容相关交互（离开前确认，避免误以为内容丢失）。
+- **LIEF 0.16.1 → 1.0.0**：`LIEF::to_json` 在 1.0 拆分为 `LIEF::ELF::to_json`，代码用 `LIEF_VERSION_MAJOR` 宏兼容两代；本地补丁集同步换代（新增 `lief-1.0.0-oat-lower_bound`、`lief-1.0.0-chained-union-size`）。
+- **jadx 1.5.1 → 1.5.6**（DEX→Java 反编译质量提升）
+- **smali / baksmali / dexlib2 3.0.9 → 3.0.10**
+- **ARSCLib 1.3.5 → 1.4.0**
+- **DexKit 2.0.4 → 2.3.0**
+- **apksig 8.7.3 → 9.4.1**（与 AGP 同版本线）
 
-## 🔧 工程 / 构建
+**框架与基础库**
 
-- 多 ABI 发布流水线：资产在**收集阶段**即重命名，保证 `SHA256SUMS` 与资产一致。
-- 发布正文来源：仓库根 `RELEASE_NOTES.md`（存在即采用，否则回退 GitHub 自动 notes）。
-- 新增 **`THIRD_PARTY_NOTICES.md`**：汇总随包分发的原生组件与 Java/Kotlin 依赖及其许可，并列出需人工复核的合规项。
-- 新增 **`docs/native-exec.md`**：原生可执行通道的架构、新增可执行文件的方法与安全边界。
+- compose-bom 2026.06.01 → **2026.09.00**
+- ktor 3.5.1 → **3.6.0**、okhttp 5.4.0 → **5.5.0**
+- ELK 0.9.1 → **0.12.0**（并补 `org.eclipse.xtext.xbase.lib` —— ELK 0.12 的算法元数据 provider 需要 Xtend runtime，否则 R8 报 Missing class）
+- jsoup 1.22.2 → **1.23.2**、slf4j-api 2.0.16 → **2.0.20**
+- bcpkix-jdk18on 1.78.1 → **1.86**、jna 5.10.0 → **5.19.1**
+- commons-io **2.22.0**、commons-codec **1.22.1**、commons-collections4 **4.6.0**
+- Dhizuku-API 2.5.3 → **2.6.0**
+
+**内置二进制**
+
+- cloudflared 2026.9.1 → **2026.9.3**
+- frida-server 17.18.0 → **17.19.0**
+
+## 🧊 冻结清单（明确「不升」，并已登记原因）
+
+`fastjson 1.2.83`、`capstone 3.1.8`、`keystone 0.9.7`、`unicorn 1.0.15`、`commons-{codec,collections4,io}`、`demumble`、`apk-parser` 的版本由 **unidbg 0.9.9 的 pom 锁定** —— 单独升级会破坏反射调用（fastjson 的类名）或 JNI 契约。已在 `build.gradle.kts` 加注释、在 `DEPENDENCIES.md` 建立冻结登记，防止后人误升。
+
+## 🛠 工程
+
+- CI 原生构建缓存 key 现在包含 **LIEF 版本 + NDK 版本**（此前不含版本号，会让升级静默复用旧产物，「看起来成功其实没生效」）。
+- LIEF 补丁改为**按版本选择 + 应用失败只告警**：上游修好后旧补丁失配不再把流水线弄红。
+- 补齐 `packaging.resources` 规则：bouncycastle 1.86 的 `META-INF/BCRSA204.*`、`META-INF/LICENSE.md`，以及 smali 3.0.10 / apksig 9.4.1 引入的裸 `LICENSE` 跨 jar 重名。
+- `DEPENDENCIES.md` 新增「版本锁定与冻结清单」「工具链版本」「升级作业检查清单」三节。
 
 ---
 
-**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.57...v1.3.58
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.58...v1.3.59

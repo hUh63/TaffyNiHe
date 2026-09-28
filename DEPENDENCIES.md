@@ -53,3 +53,41 @@
 - **核心逆向能力**（分析/反编译/签名/脱壳/模拟）→ 必须内置（jar/so 编译进 APK）。
 - **通用工具链**（编译器/脚本运行时）→ 体积大（clang 60MB / node 35MB / python 10MB），默认走「探测外部 + 降级」，除非明确要求内置。
 - **其他逆向工具**（MT/NP）→ 桥接探测，作为补充。
+
+## 版本锁定与冻结清单
+
+「能升就升」不等于「全都升」。有一组依赖的版本由上游 **unidbg 0.9.9 的 pom 强制锁定**，
+单独升级会破坏编译期契约或运行时反射，因此冻结并登记在此，避免后人误升：
+
+| 依赖 | 冻结版本 | 为什么不能升 |
+|---|---|---|
+| `com.alibaba:fastjson` | 1.2.83 | unidbg 的 `McpTools.dispatchTool(String, com.alibaba.fastjson.JSONObject)` 签名要求 1.2.x 的类名（`UnidbgEmulator.sessionNativeToolCall` 反射调用它）。升 2.x 类名变成 `com.alibaba.fastjson2.*`，反射直接失败。1.2.83 已是 1.2 系列末版；本项目只用它构造对象传给 unidbg，不做反序列化解析。 |
+| `capstone`（本地 patched jar） | 3.1.8 | unidbg-api:0.9.9 的 pom 指定 3.1.8；官方 capstone 已到 6.0.0-alpha，但与 unidbg 的 JNI/绑定不兼容。 |
+| `keystone`（本地 patched jar） | 0.9.7 | 同 capstone；且 0.9.7 已是上游 Maven 上的最新版（项目已停更）。 |
+| `unicorn` | 1.0.15 | unidbg-api:0.9.9 pom 指定，JNI 桥与之配套。 |
+| `commons-codec` / `commons-collections4` / `commons-io` | 1.21.0 / 4.5.0 / 2.21.0 | unidbg-api pom 指定。 |
+| `demumble` / `apk-parser` | 1.0.4 / 2.6.10 | unidbg 及其传递依赖指定。 |
+
+> ⚠️ 关键点：本项目的 unidbg 用**本地 patched jar**（`app/libs/unidbg-*-0.9.9-android-patched.jar`），
+> 不参与 Gradle 版本解析 —— 它的传递依赖必须在 `build.gradle.kts` 里**手工对齐**。
+> 任何一项被 Gradle 升到更高版本，都可能在运行时抛 `NoSuchMethodError`。
+
+## 工具链与关键依赖版本（2026-09）
+
+| 项 | 版本 | 备注 |
+|---|---|---|
+| AGP | 9.4.1 | AGP 9 起 Kotlin 支持内置（不要再应用 `org.jetbrains.kotlin.android`） |
+| Kotlin / Gradle | 2.4.20 / 9.8.0 | |
+| compileSdk / targetSdk / minSdk | 37(minor 2) / 36 / 26 | compose 1.12.x 要求 compileSdk ≥ 37，平台是 `platforms;android-37.2` |
+| NDK | 30.0.16248370 | 28.2 → 30；4 ABI 原生库（rizin+LIEF、unidbg、xAnSo）全部重新构建通过 |
+| LIEF | 1.0.0 | 0.16.1 → 1.0.0：`LIEF::to_json` 在 1.0 拆到 `LIEF::ELF::to_json`，用 `LIEF_VERSION_MAJOR` 宏兼容两代；补丁集同步换代 |
+| rizin / unidbg | v0.9.1 / 0.9.9 | 均为上游最新（rizin main 仍有编译 bug，故 pin tag） |
+| cloudflared / frida-server | 2026.9.3 / 17.19.0 | CI 注入，版本常量在 `build-multiabi.yml` |
+
+## 升级作业规范（升级依赖时的检查清单）
+
+1. **先查上游 pom**：unidbg 配套依赖一律以 `unidbg-api:<版本>` 的 pom 为准，不单独升级。
+2. **提前预检资源冲突**：升级前把新 jar/aar 的 ZIP 条目列出来比对一遍，一次性算出 `packaging.resources` 需要新增的 `excludes` / `pickFirsts` / `merges`（否则每轮 CI 只暴露一个冲突，一轮 8~15 分钟）。
+3. **缓存必须感知输入**：CI 里 native 构建缓存 key 必须包含 LIEF 版本与 NDK 版本，否则旧产物会让升级「看起来成功其实没生效」。
+4. **补丁按版本选择**：上游补丁要绑定源码版本，并让「应用失败」只告警不中断（上游修好后旧补丁失配，不该把流水线弄红）。
+5. **API 变化的库要在代码里兼容或补依赖**（如 LIEF 1.0 的 `to_json` 拆分、ELK 0.12 需要 xtext runtime），不要用 R8 `dontwarn` 掩盖。

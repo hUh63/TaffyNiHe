@@ -76,7 +76,8 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 
 | 位置 | 内容 |
 |---|---|
-| `third_party/patches/lief-0.16.1-*.patch` | LIEF 0.16.1 的 3 处本地修复（chained union size / OAT lower_bound / warnings） |
+| `third_party/patches/lief-1.0.0-*.patch` | LIEF 1.0.0 的 2 处本地修复（chained union size / OAT lower_bound）—— 按版本选用 |
+| `third_party/patches/lief-0.16.1-*.patch` | LIEF 0.16.1 的 3 处本地修复（chained union size / OAT lower_bound / warnings）—— 保留以支持回退 |
 | `tools/blutter-matrix/` | blutter 多 Dart 版本矩阵的构建脚本与改动 |
 | `tools/dex2c/` | Dex2C（dcc）构建与加固接入 |
 | `tools/unidbg-unicorn-bridge/` | unidbg 的 unicorn2 JNI 桥（导出 `Java_com_github_unidbg_*` 符号） |

@@ -1160,6 +1160,9 @@ internal fun SettingsEditorPage(t: UiText) {
 
     // ══════════════════════ UI ══════════════════════
     val dirty = code != savedCode
+    // 未保存状态暴露给 MainActivity（切换底部导航时做「离开前确认」）
+    LaunchedEffect(dirty) { EditorSession.dirty = dirty }
+    LaunchedEffect(Unit) { EditorSession.confirmOnExit = EditorCommands.confirmOnExit(context) }
     val curLn = EditorTextOps.lineOf(tf.text, tf.selection.start)
     val curCol = EditorTextOps.columnOf(tf.text, tf.selection.start)
     val outline = remember(code, mode) { outlineOf(code, mode) }
@@ -1239,6 +1242,20 @@ internal fun SettingsEditorPage(t: UiText) {
                         text = { Text(if (zh) "命令面板 / 自定义工具条" else "Command palette / toolbar") },
                         leadingIcon = { Icon(Icons.Default.Search, null) },
                         onClick = { showMoreMenu = false; cmdQuery = ""; showCommandPalette = true },
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (zh) "离开前确认" else "Confirm on exit") + " · " +
+                                    if (EditorSession.confirmOnExit) (if (zh) "开" else "on") else (if (zh) "关" else "off")
+                            )
+                        },
+                        onClick = {
+                            showMoreMenu = false
+                            val v = !EditorSession.confirmOnExit
+                            EditorSession.confirmOnExit = v
+                            EditorCommands.setConfirmOnExit(context, v)
+                        },
                     )
                     EditorCommands.grouped().forEach { (_, cmds) ->
                         cmds.take(6).forEach { cmd ->

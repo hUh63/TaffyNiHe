@@ -1,6 +1,9 @@
 package com.soreverse.mcp
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 /**
  * 编辑器「命令系统」——借鉴 Xed-Editor 的 Command / CommandProvider / ToolbarConfiguration 三层设计。
@@ -90,6 +93,15 @@ internal object EditorCommands {
 
     private const val PREFS = "taffy_editor_prefs"
     private const val KEY_TOOLBAR = "editor_toolbar_order"
+    private const val KEY_CONFIRM_EXIT = "editor_confirm_exit"
+
+    /** 离开编辑器前是否二次确认（有未保存内容时）。 */
+    fun confirmOnExit(ctx: Context): Boolean =
+        runCatching { prefs(ctx).getBoolean(KEY_CONFIRM_EXIT, true) }.getOrDefault(true)
+
+    fun setConfirmOnExit(ctx: Context, value: Boolean) {
+        runCatching { prefs(ctx).edit().putBoolean(KEY_CONFIRM_EXIT, value).apply() }
+    }
 
     /** 语言相关的注释前缀。 */
     fun commentPrefix(lang: CodeHighlighter.Lang): String = when (lang) {
@@ -132,6 +144,12 @@ internal object EditorCommands {
         },
         EditorCommand("line.del", "删除行", "Delete line", G_LINE) { h ->
             writeText(h, EditorTextOps.deleteLines(h.text, h.selStart, h.selEnd))
+        },
+        EditorCommand("line.sortAsc", "行排序 ↑", "Sort lines A→Z", G_LINE, enabled = { it.text.contains('\n') }) { h ->
+            writeText(h, EditorTextOps.sortLines(h.text, h.selStart, h.selEnd, desc = false))
+        },
+        EditorCommand("line.sortDesc", "行排序 ↓", "Sort lines Z→A", G_LINE, enabled = { it.text.contains('\n') }) { h ->
+            writeText(h, EditorTextOps.sortLines(h.text, h.selStart, h.selEnd, desc = true))
         },
         // ── 大小写 / 格式化 ──
         EditorCommand("case.upper", "转大写", "UPPER", G_CASE, enabled = { it.hasSelection }) { h ->
@@ -233,4 +251,16 @@ internal object EditorCommands {
     fun grouped(): List<Pair<String, List<EditorCommand>>> =
         listOf(G_EDIT, G_LINE, G_CASE, G_FILE, G_NAV, G_VIEW, G_AI, G_PANEL)
             .map { g -> g to ALL.filter { it.group == g } }
+}
+
+/**
+ * 编辑器会话状态（跨 composable 共享）：
+ * 编辑器（SettingsEditorPage）写入 [dirty]，MainActivity 在切换底部导航时读取，用于「离开前确认」。
+ */
+internal object EditorSession {
+    /** 当前是否存在未保存内容。 */
+    var dirty by mutableStateOf(false)
+
+    /** 离开编辑器时是否二次确认（由编辑器页的「更多」菜单开关，持久化在 taffy_editor_prefs）。 */
+    var confirmOnExit by mutableStateOf(true)
 }

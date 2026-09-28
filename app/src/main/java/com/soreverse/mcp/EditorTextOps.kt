@@ -57,6 +57,33 @@ internal object EditorTextOps {
         return nt to lineStartOffset(nt, from.coerceAtLeast(1))
     }
 
+    /**
+     * 行排序：对选区覆盖的行（无选区则整篇）按字典序排序（对标 Xed-Editor 的 line sorting commands）。
+     * @param desc 降序
+     * @param caseSensitive 是否区分大小写（默认不区分，更符合直觉）
+     * @return (新文本, 新光标偏移)——光标落在排序区间首行行首
+     */
+    fun sortLines(
+        text: String,
+        selStart: Int,
+        selEnd: Int,
+        desc: Boolean,
+        caseSensitive: Boolean = false,
+    ): Pair<String, Int> {
+        val (from, to) = selectionLineRange(text, selStart, selEnd)
+        val lines = text.split("\n")
+        val a = (from - 1).coerceIn(0, (lines.size - 1).coerceAtLeast(0))
+        val b = to.coerceIn(1, lines.size)
+        if (b - a < 2) return text to selStart
+        val slice = lines.subList(a, b).toList()
+        val cmp = if (caseSensitive) compareBy<String> { it } else compareBy<String> { it.lowercase() }
+        val sorted = slice.sortedWith(if (desc) cmp.reversed() else cmp)
+        val mutable = lines.toMutableList()
+        for (i in sorted.indices) mutable[a + i] = sorted[i]
+        val nt = mutable.joinToString("\n")
+        return nt to lineStartOffset(nt, a + 1)
+    }
+
     /** 缩进 / 取消缩进选中行。 */
     fun indent(text: String, selStart: Int, selEnd: Int, outdent: Boolean, useTab: Boolean): Pair<String, Int> {
         val (from, to) = selectionLineRange(text, selStart, selEnd)

@@ -489,9 +489,13 @@ private fun SoReverseApp() {
                                 zh = t.zh,
                                 onSelect = { target ->
                                     if (target != tab) {
-                                        settingsDest = SettingsDest.Root
-                                        toolCategory = null
-                                        tab = target
+                                        if (tab == MainTab.Editor && EditorSession.dirty && EditorSession.confirmOnExit) {
+                                            pendingLeave = target
+                                        } else {
+                                            settingsDest = SettingsDest.Root
+                                            toolCategory = null
+                                            tab = target
+                                        }
                                     }
                                 },
                             )
@@ -706,6 +710,29 @@ private fun SoReverseApp() {
                             tab = MainTab.Settings
                             settingsDest = SettingsDest.Updates
                         }) { Text(if (t.zh) "查看更新" else "View update") }
+                    },
+                )
+            }
+            // 「离开编辑器前确认」：仅当编辑器有未保存内容且开关打开时触发。
+            // 编辑器是常驻挂载的，离开不会丢内容，因此确认文案如实说明这一点。
+            pendingLeave?.let { target ->
+                AlertDialog(
+                    onDismissRequest = { pendingLeave = null },
+                    title = { Text(if (t.zh) "有未保存的修改" else "Unsaved changes") },
+                    text = {
+                        Text(
+                            if (t.zh) "编辑器里有未保存的内容。切走不会丢失（编辑器保持挂载，标签和内容都还在），仍要现在切换吗？"
+                            else "The editor has unsaved changes. Switching away does not lose them (the editor stays mounted). Switch now?"
+                        )
+                    },
+                    dismissButton = { TextButton(onClick = { pendingLeave = null }) { Text(if (t.zh) "留在编辑器" else "Stay") } },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            pendingLeave = null
+                            settingsDest = SettingsDest.Root
+                            toolCategory = null
+                            tab = target
+                        }) { Text(if (t.zh) "离开" else "Leave") }
                     },
                 )
             }

@@ -219,6 +219,10 @@ dependencies {
     implementation("org.eclipse.elk:org.eclipse.elk.core:0.12.0")
     implementation("org.eclipse.elk:org.eclipse.elk.alg.layered:0.12.0")
     implementation("org.eclipse.elk:org.eclipse.elk.graph:0.12.0")
+    // ELK 0.12 的算法元数据 provider 由 Xtend 生成，引用了 org.eclipse.xtext.xbase.lib 的
+    // CollectionLiterals（ELK 的 maven pom 未声明该依赖）—— 不显式补齐，R8 会在
+    // LayeredMetaDataProvider.<clinit> 上报 Missing class。
+    implementation("org.eclipse.xtext:org.eclipse.xtext.xbase.lib:2.44.0")
     implementation("commons-io:commons-io:2.21.0")  // unidbg 0.9.9 锁定版本，勿单独升级
     implementation("com.alibaba:fastjson:1.2.83")  // unidbg 0.9.9 锁定版本，勿单独升级
     implementation("com.lambdapioneer.argon2kt:argon2kt:1.6.0")

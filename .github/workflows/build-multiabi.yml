@@ -290,6 +290,32 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: 准备 Android SDK 与 NDK（Dex2C 需要 ndk-build）
+        run: |
+          set -e
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          [ -d "$SDK" ] || SDK=/usr/local/lib/android/sdk
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SM_BIN="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | head -1)"
+          if [ -n "$SM_BIN" ]; then
+            echo "$SM_BIN" >> "$GITHUB_PATH"
+          else
+            echo "::error::未找到 sdkmanager，无法安装 NDK"; exit 1
+          fi
+          for i in 1 2 3 4; do
+            echo "尝试安装 NDK (第 $i 次)..."
+            if sdkmanager --install "ndk;$NDK_VERSION" > /dev/null 2>&1; then
+              echo "NDK 安装成功"; break
+            fi
+            [ "$i" = "4" ] && { echo "::error::sdkmanager 安装 NDK 连续失败"; exit 1; }
+            sleep 15
+          done
+          NDK_BASE="$SDK/ndk/$NDK_VERSION"
+          { [ -x "$NDK_BASE/ndk-build" ] || [ -x "$NDK_BASE/build/ndk-build" ]; } \
+            || { echo "::error::安装后仍无 ndk-build: $NDK_BASE"; ls -la "$NDK_BASE" | head -30; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK_BASE" >> "$GITHUB_ENV"
+
       - name: 下载各 ABI 的 native so
         uses: actions/download-artifact@v4
         with:
@@ -348,7 +374,7 @@ jobs:
           DCC_COMMIT="17de4fd3202bd0e46735974211a43cda39fca5f3"  # dcc master @ 2024-02-07（上游钉死）
           APKTOOL_VERSION="2.12.1"
           BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
+          NDK_BASE="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$NDK_VERSION}"
           WORK="$RUNNER_TEMP/dex2c"
           FILTER="$GITHUB_WORKSPACE/tools/dex2c/filter.txt"
 
@@ -360,7 +386,17 @@ jobs:
           KEY_PASSWORD="$(grep -E '^keyPassword=' "$KEYS" | head -1 | cut -d= -f2-)"
           [ -f "$STORE_FILE" ] || { echo "::error::keystore 不存在: $STORE_FILE"; exit 1; }
 
-          test -x "$NDK_DIR/ndk-build" || { echo "::error::ndk-build 不存在于 $NDK_DIR"; exit 1; }
+          # ndk-build 在 NDK 里的位置随版本变化（顶层 / build/ 下），两者都探测；
+          # dcc 只认 <ndk_dir>/ndk-build，故统一软链到一个 shim 目录再交给 dcc。
+          NB=""
+          for cand in "$NDK_BASE/ndk-build" "$NDK_BASE/build/ndk-build"; do
+            [ -x "$cand" ] && { NB="$cand"; break; }
+          done
+          [ -n "$NB" ] || { echo "::error::找不到 ndk-build（$NDK_BASE）"; ls -la "$NDK_BASE" 2>&1 | head -30; exit 1; }
+          echo "[dex2c] ndk-build = $NB"
+          mkdir -p "$WORK/ndk"
+          ln -sf "$NB" "$WORK/ndk/ndk-build"
+          NDK_DIR="$WORK/ndk"
           test -f "$FILTER" || { echo "::error::缺少 $FILTER"; exit 1; }
 
           git clone --quiet https://github.com/amimo/dcc.git "$WORK/dcc"

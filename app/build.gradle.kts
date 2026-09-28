@@ -167,7 +167,7 @@ dependencies {
     implementation(project(":terminal-emulator"))
     implementation(project(":terminal-view"))
 
-    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -175,58 +175,64 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("io.ktor:ktor-server-core-jvm:3.5.1")
-    implementation("io.ktor:ktor-server-cio-jvm:3.5.1")
-    implementation("com.squareup.okhttp3:okhttp:5.4.0")
-    implementation("com.squareup.okhttp3:okhttp-sse:5.4.0")
+    implementation("io.ktor:ktor-server-core-jvm:3.6.0")
+    implementation("io.ktor:ktor-server-cio-jvm:3.6.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:5.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.github.rikkahub:markdown:d79a97cc8e")
-    implementation("org.jsoup:jsoup:1.22.2")
+    implementation("org.jsoup:jsoup:1.23.2")
 
     // 权限管理: Shizuku (adb 级 shell 权限) + Dhizuku (设备所有者权限)
     // provider 模块提供 rikka.shizuku.ShizukuProvider（Manifest 必需，缺了启动闪退）
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
-    implementation("io.github.iamr0s:Dhizuku-API:2.5.3")
+    implementation("io.github.iamr0s:Dhizuku-API:2.6.0")
 
+    // ⚠️ 以下 unidbg 配套依赖的版本由 unidbg-api:0.9.9 的 pom 决定，**不要单独升级**：
+    //    unicorn 1.0.15 / capstone 3.1.8 / keystone 0.9.7 / fastjson 1.2.83 /
+    //    commons-codec 1.21.0 / commons-collections4 4.5.0 / commons-io 2.21.0 / demumble 1.0.4 / apk-parser 2.6.10
+    //    unidbg 用的是本地 patched jar（不参与 Gradle 版本解析），传递依赖必须手工对齐；
+    //    fastjson 更是 unidbg McpTools.dispatchTool(String, com.alibaba.fastjson.JSONObject) 的签名要求，
+    //    升到 2.x 会让反射调用（UnidbgEmulator.sessionNativeToolCall）直接失效。
     implementation(files("libs/unidbg-api-0.9.9-android-patched.jar"))
     implementation(files("libs/unidbg-android-0.9.9-android-patched.jar"))
     implementation(files("libs/capstone-3.1.8-android-patched.jar"))
     implementation(files("libs/keystone-0.9.7-android-patched.jar"))
-    implementation("net.java.dev.jna:jna:5.10.0@aar")
-    implementation("commons-codec:commons-codec:1.21.0")
-    implementation("org.apache.commons:commons-collections4:4.5.0")
+    implementation("net.java.dev.jna:jna:5.19.1@aar")
+    implementation("commons-codec:commons-codec:1.21.0")  // unidbg 0.9.9 锁定版本，勿单独升级
+    implementation("org.apache.commons:commons-collections4:4.5.0")  // unidbg 0.9.9 锁定版本，勿单独升级
 
     // 逆核: Eclipse ELK 分层布局引擎（CFG 画布可选布局；对应 Exbin ElkLayoutEngine 的官方 Java 库版）
-    implementation("org.eclipse.elk:org.eclipse.elk.core:0.9.1")
-    implementation("org.eclipse.elk:org.eclipse.elk.alg.layered:0.9.1")
-    implementation("org.eclipse.elk:org.eclipse.elk.graph:0.9.1")
-    implementation("commons-io:commons-io:2.21.0")
-    implementation("com.alibaba:fastjson:1.2.83")
+    implementation("org.eclipse.elk:org.eclipse.elk.core:0.12.0")
+    implementation("org.eclipse.elk:org.eclipse.elk.alg.layered:0.12.0")
+    implementation("org.eclipse.elk:org.eclipse.elk.graph:0.12.0")
+    implementation("commons-io:commons-io:2.21.0")  // unidbg 0.9.9 锁定版本，勿单独升级
+    implementation("com.alibaba:fastjson:1.2.83")  // unidbg 0.9.9 锁定版本，勿单独升级
     implementation("com.lambdapioneer.argon2kt:argon2kt:1.6.0")
 
     // 逆核: 内置逆向静态分析工具(纯 Java, 作为 MCP 工具聚合)。
     // jadx: dex→java 反编译
-    implementation("io.github.skylot:jadx-core:1.5.1")
-    implementation("io.github.skylot:jadx-dex-input:1.5.1")
-    implementation("org.slf4j:slf4j-api:2.0.16")
+    implementation("io.github.skylot:jadx-core:1.5.6")
+    implementation("io.github.skylot:jadx-dex-input:1.5.6")
+    implementation("org.slf4j:slf4j-api:2.0.20")
     // APKEditor 依赖 ARSCLib: APK 资源解包/回编/合并拆分包(aapt 无关)
-    implementation("io.github.reandroid:ARSCLib:1.3.5")
+    implementation("io.github.reandroid:ARSCLib:1.4.0")
     // APKEditor: 完整 APK 反编译(资源→json/xml)/回编打包/合并拆分包(xapk/apks→单apk)/去混淆重构/加固保护。
     // 纯 Java, aapt 无关, 基于 ARSCLib。补齐 MT 管理器的"改完完整回编成 APK"最后一环。
     implementation("com.github.REAndroid:APKEditor:V1.4.9")
     // smali/baksmali: dex↔smali 汇编(Google 维护的 Android 友好 fork)
-    implementation("com.android.tools.smali:smali:3.0.9")
-    implementation("com.android.tools.smali:smali-baksmali:3.0.9")
-    implementation("com.android.tools.smali:smali-dexlib2:3.0.9")
+    implementation("com.android.tools.smali:smali:3.0.10")
+    implementation("com.android.tools.smali:smali-baksmali:3.0.10")
+    implementation("com.android.tools.smali:smali-dexlib2:3.0.10")
     // (dex2jar 已移除: 阿里云/central 缺子模块 dex-ir/d2j-external, 且 jadx 已直接 dex→java 更强, 边际价值低)
     // apksig: APK v1/v2/v3 签名(Google 官方, 纯 Java, apksigner 底层库), 用于回编打包后签名
-    implementation("com.android.tools.build:apksig:8.7.3")
+    implementation("com.android.tools.build:apksig:9.4.1")
     // bouncycastle: 运行时生成自签名证书/密钥对(给回编后的 APK 签名用)
-    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.86")
     // DexKit: C++ 实现的高性能 dex 反混淆查找库(带 arm64 native so)。
     // 混淆 App 里靠特征(用了哪些字符串/调用/参数类型)反查被混淆的真实类名/方法名，逆向定位利器。
-    implementation("org.luckypray:dexkit:2.0.4")
+    implementation("org.luckypray:dexkit:2.3.0")
     implementation("com.github.zhkl0228:demumble:1.0.4")
     implementation("net.dongliu:apk-parser:2.6.10")
     implementation("com.github.zhkl0228:unidbg-unicorn2:0.9.9") {
@@ -241,5 +247,5 @@ dependencies {
     // 显式补回该 artifact（不会重新引入 unidbg-api，避免与 patched jar 冲突）。
     implementation("com.github.zhkl0228:unicorn:1.0.15")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20250517")
+    testImplementation("org.json:json:20260814")
 }

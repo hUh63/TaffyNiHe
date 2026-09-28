@@ -71,7 +71,7 @@ import com.soreverse.mcp.core.SettingsStore
 private val toolPageDests = setOf(
     SettingsDest.Rizin, SettingsDest.Edbg, SettingsDest.Capture, SettingsDest.Sandbox,
     SettingsDest.Workflow, SettingsDest.ApkEdit, SettingsDest.DexExplorer, SettingsDest.Linux,
-    SettingsDest.Terminal, SettingsDest.Git, SettingsDest.Extensions,
+    SettingsDest.Terminal, SettingsDest.Git, SettingsDest.Extensions, SettingsDest.NativeExec,
 )
 
 private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
@@ -104,6 +104,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Capture -> if (t.zh) "抓包" else "Capture"
     SettingsDest.Linux -> if (t.zh) "Linux 环境" else "Linux Environment"
     SettingsDest.Terminal -> if (t.zh) "终端执行" else "Terminal"
+    SettingsDest.NativeExec -> if (t.zh) "本地可执行" else "Native Executables"
     SettingsDest.Sandbox -> if (t.zh) "动态沙箱" else "Sandbox"
     SettingsDest.Python -> if (t.zh) "编辑器" else "Editor"
     SettingsDest.Git -> if (t.zh) "Git 仓库" else "Git Repository"
@@ -200,6 +201,7 @@ internal fun SettingsHub(
                     SettingsGroup(if (t.zh) "开发环境" else "Dev environment") {
                         SettingsNavRow(t, SettingsDest.Linux, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Terminal, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.NativeExec, onDest); GroupDivider()
                         NavRow(settingsTitle(t, SettingsDest.Python), null, settingsIcon(SettingsDest.Python), onClick = onOpenEditor); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Git, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Workspace, onDest); GroupDivider()
@@ -278,6 +280,7 @@ internal fun SettingsHub(
             SettingsDest.Capture -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { CapturePage(t) }
             SettingsDest.Linux -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsLinuxPage(t) }
             SettingsDest.Terminal -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsTerminalPage(t) }
+            SettingsDest.NativeExec -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsNativeExecPage(t) }
             SettingsDest.Git -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsGitPage(t) }
             SettingsDest.Extensions -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsExtensionsPage(t, onDest) }
             SettingsDest.Help -> SettingsHelpPage(t)
@@ -447,6 +450,7 @@ private fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
     SettingsDest.Limits -> Icons.Default.Analytics
     SettingsDest.Linux -> Icons.Default.Terminal
     SettingsDest.Terminal -> Icons.Default.Terminal
+    SettingsDest.NativeExec -> Icons.Default.PlayArrow
     SettingsDest.Python -> Icons.Default.Code
     SettingsDest.Git -> Icons.Default.AccountTree
     SettingsDest.Workspace -> Icons.Default.FolderOpen

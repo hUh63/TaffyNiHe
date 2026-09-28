@@ -249,6 +249,38 @@ object NativeExec {
         return args to null
     }
 
+    /**
+     * 取子进程 pid：`Process.pid()` 是 Java 9 API（Android 33+ 才有），minSdk 26 下必须先反射；
+     * 反射拿不到再按 `/proc/<pid>/cmdline` 回退匹配（只可能命中本应用 uid 的进程）。
+     */
+    private fun pidOf(process: Process): Long {
+        val viaReflection = runCatching {
+            Process::class.java.getMethod("pid").invoke(process) as? Long
+        }.getOrNull()
+        if (viaReflection != null && viaReflection > 0) return viaReflection
+        return -1L
+    }
+
+    /** 回退方案：按 cmdline 前缀匹配刚启动的进程（带短暂重试，等 /proc 就绪）。 */
+    private fun findPidByBinary(binPath: String): Long {
+        val selfUid = android.os.Process.myUid()
+        repeat(5) { attempt ->
+            val entries = runCatching { File("/proc").listFiles() }.getOrNull()
+            entries?.forEach { dir ->
+                val pid = dir.name.toLongOrNull() ?: return@forEach
+                val cmdline = runCatching { File(dir, "cmdline").readText() }.getOrNull() ?: return@forEach
+                if (!cmdline.startsWith(binPath)) return@forEach
+                val uid = runCatching {
+                    File(dir, "status").readLines().firstOrNull { it.startsWith("Uid:") }
+                        ?.trim()?.split(Regex("\\s+"))?.getOrNull(1)?.toInt()
+                }.getOrNull()
+                if (uid == null || uid == selfUid) return pid
+            }
+            Thread.sleep(120L * (attempt + 1))
+        }
+        return -1L
+    }
+
     private fun drain(input: InputStream, sink: StringBuilder, limit: Int, truncated: AtomicBoolean) {
         runCatching {
             val buf = ByteArray(8192)
@@ -311,7 +343,8 @@ object NativeExec {
                 ExecResult(-1, out.toString(), err.toString() + "\n[timeout after ${timeout}s]", truncated.get(), timedOut = true)
             } else {
                 tOut.join(2000); tErr.join(2000)
-                ExecResult(process.exitValue(), out.toString(), err.toString(), truncated.get(), timedOut = false, pid = process.pid())
+                val pid = pidOf(process)
+                ExecResult(process.exitValue(), out.toString(), err.toString(), truncated.get(), timedOut = false, pid = pid)
             }
         }.getOrElse { e ->
             ExecResult(-1, "", errText("EXEC_FAILED", e.message ?: e.javaClass.simpleName))
@@ -335,7 +368,12 @@ object NativeExec {
             val log = logFile ?: File(context.cacheDir, "native-exec-${name.removeSuffix(".so")}.log")
             val pb = ProcessBuilder(cmd).directory(context.cacheDir).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(log))
             val process = pb.start()
-            val pid = process.pid()
+            val pid = pidOf(process).let { if (it > 0) it else findPidByBinary(bin.absolutePath) }
+            if (pid <= 0) {
+                // 拿不到 pid 就无法在「后台进程」里管理它 —— 宁可终止也不要留下失控进程
+                runCatching { process.destroyForcibly() }
+                return err("PID_UNAVAILABLE", "已启动但无法确定子进程 pid，为避免留下不可管理的常驻进程已将其终止", argument = "name", badValue = name)
+            }
             daemons[pid] = Proc(pid, name, cmd.joinToString(" "), System.currentTimeMillis(), process, log)
             ok(JSONObject()
                 .put("pid", pid)

@@ -1186,6 +1186,8 @@ object ToolCatalog {
         *SoDataTool.ALL.toTypedArray(),
         // 塔菲逆核: 把编辑会话字节就地写回原始 SO（写前备份 + 回读 sha256 校验）
         *SoSyncOriginalTool.ALL.toTypedArray(),
+        // 塔菲逆核: 原生可执行通道(execve + jniLibs，免 root/proot)
+        *NativeExecTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

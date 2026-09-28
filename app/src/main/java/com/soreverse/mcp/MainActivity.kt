@@ -332,6 +332,9 @@ private fun SoReverseApp() {
     var editorMounted by remember { mutableStateOf(false) }
     // 编辑器有未保存内容时，切换底部导航前的二次确认目标页（null = 无待确认）
     var pendingLeave by remember { mutableStateOf<MainTab?>(null) }
+    // 「任务」页继续历史任务：正在恢复的任务 id（按钮转圈）+ 恢复失败原因（弹窗展示）
+    var resumingTaskId by remember { mutableStateOf<String?>(null) }
+    var taskResumeError by remember { mutableStateOf<String?>(null) }
     var settingsDest by remember { mutableStateOf(SettingsDest.Root) }
     var language by remember { mutableStateOf(settings.language) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
@@ -587,9 +590,17 @@ private fun SoReverseApp() {
                                 MainTab.Tasks -> TasksPage(
                                     t = t,
                                     state = workspaceState,
+                                    resumingTaskId = resumingTaskId,
+                                    onGoAnalyze = { tab = MainTab.Tools },
                                     onContinueTask = { taskId ->
-                                        workspaceState.continueTask(taskId)
-                                        tab = MainTab.Tools
+                                        // 继续 = 重新打开任务主文件并重建共享工作区，再切回分析页；
+                                        // 失败（文件没了 / URI 授权过期）就用弹窗说清楚，不再“点了没反应”。
+                                        resumingTaskId = taskId
+                                        appScope.launch {
+                                            val failure = resumeTaskWorkspace(context, workspaceState, taskId, t.zh)
+                                            resumingTaskId = null
+                                            if (failure == null) tab = MainTab.Tools else taskResumeError = failure
+                                        }
                                     },
                                 )
                                 MainTab.Editor -> Box(Modifier.fillMaxSize())
@@ -735,6 +746,22 @@ private fun SoReverseApp() {
                             toolCategory = null
                             tab = target
                         }) { Text(if (t.zh) "离开" else "Leave") }
+                    },
+                )
+            }
+            // 「继续任务」失败：把具体原因说清楚（文件失效 / URI 授权过期 / 引擎报错）
+            taskResumeError?.let { reason ->
+                AlertDialog(
+                    onDismissRequest = { taskResumeError = null },
+                    title = { Text(if (t.zh) "无法继续该任务" else "Cannot resume this task") },
+                    text = { Text(reason, style = MaterialTheme.typography.bodyMedium) },
+                    dismissButton = {
+                        TextButton(onClick = { taskResumeError = null; tab = MainTab.Tools }) {
+                            Text(if (t.zh) "去分析页" else "Open analysis")
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { taskResumeError = null }) { Text(if (t.zh) "知道了" else "OK") }
                     },
                 )
             }

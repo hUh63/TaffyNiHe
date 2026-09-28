@@ -160,6 +160,48 @@ internal class OpenDocumentReadWriteContract : ActivityResultContract<Array<Stri
         if (resultCode == Activity.RESULT_OK) intent?.data else null
 }
 
+/**
+ * 恢复历史任务：按任务记录重新打开主文件、重建共享工作区（workspaceId / 文件名 / 结果标签），
+ * 并把该任务重新置为当前任务。成功返回 null，失败返回可直接展示给用户的文案（本函数不抛异常）。
+ *
+ * 注意：主文件走的是 [EngineRuntime.open]，它会把 content:// 复制到缓存后打开，
+ * 因此 URI 授权必须仍然有效（选择文件时已调 takePersistableUriPermission 持久化）。
+ */
+internal suspend fun resumeTaskWorkspace(
+    context: android.content.Context,
+    state: WorkspaceState,
+    taskId: String,
+    zh: Boolean,
+): String? {
+    val task = state.tasks.firstOrNull { it.id == taskId }
+        ?: return if (zh) "任务不存在（可能已被清除），请在任务页刷新" else "Task not found (maybe cleared)"
+    val tools = state.tools
+    val path = task.mainPath.trim()
+    if (path.isBlank()) {
+        state.continueTask(taskId)
+        return if (zh) "该任务未记录主文件路径，请在分析页用「选文件」重新打开一个文件" else "This task has no recorded main file; open one in the analysis page"
+    }
+    tools.openError = ""
+    tools.opening = true
+    val opened = withContext(Dispatchers.IO) {
+        runCatching<JSONObject> { EngineProvider.get(context).open(path, false) }.getOrNull()
+    }
+    tools.opening = false
+    if (opened == null || !opened.optBoolean("ok", false)) {
+        val engineMessage = opened?.optString("error").orEmpty().takeIf { it.isNotBlank() && it != "null" }
+        return when {
+            engineMessage != null -> if (zh) "打开失败：$engineMessage" else "Open failed: $engineMessage"
+            path.startsWith("content://") -> if (zh) "无权访问该文件（URI 授权已失效），请重新选择文件后再继续" else "No access to the file (URI permission expired); pick it again"
+            else -> if (zh) "文件不存在或不可读：$path" else "File missing or unreadable: $path"
+        }
+    }
+    tools.sharedWorkspaceId = opened.optString("workspaceId")
+    tools.sharedSoName = opened.optString("soFileName").ifBlank { opened.optString("fileName") }.ifBlank { task.mainName }
+    tools.clearTabs()
+    state.continueTask(taskId)
+    return null
+}
+
 internal data class ToolDef(val key: String, val labelZh: String, val labelEn: String)
 
 internal val toolDefs = listOf(
@@ -816,6 +858,14 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
     val picker = rememberLauncherForActivityResult(OpenDocumentReadWriteContract()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         showDialog = false
+        // 持久化 URI 授权：任务记录只保存路径，应用重启后「继续任务」还要能重新打开这个文件，
+        // 不持久化的话 content:// 会在下次启动时报权限错误（历史任务因此无法继续）。
+        runCatching {
+            ctx.contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
         openWorkspaceFile(uri.toString(), uri.lastPathSegment ?: "file")
     }
 

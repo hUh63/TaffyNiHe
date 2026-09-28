@@ -181,6 +181,101 @@ object LinuxRootfs {
         return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } / 1048576
     }
 
+    // ------------------------------------------------------------------ 环境诊断（Health Check）
+
+    /** 单项自检结果。level: "ok" / "warn" / "fail"。 */
+    data class DiagItem(val title: String, val detail: String, val level: String)
+
+    /**
+     * 环境自检：把「Linux 跑不起来」变成可读清单（对标 Xed-Editor 的 Terminal Health Checks）。
+     *
+     * 逐项检查：执行通道 → proot 运行时文件/可执行权限 → rootfs 是否解压 → DNS → 端到端执行探针 → 可用存储。
+     * @param probe 是否真的执行一次 echo 探针（会起进程，默认开）
+     */
+    fun diagnose(context: Context, distro: String, zh: Boolean, probe: Boolean = true): List<DiagItem> {
+        val res = ArrayList<DiagItem>(8)
+
+        // 1. 执行通道
+        val root = RootShell.isRootAvailable() || PermissionManager.isShizukuGranted()
+        val ch = if (root) "chroot" else if (prootReady(context)) "proot" else null
+        res.add(
+            DiagItem(
+                if (zh) "执行通道" else "Execution channel",
+                when (ch) {
+                    "chroot" -> if (zh) "root/Shizuku 可用 → 原生 chroot（性能最优）" else "root/Shizuku → chroot"
+                    "proot" -> if (zh) "无 root → 内置 proot 用户态模拟" else "no root → built-in proot"
+                    else -> if (zh) "无可用通道：既没有 root/Shizuku，内置 proot 也未就绪（已降级，Linux 命令不可执行）"
+                    else "no channel available (degraded)"
+                },
+                if (ch == null) "fail" else "ok",
+            )
+        )
+
+        // 2. proot 运行时
+        val pdir = runCatching { prootDir(context) }.getOrNull()
+        if (pdir == null) {
+            res.add(DiagItem(if (zh) "proot 运行时" else "proot runtime", if (zh) "assets 缺少 proot 目录，无法解压" else "assets/proot missing", "fail"))
+        } else {
+            val missing = listOf("proot", "loader").filter { !File(pdir, it).isFile }
+            val execOk = File(pdir, "proot").canExecute()
+            val detail = when {
+                missing.isNotEmpty() -> if (zh) "缺少文件: ${missing.joinToString()}" else "missing: ${missing.joinToString()}"
+                !execOk -> if (zh) "文件齐全但缺少可执行权限（重新安装 APK 或点刷新重新解压）" else "not executable"
+                else -> if (zh) "已就绪（${pdir.absolutePath}）" else "ready"
+            }
+            res.add(DiagItem(if (zh) "proot 运行时" else "proot runtime", detail, if (missing.isEmpty() && execOk) "ok" else "fail"))
+        }
+
+        // 3. rootfs
+        val dir = rootfsDir(context, distro)
+        val shOk = File(dir, "bin/sh").isFile
+        res.add(
+            DiagItem(
+                if (zh) "rootfs（$distro）" else "rootfs ($distro)",
+                if (shOk) (if (zh) "已解压 ${sizeMb(context, distro)}MB" else "installed ${sizeMb(context, distro)}MB")
+                else (if (zh) "未解压，或缺少 /bin/sh（先点上方「安装」）" else "not extracted"),
+                if (shOk) "ok" else "warn",
+            )
+        )
+
+        // 4. DNS
+        if (shOk) {
+            val resolv = File(dir, "etc/resolv.conf")
+            val hasDns = resolv.isFile && runCatching { resolv.readText().contains("nameserver") }.getOrDefault(false)
+            res.add(
+                DiagItem(
+                    if (zh) "DNS 配置" else "DNS",
+                    if (hasDns) (if (zh) "etc/resolv.conf 就绪，包管理联网可用" else "resolv.conf ok")
+                    else (if (zh) "缺少 etc/resolv.conf，apk/apt 联网会失败（重新安装发行版可自动补写）" else "missing resolv.conf"),
+                    if (hasDns) "ok" else "warn",
+                )
+            )
+        }
+
+        // 5. 端到端探针
+        if (probe && ch != null && shOk) {
+            val r = runCatching { exec(context, distro, "echo taffy_ok", timeoutSec = 20) }.getOrNull()
+            val ok = r != null && r.code == 0 && r.output.contains("taffy_ok")
+            val detail = when {
+                r == null -> if (zh) "执行器不可用" else "executor unavailable"
+                else -> (if (zh) "echo taffy_ok → exit=${r.code} · 通道=${r.channel}" else "exit=${r.code} channel=${r.channel}") +
+                    if (ok) "" else (if (zh) "（未通过）" else " (failed)")
+            }
+            res.add(DiagItem(if (zh) "端到端探针" else "End-to-end probe", detail, if (ok) "ok" else "fail"))
+        }
+
+        // 6. 可用存储
+        val freeMb = context.filesDir.usableSpace / (1024L * 1024L)
+        res.add(
+            DiagItem(
+                if (zh) "可用存储" else "Free storage",
+                "${freeMb}MB" + if (freeMb < 300) (if (zh) " · 偏低，安装 Ubuntu（约 96MB）可能失败" else " · low") else "",
+                if (freeMb < 300) "warn" else "ok",
+            )
+        )
+        return res
+    }
+
     // ------------------------------------------------------------------ 执行
 
     data class ExecResult(val code: Int, val output: String, val channel: String)

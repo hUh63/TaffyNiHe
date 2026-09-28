@@ -23,7 +23,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -54,6 +56,8 @@ internal fun SettingsLinuxPage(t: UiText) {
     var output by remember { mutableStateOf("") }
     var execInfo by remember { mutableStateOf("") }
     var pendingRemove by remember { mutableStateOf<String?>(null) }
+    val clipboard = LocalClipboardManager.current
+    var diag by remember { mutableStateOf<List<LinuxRootfs.DiagItem>>(emptyList()) }
 
     val distros = remember(refreshTick) {
         LinuxRootfs.distros(context).map { d -> Triple(d.name, d.pkgMgr, LinuxRootfs.installed(context, d.name)) }
@@ -130,6 +134,72 @@ internal fun SettingsLinuxPage(t: UiText) {
                 trailingText = if (zh) "刷新" else "Refresh",
                 onClick = { refreshTick++ },
             )
+        }
+
+        if (channel == "none") {
+            GlassGroup(
+                title = if (zh) "降级模式" else "Degraded Mode",
+                footer = if (zh) "无执行通道时仅 Linux 功能不可用，应用其余能力不受影响" else "Only Linux features are unavailable; the rest of the app is unaffected",
+            ) {
+                InlineHint(
+                    if (zh) "当前没有可用的执行通道：设备上没有 root/Shizuku，且内置 proot 未就绪。\n可尝试：① 点上方「刷新」重新解压 proot；② 授予 Shizuku；③ 重新安装 APK 以恢复内置资产。\n下方「环境诊断」会逐项指出卡在哪一步。"
+                    else "No execution channel: no root/Shizuku and built-in proot not ready. Try Refresh, grant Shizuku, or reinstall. Run the health check below for details."
+                )
+            }
+        }
+
+        GlassGroup(
+            title = if (zh) "环境诊断" else "Health Check",
+            footer = if (zh) "逐项检查 proot 运行时 / rootfs / DNS / 端到端执行，定位「跑不起来」的原因" else "Diagnose why the Linux environment fails",
+        ) {
+            if (diag.isEmpty()) {
+                InlineHint(if (zh) "点「开始诊断」逐项体检（会执行一次 echo 探针）" else "Tap Run check (runs an echo probe)")
+            } else {
+                diag.forEachIndexed { i, item ->
+                    if (i > 0) GroupDivider()
+                    DataRow(
+                        title = item.title,
+                        subtitle = item.detail,
+                        trailingText = when (item.level) {
+                            "ok" -> "✅"
+                            "warn" -> "⚠️"
+                            else -> "❌"
+                        },
+                        onClick = { },
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PrimaryActionButton(
+                    if (zh) "开始诊断" else "Run check",
+                    {
+                        if (busy == null) {
+                            diag = emptyList()
+                            busy = "diag"
+                            scope.launch {
+                                val r = withContext(Dispatchers.IO) { LinuxRootfs.diagnose(context, target, zh) }
+                                diag = r
+                                busy = null
+                            }
+                        }
+                    },
+                    Modifier.weight(1f),
+                )
+                SecondaryActionButton(
+                    if (zh) "复制报告" else "Copy",
+                    {
+                        if (diag.isNotEmpty()) {
+                            clipboard.setText(
+                                AnnotatedString(diag.joinToString("\n") { "${it.level.uppercase()}\t${it.title}\t${it.detail}" })
+                            )
+                        }
+                    },
+                    Modifier.weight(1f),
+                )
+            }
         }
 
         GlassGroup(
@@ -244,6 +314,7 @@ internal fun SettingsLinuxPage(t: UiText) {
             busy!!.startsWith("in:") -> if (zh) "正在解压发行版…（Ubuntu 约 96MB，请稍候）" else "Extracting…"
             busy!!.startsWith("rm:") -> if (zh) "正在删除…" else "Removing…"
             busy == "exec" -> if (zh) "正在执行命令…" else "Running command…"
+            busy == "diag" -> if (zh) "正在诊断…" else "Diagnosing…"
             else -> if (zh) "处理中…" else "Working…"
         },
     )

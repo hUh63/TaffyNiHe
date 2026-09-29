@@ -12,6 +12,7 @@
 
 **逆向工具链**
 
+- **capstone 4.0 → 5.0.9（深度 fork）**：上游 `zhkl0228/capstone` 绑定停更在 3.1.8（capstone 4.0 API），本版把 C 引擎换到官方 **capstone 5.0.9**，并把绑定层重做为**单一 JNI 实现** —— `capstone.Capstone` 改为转发 `capstone.jni.FastDisassembler` 的薄转发器，删掉整套 JNA 结构体类（顺带作废「静态块从 jar 资源解 native + `coreVersion` 硬校验」这条在 Android 上走不通的路径），而 `capstone.api.*` 抽象层与 `capstone.Capstone$OpInfo` marker 接口**签名保持原样** —— unidbg 0.9.9 的 16 处引用**零改动**，无需「改写 unidbg 本地 patched jar」。绑定源码与 JNI 胶水随仓库提交（`third_party/capstone-java/`），4 个 ABI 的 `libcapstone.so` + `libdisassembler.so` 纳入原生构建流水线。
 - **LIEF 0.16.1 → 1.0.0**：`LIEF::to_json` 在 1.0 拆分为 `LIEF::ELF::to_json`，代码用 `LIEF_VERSION_MAJOR` 宏兼容两代；本地补丁集同步换代（新增 `lief-1.0.0-oat-lower_bound`、`lief-1.0.0-chained-union-size`）。
 - **fastjson 1.2.83 → 2.0.65**：改用 fastjson2 官方发布的 **fastjson1 兼容层**（`com.alibaba:fastjson` 的 2.x 系列）——保留 `com.alibaba.fastjson.*` 全套类名与 API、内核换成 fastjson2（AutoType 默认关闭）。unidbg 的 `McpTools.dispatchTool(String, com.alibaba.fastjson.JSONObject)` 反射调用**零改动**继续可用（已用 JVM 冒烟测试逐条验证 unidbg 用到的全部成员）。
 - **jadx 1.5.1 → 1.5.6**（DEX→Java 反编译质量提升）
@@ -38,14 +39,18 @@
 
 ## 🧊 冻结清单（明确「不升」，并已登记原因）
 
-`capstone 3.1.8`、`keystone 0.9.7`、`unicorn 1.0.15`、`commons-{codec,collections4,io}`、`demumble`、`apk-parser` 的版本由 **unidbg 0.9.9 的 pom / JNI 契约锁定**，单独升级会破坏编译期契约或运行时反射。
+`keystone 0.9.7`、`unicorn 1.0.15`、`commons-{codec,collections4,io}`、`demumble`、`apk-parser` 的版本由 **unidbg 0.9.9 的 pom / JNI 契约锁定**，单独升级会破坏编译期契约或运行时反射。
 
-其中 **capstone 无法通过「改写 unidbg 本地 patched jar」升级**：它依赖的 `capstone.api.*` 薄封装层是 zhkl0228 自研的，官方 capstone 5.x/6.x **没有这一层**、且 JNI ABI 不同 —— 强行升要连 unidbg 的 16 个引用类一起改写，并为 4 个 ABI 重造 `libcapstone.so`，投入大、收益小，登记为**已知限制**（详见 `DEPENDENCIES.md`）。
+`fastjson` 与 `capstone` 本版**已从该清单移出**：
 
-`fastjson` 已从本清单移出：1.2.83 → **2.0.65**（fastjson1 兼容层）。其余已在 `build.gradle.kts` 加注释、`DEPENDENCIES.md` 建立冻结登记，防止后人误升。
+- `fastjson` 1.2.83 → **2.0.65**：改用 fastjson2 官方发布的 fastjson1-compatible 兼容层（类名/API 全保，unidbg 反射调用零改动）。
+- `capstone` 引擎 4.0 → **5.0.9**：自建绑定 —— **新引擎 + 原样保留的 `capstone.api.*` 接口**，unidbg 零改动；capstone 4→5 的 C ABI 变化（`cs_insn.bytes`、`cs_detail.regs_read`、`cs_arm64_op` 字段重排等）由 C 侧 `disassembler.c` 直接 `#include <capstone/capstone.h>` 覆盖，不存在第二份结构定义需要同步。
+
+其余已在 `build.gradle.kts` 加注释、`DEPENDENCIES.md` 建立冻结登记，防止后人误升。
 
 ## 🛠 工程
 
+- **capstone 自建绑定接入原生构建**：`scripts/build-unidbg-native.sh` 新增 `libdisassembler.so`（JNI 胶水）构建、capstone 源码改指官方 `capstone-engine/capstone@5.0.9`，适配 5.x 的 CMake 选项改名（`CAPSTONE_BUILD_SHARED → BUILD_SHARED_LIBS`、`CAPSTONE_BUILD_STATIC → BUILD_STATIC_LIBS`）并去掉 `SOVERSION`（否则 SONAME 变 `libcapstone.so.5`，Android 只打包 `libcapstone.so` 会解析不到）；`build-multiabi.yml` 的克隆源同步改指 5.0.9、产物门禁新增 `libdisassembler.so`。
 - CI 原生构建缓存 key 现在包含 **LIEF 版本 + NDK 版本**（此前不含版本号，会让升级静默复用旧产物，「看起来成功其实没生效」）。
 - LIEF 补丁改为**按版本选择 + 应用失败只告警**：上游修好后旧补丁失配不再把流水线弄红。
 - 补齐 `packaging.resources` 规则：bouncycastle 1.86 的 `META-INF/BCRSA204.*`、`META-INF/LICENSE.md`，以及 smali 3.0.10 / apksig 9.4.1 引入的裸 `LICENSE` 跨 jar 重名。

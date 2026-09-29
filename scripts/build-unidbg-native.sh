@@ -53,10 +53,9 @@
 #     需要 third_party/unidbg-src（zhkl0228/unidbg v0.9.9）提供桥源码。
 #   - libjnidispatch.so is provided automatically by the JNA AAR
 #     (net.java.dev.jna:jna); no need to build it.
-#   - libdisassembler.so / libdemumble.so only serve optional diagnostic
-#     paths in unidbg 0.9.9 and have no Android prebuilt source;
-#     UnidbgEmulator loads them tolerantly (warning only), so they are not
-#     built here either.
+#   - libdisassembler.so（capstone 的 JNI 绑定 capstone.jni.FastDisassembler）现在由本脚本
+#     从 third_party/capstone-java/native 构建并打包（它是 app 里 Capstone 唯一走通的路径）。
+#     libdemumble.so 仍是可选诊断路径，不在这里构建。
 #   - The CMake flags target NDK 29 / CMake 3.22 / unidbg 0.9.9; if you bump
 #     the NDK or CMake, adjust the flags per the upstream READMEs.
 set -euo pipefail
@@ -152,7 +151,7 @@ echo "[unidbg-native] NDK: $NDK"
 # --- Locate cmake (prefer the SDK's 3.22.1, mirroring the PS1 default) -------
 NINJA_BIN="$(command -v ninja || true)"
 if [[ -z "$CMAKE_BIN" ]]; then
-  for base in "$ANDROID_HOME" "$ANDROID_SDK_ROOT" "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do
+  for base in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do
     [[ -z "$base" || ! -d "$base" ]] && continue
     for v in 3.22.1.5040 3.22.1.5000 3.22.1.4700 3.22.1.4501 3.22.1; do
       if [[ -x "$base/cmake/$v/bin/cmake" ]]; then
@@ -208,13 +207,16 @@ build_one() {
 }
 
 if [[ $SKIP_CAPSTONE -eq 0 ]]; then
-  # Prefer the zhkl0228 fork (the unidbg 0.9.9 JNA bindings were written
-  # against its API); fall back to the official capstone-4.0.2-src
-  # (cs_open/cs_disasm ABI is stable and compatible).
-  cap="$PROJECT/third_party/zhkl-capstone-src"
-  [[ -d "$cap" ]] || cap="$PROJECT/third_party/capstone-4.0.2-src"
+  # 逆核 fork: capstone 4.0 -> 5.0.9（官方 capstone-engine/capstone tag 5.0.9）。
+  #  - CMake 选项改名：CAPSTONE_BUILD_SHARED -> BUILD_SHARED_LIBS、
+  #    CAPSTONE_BUILD_STATIC -> BUILD_STATIC_LIBS（5.x 起用标准名）。
+  #  - 去掉 shared 库的 SOVERSION：Android 只打包 libcapstone.so（无版本后缀），
+  #    若 SONAME 变成 libcapstone.so.5，libdisassembler.so 的 DT_NEEDED 会解析不到。
+  cap="$PROJECT/third_party/capstone-src"
+  [[ -d "$cap" ]] || { echo "error: capstone source missing: $cap" >&2; exit 1; }
+  sed -i '/set_target_properties(capstone_shared PROPERTIES$/,/^    )$/d' "$cap/CMakeLists.txt"
   build_one capstone "$cap" \
-    -DCAPSTONE_BUILD_STATIC=OFF -DCAPSTONE_BUILD_SHARED=ON \
+    -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF \
     -DCAPSTONE_BUILD_TESTS=OFF -DCAPSTONE_BUILD_CSTOOL=OFF \
     -DCAPSTONE_ARCHITECTURE_DEFAULT=OFF \
     -DCAPSTONE_ARM_SUPPORT=ON -DCAPSTONE_ARM64_SUPPORT=ON
@@ -222,6 +224,35 @@ if [[ $SKIP_CAPSTONE -eq 0 ]]; then
   [ -n "$RZ_SO" ] || { echo "error: libcapstone.so not produced"; exit 1; }
   cp "$RZ_SO" "$JNI_LIBS/"
   echo "[unidbg-native] copied libcapstone.so -> $JNI_LIBS"
+
+  # libdisassembler.so：capstone Java 绑定的 JNI 胶水（capstone.jni.FastDisassembler）。
+  # 逆核 fork 版源码在 third_party/capstone-java/native/（含已生成的 JNI 头）。
+  # 它直接 #include <capstone/capstone.h>，结构体布局由编译器按 5.0.9 保证 —— 这是
+  # app/libs/capstone-5.0.9-android-patched.jar 里 Capstone 唯一走通的路径。
+  CAPJNI="$PROJECT/third_party/capstone-java/native"
+  if [[ -f "$CAPJNI/disassembler.c" ]]; then
+    HOST_TAG="$(ls -d "$NDK/toolchains/llvm/prebuilt"/* 2>/dev/null | head -1)"
+    case "$ABI" in
+      arm64-v8a)   TARGET=aarch64-linux-android ;;
+      armeabi-v7a) TARGET=armv7a-linux-androideabi ;;
+      x86)         TARGET=i686-linux-android ;;
+      x86_64)      TARGET=x86_64-linux-android ;;
+    esac
+    CC_BIN="$HOST_TAG/bin/${TARGET}26-clang"
+    [[ -x "$CC_BIN" ]] || { echo "error: NDK clang not found: $CC_BIN" >&2; exit 1; }
+    "$CC_BIN" -shared -fPIC -O2 -Wl,-soname,libdisassembler.so \
+      -I"$cap/include" -I"$CAPJNI" \
+      "$CAPJNI/disassembler.c" "$CAPJNI/reg_mapping.c" \
+      -o "$JNI_LIBS/libdisassembler.so" \
+      -L"$(dirname "$RZ_SO")" -lcapstone
+    [[ -s "$JNI_LIBS/libdisassembler.so" ]] || { echo "error: libdisassembler.so not produced" >&2; exit 1; }
+    if [[ -x "$HOST_TAG/bin/llvm-strip" ]]; then
+      "$HOST_TAG/bin/llvm-strip" --strip-unneeded "$JNI_LIBS/libdisassembler.so" || true
+    fi
+    echo "[unidbg-native] built libdisassembler.so -> $JNI_LIBS"
+  else
+    echo "warning: $CAPJNI/disassembler.c missing - skip libdisassembler.so" >&2
+  fi
 fi
 
 if [[ $SKIP_KEYSTONE -eq 0 ]]; then

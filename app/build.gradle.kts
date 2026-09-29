@@ -205,15 +205,16 @@ dependencies {
     implementation("io.github.iamr0s:Dhizuku-API:2.6.0")
 
     // ⚠️ 以下 unidbg 配套依赖的版本由 unidbg-api:0.9.9 的 pom 决定，**不要单独升级**：
-    //    unicorn 1.0.15 / capstone 3.1.8 / keystone 0.9.7 /
+    //    unicorn 1.0.15 / keystone 0.9.7 /
     //    commons-codec 1.21.0 / commons-collections4 4.5.0 / commons-io 2.21.0 / demumble 1.0.4 / apk-parser 2.6.10
     //    unidbg 用的是本地 patched jar（不参与 Gradle 版本解析），传递依赖必须手工对齐。
-    //    capstone/keystone 是 zhkl0228 fork 的 Java 绑定，随 unidbg 的 JNI 契约冻结
-    //    （上游 maven 最新即为 3.1.8/0.9.7，官方 capstone 5/6.x 的绑定与 JNI ABI 不兼容，见 DEPENDENCIES.md）。
+    //    keystone 是 zhkl0228 fork 的 Java 绑定，随 unidbg 的 JNI 契约冻结（上游 maven 最新即 0.9.7，见 DEPENDENCIES.md）。
+    //    capstone 已从本清单移出 —— 改用本仓库自建绑定跟进官方 capstone 5.0.9 引擎
+    //    （源码 third_party/capstone-java；只要保住 capstone.api.* 与 Capstone$OpInfo，unidbg 零改动）。
     //    注：fastjson 已从本清单移出 —— 见下方 fastjson 依赖处（改用 fastjson1-compatible 兼容层）。
     implementation(files("libs/unidbg-api-0.9.9-android-patched.jar"))
     implementation(files("libs/unidbg-android-0.9.9-android-patched.jar"))
-    implementation(files("libs/capstone-3.1.8-android-patched.jar"))
+    implementation(files("libs/capstone-5.0.9-android-patched.jar"))
     implementation(files("libs/keystone-0.9.7-android-patched.jar"))
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("commons-codec:commons-codec:1.21.0")  // unidbg 0.9.9 锁定版本，勿单独升级

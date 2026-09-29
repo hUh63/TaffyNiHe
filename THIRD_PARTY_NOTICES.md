@@ -16,7 +16,7 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 | rizin | `librz_native.so`（静态链接） | [rizinorg/rizin](https://github.com/rizinorg/rizin) | LGPL-3.0 |
 | rz-ghidra 反编译器 | 同上 | [rizinorg/rz-ghidra](https://github.com/rizinorg/rz-ghidra) | LGPL-3.0 |
 | LIEF | 同上 | [lief-project/LIEF](https://github.com/lief-project/LIEF) | Apache-2.0 |
-| Capstone | `libcapstone.so` | [capstone-engine/capstone](https://github.com/capstone-engine/capstone) | BSD-3-Clause |
+| Capstone | `libcapstone.so` + `libdisassembler.so`（5.0.9） | [capstone-engine/capstone](https://github.com/capstone-engine/capstone) | BSD-3-Clause |
 | Keystone | `libkeystone.so` | [keystone-engine/keystone](https://github.com/keystone-engine/keystone) | GPL-2.0 ⚠️ 待复核（与 GPL-3.0 的兼容性） |
 | Unicorn（unicorn2 分支） | `libunicorn.so` | [zhkl0228/unicorn](https://github.com/zhkl0228/unicorn)（fork 自 unicorn-engine） | GPL-2.0 ⚠️ 待复核（同上） |
 | blutter 引擎（多 Dart 版本） | `libblutter_<hash>.so` | [worawit/blutter](https://github.com/worawit/blutter) | MIT |
@@ -37,7 +37,7 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 
 | 组件 | 文件 | 上游 | 许可 |
 |---|---|---|---|
-| Capstone Java 绑定 | `capstone-3.1.8-android-patched.jar`（zhkl0228 fork；Maven 最新即 3.1.8，含自研 `capstone.api.*` 层，随 unidbg JNI 契约冻结） | [zhkl0228/capstone](https://github.com/zhkl0228/capstone) | BSD-3-Clause |
+| Capstone Java 绑定 | `capstone-5.0.9-android-patched.jar`（逆核自建：保留上游 zhkl0228 fork 的 `capstone.api.*` 层，`capstone.Capstone` 改为 JNI 转发器，引擎 capstone 5.0.9；源码 `third_party/capstone-java/`） | [zhkl0228/capstone](https://github.com/zhkl0228/capstone) | BSD-3-Clause |
 | Keystone Java 绑定 | `keystone-0.9.7-android-patched.jar` | 上游 keystone Java binding | GPL-2.0 ⚠️ 待复核 |
 | unidbg | `unidbg-android-0.9.9-android-patched.jar`<br>`unidbg-api-0.9.9-android-patched.jar` | [zhkl0228/unidbg](https://github.com/zhkl0228/unidbg) | Apache-2.0 |
 
@@ -79,11 +79,12 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 | 位置 | 内容 |
 |---|---|
 | `third_party/patches/lief-1.0.0-*.patch` | LIEF 1.0.0 的 2 处本地修复（chained union size / OAT lower_bound）—— 按版本选用 |
+| `third_party/capstone-java/` | 逆核自建的 capstone Java 绑定 + JNI 胶水（基于官方 capstone 5.0.9，保留 zhkl0228 的 `capstone.api.*` 层） |
 | `third_party/patches/lief-0.16.1-*.patch` | LIEF 0.16.1 的 3 处本地修复（chained union size / OAT lower_bound / warnings）—— 保留以支持回退 |
 | `tools/blutter-matrix/` | blutter 多 Dart 版本矩阵的构建脚本与改动 |
 | `tools/dex2c/` | Dex2C（dcc）构建与加固接入 |
 | `tools/unidbg-unicorn-bridge/` | unidbg 的 unicorn2 JNI 桥（导出 `Java_com_github_unidbg_*` 符号） |
-| `tools/PatchCapstoneClinit.java` / `PatchKeystoneClinit.java` | capstone / keystone Java 绑定的 Android 适配补丁 |
+| `tools/PatchKeystoneClinit.java`（含已弃用的 `PatchCapstoneClinit.java`） | keystone Java 绑定的 Android 适配补丁（capstone 自改用 5.0.9 自建绑定、不再走 JNA 后已不需要） |
 | `rizin-cross-*.ini` / `build-*.ps1` / `build-native-android.sh` | rizin + rz-ghidra 的交叉编译配置 |
 
 ## 四、需要人工复核的合规注意

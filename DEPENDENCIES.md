@@ -61,7 +61,6 @@
 
 | 依赖 | 冻结版本 | 为什么不能升 |
 |---|---|---|
-| `capstone`（本地 patched jar） | 3.1.8（= capstone 4.0 API） | zhkl0228 fork 的 Java 绑定，Maven 上**最新就是 3.1.8**（2022-07 起停更，`capstone.Capstone.CS_API_MAJOR=4`）。它同时提供 unidbg 依赖的 `capstone.api.*` 抽象层（Disassembler / Instruction / DisassemblerFactory / arm,arm64 Operand…）。官方 capstone 5.x/6.x 是**另一套 Java 绑定**（没有 `capstone.api.*`）+ 不同 JNI ABI，升它要连 unidbg 一起改（见下）。 |
 | `keystone`（本地 patched jar） | 0.9.7 | 同 capstone；0.9.7 已是上游 Maven 最新（项目停更）。 |
 | `unicorn` | 1.0.15 | unidbg-api:0.9.9 pom 指定，JNI 桥（unicorn2 分支）与之配套。 |
 | `commons-codec` / `commons-collections4` / `commons-io` | 1.21.0 / 4.5.0 / 2.21.0 | unidbg-api pom 指定。 |
@@ -76,15 +75,28 @@
 > unidbg 用到的全部 fastjson 成员（`JSONObject()`/`JSONObject(boolean)`/`JSONObject(Map)`/
 > `put/get/getJSONObject/getJSONArray/getString/getBoolean*`/`toJSONString()`/`JSONArray.add|getString|size|isEmpty`/
 > `JSON.parseObject(String)`/`IOUtils.close(Closeable)`）均在兼容层存在且行为正常。
+>
+> ✅ **已解除冻结（深度 fork）**：`capstone` **引擎 4.0 → 5.0.9**。上游 `zhkl0228/capstone`
+> 绑定停更在 3.1.8（capstone 4.0 API），官方 5.x/6.x 确实是另一套绑定、**没有** `capstone.api.*` ——
+> 所以本仓库**自建绑定**：C 引擎换成官方 capstone 5.0.9，同时**原样保留** `capstone.api.*` 抽象层与
+> `capstone.Capstone$OpInfo` marker 接口（这两处就是 unidbg 的全部依赖面），把 `capstone.Capstone`
+> 重写为转发 `capstone.jni.FastDisassembler` 的薄转发器，并删掉整套 JNA 结构体类（顺带解决上游
+> 「静态块从 jar 资源解 native + `coreVersion` 硬校验」在 Android 上不可用的问题）。
+> 效果：unidbg 0.9.9 的 16 处引用**零改动**，不需要「改写 unidbg 本地 patched jar」。
+> 绑定源码与 JNI 胶水随仓库提交（`third_party/capstone-java/`）；4 个 ABI 的 `libcapstone.so`
+> 与 `libdisassembler.so` 已纳入 `scripts/build-unidbg-native.sh` 与 `build-multiabi.yml`。
 
-#### 关于「改写 unidbg 本地 patched jar 来升 capstone」
-capstone 与 fastjson 的情形**不同**：fastjson 的 2.x 兼容层保住了类名，故零改动；
+#### capstone 为什么走「自建绑定」而不是「改写 unidbg patched jar」
+capstone 与 fastjson 的情形**不同**：fastjson 的 2.x 兼容层保住了类名，故一行改动即可；
 而 capstone 的 Java 绑定本身就是 zhkl0228 自研的 `capstone.api.*` 薄封装，unidbg 有
 16 个类（`AbstractARMEmulator` / `AbstractARM64Emulator` / `ARM` / `McpTools` / `AssemblyCodeDumper` …）
 直接引用 `capstone.api.*` 与 `capstone.Capstone$OpInfo`，官方 5/6.x **没有这一层**。
-要在新 capstone 上跑通必须：(1) 用 ASM/重编译把 unidbg 里对这些类型的引用整体改写到新绑定；
-(2) 为新绑定重造 4 个 ABI 的 `libcapstone.so`。投入大、回归面广，收益只是「新指令解码覆盖」，
-故**暂不做**，登记为已知限制。
+因此 fork 的方向不是「把 unidbg 改到新绑定」，而是「把新引擎接到旧 API 上」：
+保留 `capstone.api.*` 与 `Capstone$OpInfo` 的签名不变，只重写 `capstone.Capstone` 为 JNI 转发器
+—— unidbg 侧零改动，回归面最小。配套：`capstone 4.0.2 → 5.0.9` 的 C ABI 变化
+（`cs_insn.bytes[16→24]`、`cs_detail.regs_read[12→20]`、`cs_arm64_op` 字段重排等）
+由 C 侧 `disassembler.c` 直接 `#include <capstone/capstone.h>` 覆盖，
+不存在第二份结构定义需要同步。
 
 > ⚠️ 关键点：本项目的 unidbg 用**本地 patched jar**（`app/libs/unidbg-*-0.9.9-android-patched.jar`），
 > 不参与 Gradle 版本解析 —— 它的传递依赖必须在 `build.gradle.kts` 里**手工对齐**。

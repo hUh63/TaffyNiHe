@@ -1,4 +1,4 @@
-# TaffyNiHe v1.3.59
+# TaffyNiHe v1.3.60
 
 本版为**依赖与工具链大版本升级**：功能与 v1.3.58 一致（分析页工具聚合、Flutter/Dart AOT 分析视图、原生可执行通道等见 v1.3.58 说明），重点是把整套技术栈推到当前最新可用版本。
 
@@ -59,4 +59,4 @@
 
 ---
 
-**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.58...v1.3.59
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.59...v1.3.60

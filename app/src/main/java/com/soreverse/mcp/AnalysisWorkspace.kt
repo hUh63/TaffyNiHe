@@ -1019,18 +1019,16 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                         tools.addTab(tl, if (zh) "反编译" else "Decompile", text)
                     }
                 }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.decompileTarget.isNotBlank() && !tools.decompileRunning, loading = tools.decompileRunning)
-                SmBtn(if (zh) "函数" else "Fns", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "functions", "", 30) }.getOrNull() }
-                    tools.addTab(tl, if (zh) "函数" else "Functions", r?.toString() ?: if (zh) "无" else "none")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn("Disasm", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).disasm(tools.sharedWorkspaceId, "", "", 20, "", 0, 0, 4096, tools.disasmAddr, null, "auto") }.getOrNull() }
-                    tools.addTab(tl, "Disasm", r?.toString() ?: if (zh) "失败" else "failed")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.disasmAddr.isNotBlank())
-                SmBtn("Hex", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", tools.disasmAddr.ifBlank { "0x0" }, 0, 256) }.getOrNull() }
-                    tools.addTab(tl, "Hex", r?.toString() ?: if (zh) "失败" else "failed")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                // 以下三项与「函数 / 汇编 / HEX」图形化视图重复 → 直接跳转，不再倒原始 JSON。
+                SmBtn(if (zh) "函数视图" else "Fns", bm, bp, { tools.analysisView = "functions" }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "汇编视图" else "Disasm", bm, bp, {
+                    tools.disasmAddr = tools.decompileTarget.trim().ifBlank { tools.disasmAddr }
+                    tools.analysisView = "disasm"
+                }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn("HEX", bm, bp, {
+                    tools.disasmAddr = tools.decompileTarget.trim().ifBlank { tools.disasmAddr }
+                    tools.analysisView = "hex"
+                }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "unpack" -> {
                 SmBtn(if (zh) "分析" else "Analyze", bm, bp, { scope.launch { tools.unpackRunning = true
@@ -1056,18 +1054,10 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                     if (c != null) merged.put("cryptoFindings", c.optJSONArray("cryptoFindings") ?: c.optJSONArray("findings") ?: c.optJSONArray("scans"))
                     tools.addTab(tl, if (zh) "概览" else "Overview", if (merged.length() > 0) merged.toString() else if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.soAnalyzeRunning, loading = tools.soAnalyzeRunning)
-                SmBtn("Sec", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "sections", "", 60) }.getOrNull() }
-                    tools.addTab(tl, if (zh) "节区" else "Sections", r?.toString() ?: if (zh) "无" else "none")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn("Imp", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "imports", "", 60) }.getOrNull() }
-                    tools.addTab(tl, if (zh) "导入" else "Imports", r?.toString() ?: if (zh) "无" else "none")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn("Exp", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "dynsyms", "", 60) }.getOrNull() }
-                    tools.addTab(tl, if (zh) "导出" else "Exports", r?.toString() ?: if (zh) "无" else "none")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                // 「节区/导入/导出」与文件级对象视图重复 → 直接跳转。
+                SmBtn(if (zh) "节区视图" else "Sec", bm, bp, { tools.analysisView = "sections" }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "导入视图" else "Imp", bm, bp, { tools.analysisView = "imports" }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "符号视图" else "Sym", bm, bp, { tools.analysisView = "symbols" }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 SmBtn("CFG", bm, bp, {
                     // CFG 目标必须来自用户显式选择（函数列表选中 / 顶部条），不再有 "main" 这类魔法默认。
                     // 未选中函数时只切到 CFG 视图，由视图自身给出「请先选择函数 / 入口点兜底」空态。
@@ -1158,22 +1148,13 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                     val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
                     tools.addTab(tl, if (zh) "补丁" else "Patch", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn(if (zh) "符号" else "Sym", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "symbols", "", 60) }.getOrNull() }
-                    tools.addTab(tl, if (zh) "符号" else "Symbols", r?.toString() ?: if (zh) "无" else "none")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn(if (zh) "字符串" else "Str", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 20) }.getOrNull() }
-                    tools.addTab(tl, if (zh) "字符串" else "Strings", r?.toString() ?: if (zh) "无" else "none")
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                // 与「符号 / 字符串」视图重复 → 直接跳转。
+                SmBtn(if (zh) "符号视图" else "Sym", bm, bp, { tools.analysisView = "symbols" }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                SmBtn(if (zh) "字符串视图" else "Str", bm, bp, { tools.analysisView = "strings" }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "editor" -> {
-                // 编辑工具：文本查看（读取字符串列表）
-                SmBtn(if (zh) "文本" else "Text", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "strings", "", 30) }.getOrNull() }
-                    tools.editorTextResult = r?.toString() ?: if (zh) "无" else "none"
-                    tools.addTab(tl, if (zh) "文本" else "Text", tools.editorTextResult)
-                } }, enabled = tools.sharedWorkspaceId.isNotBlank())
+                // 与「字符串」视图重复 → 直接跳转。
+                SmBtn(if (zh) "字符串视图" else "Strings", bm, bp, { tools.analysisView = "strings" }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 // 编辑：读取地址数据展示可编辑格式
                 SmBtn(if (zh) "编辑" else "Edit", bm, bp, { scope.launch {
                     val addr = tools.disasmAddr.ifBlank { "0x0" }

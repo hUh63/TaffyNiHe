@@ -1287,6 +1287,12 @@ internal fun CfgCanvas(
     layoutMode: String = "layered",
     contentMode: String = "summary",
     blockLines: Map<Long, List<String>> = emptyMap(),
+    fnLabel: String = "",
+    onLayoutChange: (String) -> Unit = {},
+    onContentChange: (String) -> Unit = {},
+    onRebuild: () -> Unit = {},
+    onEntry: () -> Unit = {},
+    onPickFunction: () -> Unit = {},
 ) {
     val density = LocalDensity.current.density
     val baseGraph = remember(json) { parseCfgGraph(json) }
@@ -1334,6 +1340,8 @@ internal fun CfgCanvas(
     var dragOffsets by remember(graph) { mutableStateOf<Map<Int, Offset>>(emptyMap()) }
     // 右下角迷你导航图（对标 Exbin CfgMinimap「显示小地图」）。
     var showMinimap by remember { mutableStateOf(true) }
+    // 控制面板是否展开（收起后只留一行标题，避免与画布重叠）。
+    var panelOpen by remember { mutableStateOf(true) }
 
     val ctx = LocalContext.current
     val densityObj = LocalDensity.current
@@ -1362,8 +1370,11 @@ internal fun CfgCanvas(
         }
         val w = layout.width.coerceAtLeast(1f) + 80f
         val h = layout.height.coerceAtLeast(1f) + 80f
-        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.12f, 2.5f)
-        pan = Offset.Zero
+        // 顶部为悬浮控制面板预留安全区（收起时只留标题行），避免节点被面板压住。
+        val topInset = with(densityObj) { (if (panelOpen) 128.dp else 44.dp).toPx() }
+        val availH = (viewport.height - topInset).coerceAtLeast(80f)
+        scale = min(viewport.width / w, availH / h).coerceIn(0.12f, 2.5f)
+        pan = Offset(0f, topInset / 2f)
     }
 
     fun zoomReset() {
@@ -1470,18 +1481,111 @@ internal fun CfgCanvas(
                 }
             }
 
-            // 左上角：统计
+            // 左上角：唯一控制面板 —— 把原先分散的「外层悬浮面板 / 左上统计条 / 右上工具条」
+            // 合并到一处，收起后只留一行标题，彻底消除彼此重叠。
             Surface(
-                shape = RoundedCornerShape(AppShape.xs),
-                color = colors.surfaceVariant.copy(alpha = 0.60f),
-                modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
+                shape = RoundedCornerShape(AppShape.md),
+                color = colors.surfaceContainerHigh.copy(alpha = 0.94f),
+                border = BorderStroke(1.dp, colors.outlineVariant),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+                modifier = Modifier.align(Alignment.TopStart).padding(6.dp).fillMaxWidth(0.985f),
             ) {
-                Text(
-                    "blocks ${graph.blocks.size} · edges ${graph.edges.size} · ${(scale * 100).toInt()}%",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant,
-                )
+                Column(
+                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures { panelOpen = !panelOpen } },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(if (panelOpen) "\u25be" else "\u25b8", color = colors.primary, fontSize = AppText.bodyStrong)
+                        Text(
+                            if (fnLabel.isBlank()) (if (zh) "\u63a7\u5236\u6d41\u56fe" else "Control Flow Graph") else fnLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = AppText.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = colors.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "${graph.blocks.size} \u5757 \u00b7 ${graph.edges.size} \u8fb9 \u00b7 ${(scale * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    if (panelOpen) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            CfgChip(if (zh) "\u91cd\u65b0\u751f\u6210" else "Rebuild", colors.primary) { onRebuild() }
+                            CfgChip(if (zh) "\u5165\u53e3\u70b9" else "Entry", colors.onSurfaceVariant) { onEntry() }
+                            CfgChip(if (zh) "\u5206\u5c42" else "Layered", colors.onSurfaceVariant, layoutMode == "layered") { onLayoutChange("layered") }
+                            CfgChip("Dagre", colors.onSurfaceVariant, layoutMode == "dagre") { onLayoutChange("dagre") }
+                            CfgChip("ELK", colors.onSurfaceVariant, layoutMode == "elk") { onLayoutChange("elk") }
+                            CfgChip(if (zh) "\u7f51\u683c\u5e03\u5c40" else "Grid-L", colors.onSurfaceVariant, layoutMode == "grid") { onLayoutChange("grid") }
+                            CfgChip(if (zh) "\u529b\u5bfc\u5411" else "Force", colors.onSurfaceVariant, layoutMode == "force") { onLayoutChange("force") }
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            CfgChip(if (zh) "\u9002\u5e94\u5c4f\u5e55" else "Fit", colors.primary) { applyFit() }
+                            CfgChip("100%", colors.primary) { zoomReset() }
+                            CfgChip(if (zh) "\u5b9a\u4f4d\u5165\u53e3" else "Focus", entryColor) { focusEntry() }
+                            CfgChip(
+                                when (contentMode) {
+                                    "asm" -> if (zh) "\u6c47\u7f16\u5757" else "Asm"
+                                    "pseudo" -> if (zh) "\u4f2aC\u5757" else "PseudoC"
+                                    else -> if (zh) "\u6458\u8981\u5757" else "Summary"
+                                },
+                                colors.onSurfaceVariant,
+                                active = contentMode != "summary",
+                            ) {
+                                onContentChange(when (contentMode) {
+                                    "summary" -> "asm"
+                                    "asm" -> "pseudo"
+                                    else -> "summary"
+                                })
+                            }
+                            CfgChip(
+                                if (simpleView) (if (zh) "\u5b8c\u6574\u89c6\u56fe" else "Full") else (if (zh) "\u7b80\u5316\u89c6\u56fe" else "Simple"),
+                                colors.onSurfaceVariant,
+                            ) { simpleView = !simpleView }
+                            CfgChip(bgStyleLabel(zh, bgStyle), colors.onSurfaceVariant) { bgStyle = nextBgStyle(bgStyle) }
+                            CfgChip(routeStyleLabel(zh, routing), colors.onSurfaceVariant) { routing = nextRouting(routing) }
+                            CfgChip(if (zh) "\u62d6\u52a8\u8282\u70b9" else "Drag", colors.onSurfaceVariant, active = dragMode) { dragMode = !dragMode }
+                            CfgChip(if (zh) "\u5c0f\u5730\u56fe" else "Minimap", colors.onSurfaceVariant, active = showMinimap) { showMinimap = !showMinimap }
+                            if (dragOffsets.isNotEmpty()) {
+                                CfgChip(if (zh) "\u590d\u4f4d" else "Reset", failColor) { dragOffsets = emptyMap() }
+                            }
+                            CfgChip(if (zh) "\u5bfc\u51fa PNG" else "PNG", colors.primary) {
+                                val w = (layout.width + 80f).coerceAtLeast(320f)
+                                val h = (layout.height + 80f).coerceAtLeast(240f)
+                                val p = exportDrawToPng(
+                                    context = ctx,
+                                    fileName = "cfg_" + System.currentTimeMillis() + ".png",
+                                    widthPx = w.toInt(),
+                                    heightPx = h.toInt(),
+                                    density = densityObj,
+                                ) {
+                                    drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, bgStyle, routing)
+                                }
+                                Toast.makeText(
+                                    ctx,
+                                    if (p != null) (if (zh) "\u5df2\u5bfc\u51fa\uff1a$p" else "saved: $p") else (if (zh) "\u5bfc\u51fa\u5931\u8d25" else "export failed"),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            CfgChip(if (zh) "\u6362\u51fd\u6570" else "Functions", colors.onSurfaceVariant) { onPickFunction() }
+                        }
+                    }
+                }
             }
 
             // 右下角：迷你导航图（对标 Exbin CfgMinimap「显示小地图」）
@@ -1517,54 +1621,6 @@ internal fun CfgCanvas(
                 }
             }
 
-            // 右上角：视图工具（FlowRow 窄屏自动换行）
-            Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    CfgChip(if (zh) "适应屏幕" else "Fit", colors.primary) { applyFit() }
-                    CfgChip("100%", colors.primary) { zoomReset() }
-                    CfgChip(if (zh) "定位入口" else "Entry", entryColor) { focusEntry() }
-                    CfgChip(
-                        if (simpleView) (if (zh) "完整视图" else "Full") else (if (zh) "简化视图" else "Simple"),
-                        colors.onSurfaceVariant,
-                    ) { simpleView = !simpleView }
-                    CfgChip(bgStyleLabel(zh, bgStyle), colors.onSurfaceVariant) { bgStyle = nextBgStyle(bgStyle) }
-                    CfgChip(routeStyleLabel(zh, routing), colors.onSurfaceVariant) { routing = nextRouting(routing) }
-                    CfgChip(
-                        if (zh) "拖动节点" else "Drag",
-                        colors.onSurfaceVariant,
-                        active = dragMode,
-                    ) { dragMode = !dragMode }
-                    CfgChip(
-                        if (zh) "小地图" else "Minimap",
-                        colors.onSurfaceVariant,
-                        active = showMinimap,
-                    ) { showMinimap = !showMinimap }
-                    if (dragOffsets.isNotEmpty()) {
-                        CfgChip(if (zh) "复位" else "Reset", failColor) { dragOffsets = emptyMap() }
-                    }
-                    CfgChip(if (zh) "导出 PNG" else "PNG", colors.primary) {
-                        val w = (layout.width + 80f).coerceAtLeast(320f)
-                        val h = (layout.height + 80f).coerceAtLeast(240f)
-                        val p = exportDrawToPng(
-                            context = ctx,
-                            fileName = "cfg_" + System.currentTimeMillis() + ".png",
-                            widthPx = w.toInt(),
-                            heightPx = h.toInt(),
-                            density = densityObj,
-                        ) {
-                            drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, bgStyle, routing)
-                        }
-                        Toast.makeText(
-                            ctx,
-                            if (p != null) (if (zh) "已导出：$p" else "saved: $p") else (if (zh) "导出失败" else "export failed"),
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }
-            }
         }
 
         Spacer(Modifier.size(6.dp))

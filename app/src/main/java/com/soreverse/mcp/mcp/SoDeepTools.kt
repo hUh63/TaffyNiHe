@@ -641,7 +641,7 @@ object SoDeepTools {
         override val meta = ToolMeta(
             "taffy_so_pseudoc_batch",
             "【批量伪 C 反编译】对多个函数一次性生成伪 C(rizin-ghidra), 用于快速通读一个 SO 的主要逻辑。" +
-                "默认取前 5 个函数, 可用 count(上限 30)/startIndex/filter(函数名子串) 控制; 单个函数失败不会中断整体。" +
+                "默认取前 5 个函数(自动跳过 sym.imp.* 导入桩, 可用 skipImports=false 关闭), 可用 count(上限 30)/startIndex/filter(函数名子串) 控制; 单个函数失败不会中断整体。" +
                 "可选 outFile 把结果合并写成一个 .c 文件。",
             "Batch-decompile multiple functions to pseudo C (rizin-ghidra) in one call. Defaults to the first 5 " +
                 "functions; use count (max 30) / startIndex / filter. A failing function does not abort the batch. " +
@@ -665,13 +665,21 @@ object SoDeepTools {
             val filter = args.str("filter")
             val engine = EngineProvider.get(ctx.context)
 
+            // 导入桩(sym.imp.* / imp.*, 即 PLT/GOT 跳转桩)没有函数体, 反编译必然失败。
+            // 未显式指定 filter 时默认跳过, 避免整批出现"成功 0 / 失败 N"这种无信息量的结果。
+            val skipImports = args.optBoolean("skipImports", true)
             val fns = functionItems(engine, ws, 500)
             val chosen = ArrayList<Pair<String, Long>>()
+            var skippedImports = 0
             for (i in 0 until fns.length()) {
                 val f = fns.optJSONObject(i) ?: continue
                 val nm = f.optString("name")
                 if (nm.isBlank()) continue
                 if (filter.isNotBlank() && !nm.contains(filter, true)) continue
+                if (filter.isBlank() && skipImports && (nm.startsWith("sym.imp.") || nm.startsWith("imp."))) {
+                    skippedImports++
+                    continue
+                }
                 val a = funcAddr(f) ?: continue
                 chosen.add(nm to a)
             }
@@ -680,6 +688,7 @@ object SoDeepTools {
                     .put("workspaceId", ws)
                     .put("generated", 0)
                     .put("functions", JSONArray())
+                    .put("skippedImports", skippedImports)
                     .put("note", "没有可用函数(可能 strip 严重或 filter 过严); 可先用 taffy_rizin_api action=analyze"))
             }
 
@@ -715,6 +724,7 @@ object SoDeepTools {
 
             val payload = JSONObject()
                 .put("workspaceId", ws)
+                .put("skippedImports", skippedImports)
                 .put("requested", slice.size)
                 .put("generated", okCount)
                 .put("failed", failCount)

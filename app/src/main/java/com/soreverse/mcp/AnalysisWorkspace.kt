@@ -842,6 +842,15 @@ private fun AddrBar(state: WorkspaceState, zh: Boolean) {
 }
 
 @Composable
+/** 文件名短标签：去掉引擎写入 cacheDir 时加的 picked_ 前缀，过长时中间省略并保留首尾（含 .so）。 */
+private fun shortSoLabel(raw: String): String {
+    var n = raw.trim()
+    if (n.isBlank()) return n
+    if (n.startsWith("picked_")) n = n.removePrefix("picked_")
+    if (n.length <= 20) return n
+    return n.take(10) + "…" + n.takeLast(8)
+}
+
 private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
     val tools = state.tools; val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
@@ -889,7 +898,7 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp), enabled = !tools.opening, shape = RoundedCornerShape(AppShape.sm)) {
         if (tools.opening) { CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary); Spacer(Modifier.size(4.dp)); Text(if (zh) "加载中…" else "Loading…", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label) }
         else { Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp)) }
-        Spacer(Modifier.size(4.dp)); Text((tools.sharedSoName.ifBlank { if (zh) "选文件" else "Open" }).take(12), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label)
+        Spacer(Modifier.size(4.dp)); Text(shortSoLabel(tools.sharedSoName.ifBlank { if (zh) "选文件" else "Open" }), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
     if (tools.openError.isNotBlank()) Text(tools.openError, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2)
 
@@ -2843,7 +2852,7 @@ private fun AnalysisAppBar(
                 if (fnName.isBlank()) {
                     if (zh) "点这里去函数列表" else "tap for function list"
                 } else {
-                    "${fnVa.ifBlank { "--" }} · ${analysisViewLabel(view, zh)}"
+                    fnVa.ifBlank { analysisViewLabel(view, zh) }
                 },
                 style = MaterialTheme.typography.labelSmall,
                 fontSize = AppText.label,
@@ -2911,7 +2920,7 @@ private fun TaskChip(state: WorkspaceState, zh: Boolean, onOpenTask: () -> Unit)
     ) {
         Icon(Icons.Filled.FolderOpen, null, tint = cs.primary, modifier = Modifier.size(13.dp))
         Text(
-            (task?.title ?: (if (zh) "选择任务" else "Pick task")).take(14),
+            shortSoLabel(task?.title ?: (if (zh) "选择任务" else "Pick task")),
             style = MaterialTheme.typography.labelSmall,
             fontSize = AppText.label,
             maxLines = 1,
@@ -3749,7 +3758,6 @@ private fun CfgView(
     var cfgLayout by remember { mutableStateOf("layered") }
     var cfgContent by remember { mutableStateOf("summary") }
     var cfgInsns by remember { mutableStateOf<Map<Long, List<String>>>(emptyMap()) }
-    var cfgPanelOpen by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
@@ -3840,79 +3848,20 @@ private fun CfgView(
                 secondaryLabel = if (zh) "重试" else "Retry",
                 onSecondary = { loadCfg(context, tools, zh, scope, target) },
             )
-            else -> CfgCanvas(tools.cfgJson, zh, Modifier.fillMaxSize(), cfgLayout, cfgContent, cfgInsns)
-        }
-
-        if (hasGraph) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = cs.surfaceContainerHigh.copy(alpha = 0.92f),
-                border = BorderStroke(1.dp, cs.outlineVariant),
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-            ) {
-                Column(
-                    Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Row(
-                        Modifier.clickable { cfgPanelOpen = !cfgPanelOpen },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(if (cfgPanelOpen) "▾" else "▸", color = cs.primary, fontSize = AppText.bodyStrong)
-                        Text(
-                            text = if (fnLabel.isBlank()) (if (zh) "控制流图" else "Control Flow Graph") else fnLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = AppText.label,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = cs.primary,
-                        )
-                    }
-                    if (cfgPanelOpen) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        SmallAction(
-                            label = if (zh) "重新生成" else "Rebuild",
-                            enabled = ws.isNotBlank() && target.isNotBlank(),
-                            loading = tools.cfgLoading,
-                            onClick = { loadCfg(context, tools, zh, scope, target) },
-                        )
-                        SmallAction(
-                            label = if (zh) "入口点" else "Entry",
-                            enabled = ws.isNotBlank(),
-                            loading = tools.cfgLoading,
-                            onClick = { useEntryPoint() },
-                        )
-                        SmallAction(if (zh) "分层" else "Layered", active = cfgLayout == "layered") { cfgLayout = "layered" }
-                        SmallAction(if (zh) "Dagre" else "Dagre", active = cfgLayout == "dagre") { cfgLayout = "dagre" }
-                        SmallAction(if (zh) "ELK" else "ELK", active = cfgLayout == "elk") { cfgLayout = "elk" }
-                        SmallAction(if (zh) "网格" else "Grid", active = cfgLayout == "grid") { cfgLayout = "grid" }
-                        SmallAction(if (zh) "力导向" else "Force", active = cfgLayout == "force") { cfgLayout = "force" }
-                        SmallAction(
-                            when (cfgContent) {
-                                "asm" -> if (zh) "汇编块" else "Asm"
-                                "pseudo" -> if (zh) "伪C块" else "PseudoC"
-                                else -> if (zh) "摘要块" else "Summary"
-                            },
-                            active = cfgContent != "summary",
-                        ) {
-                            cfgContent = when (cfgContent) {
-                                "summary" -> "asm"
-                                "asm" -> "pseudo"
-                                else -> "summary"
-                            }
-                        }
-                        SmallAction(if (zh) "换函数" else "Functions", onClick = onGoFunctions)
-                    }
-                    }
-                }
-            }
+            else -> CfgCanvas(
+                json = tools.cfgJson,
+                zh = zh,
+                modifier = Modifier.fillMaxSize(),
+                layoutMode = cfgLayout,
+                contentMode = cfgContent,
+                blockLines = cfgInsns,
+                fnLabel = fnLabel,
+                onLayoutChange = { cfgLayout = it },
+                onContentChange = { cfgContent = it },
+                onRebuild = { loadCfg(context, tools, zh, scope, target) },
+                onEntry = { useEntryPoint() },
+                onPickFunction = onGoFunctions,
+            )
         }
     }
 }
@@ -4942,7 +4891,7 @@ private fun RzViewScaffold(
                 )
                 kv != null -> RzKeyValueTable(kv, zh)
                 strList.isNotEmpty() && rows.isEmpty() -> RzStringList(strList)
-                rows.isNotEmpty() -> RzObjectTable(rows, cols, zh, context)
+                rows.isNotEmpty() -> RzObjectTable(rows, effectiveCols(cols, rows), zh, context)
                 else -> AnalysisEmptyState(
                     title = if (zh) "空清单" else "Empty list",
                     hint = if (zh) "该文件可能不含这一类内容" else "This file may not contain this kind of data",
@@ -5111,6 +5060,20 @@ private fun RzStringList(items0: List<String>) {
 
 /** 对象表格（列由各视图指定）。 */
 @Composable
+/** 视图未定义列时从数据自动推导列，避免对象数组渲染成空白（如 ELF 头的字段数组）。 */
+private fun effectiveCols(cols: List<RzCol>, rows: List<JSONObject>): List<RzCol> {
+    if (cols.isNotEmpty() || rows.isEmpty()) return cols
+    val first = rows.first()
+    if (first.has("name") && first.has("value"))
+        return listOf(RzCol("name", "字段", "FIELD", 128.dp), RzCol("value", "值", "VALUE", null))
+    val keys = LinkedHashSet<String>()
+    for (r in rows.take(8)) {
+        val it = r.keys()
+        while (it.hasNext()) keys.add(it.next())
+    }
+    return keys.take(6).map { RzCol(it, it, it, null) }
+}
+
 private fun RzObjectTable(rows: List<JSONObject>, cols: List<RzCol>, zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
     Column(
@@ -8691,14 +8654,22 @@ private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.c
                 runCatching {
                     val eng = EngineProvider.get(context)
                     val out = mutableListOf<Pair<String, List<String>>>()
+                    val unresolved = LinkedHashSet<String>()
                     var frontier = listOf(r0)
                     val seen = HashSet<String>(frontier)
                     for (d in 0 until maxDepth) {
                         val next = LinkedHashSet<String>()
                         frontier.forEach { node ->
-                            val arr = parseRzArray(eng.rzCommand(ws, "", "s $node; axfj")) ?: return@forEach
+                            // 先 aac 补建当前函数的调用关系（否则 axf/axfj 恒为空），再取「本函数调用了谁」。
+                            val res = eng.rzCommand(ws, "", "s $node; aac; axfj")
+                            val raw = rzText(res).trim()
+                            val arr = parseRzArray(res)
+                            if (arr == null) {
+                                if (raw.isNotBlank()) unresolved.add(node)   // 非 JSON：多为 seek 失败（符号无法解析）
+                                return@forEach
+                            }
                             arr.forEach { e ->
-                                val t = e.optString("to")
+                                val t = e.optString("to").ifBlank { e.optString("refname") }
                                 if (t.isNotBlank() && seen.add(t)) next.add(t)
                             }
                         }
@@ -8706,12 +8677,18 @@ private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.c
                         if (next.isEmpty()) break
                         frontier = next.toList()
                     }
-                    out
+                    out to unresolved.toList()
                 }.getOrNull()
             }
             loading = false
-            if (res == null) error = if (zh) "下钻失败（根节点无法解析）" else "drill failed"
-            levels = res ?: emptyList()
+            if (res == null) {
+                error = if (zh) "下钻失败（引擎异常）" else "drill failed"
+            } else {
+                levels = res.first
+                if (res.second.isNotEmpty())
+                    error = if (zh) "根节点无法解析：${res.second.joinToString("、")}（不是有效函数符号）"
+                            else "unresolved root: ${res.second.joinToString(", ")}"
+            }
         }
     }
 
@@ -8762,7 +8739,17 @@ private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.c
             )
             levels.isEmpty() || levels.all { it.second.isEmpty() } -> AnalysisEmptyState(
                 title = if (zh) "无调用关系" else "No calls",
-                hint = if (zh) "根节点没有出边（可能是叶子函数，或需先跑全量分析）。" else "Root has no outgoing edges (leaf, or run full analysis first).",
+                hint = if (zh) "该根节点没有出边（可能是叶子函数，或尚未分析出调用关系）。点下面按钮跑一次全量分析再试。"
+                    else "The root has no outgoing edges (leaf, or calls not analyzed yet). Run a full analysis and retry.",
+                primaryLabel = if (zh) "跑全量分析" else "Full analysis",
+                onPrimary = {
+                    scope.launch {
+                        loading = true
+                        withContext(Dispatchers.IO) { runCatching { EngineProvider.get(context).rzCommand(ws, "", "aaa") } }
+                        loading = false
+                        drill()
+                    }
+                },
             )
             else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 MonoLine((if (zh) "根：$root" else "root: $root"), cs.primary, AppText.bodyStrong)
@@ -8976,6 +8963,7 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
     var text by remember { mutableStateOf("") }
     var okCount by remember { mutableStateOf(0) }
     var failCount by remember { mutableStateOf(0) }
+    var failReasons by remember { mutableStateOf("") }
 
     fun gen() {
         if (ws.isBlank()) return
@@ -8990,12 +8978,28 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
             loading = false
             if (r == null) { error = if (zh) "引擎未就绪" else "engine not ready"; return@launch }
             if (!r.optBoolean("ok", true)) { error = r.optString("error").ifBlank { r.optString("note") }; return@launch }
-            okCount = r.optInt("succeeded", r.optInt("okCount", 0))
+            okCount = r.optInt("generated", r.optInt("succeeded", r.optInt("okCount", 0)))
             failCount = r.optInt("failed", r.optInt("failCount", 0))
+            val fns = r.optJSONArray("functions")
+            val reasons = StringBuilder()
+            if (fns != null) {
+                for (i in 0 until fns.length()) {
+                    val f = fns.optJSONObject(i) ?: continue
+                    if (!f.optBoolean("ok", true)) {
+                        reasons.append("• ").append(f.optString("function").ifBlank { f.optString("addr") })
+                        f.optString("error").ifBlank { null }?.let { reasons.append(" — ").append(it) }
+                        reasons.append('\n')
+                    }
+                }
+            }
+            failReasons = reasons.toString().trimEnd()
             text = r.optString("combined").ifBlank { r.optString("text") }.ifBlank {
                 r.optString("outFile").let { if (it.isNotBlank()) (if (zh) "已写入文件：$it" else "written to $it") else "" }
             }
-            if (text.isBlank()) error = if (zh) "未生成内容（可能全部函数失败）" else "nothing generated"
+            if (text.isBlank()) error = if (zh) {
+                if (failCount > 0) "未生成内容：$failCount 个函数反编译失败（导入桩 sym.imp.* 无函数体，已默认跳过）"
+                else "未生成内容"
+            } else "nothing generated"
         }
     }
 
@@ -9048,7 +9052,13 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
         Spacer(Modifier.size(8.dp))
         when {
             loading -> AnalysisLoading()
-            error.isNotBlank() -> AnalysisErrorBanner(error)
+            error.isNotBlank() -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                AnalysisErrorBanner(error)
+                if (failReasons.isNotBlank()) {
+                    Text(if (zh) "失败明细" else "Failures", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.error)
+                    MonoLine(failReasons, cs.onSurfaceVariant, AppText.label)
+                }
+            }
             text.isBlank() -> AnalysisEmptyState(
                 title = if (zh) "全局伪 C" else "Global pseudo-C",
                 hint = if (zh) "批量把多个函数反编译为伪 C（默认前 5 个，上限 30），用于快速通读 SO 主要逻辑；可用函数名子串过滤，或指定文件名把结果合并落盘。"

@@ -121,10 +121,24 @@ internal fun FlutterView(
         if (path.isBlank()) path = guessInput()
     }
 
+    /** inspect/analyze 只接受 APK，或含 libapp.so/libflutter.so 的目录。 */
+    fun looksApkOrDir(p: String): Boolean {
+        val t = p.trim()
+        if (t.isBlank()) return false
+        if (t.endsWith(".apk", true)) return true
+        if (t.endsWith("/")) return true
+        return !t.substringAfterLast('/').contains('.')   // 无扩展名 → 视为目录
+    }
+
     fun doInspect() {
         val target = path.trim()
         if (target.isBlank()) {
             error = if (zh) "请先指定 APK（或含 libapp.so + libflutter.so 的目录）" else "Provide an APK (or a directory with libapp.so + libflutter.so)"
+            return
+        }
+        if (!looksApkOrDir(target)) {
+            error = if (zh) "「${target.substringAfterLast('/')}」不是 APK。Flutter 分析需要 APK，或含 libapp.so + libflutter.so 的目录；可点「工作区 APK」选择当前已打开的 APK。"
+                else "'${target.substringAfterLast('/')}' is not an APK. Provide an APK, or a directory with libapp.so + libflutter.so."
             return
         }
         inspecting = true; error = ""; notice = ""; inspect = null; result = null; jobId = ""; jobStatus = ""; jobStage = ""
@@ -139,6 +153,11 @@ internal fun FlutterView(
         val target = path.trim()
         if (target.isBlank()) {
             error = if (zh) "请先指定 APK" else "Provide an APK first"
+            return
+        }
+        if (!looksApkOrDir(target)) {
+            error = if (zh) "「${target.substringAfterLast('/')}」不是 APK，无法分析；请选择 APK 或含 libapp.so + libflutter.so 的目录。"
+                else "'${target.substringAfterLast('/')}' is not an APK."
             return
         }
         analyzing = true; error = ""; notice = ""; result = null
@@ -220,7 +239,15 @@ internal fun FlutterView(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ToolChip(if (zh) "当前文件" else "Current", onClick = { path = guessInput(); if (path.isBlank()) error = if (zh) "当前任务没有可用的本地文件路径" else "no local file for current task" })
+                        ToolChip(if (zh) "当前文件" else "Current", onClick = {
+                            val g = guessInput()
+                            path = g
+                            error = when {
+                                g.isBlank() -> if (zh) "当前任务没有可用的本地文件路径" else "no local file for current task"
+                                !looksApkOrDir(g) -> if (zh) "当前文件不是 APK（${g.substringAfterLast('/')}）；Flutter 分析需要 APK 或含 libapp.so/libflutter.so 的目录" else "current file is not an APK"
+                                else -> ""
+                            }
+                        })
                         ToolChip(if (zh) "工作区 APK" else "Workspace APK", onClick = {
                             scope.launch {
                                 val handler = ToolCatalog.byName["taffy_so_close"]

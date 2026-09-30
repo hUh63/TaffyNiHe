@@ -39,7 +39,7 @@ internal class BlutterCoordinator(private val context: Context, private val stor
                 // 上游 1.0.20 借鉴: MemoryGuard——APK 读入前估算堆余量
                 com.soreverse.mcp.core.MemoryGuard.ensureAnalysisMemory(file.length(), "flutter_inspect(${file.name})")
                 val bytes = readCapped(file)
-                if (!file.extension.equals("apk", true)) return err("UNSUPPORTED_INPUT", "inspect currently accepts an APK or a libapp/libflutter directory", "path", path)
+                if (!file.extension.equals("apk", true)) return err("UNSUPPORTED_INPUT", "inspect 只接受 APK，或含 libapp.so / libflutter.so 的目录（inspect accepts an APK or a libapp/libflutter directory）", "path", path)
                 val inventory = FlutterArtifactInspector.inspectApk(bytes, path, args.str("abi", "auto"))
                 val selected = inventory.optJSONObject("selected")
                 if (selected == null) ok(inventory) else {

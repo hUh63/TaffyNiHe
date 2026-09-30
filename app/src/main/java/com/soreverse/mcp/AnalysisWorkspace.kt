@@ -841,7 +841,6 @@ private fun AddrBar(state: WorkspaceState, zh: Boolean) {
     }
 }
 
-@Composable
 /** 文件名短标签：去掉引擎写入 cacheDir 时加的 picked_ 前缀，过长时中间省略并保留首尾（含 .so）。 */
 private fun shortSoLabel(raw: String): String {
     var n = raw.trim()
@@ -851,6 +850,7 @@ private fun shortSoLabel(raw: String): String {
     return n.take(10) + "…" + n.takeLast(8)
 }
 
+@Composable
 private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
     val tools = state.tools; val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
@@ -5059,7 +5059,6 @@ private fun RzStringList(items0: List<String>) {
 }
 
 /** 对象表格（列由各视图指定）。 */
-@Composable
 /** 视图未定义列时从数据自动推导列，避免对象数组渲染成空白（如 ELF 头的字段数组）。 */
 private fun effectiveCols(cols: List<RzCol>, rows: List<JSONObject>): List<RzCol> {
     if (cols.isNotEmpty() || rows.isEmpty()) return cols
@@ -5074,6 +5073,7 @@ private fun effectiveCols(cols: List<RzCol>, rows: List<JSONObject>): List<RzCol
     return keys.take(6).map { RzCol(it, it, it, null) }
 }
 
+@Composable
 private fun RzObjectTable(rows: List<JSONObject>, cols: List<RzCol>, zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
     Column(

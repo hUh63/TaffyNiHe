@@ -700,9 +700,17 @@ object SoDeepTools {
             for (pair in slice) {
                 val nm = pair.first
                 val loc = "0x" + java.lang.Long.toHexString(pair.second)
-                val r = runCatching { engine.rzDecompile(ws, "", loc, false) }.getOrNull()
+                // 复用 taffy_so_decompile 的完整降级链（ghidra pdg → native pdc → java r2dec/启发式），
+                // 而不是只调 rzDecompile(ghidra) —— 否则某函数 ghidra 产不出输出时整批全失败。
+                val r = runCatching {
+                    ToolCatalog.byName["taffy_so_decompile"]?.handle(
+                        ctx,
+                        JSONObject().put("workspaceId", ws).put("locator", loc)
+                            .put("engine", "auto").put("strict", false),
+                    )
+                }.getOrNull()
                 val code = r?.optString("pseudocode", "").orEmpty()
-                if (code.isBlank()) {
+                if (r == null || code.isBlank()) {
                     failCount++
                     out.put(JSONObject()
                         .put("function", nm)
@@ -716,7 +724,8 @@ object SoDeepTools {
                     .put("function", nm)
                     .put("addr", loc)
                     .put("ok", true)
-                    .put("size", r?.optLong("functionSize", 0L) ?: 0L)
+                    .put("engine", r.optString("engine"))
+                    .put("size", r.optLong("functionSize", 0L) ?: 0L)
                     .put("pseudocode", code))
                 merged.append("// ===== ").append(nm).append(" @ ").append(loc).append(" =====\n")
                 merged.append(code).append("\n\n")

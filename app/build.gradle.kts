@@ -25,8 +25,8 @@ android {
         applicationId = "com.taffynihe"
         minSdk = 26
         targetSdk = 36
-        versionCode = 171
-        versionName = "1.3.60"
+        versionCode = 172
+        versionName = "1.3.61"
 
         // 逆核: 禁用 CMake native 编译, 完全使用从原版 SOMCP 提取的预编译 so(在 jniLibs/)。
         // 原因: 我们没有 rizin/lief 的交叉编译产物, CMake 只会产出 stub 桩覆盖真 so。

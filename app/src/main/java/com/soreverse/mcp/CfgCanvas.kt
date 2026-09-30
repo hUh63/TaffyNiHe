@@ -651,7 +651,7 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
     val maxRight = nodes.maxOf { it.right }
     var backIdx = 0
     val routes = ArrayList<CfgRoute>(seeds.size)
-    seeds.forEach { sd ->
+    seeds.forEachIndexed { si, sd ->
         val a = realNodes[sd.from]
         val b = realNodes[sd.to]
         val pts: MutableList<Offset> = ArrayList(8)
@@ -679,16 +679,19 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
                 val exitX = bottomPortX(a, sd)
                 val entryX = topPortX(b, sd)
                 pts.add(Offset(exitX, a.bottom))
+                // 同一层间多条边若共用同一中间高度，水平段会重合、并与其它的竖段交叉；
+                // 按边序号把折线中段错开到 ±1 条通道，显著减少重叠与视觉交叉。
+                val laneBias = ((si % 3) - 1) * (9f * density)
                 var prevX = exitX
                 var prevBottom = a.bottom
                 sd.chain.forEach { d ->
-                    val my = (prevBottom + d.y) / 2f
+                    val my = (prevBottom + d.y) / 2f + laneBias
                     pts.add(Offset(prevX, my))
                     pts.add(Offset(d.x, my))
                     prevX = d.x
                     prevBottom = d.y
                 }
-                val my = (prevBottom + b.top) / 2f
+                val my = (prevBottom + b.top) / 2f + laneBias
                 pts.add(Offset(prevX, my))
                 pts.add(Offset(entryX, my))
                 pts.add(Offset(entryX, b.top))

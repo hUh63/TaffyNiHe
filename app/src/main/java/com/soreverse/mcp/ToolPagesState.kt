@@ -141,6 +141,8 @@ class ToolPagesState {
     /** 反汇编结果（disasm 原始 JSON）与其对应的缓存 key。 */
     var disasmJson by mutableStateOf("")
     var disasmKey by mutableStateOf("")
+    /** 当前反汇编已请求的指令上限（「更多指令」每次 +400）。 */
+    var disasmLimit by mutableStateOf(200)
 
     /**
      * 反汇编语义注解开关（Exbin DisasmAnnotator）：
@@ -165,6 +167,7 @@ class ToolPagesState {
         viewLoading = ""
         disasmJson = ""
         disasmKey = ""
+        disasmLimit = 200
         pseudoJson = ""
         pseudoKey = ""
         cfgJson = ""

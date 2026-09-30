@@ -3389,7 +3389,7 @@ private fun DisasmView(
 
     LaunchedEffect(key, tools.reloadTick) {
         if (tools.disasmKey != key || tools.disasmJson.isBlank()) {
-            fetchDisasm(context, tools, zh, ws, target, key, 120)
+            fetchDisasm(context, tools, zh, ws, target, key, tools.disasmLimit)
         }
     }
 
@@ -3410,10 +3410,13 @@ private fun DisasmView(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             SmallAction(
-                label = if (zh) "更多指令" else "More",
-                enabled = ws.isNotBlank() && target.isNotBlank(),
+                label = if (zh) "更多指令 +400" else "More +400",
+                enabled = ws.isNotBlank() && target.isNotBlank() && tools.disasmLimit < 4000,
                 loading = tools.viewLoading == key,
-                onClick = { scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 400) } },
+                onClick = {
+                    tools.disasmLimit = (tools.disasmLimit + 400).coerceAtMost(4000)
+                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, tools.disasmLimit) }
+                },
             )
             SmallAction(if (zh) "重新加载" else "Reload", onClick = onRefresh)
             SmallAction(
@@ -3421,12 +3424,12 @@ private fun DisasmView(
                 active = tools.disasmAnnotate,
                 onClick = {
                     tools.disasmAnnotate = !tools.disasmAnnotate
-                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, 120) }
+                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, tools.disasmLimit) }
                 },
             )
             if (addr.isNotBlank()) {
                 Text(
-                    "$addr · $count",
+                    "$addr · $count / ${tools.disasmLimit}",
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = AppText.label,
                     color = cs.onSurfaceVariant,

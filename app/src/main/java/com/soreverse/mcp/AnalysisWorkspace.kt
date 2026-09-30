@@ -315,9 +315,12 @@ internal fun AnalysisWorkspace(
         )
         GroupDivider()
         // ── 域 / 工具 / 模式 ──
-        AnalysisDomainTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
-        AnalysisToolTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
-        AnalysisModeTabs(current = view, zh = zh) { tools.analysisView = it }
+        // 对齐 Explorer So：一级=文件级对象（函数/节区/符号/…），二级=函数视图（汇编/控制流/伪C/交叉引用）
+        FileObjectTabs(current = view, zh = zh, onPick = { tools.analysisView = it }, onMore = { showDrawer = true })
+        FuncViewTabs(
+            current = view, zh = zh,
+            visible = tools.selectedFunctionName.isNotBlank() || tools.selectedFunctionVa.isNotBlank(),
+        ) { tools.analysisView = it }
         GroupDivider()
 
         // ── 当前视图内容区 ──
@@ -2603,95 +2606,72 @@ private suspend fun resolveCfgEntry(
     null
 }
 
-// ───────────────────────── 导航（域 → 工具 → 模式） ─────────────────────────
+// ───────────────────── 导航（对齐 Explorer So：文件级对象 tab + 函数级视图 tab） ─────────────────────
 
-/** 一级：分析域（5 个，不需要横向滚动，等宽均分）。 */
+/** 文件级对象 tab：与该 .so 的「表」一一对应。 */
+private val fileObjectTabs = listOf(
+    Triple("functions", "函数", "Functions"),
+    Triple("sections", "节区", "Sections"),
+    Triple("symbols", "符号", "Symbols"),
+    Triple("imports", "导入", "Imports"),
+    Triple("libraries", "依赖库", "Libraries"),
+    Triple("relocs", "重定位", "Relocs"),
+    Triple("strings", "字符串", "Strings"),
+    Triple("data", "数据", "Data"),
+    Triple("elfhdr", "ELF头", "ELF Header"),
+)
+private val fileObjectKeys = fileObjectTabs.map { it.first }
+
+/** 函数级视图 tab：进入某个函数后的四种看法（Exbin：汇编/控制流/伪C/交叉引用）。 */
+private val funcViewTabs = listOf(
+    Triple("disasm", "汇编", "Assembly"),
+    Triple("cfg", "控制流", "Flow"),
+    Triple("pseudo", "伪C", "Pseudo-C"),
+    Triple("xrefs", "交叉引用", "Xrefs"),
+)
+private val funcViewKeys = funcViewTabs.map { it.first }
+
+/** 紧凑 tab chip（自绘，避免 FilterChip 的肥大）。 */
 @Composable
-private fun AnalysisDomainTabs(
-    current: String,
-    zh: Boolean,
-    lastModeByTool: Map<String, String>,
-    onPick: (String) -> Unit,
-) {
+private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val active = analysisDomainOf(current)
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        analysisDomains.forEach { d ->
-            val selected = d.key == active.key
-            Column(
-                Modifier.weight(1f).clickable { onPick(rememberedView(d, lastModeByTool)) }.padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    if (zh) d.short else d.en,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = AppText.bodyStrong,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) cs.primary else cs.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-                Spacer(Modifier.size(4.dp))
-                Box(
-                    Modifier.height(2.dp)
-                        .width(if (selected) 18.dp else 0.dp)
-                        .clip(RoundedCornerShape(1.dp))
-                        .background(if (selected) cs.primary else Color.Transparent),
-                )
-            }
-        }
-    }
+    val shape = RoundedCornerShape(AppShape.pill)
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        fontSize = AppText.label,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        color = if (selected) cs.primary else cs.onSurfaceVariant,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier.clip(shape)
+            .background(if (selected) cs.primary.copy(alpha = 0.12f) else Color.Transparent)
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
 }
 
-/** 二级：当前域里的工具（≤4 个）。 */
+/** 一级：文件级对象 tab（函数/节区/符号/导入/依赖库/重定位/字符串/数据/ELF头）+「更多」。 */
 @Composable
-private fun AnalysisToolTabs(
-    current: String,
-    zh: Boolean,
-    lastModeByTool: Map<String, String>,
-    onPick: (String) -> Unit,
-) {
-    val cs = MaterialTheme.colorScheme
-    val domain = analysisDomainOf(current)
-    val active = analysisToolOf(current)
+private fun FileObjectTabs(current: String, zh: Boolean, onPick: (String) -> Unit, onMore: () -> Unit) {
+    val inFunc = current in funcViewKeys
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 2.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        domain.tools.forEach { tool ->
-            val selected = tool.key == active.key
-            val target = rememberedView(tool, lastModeByTool)
-            val shape = RoundedCornerShape(AppShape.pill)
-            Row(
-                Modifier.clip(shape)
-                    .background(if (selected) cs.primary.copy(alpha = 0.14f) else Color.Transparent)
-                    .border(BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.5f) else cs.outlineVariant), shape)
-                    .clickable { onPick(target) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(analysisViewIcon(target), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(13.dp))
-                Text(
-                    if (zh) tool.short else tool.en,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = AppText.label,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) cs.primary else cs.onSurfaceVariant,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
+        fileObjectTabs.forEach { (key, zhLabel, enLabel) ->
+            val selected = current == key || (key == "functions" && inFunc)
+            TabChip(if (zh) zhLabel else enLabel, selected) { onPick(key) }
         }
+        TabChip(if (zh) "更多 ⋯" else "More ⋯", current !in fileObjectKeys && !inFunc) { onMore() }
     }
 }
 
-/** 三级：当前工具里的模式（同一份数据的几种看法）；只有 1 个模式时整行不出现。 */
+/** 二级：函数级视图 tab（仅当已选中函数时显示）。 */
 @Composable
-private fun AnalysisModeTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
-    val tool = analysisToolOf(current)
-    if (tool.modes.size <= 1) return
+private fun FuncViewTabs(current: String, zh: Boolean, visible: Boolean, onPick: (String) -> Unit) {
+    if (!visible) return
     val cs = MaterialTheme.colorScheme
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, bottom = 4.dp),
@@ -2699,27 +2679,13 @@ private fun AnalysisModeTabs(current: String, zh: Boolean, onPick: (String) -> U
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            if (zh) "模式" else "Mode",
+            if (zh) "函数视图" else "Function",
             style = MaterialTheme.typography.labelSmall,
             fontSize = AppText.label,
             color = cs.onSurfaceVariant.copy(alpha = 0.7f),
         )
-        tool.modes.forEach { key ->
-            val selected = key == current
-            val shape = RoundedCornerShape(AppShape.pill)
-            Text(
-                analysisViewLabel(key, zh),
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) cs.primary else cs.onSurfaceVariant,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.clip(shape)
-                    .background(if (selected) cs.primary.copy(alpha = 0.12f) else Color.Transparent)
-                    .clickable { onPick(key) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            )
+        funcViewTabs.forEach { (key, zhLabel, enLabel) ->
+            TabChip(if (zh) zhLabel else enLabel, current == key) { onPick(key) }
         }
     }
 }

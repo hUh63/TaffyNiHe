@@ -375,7 +375,10 @@ jobs:
         run: |
           set -euo pipefail
           DCC_COMMIT="17de4fd3202bd0e46735974211a43cda39fca5f3"  # dcc master @ 2024-02-07（上游钉死）
-          APKTOOL_VERSION="2.12.1"
+          # 2.12.1 内置 smali 3.0.9 在回编 fastjson2 的 invoke-polymorphic 指令时抛
+          # NPE（Cannot read field "format"）→ dcc 无法重建 APK；3.0.3 已修复该 round-trip
+          # （本地用真实 release APK 复现并验证：2.12.1 build 失败、3.0.3 build 成功）。
+          APKTOOL_VERSION="3.0.3"
           BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
           NDK_BASE="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$NDK_VERSION}"
           WORK="$RUNNER_TEMP/dex2c"

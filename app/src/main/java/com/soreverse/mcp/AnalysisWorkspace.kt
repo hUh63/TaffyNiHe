@@ -447,8 +447,6 @@ internal fun AnalysisWorkspace(
 
                         "flutter" -> FlutterView(state = state, tools = tools, zh = zh, context = context)
 
-                        "rootdrill" -> RootDrillView(tools, zh, context, refreshAll)
-
                         "edit" -> EditCenterView(tools, zh, context, refreshAll)
 
                         "globalc" -> GlobalPseudoCView(tools, zh, context, refreshAll)
@@ -2104,7 +2102,6 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("comments", "注释", "Note", Icons.Filled.Description),
     AnalysisNavItem("analyze", "分析", "Ana", Icons.Filled.FlashOn),
     AnalysisNavItem("flutter", "Flutter", "Flutter", Icons.Filled.Memory),
-    AnalysisNavItem("rootdrill", "根下钻", "Root", Icons.Filled.Transform),
     AnalysisNavItem("edit", "编辑", "Edit", Icons.Filled.Build),
     AnalysisNavItem("globalc", "全局伪C", "GpC", Icons.Filled.Description),
 )
@@ -2154,7 +2151,7 @@ private val analysisDomains = listOf(
     )),
     // 分析域：判定与产物
     AnalysisDomain("judge", "分析", "Analyze", listOf(
-        AnalysisTool("hard", "加固", "Hard", listOf("hardening", "rootdrill", "unpack")),
+        AnalysisTool("hard", "加固", "Hard", listOf("hardening", "unpack")),
         AnalysisTool("ai", "AI", "AI", listOf("analyze")),
         AnalysisTool("exp", "导出", "Export", listOf("export", "data")),
         // Flutter/Dart AOT：内置 Blutter Runner，全本地分析（后端早已存在，这里补上 UI 入口）
@@ -7438,7 +7435,12 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var error by remember(ws, tick) { mutableStateOf("") }
     var note by remember(ws, tick) { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
-    var cgView by remember { mutableStateOf("graph") }
+    var xTab by remember { mutableStateOf("overview") }
+    var ovView by remember { mutableStateOf("list") }
+    var drillRoot by remember { mutableStateOf("JNI_OnLoad") }
+    var drillDepth by remember { mutableStateOf("3") }
+    var drillRan by remember { mutableStateOf(false) }
+    var savedMsg by remember { mutableStateOf("") }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -7446,12 +7448,8 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         val res = withContext(Dispatchers.IO) {
             runCatching {
                 val eng = EngineProvider.get(context)
-                // rizin 0.9.x 的 agCj 输出是对象 {"nodes":[{id,title,offset,out_nodes}]}，不是数组；
-                // 旧实现按数组解析 → 恒为空 → 全局调用图被误判「不可用」。这里按真实结构解析。
-                // 全局调用图依赖 rizin 的调用关系分析（aac）；native 每次命令只跑了 aa，
-                // 直接 agCj 常为空 → 先补一次 aac 再取图。
                 var raw = ""
-                var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList<Pair<String, String>>()
+                var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
                 for (c in listOf("aa; aac; agCj", "aac; agCj", "agCj")) {
                     raw = rzText(eng.rzCommand(ws, "", c))
                     g = parseRizinGraph(raw)
@@ -7463,10 +7461,9 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                 }
                 if (g.first.isNotEmpty()) Triple(g.first, g.second, "")
                 else {
-                    // 降级：函数列表（含各自规模），无全局边
                     val fns = rzArray(eng.rzCommand(ws, "", "aflj"))
                     Triple(fns, emptyList(), if (fns.isEmpty())
-                        (if (zh) "rizin 未返回调用图（agC 不可用或未分析），也无法列出函数" else "no call graph / functions from rizin")
+                        (if (zh) "rizin 未返回调用图，也无法列出函数" else "no call graph / functions")
                     else (if (zh) "未取得全局调用图，已降级为函数清单" else "no global call graph; fell back to function list"))
                 }
             }.getOrNull()
@@ -7474,17 +7471,19 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         loading = false
         if (res == null) { error = if (zh) "引擎未就绪或命令失败" else "engine/command failed"; return@LaunchedEffect }
         val (n, _, nt) = res
-        val (parsedNodes, parsedEdges) = parseCallGraph(n)
-        nodes = parsedNodes
-        edges = parsedEdges
-        note = nt
+        val (pn, pe) = parseCallGraph(n)
+        nodes = pn; edges = pe; note = nt
     }
 
     if (ws.isBlank()) return NeedWorkspace(zh)
 
-    val indeg = remember(edges) {
-        edges.groupingBy { it.second }.eachCount().entries.sortedByDescending { it.value }.take(5)
+    val names = remember(nodes) {
+        nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }.filter { it.isNotBlank() }
     }
+    val outCnt = remember(edges) { edges.groupingBy { it.first }.eachCount() }
+    val inCnt = remember(edges) { edges.groupingBy { it.second }.eachCount() }
+    val indegTop = remember(inCnt) { inCnt.entries.sortedByDescending { it.value }.take(5) }
+    val entryCount = remember(names, inCnt) { names.count { (inCnt[it] ?: 0) == 0 } }
     val shown = remember(nodes, query) {
         if (query.isBlank()) nodes else nodes.filter {
             it.optString("name").contains(query, true) || it.optString("id").contains(query, true)
@@ -7492,212 +7491,254 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     }
 
     Column(Modifier.fillMaxSize()) {
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                "overview" to (if (zh) "入口概览" else "Overview"),
+                "drill" to (if (zh) "根下钻" else "Root drill"),
+                "scc" to (if (zh) "SCC 鸟瞰" else "SCC"),
+                "export" to (if (zh) "导出" else "Export"),
+            ).forEach { (k, l) -> TabChip(l, selected = xTab == k) { xTab = k } }
             SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
-            SmallAction(if (zh) "复制节点" else "Copy nodes", enabled = nodes.isNotEmpty()) {
-                val sb = StringBuilder()
-                nodes.forEach { n -> sb.append(n.optString("name").ifBlank { n.optString("id") }).append('\t').append(hexAddr(n.opt("offset") ?: n.opt("id"))).append('\n') }
-                copyToClipboard(context, sb.toString().trimEnd(), zh)
-            }
-            SmallAction(if (zh) "复制边" else "Copy edges", enabled = edges.isNotEmpty()) {
-                copyToClipboard(context, edges.joinToString("\n") { "${it.first} -> ${it.second}" }, zh)
-            }
-            SmallAction(if (zh) "图形" else "Graph", active = cgView == "graph", enabled = nodes.isNotEmpty()) { cgView = "graph" }
-            SmallAction(if (zh) "列表" else "List", active = cgView == "list", enabled = nodes.isNotEmpty()) { cgView = "list" }
-            SmallAction("SCC", active = cgView == "scc", enabled = nodes.isNotEmpty()) { cgView = "scc" }
-            SmallAction(if (zh) "导出 JSON" else "JSON", enabled = nodes.isNotEmpty()) {
-                val o = JSONObject()
-                o.put("nodes", JSONArray(nodes.map { it.toString() }))
-                o.put("edges", JSONArray(edges.map { JSONObject().put("from", it.first).put("to", it.second) }))
-                copyToClipboard(context, o.toString(2), zh)
-            }
-            Text(if (zh) "${nodes.size} 节点 · ${edges.size} 边" else "${nodes.size} nodes · ${edges.size} edges",
-                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
         }
-        Spacer(Modifier.size(6.dp))
-        OutlinedTextField(
-            value = query, onValueChange = { query = it }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-            shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-            placeholder = { Text(if (zh) "过滤函数名" else "filter function", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        )
-        if (note.isNotBlank()) { Spacer(Modifier.size(6.dp)); MonoLine(note, cs.onSurfaceVariant, AppText.label) }
-        Spacer(Modifier.size(8.dp))
-        when {
-            loading -> AnalysisLoading()
-            error.isNotBlank() -> AnalysisErrorBanner(error)
-            nodes.isEmpty() -> AnalysisEmptyState(
-                title = if (zh) "无调用图数据" else "No call graph",
-                hint = if (zh) "rizin 未返回全局调用图。可先在「工具」页跑一次全量分析（aaaa），或改用「CFG」页看单函数控制流。"
-                    else "rizin returned no call graph. Run full analysis (aaaa) first, or use the CFG page for per-function control flow.",
-                primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+        if (nodes.isNotEmpty()) {
+            MonoLine(
+                if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 入口 $entryCount 个 · 全部函数 ${nodes.size}"
+                else "Global xref · ${edges.size} edges · $entryCount entries · ${nodes.size} fns",
+                cs.onSurfaceVariant, AppText.label,
             )
-            cgView == "scc" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val sccs = remember(nodes, edges) {
-                    if (nodes.isEmpty()) emptyList()
-                    else tarjanScc(nodes.map { it.optString("name").ifBlank { it.optString("id") } }, edges)
-                        .sortedByDescending { it.size }
-                }
-                val cyclic = sccs.filter { it.size > 1 }
-                KeyValueCard(zh, listOf(
-                    (if (zh) "强连通分量" else "SCCs") to "${sccs.size}",
-                    (if (zh) "环状簇(>1)" else "cyclic (>1)") to "${cyclic.size}",
-                    (if (zh) "最大簇" else "largest") to "${sccs.firstOrNull()?.size ?: 0}",
-                ))
-                if (sccs.isNotEmpty()) {
-                    SccGraphCanvas(
-                        comps = sccs,
-                        edges = edges,
-                        zh = zh,
-                        modifier = Modifier.fillMaxWidth().height(360.dp),
-                    )
-                }
-                if (cyclic.isEmpty()) {
-                    AnalysisEmptyState(
-                        title = if (zh) "无环状调用簇" else "No cyclic clusters",
-                        hint = if (zh) "所有函数的调用关系无环（DAG），可直接按调用顺序阅读。" else "The call graph is acyclic (DAG).",
-                    )
-                } else {
-                    Text(if (zh) "环状簇（互相调用，建议整体理解）" else "Cyclic clusters", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(AppShape.md))
-                            .background(cs.surfaceContainerHigh)
-                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        cyclic.take(60).forEachIndexed { idx, comp ->
-                            Column(Modifier.fillMaxWidth().clickable { copyToClipboard(context, comp.joinToString("\n"), zh) }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    TypeBadge("#$idx · ${comp.size}", cs.tertiary)
-                                    MonoLine(if (zh) "点按复制该簇" else "tap to copy", cs.onSurfaceVariant, AppText.label)
+        }
+        if (note.isNotBlank()) { Spacer(Modifier.size(4.dp)); MonoLine(note, cs.onSurfaceVariant, AppText.label) }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                loading && nodes.isEmpty() -> AnalysisLoading()
+                error.isNotBlank() -> AnalysisErrorBanner(error)
+                nodes.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无调用图数据" else "No call graph",
+                    hint = if (zh) "rizin 未返回全局调用图。可先跑一次全量分析（aaaa）。" else "rizin returned no call graph. Run full analysis (aaaa) first.",
+                    primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+                )
+                xTab == "overview" -> Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = query, onValueChange = { query = it }, singleLine = true,
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(AppShape.sm),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
+                            placeholder = { Text(if (zh) "搜索函数名 / 地址…" else "search fn / addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        )
+                        TabChip(if (zh) "列表" else "List", ovView == "list") { ovView = "list" }
+                        TabChip(if (zh) "图形" else "Graph", ovView == "graph") { ovView = "graph" }
+                        if (query.isNotBlank()) SmallAction(if (zh) "重置" else "Reset") { query = "" }
+                    }
+                    Spacer(Modifier.size(6.dp))
+                    if (ovView == "graph") {
+                        CallGraphGraphPane(nodes, edges, query, zh)
+                    } else {
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            shown.take(400).forEach { o ->
+                                val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
+                                val addr = hexAddr(o.opt("offset") ?: o.opt("id"))
+                                val oN = outCnt[nm] ?: 0
+                                val iN = inCnt[nm] ?: 0
+                                Column(
+                                    Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(AppShape.md))
+                                        .background(cs.surfaceContainerHigh)
+                                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                        .clickable { copyToClipboard(context, nm, zh) }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(nm, style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                        if (iN == 0) TypeBadge(if (zh) "入口" else "entry", cs.tertiary)
+                                    }
+                                    MonoLine((if (addr.isNotBlank()) "$addr  " else "") + (if (zh) "调用 $oN · 被调 $iN" else "$oN out · $iN in"), cs.onSurfaceVariant, AppText.label)
                                 }
-                                comp.take(12).forEach { nm -> MonoLine(nm, cs.onSurface, AppText.label) }
-                                if (comp.size > 12) MonoLine(if (zh) "… 共 ${comp.size} 个" else "… ${comp.size} total", cs.onSurfaceVariant, AppText.label)
+                            }
+                            if (shown.size > 400) MonoLine(if (zh) "… 共 ${shown.size} 个（用搜索缩小）" else "… ${shown.size} total", cs.onSurfaceVariant, AppText.label)
+                        }
+                    }
+                }
+                xTab == "drill" -> Column(Modifier.fillMaxSize()) {
+                    val levels = remember(names, edges, drillRoot, drillDepth, drillRan) {
+                        if (!drillRan) emptyList<Pair<String, List<String>>>()
+                        else {
+                            val outAdj = HashMap<String, MutableList<String>>()
+                            edges.forEach { (f, t) -> outAdj.getOrPut(f) { ArrayList() }.add(t) }
+                            val start = names.firstOrNull { it == drillRoot }
+                                ?: names.firstOrNull { it.contains(drillRoot, true) }
+                                ?: if (drillRoot.isBlank()) names.firstOrNull() else null
+                            val out = ArrayList<Pair<String, List<String>>>()
+                            if (!start.isNullOrBlank()) {
+                                val seen = HashSet<String>()
+                                seen.add(start)
+                                var fr = listOf(start)
+                                val d = drillDepth.toIntOrNull()?.coerceIn(1, 8) ?: 3
+                                for (lvl in 0 until d) {
+                                    val nx = LinkedHashSet<String>()
+                                    fr.forEach { u -> outAdj[u]?.forEach { v -> if (v != u && seen.add(v)) nx.add(v) } }
+                                    out.add((if (zh) "第 ${lvl + 1} 层" else "level ${lvl + 1}") to nx.toList())
+                                    if (nx.isEmpty()) break
+                                    fr = nx.toList()
+                                }
+                            }
+                            out
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SmallAction(if (zh) "开始下钻" else "Drill") { drillRan = true }
+                        SmallAction("JNI_OnLoad") { drillRoot = "JNI_OnLoad"; drillRan = true }
+                        SmallAction(if (zh) "取当前函数" else "Current", enabled = tools.selectedFunctionName.isNotBlank()) { drillRoot = tools.selectedFunctionName; drillRan = true }
+                        SmallAction(if (zh) "复制树" else "Copy", enabled = levels.isNotEmpty()) {
+                            val sb = StringBuilder()
+                            levels.forEach { (lvl, list) -> sb.append("$lvl (${list.size})\n"); list.forEach { sb.append("  $it\n") } }
+                            copyToClipboard(context, sb.toString().trimEnd(), zh)
+                        }
+                    }
+                    Spacer(Modifier.size(6.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = drillRoot, onValueChange = { drillRoot = it }, singleLine = true,
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(AppShape.sm),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                            label = { Text(if (zh) "根节点" else "root", fontSize = AppText.label) },
+                        )
+                        OutlinedTextField(
+                            value = drillDepth, onValueChange = { drillDepth = it }, singleLine = true,
+                            modifier = Modifier.width(80.dp).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(AppShape.sm),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                            label = { Text(if (zh) "层数" else "depth", fontSize = AppText.label) },
+                        )
+                    }
+                    Spacer(Modifier.size(8.dp))
+                    when {
+                        !drillRan -> AnalysisEmptyState(
+                            title = if (zh) "根下钻" else "Root drill",
+                            hint = if (zh) "从根节点出发逐层展开它调用的函数，快速摸清主流程。" else "Expand callees from a root level by level.",
+                            primaryLabel = if (zh) "从 JNI_OnLoad 开始" else "From JNI_OnLoad",
+                            onPrimary = { drillRoot = "JNI_OnLoad"; drillRan = true },
+                        )
+                        levels.isEmpty() || levels.all { it.second.isEmpty() } -> AnalysisEmptyState(
+                            title = if (zh) "无调用关系" else "No calls",
+                            hint = if (zh) "该根节点没有出边（可能是叶子函数，或尚未分析出调用关系）。可点「刷新」重跑全量分析再试。" else "The root has no outgoing edges (leaf, or calls not analyzed yet).",
+                            primaryLabel = if (zh) "刷新重分析" else "Re-analyze", onPrimary = onRefresh,
+                        )
+                        else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MonoLine((if (zh) "根：$drillRoot" else "root: $drillRoot"), cs.primary, AppText.bodyStrong)
+                            levels.forEach { (lvl, list) ->
+                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("$lvl · ${list.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                                    Column(
+                                        Modifier.fillMaxWidth()
+                                            .clip(RoundedCornerShape(AppShape.md))
+                                            .background(cs.surfaceContainerHigh)
+                                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                                    ) {
+                                        if (list.isEmpty()) MonoLine(if (zh) "（无）" else "(none)", cs.onSurfaceVariant, AppText.label)
+                                        list.take(80).forEach { nm -> MonoLine("→ $nm", cs.onSurface, AppText.label) }
+                                        if (list.size > 80) MonoLine(if (zh) "… 共 ${list.size} 个" else "… ${list.size} total", cs.onSurfaceVariant, AppText.label)
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
-            cgView == "list" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (indeg.isNotEmpty()) {
-                    Text(if (zh) "枢纽（入度 Top5）" else "Hubs (indegree Top5)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
-                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        indeg.forEach { (name, c) -> TypeBadge("$name  ×$c", cs.primary) }
+                xTab == "scc" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val sccs = remember(names, edges) {
+                        if (names.isEmpty()) emptyList() else tarjanScc(names, edges).sortedByDescending { it.size }
                     }
-                }
-                Column(
-                    Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(AppShape.md))
-                        .background(cs.surfaceContainerHigh)
-                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    shown.take(500).forEach { n ->
-                        val nm = n.optString("name").ifBlank { n.optString("id") }
-                        Row(Modifier.fillMaxWidth().clickable { copyToClipboard(context, nm, zh) }, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            MonoLine(hexAddr(n.opt("offset") ?: n.opt("id")), cs.primary, AppText.label)
-                            Text(nm, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), fontSize = AppText.body,
-                                color = cs.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            val sz = numOf(n.opt("size"))
-                            if (sz > 0) MonoLine("$sz", cs.onSurfaceVariant, AppText.label)
+                    val cyclic = sccs.filter { it.size > 1 }
+                    KeyValueCard(zh, listOf(
+                        (if (zh) "强连通分量" else "SCCs") to "${sccs.size}",
+                        (if (zh) "环状簇(>1)" else "cyclic (>1)") to "${cyclic.size}",
+                        (if (zh) "最大簇" else "largest") to "${sccs.firstOrNull()?.size ?: 0}",
+                    ))
+                    if (indegTop.isNotEmpty()) {
+                        Text(if (zh) "枢纽（入度 Top5）" else "Hubs (indegree Top5)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            indegTop.forEach { (name, c) -> TypeBadge("$name  ×$c", cs.primary) }
                         }
                     }
-                    if (shown.size > 500) MonoLine(if (zh) "… 仅显示前 500 个节点" else "… first 500 nodes", cs.onSurfaceVariant, AppText.label)
-                }
-                if (edges.isNotEmpty()) {
-                    Text(if (zh) "调用边（前 400）" else "Edges (first 400)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(AppShape.md))
-                            .background(cs.surfaceContainerHigh)
-                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        edges.take(400).forEach { (f, t) ->
-                            MonoLine("$f  →  $t", cs.onSurface, AppText.label)
+                    if (sccs.isNotEmpty()) {
+                        SccGraphCanvas(comps = sccs, edges = edges, zh = zh, modifier = Modifier.fillMaxWidth().height(360.dp))
+                    }
+                    if (cyclic.isEmpty()) {
+                        AnalysisEmptyState(
+                            title = if (zh) "无环状调用簇" else "No cyclic clusters",
+                            hint = if (zh) "所有函数的调用关系无环（DAG），可直接按调用顺序阅读。" else "The call graph is acyclic (DAG).",
+                        )
+                    } else {
+                        Text(if (zh) "环状簇（互相调用，建议整体理解）" else "Cyclic clusters", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(AppShape.md))
+                                .background(cs.surfaceContainerHigh)
+                                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            cyclic.take(60).forEachIndexed { idx, comp ->
+                                Column(Modifier.fillMaxWidth().clickable { copyToClipboard(context, comp.joinToString("\n"), zh) }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        TypeBadge("#$idx · ${comp.size}", cs.tertiary)
+                                        MonoLine(if (zh) "点按复制该簇" else "tap to copy", cs.onSurfaceVariant, AppText.label)
+                                    }
+                                    comp.take(12).forEach { nm -> MonoLine(nm, cs.onSurface, AppText.label) }
+                                    if (comp.size > 12) MonoLine(if (zh) "… 共 ${comp.size} 个" else "… ${comp.size} total", cs.onSurfaceVariant, AppText.label)
+                                }
+                            }
                         }
                     }
                 }
+                else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val d = LocalDensity.current
+                    val df = d.density
+                    SmallAction(if (zh) "导出 PNG（调用图画布）" else "PNG") {
+                        val sub = buildCallSubgraph(nodes, edges, "full", "", 2, 200)
+                        val lay = layoutCallGraph(sub.first, sub.second, "TB", df)
+                        val path = exportDrawToPng(
+                            context = context,
+                            fileName = "xref_graph_${System.currentTimeMillis()}.png",
+                            widthPx = (lay.width + 60f).toInt(),
+                            heightPx = (lay.height + 60f).toInt(),
+                            density = d,
+                        ) { drawCgScene(lay, cs, df, 1f, Offset.Zero, this.size, -1, "", "TB") }
+                        savedMsg = if (path != null) (if (zh) "已导出：$path" else "saved: $path") else (if (zh) "导出失败" else "export failed")
+                    }
+                    SmallAction(if (zh) "导出 JSON（完整数据）" else "JSON") {
+                        val o = JSONObject()
+                        o.put("nodes", JSONArray(nodes.map { it.toString() }))
+                        o.put("edges", JSONArray(edges.map { JSONObject().put("from", it.first).put("to", it.second) }))
+                        val f = java.io.File(exportsDir(context), "xref_${System.currentTimeMillis()}.json")
+                        val r = runCatching { f.writeText(o.toString(2)) }
+                        savedMsg = if (r.isSuccess) (if (zh) "已导出：${f.absolutePath}" else "saved: ${f.absolutePath}") else (if (zh) "导出失败" else "export failed")
+                    }
+                    SmallAction(if (zh) "导出 CSV（完整数据）" else "CSV") {
+                        fun esc(v: String) = "\"" + v.replace("\"", "\"\"") + "\""
+                        val sb = StringBuilder("from,to\n")
+                        edges.forEach { sb.append(esc(it.first)).append(',').append(esc(it.second)).append('\n') }
+                        val f = java.io.File(exportsDir(context), "xref_${System.currentTimeMillis()}.csv")
+                        val r = runCatching { f.writeText(sb.toString()) }
+                        savedMsg = if (r.isSuccess) (if (zh) "已导出：${f.absolutePath}" else "saved: ${f.absolutePath}") else (if (zh) "导出失败" else "export failed")
+                    }
+                    MonoLine(if (zh) "导出目录：${exportsDir(context).absolutePath}" else exportsDir(context).absolutePath, cs.onSurfaceVariant, AppText.label)
+                    if (savedMsg.isNotBlank()) MonoLine(savedMsg, cs.primary, AppText.label)
+                }
             }
-            else -> CallGraphGraphPane(nodes, edges, query, zh)
         }
     }
 }
-
-/** agCj 输出既可能是 {nodes,edges} 也可能是 [{name,imports|out}] 数组。 */
-private fun parseCallGraph(items: List<JSONObject>): Pair<List<JSONObject>, List<Pair<String, String>>> {
-    if (items.isEmpty()) return emptyList<JSONObject>() to emptyList<Pair<String, String>>()
-    // 形式一：单个对象含 nodes/edges
-    val first = items.firstOrNull()
-    if (items.size == 1 && first != null && (first.has("nodes") || first.has("edges"))) {
-        val ns = mutableListOf<JSONObject>()
-        first.optJSONArray("nodes")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { ns.add(it) } }
-        val es = mutableListOf<Pair<String, String>>()
-        first.optJSONArray("edges")?.let { a ->
-            for (i in 0 until a.length()) {
-                val e = a.optJSONObject(i) ?: continue
-                val f = e.optString("from").ifBlank { e.optString("src") }
-                val t = e.optString("to").ifBlank { e.optString("dst") }
-                if (f.isNotBlank() && t.isNotBlank()) es.add(f to t)
-            }
-        }
-        return ns to es
-    }
-    // 形式二：数组，每项是一个函数节点（可能含 imports/out 列表）
-    val nodes = items
-    val edges = mutableListOf<Pair<String, String>>()
-    items.forEach { o ->
-        val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset")) }
-        listOf("imports", "out", "calls", "children").forEach { key ->
-            o.optJSONArray(key)?.let { a ->
-                for (i in 0 until a.length()) {
-                    val t = when (val v = a.opt(i)) {
-                        is String -> v
-                        is JSONObject -> v.optString("name").ifBlank { hexAddr(v.opt("offset")) }
-                        else -> ""
-                    }
-                    if (nm.isNotBlank() && t.isNotBlank()) edges.add(nm to t)
-                }
-            }
-        }
-    }
-    return nodes to edges
-}
-
-// ───────────────────────── 导出中心 ─────────────────────────
-
-private data class ExportKind(val key: String, val zh: String, val en: String, val cmd: String, val fields: List<Triple<String, String, String>>)
-
-/** fields: (jsonKey, 中文列名, 英文列名) */
-private val exportKinds = listOf(
-    ExportKind("functions", "函数列表", "Functions", "aflj", listOf(
-        Triple("offset", "地址", "ADDR"), Triple("size", "大小", "SIZE"),
-        Triple("nbbs", "基本块", "BBS"), Triple("name", "名字", "NAME"))),
-    ExportKind("strings", "字符串", "Strings", "izj", listOf(
-        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"),
-        Triple("length", "长度", "LEN"), Triple("string", "内容", "VALUE"))),
-    ExportKind("symbols", "符号", "Symbols", "isj", listOf(
-        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"),
-        Triple("bind", "绑定", "BIND"), Triple("name", "名字", "NAME"))),
-    ExportKind("imports", "导入", "Imports", "iij", listOf(
-        Triple("plt", "PLT", "PLT"), Triple("type", "类型", "TYPE"), Triple("name", "名字", "NAME"))),
-    ExportKind("sections", "节区", "Sections", "iSj", listOf(
-        Triple("vaddr", "虚地址", "VADDR"), Triple("paddr", "文件偏移", "OFF"),
-        Triple("size", "大小", "SIZE"), Triple("name", "名称", "NAME"))),
-    ExportKind("segments", "程序段", "Segments", "iSSj", listOf(
-        Triple("vaddr", "虚地址", "VADDR"), Triple("paddr", "文件偏移", "OFF"),
-        Triple("vsize", "内存大小", "VMSIZE"), Triple("type", "类型", "TYPE"))),
-    ExportKind("relocs", "重定位", "Relocations", "irj", listOf(
-        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"), Triple("name", "名字", "NAME"))),
-    ExportKind("entries", "入口点", "Entrypoints", "iej", listOf(
-        Triple("vaddr", "虚地址", "VADDR"), Triple("type", "类型", "TYPE"), Triple("name", "名称", "NAME"))),
-)
 
 @Composable
 private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
@@ -8575,173 +8616,6 @@ private fun AnalyzeModeView(tools: ToolPagesState, zh: Boolean, context: android
         )
     }
 }
-
-// ───────────────────────── 交叉引用：根下钻 ─────────────────────────
-
-@Composable
-private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
-    val ws = tools.sharedWorkspaceId
-    val cs = MaterialTheme.colorScheme
-    val scope = rememberCoroutineScope()
-    var root by remember { mutableStateOf("") }
-    var depth by remember { mutableStateOf("2") }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-    var levels by remember { mutableStateOf<List<Pair<String, List<String>>>>(emptyList()) }
-    var ran by remember { mutableStateOf(false) }
-
-    LaunchedEffect(ws) {
-        if (root.isBlank()) root = "JNI_OnLoad"
-    }
-
-    fun drill() {
-        val r0 = root.trim()
-        if (r0.isBlank() || ws.isBlank()) return
-        val maxDepth = depth.toIntOrNull()?.coerceIn(1, 4) ?: 2
-        scope.launch {
-            loading = true; error = ""; ran = true; levels = emptyList()
-            val res = withContext(Dispatchers.IO) {
-                runCatching {
-                    val eng = EngineProvider.get(context)
-                    // 取全局调用图（与「调用图」页同源 agCj），在本地做 BFS —— 不再依赖逐节点 seek+axfj
-                    // （axfj 需 seek 成功，且对 strip 过的 SO 常返回空 → 表现为「无调用关系」）。
-                    var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
-                    for (c in listOf("aa; aac; agCj", "aac; agCj", "agCj")) {
-                        val raw = rzText(eng.rzCommand(ws, "", c))
-                        g = parseRizinGraph(raw)
-                        if (g.first.isNotEmpty()) break
-                        val legacy = rzArrayText(raw)
-                        if (legacy.isNotEmpty()) { g = parseCallGraph(legacy); if (g.first.isNotEmpty()) break }
-                    }
-                    val names = g.first.map { it.optString("name") }
-                    if (names.isEmpty()) return@runCatching Triple(emptyList<Pair<String, List<String>>>(), emptyList<String>(), true)
-                    val addrKey = r0.removePrefix("0x").removePrefix("0X")
-                    val start = names.firstOrNull { it == r0 }
-                        ?: names.firstOrNull { it.contains(r0, true) }
-                        ?: names.firstOrNull { addrKey.isNotBlank() && it.equals("0x$addrKey", true) }
-                        ?: names.firstOrNull { addrKey.isNotBlank() && it.contains(addrKey, true) }
-                    if (start == null) return@runCatching Triple(emptyList<Pair<String, List<String>>>(), listOf(r0), false)
-                    val outAdj = HashMap<String, MutableList<String>>()
-                    g.second.forEach { (f, t) -> outAdj.getOrPut(f) { ArrayList() }.add(t) }
-                    val out = mutableListOf<Pair<String, List<String>>>()
-                    val seen = HashSet<String>()
-                    seen.add(start)
-                    var frontier = listOf(start)
-                    for (d in 0 until maxDepth) {
-                        val next = LinkedHashSet<String>()
-                        frontier.forEach { node -> outAdj[node]?.forEach { v -> if (v != node && seen.add(v)) next.add(v) } }
-                        out.add((if (zh) "第 ${d + 1} 层" else "level ${d + 1}") to next.toList())
-                        if (next.isEmpty()) break
-                        frontier = next.toList()
-                    }
-                    Triple(out, emptyList<String>(), false)
-                }.getOrNull()
-            }
-            loading = false
-            if (res == null) {
-                error = if (zh) "下钻失败（引擎异常）" else "drill failed"
-            } else {
-                levels = res.first
-                when {
-                    res.third -> error = if (zh) "未取得调用图（已跑 aa+aac；若仍为空说明该 SO 分析不出调用关系）" else "no call graph"
-                    res.second.isNotEmpty() -> error = if (zh) "根节点「${res.second.first()}」不在调用图内（试试函数名或 0x 地址）" else "root not found in call graph"
-                }
-            }
-        }
-    }
-
-    if (ws.isBlank()) return NeedWorkspace(zh)
-
-    Column(Modifier.fillMaxSize()) {
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "开始下钻" else "Drill", loading = loading, onClick = { drill() })
-            SmallAction("JNI_OnLoad") { root = "JNI_OnLoad"; drill() }
-            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionName.isNotBlank()) {
-                root = tools.selectedFunctionName; drill()
-            }
-            SmallAction(if (zh) "复制树" else "Copy", enabled = levels.isNotEmpty()) {
-                val sb = StringBuilder()
-                levels.forEach { (lvl, list) -> sb.append("$lvl (${list.size})\n"); list.forEach { sb.append("  $it\n") } }
-                copyToClipboard(context, sb.toString().trimEnd(), zh)
-            }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
-        }
-        Spacer(Modifier.size(6.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedTextField(
-                value = root, onValueChange = { root = it }, singleLine = true,
-                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-                shape = RoundedCornerShape(AppShape.sm),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                label = { Text(if (zh) "根节点" else "root", fontSize = AppText.label) },
-                placeholder = { Text("JNI_OnLoad", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
-            )
-            OutlinedTextField(
-                value = depth, onValueChange = { depth = it }, singleLine = true,
-                modifier = Modifier.width(80.dp).heightIn(min = 46.dp),
-                shape = RoundedCornerShape(AppShape.sm),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                label = { Text(if (zh) "层数" else "depth", fontSize = AppText.label) },
-            )
-        }
-        Spacer(Modifier.size(8.dp))
-        when {
-            loading -> AnalysisLoading()
-            error.isNotBlank() -> AnalysisErrorBanner(error)
-            !ran -> AnalysisEmptyState(
-                title = if (zh) "根下钻" else "Root drill",
-                hint = if (zh) "从一个根节点（如 JNI_OnLoad）出发，逐层展开它调用的函数，快速摸清主流程。"
-                    else "From a root (e.g. JNI_OnLoad), expand callees level by level to map the main flow.",
-                primaryLabel = if (zh) "从 JNI_OnLoad 开始" else "From JNI_OnLoad",
-                onPrimary = { root = "JNI_OnLoad"; drill() },
-            )
-            levels.isEmpty() || levels.all { it.second.isEmpty() } -> AnalysisEmptyState(
-                title = if (zh) "无调用关系" else "No calls",
-                hint = if (zh) "该根节点没有出边（可能是叶子函数，或尚未分析出调用关系）。点下面按钮跑一次全量分析再试。"
-                    else "The root has no outgoing edges (leaf, or calls not analyzed yet). Run a full analysis and retry.",
-                primaryLabel = if (zh) "跑全量分析" else "Full analysis",
-                onPrimary = {
-                    scope.launch {
-                        loading = true
-                        withContext(Dispatchers.IO) { runCatching { EngineProvider.get(context).rzCommand(ws, "", "aaa") } }
-                        loading = false
-                        drill()
-                    }
-                },
-            )
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MonoLine((if (zh) "根：$root" else "root: $root"), cs.primary, AppText.bodyStrong)
-                levels.forEach { (lvl, list) ->
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("$lvl · ${list.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
-                        Column(
-                            Modifier.fillMaxWidth()
-                                .clip(RoundedCornerShape(AppShape.md))
-                                .background(cs.surfaceContainerHigh)
-                                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
-                        ) {
-                            if (list.isEmpty()) MonoLine(if (zh) "（无）" else "(none)", cs.onSurfaceVariant, AppText.label)
-                            list.take(80).forEach { nm ->
-                                MonoLine("→ $nm", cs.onSurface, AppText.label)
-                            }
-                            if (list.size > 80) MonoLine(if (zh) "… 共 ${list.size} 个" else "… ${list.size} total", cs.onSurfaceVariant, AppText.label)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  编辑中心（对齐 Exbin §5.1「能改什么」）
-//    · 函数符号重命名  → taffy_edit_symbol(op=rename)
-//    · 字符串内容替换  → taffy_native_patch_string
-//    · 单条指令重汇编  → taffy_native_patch_instructions
-//  一律先 dryRun / CAS 校验，破坏性写入前二次确认。
-// ═══════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {

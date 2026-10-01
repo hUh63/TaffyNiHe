@@ -7739,6 +7739,75 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         }
     }
 }
+/** agCj 输出既可能是 {nodes,edges} 也可能是 [{name,imports|out}] 数组。 */
+private fun parseCallGraph(items: List<JSONObject>): Pair<List<JSONObject>, List<Pair<String, String>>> {
+    if (items.isEmpty()) return emptyList<JSONObject>() to emptyList<Pair<String, String>>()
+    // 形式一：单个对象含 nodes/edges
+    val first = items.firstOrNull()
+    if (items.size == 1 && first != null && (first.has("nodes") || first.has("edges"))) {
+        val ns = mutableListOf<JSONObject>()
+        first.optJSONArray("nodes")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { ns.add(it) } }
+        val es = mutableListOf<Pair<String, String>>()
+        first.optJSONArray("edges")?.let { a ->
+            for (i in 0 until a.length()) {
+                val e = a.optJSONObject(i) ?: continue
+                val f = e.optString("from").ifBlank { e.optString("src") }
+                val t = e.optString("to").ifBlank { e.optString("dst") }
+                if (f.isNotBlank() && t.isNotBlank()) es.add(f to t)
+            }
+        }
+        return ns to es
+    }
+    // 形式二：数组，每项是一个函数节点（可能含 imports/out 列表）
+    val nodes = items
+    val edges = mutableListOf<Pair<String, String>>()
+    items.forEach { o ->
+        val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset")) }
+        listOf("imports", "out", "calls", "children").forEach { key ->
+            o.optJSONArray(key)?.let { a ->
+                for (i in 0 until a.length()) {
+                    val t = when (val v = a.opt(i)) {
+                        is String -> v
+                        is JSONObject -> v.optString("name").ifBlank { hexAddr(v.opt("offset")) }
+                        else -> ""
+                    }
+                    if (nm.isNotBlank() && t.isNotBlank()) edges.add(nm to t)
+                }
+            }
+        }
+    }
+    return nodes to edges
+}
+
+// ───────────────────────── 导出中心 ─────────────────────────
+
+private data class ExportKind(val key: String, val zh: String, val en: String, val cmd: String, val fields: List<Triple<String, String, String>>)
+
+/** fields: (jsonKey, 中文列名, 英文列名) */
+private val exportKinds = listOf(
+    ExportKind("functions", "函数列表", "Functions", "aflj", listOf(
+        Triple("offset", "地址", "ADDR"), Triple("size", "大小", "SIZE"),
+        Triple("nbbs", "基本块", "BBS"), Triple("name", "名字", "NAME"))),
+    ExportKind("strings", "字符串", "Strings", "izj", listOf(
+        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"),
+        Triple("length", "长度", "LEN"), Triple("string", "内容", "VALUE"))),
+    ExportKind("symbols", "符号", "Symbols", "isj", listOf(
+        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"),
+        Triple("bind", "绑定", "BIND"), Triple("name", "名字", "NAME"))),
+    ExportKind("imports", "导入", "Imports", "iij", listOf(
+        Triple("plt", "PLT", "PLT"), Triple("type", "类型", "TYPE"), Triple("name", "名字", "NAME"))),
+    ExportKind("sections", "节区", "Sections", "iSj", listOf(
+        Triple("vaddr", "虚地址", "VADDR"), Triple("paddr", "文件偏移", "OFF"),
+        Triple("size", "大小", "SIZE"), Triple("name", "名称", "NAME"))),
+    ExportKind("segments", "程序段", "Segments", "iSSj", listOf(
+        Triple("vaddr", "虚地址", "VADDR"), Triple("paddr", "文件偏移", "OFF"),
+        Triple("vsize", "内存大小", "VMSIZE"), Triple("type", "类型", "TYPE"))),
+    ExportKind("relocs", "重定位", "Relocations", "irj", listOf(
+        Triple("vaddr", "地址", "VADDR"), Triple("type", "类型", "TYPE"), Triple("name", "名字", "NAME"))),
+    ExportKind("entries", "入口点", "Entrypoints", "iej", listOf(
+        Triple("vaddr", "虚地址", "VADDR"), Triple("type", "类型", "TYPE"), Triple("name", "名称", "NAME"))),
+)
+
 
 @Composable
 private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {

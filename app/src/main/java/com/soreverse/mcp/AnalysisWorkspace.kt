@@ -403,8 +403,6 @@ internal fun AnalysisWorkspace(
                             onShowCfg = { tools.analysisView = "cfg" },
                         )
 
-                        "hub" -> ToolsHubView(zh = zh) { key -> tools.analysisView = key }
-
                         "xor" -> XorDecryptView(zh = zh, context = context)
 
                         "regs" -> ArmRegisterView(zh = zh, context = context)
@@ -2080,7 +2078,6 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("asm", "汇编器", "Asm+", Icons.Filled.SwapHoriz),
     AnalysisNavItem("results", "结果", "Out", Icons.Filled.Terminal),
     AnalysisNavItem("tools", "工具", "Tools", Icons.Filled.Build),
-    AnalysisNavItem("hub", "工具集", "Hub", Icons.Filled.Build),
     AnalysisNavItem("xor", "XOR", "XOR", Icons.Filled.LockOpen),
     AnalysisNavItem("regs", "寄存器", "Reg", Icons.Filled.Memory),
     AnalysisNavItem("strdec", "解码", "Dec", Icons.Filled.DataObject),
@@ -2160,7 +2157,7 @@ private val analysisDomains = listOf(
     // 工具域：和当前文件无关的通用小工具
     AnalysisDomain("utils", "工具", "Tools", listOf(
         AnalysisTool("conv", "转换", "Conv", listOf("base", "demangle", "strdec", "xor", "bytediff")),
-        AnalysisTool("mcp", "控制台", "Console", listOf("tools", "hub")),
+        AnalysisTool("mcp", "控制台", "Console", listOf("tools")),
         AnalysisTool("out", "输出", "Out", listOf("results")),
     )),
 )
@@ -2636,23 +2633,26 @@ private fun AnalysisModeTabs(current: String, zh: Boolean, onPick: (String) -> U
     }
 }
 
-/** 紧凑 tab chip（自绘，避免 FilterChip 的肥大）。 */
+/** 紧凑 tab chip（自绘，Exbin 风：选中=主色底+描边+加粗，未选中=浅底纯字）。 */
 @Composable
 private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(AppShape.pill)
+    val mod = Modifier
+        .clip(shape)
+        .background(if (selected) cs.primary.copy(alpha = 0.15f) else cs.surfaceContainerHigh.copy(alpha = 0.55f))
+        .then(if (selected) Modifier.border(BorderStroke(1.dp, cs.primary.copy(alpha = 0.45f)), shape) else Modifier)
+        .clickable { onClick() }
+        .padding(horizontal = 11.dp, vertical = 6.dp)
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
         fontSize = AppText.label,
-        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
         color = if (selected) cs.primary else cs.onSurfaceVariant,
         maxLines = 1,
         softWrap = false,
-        modifier = Modifier.clip(shape)
-            .background(if (selected) cs.primary.copy(alpha = 0.12f) else Color.Transparent)
-            .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+        modifier = mod,
     )
 }
 
@@ -5131,103 +5131,6 @@ private fun EntriesView(tools: ToolPagesState, zh: Boolean, context: android.con
 // ═══════════════════════════════════════════════════════════════════════════
 //  逆向工程工具集（复刻 Exbin ToolsHubFragment 的 12 项）
 //  本文件所有页面均为纯客户端实现：不打开工作区也能用（与「进制转换/汇编器」一致）。
-// ═══════════════════════════════════════════════════════════════════════════
-
-private data class ToolEntry(
-    val key: String,
-    val zh: String,
-    val en: String,
-    val zhDesc: String,
-    val enDesc: String,
-)
-
-private val toolHubItems = listOf(
-    ToolEntry("base", "进制转换", "Base", "BIN / OCT / DEC / HEX 互转 + 字节序 + ASCII", "BIN / OCT / DEC / HEX + endianness + ASCII"),
-    ToolEntry("strdec", "字符串解码", "Decode", "Hex / Base64 / UTF-8 / ASCII / URL 解码与编码", "Hex / Base64 / UTF-8 / ASCII / URL decode &amp; encode"),
-    ToolEntry("asm", "汇编器", "Assembler", "汇编 → 机器码（多架构，可视化预览与写回）", "Assemble → machine code (multi-arch)"),
-    ToolEntry("xor", "XOR 解密", "XOR", "对 hex 数据用 key 做 XOR，输出 hex + ASCII", "XOR hex data with key → hex + ASCII"),
-    ToolEntry("elfhdr", "ELF 头解析", "ELF Header", "解析 ELF 头字段、程序段与节表结构", "Parse ELF header, program &amp; section tables"),
-    ToolEntry("regs", "寄存器速查", "Registers", "ARM64 / ARM32 寄存器用途与调用约定", "ARM64 / ARM32 registers &amp; calling convention"),
-    ToolEntry("hex", "十六进制查看器", "Hex Viewer", "按偏移查看当前文件的十六进制内容", "Hex view of the current file"),
-    ToolEntry("bytediff", "字节差分对比", "Byte Diff", "对比两段 hex 数据，逐字节输出差异行", "Diff two hex blobs byte by byte"),
-    ToolEntry("insnexp", "指令含义", "Insn Explain", "ARM / ARM64 汇编指令中文语义查询", "Explain ARM / ARM64 instructions in Chinese"),
-    ToolEntry("asm2c", "汇编转伪C", "Asm → C", "把多条汇编指令翻译成可读的伪 C 代码", "Translate assembly into readable pseudo-C"),
-    ToolEntry("asm2flow", "汇编转流程图", "Asm → Flow", "按基本块切分汇编，输出 ASCII 框图", "Split asm into basic blocks → ASCII flowchart"),
-    ToolEntry("demangle", "符号解码", "Demangle", "Itanium C++ mangled 符号解码", "Decode Itanium mangled C++ symbols"),
-)
-
-@Composable
-private fun ToolsHubView(zh: Boolean, onOpen: (String) -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Icons.Filled.Build, null, tint = cs.primary, modifier = Modifier.size(15.dp))
-            Text(
-                if (zh) "逆向工程工具集 · 共 ${toolHubItems.size} 项" else "Reverse Engineering Toolkit · ${toolHubItems.size} tools",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                color = cs.onSurfaceVariant,
-            )
-        }
-        toolHubItems.forEach { item ->
-            Surface(
-                onClick = { onOpen(item.key) },
-                shape = RoundedCornerShape(AppShape.md),
-                color = cs.surfaceContainerHigh,
-                border = BorderStroke(1.dp, cs.outlineVariant),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                ) {
-                    Box(
-                        Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(cs.primary.copy(alpha = 0.16f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(toolHubIcon(item.key), null, tint = cs.primary, modifier = Modifier.size(15.dp))
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            if (zh) item.zh else item.en,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = AppText.bodyStrong,
-                            fontWeight = FontWeight.SemiBold,
-                            color = cs.onSurface,
-                        )
-                        Text(
-                            if (zh) item.zhDesc else item.enDesc,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = AppText.label,
-                            color = cs.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
-    }
-}
-
-private fun toolHubIcon(key: String): ImageVector = when (key) {
-    "base" -> Icons.Filled.Calculate
-    "strdec" -> Icons.Filled.DataObject
-    "asm" -> Icons.Filled.SwapHoriz
-    "xor" -> Icons.Filled.LockOpen
-    "elfhdr" -> Icons.Filled.Info
-    "regs" -> Icons.Filled.Memory
-    "hex" -> Icons.Filled.Storage
-    "bytediff" -> Icons.Filled.CompareArrows
-    "insnexp" -> Icons.Filled.Description
-    "asm2c" -> Icons.Filled.Transform
-    "asm2flow" -> Icons.Filled.Inventory2
-    else -> Icons.Filled.ListAlt
-}
 
 // ───────────────────────── 通用小工具 ─────────────────────────
 

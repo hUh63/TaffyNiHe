@@ -649,6 +649,40 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
 
     // ── 10. 生成正交折线路由 ──
     val maxRight = nodes.maxOf { it.right }
+    // 预扫描：按「层间隙」为水平段分配唯一 y 轨道。
+    // 旧实现让同一间隙的所有水平段都落在 (src.bottom+dst.top)/2 上（再用 si%3 微扰），
+    // 于是多条线共线、其竖直段彼此穿插 → 视觉上到处交叉。这里让每个间隙内的水平段各占一条轨道。
+    val gapSegs = HashMap<Int, ArrayList<Triple<Int, Int, Float>>>()
+    val gapTop = HashMap<Int, Float>()
+    val gapBot = HashMap<Int, Float>()
+    seeds.forEachIndexed { si, sd ->
+        if (sd.isSelf || sd.isBack) return@forEachIndexed
+        var prevNode = realNodes[sd.from]
+        var step = 0
+        sd.chain.forEach { d ->
+            val g = prevNode.layer
+            gapSegs.getOrPut(g) { ArrayList() }.add(Triple(si, step, prevNode.x))
+            gapTop[g] = max(gapTop[g] ?: -Float.MAX_VALUE, prevNode.bottom)
+            gapBot[g] = min(gapBot[g] ?: Float.MAX_VALUE, d.top)
+            step++
+            prevNode = d
+        }
+        val g = prevNode.layer
+        gapSegs.getOrPut(g) { ArrayList() }.add(Triple(si, step, prevNode.x))
+        gapTop[g] = max(gapTop[g] ?: -Float.MAX_VALUE, prevNode.bottom)
+        gapBot[g] = min(gapBot[g] ?: Float.MAX_VALUE, realNodes[sd.to].top)
+    }
+    val lane = HashMap<Long, Float>()
+    gapSegs.forEach { (g, list) ->
+        list.sortBy { it.third }
+        val top = gapTop[g] ?: 0f
+        val bot = gapBot[g] ?: top
+        val k = list.size
+        list.forEachIndexed { i, t ->
+            val y = if (bot - top > 6f * density) top + (bot - top) * (i + 1) / (k + 1) else (top + bot) / 2f
+            lane[t.first * 1000L + t.second] = y
+        }
+    }
     var backIdx = 0
     val routes = ArrayList<CfgRoute>(seeds.size)
     seeds.forEachIndexed { si, sd ->
@@ -679,19 +713,17 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
                 val exitX = bottomPortX(a, sd)
                 val entryX = topPortX(b, sd)
                 pts.add(Offset(exitX, a.bottom))
-                // 同一层间多条边若共用同一中间高度，水平段会重合、并与其它的竖段交叉；
-                // 按边序号把折线中段错开到 ±1 条通道，显著减少重叠与视觉交叉。
-                val laneBias = ((si % 3) - 1) * (9f * density)
+                // 每段水平线取自预扫描分配的唯一轨道（同一间隙内不共线，避免重叠与交叉）。
                 var prevX = exitX
-                var prevBottom = a.bottom
+                var step = 0
                 sd.chain.forEach { d ->
-                    val my = (prevBottom + d.y) / 2f + laneBias
+                    val my = lane[si * 1000L + step] ?: ((a.bottom + d.y) / 2f)
                     pts.add(Offset(prevX, my))
                     pts.add(Offset(d.x, my))
                     prevX = d.x
-                    prevBottom = d.y
+                    step++
                 }
-                val my = (prevBottom + b.top) / 2f + laneBias
+                val my = lane[si * 1000L + step] ?: ((a.bottom + b.top) / 2f)
                 pts.add(Offset(prevX, my))
                 pts.add(Offset(entryX, my))
                 pts.add(Offset(entryX, b.top))

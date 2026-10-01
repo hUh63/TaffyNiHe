@@ -8603,33 +8603,38 @@ private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.c
             val res = withContext(Dispatchers.IO) {
                 runCatching {
                     val eng = EngineProvider.get(context)
+                    // 取全局调用图（与「调用图」页同源 agCj），在本地做 BFS —— 不再依赖逐节点 seek+axfj
+                    // （axfj 需 seek 成功，且对 strip 过的 SO 常返回空 → 表现为「无调用关系」）。
+                    var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
+                    for (c in listOf("aa; aac; agCj", "aac; agCj", "agCj")) {
+                        val raw = rzText(eng.rzCommand(ws, "", c))
+                        g = parseRizinGraph(raw)
+                        if (g.first.isNotEmpty()) break
+                        val legacy = rzArrayText(raw)
+                        if (legacy.isNotEmpty()) { g = parseCallGraph(legacy); if (g.first.isNotEmpty()) break }
+                    }
+                    val names = g.first.map { it.optString("name") }
+                    if (names.isEmpty()) return@runCatching Triple(emptyList<Pair<String, List<String>>>(), emptyList<String>(), true)
+                    val addrKey = r0.removePrefix("0x").removePrefix("0X")
+                    val start = names.firstOrNull { it == r0 }
+                        ?: names.firstOrNull { it.contains(r0, true) }
+                        ?: names.firstOrNull { addrKey.isNotBlank() && it.equals("0x$addrKey", true) }
+                        ?: names.firstOrNull { addrKey.isNotBlank() && it.contains(addrKey, true) }
+                    if (start == null) return@runCatching Triple(emptyList<Pair<String, List<String>>>(), listOf(r0), false)
+                    val outAdj = HashMap<String, MutableList<String>>()
+                    g.second.forEach { (f, t) -> outAdj.getOrPut(f) { ArrayList() }.add(t) }
                     val out = mutableListOf<Pair<String, List<String>>>()
-                    val unresolved = LinkedHashSet<String>()
-                    // 先做一次全局分析（aa + aac），否则没有函数分析结果时 axfj 恒为空。
-                    eng.rzCommand(ws, "", "aa; aac")
-                    var frontier = listOf(r0)
-                    val seen = HashSet<String>(frontier)
+                    val seen = HashSet<String>()
+                    seen.add(start)
+                    var frontier = listOf(start)
                     for (d in 0 until maxDepth) {
                         val next = LinkedHashSet<String>()
-                        frontier.forEach { node ->
-                            // 取「本函数调用了谁」。全局 aa/aac 已在进入时跑过，这里只做 seek + axfj。
-                            val res = eng.rzCommand(ws, "", "s $node; axfj")
-                            val raw = rzText(res).trim()
-                            val arr = parseRzArray(res)
-                            if (arr == null) {
-                                if (raw.isNotBlank()) unresolved.add(node)   // 非 JSON：多为 seek 失败（符号无法解析）
-                                return@forEach
-                            }
-                            arr.forEach { e ->
-                                val t = e.optString("to").ifBlank { e.optString("refname") }
-                                if (t.isNotBlank() && seen.add(t)) next.add(t)
-                            }
-                        }
+                        frontier.forEach { node -> outAdj[node]?.forEach { v -> if (v != node && seen.add(v)) next.add(v) } }
                         out.add((if (zh) "第 ${d + 1} 层" else "level ${d + 1}") to next.toList())
                         if (next.isEmpty()) break
                         frontier = next.toList()
                     }
-                    out to unresolved.toList()
+                    Triple(out, emptyList<String>(), false)
                 }.getOrNull()
             }
             loading = false
@@ -8637,9 +8642,10 @@ private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.c
                 error = if (zh) "下钻失败（引擎异常）" else "drill failed"
             } else {
                 levels = res.first
-                if (res.second.isNotEmpty())
-                    error = if (zh) "根节点无法解析：${res.second.joinToString("、")}（不是有效函数符号）"
-                            else "unresolved root: ${res.second.joinToString(", ")}"
+                when {
+                    res.third -> error = if (zh) "未取得调用图（已跑 aa+aac；若仍为空说明该 SO 分析不出调用关系）" else "no call graph"
+                    res.second.isNotEmpty() -> error = if (zh) "根节点「${res.second.first()}」不在调用图内（试试函数名或 0x 地址）" else "root not found in call graph"
+                }
             }
         }
     }

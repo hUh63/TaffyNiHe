@@ -75,6 +75,80 @@ object SoDeepTools {
     }
 
     /** 取函数列表(rzFunctions 的 functions 数组)。 */
+    /** 解析 "0x.."/十进制字符串为 Long（无效返回 -1）。 */
+    private fun parseHex(s: String): Long {
+        val t = s.trim()
+        if (t.isEmpty() || t == "null") return -1L
+        return runCatching { if (t.startsWith("0x", true)) t.substring(2).toLong(16) else t.toLong() }.getOrDefault(-1L)
+    }
+
+    /**
+     * 启发式虚表候选（rizin avj 无结果时兜底）：
+     * 在 .data.rel.ro / .data.rel.ro.* 这些只读重定位段里，找「由 RELATIVE 重定位指向 .text 函数、
+     * 且目标偏移连续（步长 8）的指针数组」，每个数组当作一个候选虚表。
+     * 纯静态启发式，结果需人工核对；任何异常一律返回空（不抛）。
+     */
+    private fun heuristicVtables(engine: NativeSoEngine, ws: String): JSONArray {
+        val out = JSONArray()
+        runCatching {
+            val secItems = engine.list(ws, "", "sections", "", 500).optJSONArray("items") ?: return@runCatching
+            var textLo = Long.MAX_VALUE; var textHi = 0L
+            val relro = HashMap<String, Long>()
+            for (i in 0 until secItems.length()) {
+                val s = secItems.optJSONObject(i) ?: continue
+                val nm = s.optString("name")
+                val a = parseHex(s.optString("addr"))
+                val sz = s.optLong("size", 0L)
+                if (nm == ".text" && a >= 0) { textLo = minOf(textLo, a); textHi = maxOf(textHi, a + sz) }
+                if (nm.startsWith(".data.rel.ro")) relro[nm] = a
+            }
+            if (relro.isEmpty() || textLo > textHi) return@runCatching
+            val relItems = engine.list(ws, "", "relocations", "", 8000).optJSONArray("items") ?: return@runCatching
+            val bySec = HashMap<String, ArrayList<Long>>()
+            val fnOf = HashMap<Long, Long>()
+            for (i in 0 until relItems.length()) {
+                val r = relItems.optJSONObject(i) ?: continue
+                val sec = r.optString("section")
+                if (!relro.containsKey(sec)) continue
+                val off = parseHex(r.optString("offset"))
+                if (off < 0) continue
+                val addend = r.optLong("addend", -1L)
+                val fn = if (addend >= 0) addend else parseHex(r.optString("symbolValue"))
+                if (fn < 0 || fn < textLo || fn >= textHi) continue
+                bySec.getOrPut(sec) { ArrayList() }.add(off)
+                fnOf[off] = fn
+            }
+            for ((sec, offs) in bySec) {
+                offs.sort()
+                var run = ArrayList<Long>()
+                fun flush() {
+                    if (run.size >= 2) {
+                        val slots = JSONArray()
+                        run.forEachIndexed { k, o ->
+                            slots.put(JSONObject().put("index", k).put("name", "")
+                                .put("addr", "0x" + java.lang.Long.toHexString(fnOf[o] ?: 0L)))
+                        }
+                        val head = "0x" + java.lang.Long.toHexString(run.first())
+                        out.put(JSONObject()
+                            .put("className", "vtable_$head")
+                            .put("vtableAddr", head)
+                            .put("slotCount", run.size)
+                            .put("section", sec)
+                            .put("slots", slots))
+                    }
+                    run = ArrayList()
+                }
+                var prev = -16L
+                for (o in offs) {
+                    if (o - prev == 8L) run.add(o) else { flush(); run.add(o) }
+                    prev = o
+                }
+                flush()
+            }
+        }
+        return out
+    }
+
     private fun functionItems(engine: NativeSoEngine, ws: String, limit: Int): JSONArray {
         val r = engine.rzFunctions(ws, "", limit, "")
         return r.optJSONArray("functions") ?: JSONArray()
@@ -111,19 +185,27 @@ object SoDeepTools {
             val limit = args.intValue("limit", 50).coerceIn(1, 500)
             val engine = EngineProvider.get(ctx.context)
 
-            val raw = engine.rzCommand(ws, "", "avj", false)
+            var raw = engine.rzCommand(ws, "", "avj", false)
+            if (cmdStdout(raw).isBlank()) {
+                // rizin 的虚表分析(av)依赖 C++ 分析；首次无输出时补一次全量分析(aaa)再试。
+                engine.rzCommand(ws, "", "aaa", false)
+                raw = engine.rzCommand(ws, "", "avj", false)
+            }
             val stdout = cmdStdout(raw)
             if (stdout.isBlank()) {
+                val heur0 = heuristicVtables(engine, ws)
                 return ok(JSONObject()
                     .put("workspaceId", ws)
-                    .put("supported", false)
-                    .put("vtableCount", 0)
-                    .put("vtables", JSONArray())
-                    .put("command", "avj")
+                    .put("supported", true)
+                    .put("vtableCount", heur0.length())
+                    .put("vtables", heur0)
+                    .put("command", "avj+heuristic")
                     .put("engineMessage", engineMessage(raw))
                     .put(
                         "note",
-                        "rizin avj 无输出：该 SO 可能不含 C++ 虚表(RTTI)，或当前 rizin 构建未启用 C++ 分析",
+                        if (heur0.length() > 0)
+                            "rizin avj 无 RTTI 结果；已用重定位启发式恢复 ${heur0.length()} 个候选虚表（.data.rel.ro 中指向 .text 的连续指针数组，需人工核对）"
+                        else "未发现虚表：avj 无输出，且 .data.rel.ro 中也没有指向 .text 的连续指针表（该 SO 可能确实无 C++ 虚函数，或 RTTI/虚表已被 strip）",
                     )
                     .put("hint", "可用 taffy_rizin_api(workspaceId=..., action=\"command\", command=\"av\") 交叉验证"))
             }
@@ -165,13 +247,19 @@ object SoDeepTools {
             }
 
             if (parsedItems.length() == 0) {
+                val heur1 = heuristicVtables(engine, ws)
                 return ok(JSONObject()
                     .put("workspaceId", ws)
                     .put("supported", true)
-                    .put("vtableCount", 0)
-                    .put("vtables", JSONArray())
-                    .put("command", "avj")
-                    .put("note", "avj 无虚表条目：该 SO 不含 RTTI 可见的 C++ 虚表"))
+                    .put("vtableCount", heur1.length())
+                    .put("vtables", heur1)
+                    .put("command", "avj+heuristic")
+                    .put(
+                        "note",
+                        if (heur1.length() > 0)
+                            "rizin avj 无 RTTI 条目；已用重定位启发式恢复 ${heur1.length()} 个候选虚表（.data.rel.ro 中指向 .text 的连续指针数组，需人工核对）"
+                        else "未发现虚表：avj 无条目，且 .data.rel.ro 中无指向 .text 的连续指针表（可能确实无 C++ 虚函数，或 RTTI 已 strip / -fno-rtti）",
+                    ))
             }
 
             if (action == "export") {

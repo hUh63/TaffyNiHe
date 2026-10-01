@@ -167,7 +167,9 @@ object SoDecompileTool {
             var raw = engine.rzDecompile(workspaceId, "", locator, strict)
             var usedEngine = "ghidra-pdg"
             if (wantEngine == "auto" && !raw.optBoolean("ok", false)) {
-                val alt = runNativePdc() ?: runJavaHeuristic()
+                // 依次降级：rizin pdc → r2dec 纯 Java → SimplePseudoC → Exbin microcode+SSA。
+                // 之前只接了前两级，导致 pdg 与 pdc/r2dec 都失败时直接报错（Exbin 引擎其实可用）。
+                val alt = runNativePdc() ?: runJavaHeuristic() ?: runExbinSimple() ?: runExbinDecomp()
                 if (alt != null) { raw = alt; usedEngine = alt.optString("engine") }
             }
 

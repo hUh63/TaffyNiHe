@@ -18,7 +18,12 @@ internal fun EngineRuntime.list(workspaceId: String, editSessionId: String, view
             "sections" -> elf.sections.asSequence().withIndex().filter { it.value.name.startsWith(prefix) }.map { (index, section) ->
                 EngineJson.sectionJson(name, section, index).put("virtualAddr", hex(section.addr)).put("fileOffset", hex(section.offset)).put("alignment", section.addralign)
             }
-            "symbols", "dynsyms" -> (if (view == "dynsyms") elf.dynSymbols else elf.symbols).asSequence().filter { it.name.startsWith(prefix) }.map {
+            "symbols" -> {
+                // .symtab 在 strip 过的 SO 上通常不存在；此时回退 .dynsym，避免「符号页暂无数据」的误导。
+                val base = if (elf.symbols.isEmpty()) elf.dynSymbols else elf.symbols
+                base.asSequence().filter { it.name.startsWith(prefix) }.map { EngineJson.symbolJson(name, it) }
+            }
+            "dynsyms" -> elf.dynSymbols.asSequence().filter { it.name.startsWith(prefix) }.map {
                 EngineJson.symbolJson(name, it)
             }
             "functions" -> (elf.symbols + elf.dynSymbols).asSequence().filter { it.type == "FUNC" && !it.imported && it.name.startsWith(prefix) }.map {

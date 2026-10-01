@@ -7452,7 +7452,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                 // 直接 agCj 常为空 → 先补一次 aac 再取图。
                 var raw = ""
                 var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList<Pair<String, String>>()
-                for (c in listOf("aac; agCj", "agCj")) {
+                for (c in listOf("aa; aac; agCj", "aac; agCj", "agCj")) {
                     raw = rzText(eng.rzCommand(ws, "", c))
                     g = parseRizinGraph(raw)
                     if (g.first.isNotEmpty()) break
@@ -8605,13 +8605,15 @@ private fun RootDrillView(tools: ToolPagesState, zh: Boolean, context: android.c
                     val eng = EngineProvider.get(context)
                     val out = mutableListOf<Pair<String, List<String>>>()
                     val unresolved = LinkedHashSet<String>()
+                    // 先做一次全局分析（aa + aac），否则没有函数分析结果时 axfj 恒为空。
+                    eng.rzCommand(ws, "", "aa; aac")
                     var frontier = listOf(r0)
                     val seen = HashSet<String>(frontier)
                     for (d in 0 until maxDepth) {
                         val next = LinkedHashSet<String>()
                         frontier.forEach { node ->
-                            // 先 aac 补建当前函数的调用关系（否则 axf/axfj 恒为空），再取「本函数调用了谁」。
-                            val res = eng.rzCommand(ws, "", "s $node; aac; axfj")
+                            // 取「本函数调用了谁」。全局 aa/aac 已在进入时跑过，这里只做 seek + axfj。
+                            val res = eng.rzCommand(ws, "", "s $node; axfj")
                             val raw = rzText(res).trim()
                             val arr = parseRzArray(res)
                             if (arr == null) {

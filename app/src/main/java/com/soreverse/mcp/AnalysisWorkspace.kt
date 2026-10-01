@@ -314,13 +314,11 @@ internal fun AnalysisWorkspace(
             onOpenTask = onOpenTask,
         )
         GroupDivider()
-        // ── 域 / 工具 / 模式 ──
-        // 对齐 Explorer So：一级=文件级对象（函数/节区/符号/…），二级=函数视图（汇编/控制流/伪C/交叉引用）
-        FileObjectTabs(current = view, zh = zh, onPick = { tools.analysisView = it }, onMore = { showDrawer = true })
-        FuncViewTabs(
-            current = view, zh = zh,
-            visible = tools.selectedFunctionName.isNotBlank() || tools.selectedFunctionVa.isNotBlank(),
-        ) { tools.analysisView = it }
+        // ── 域 → 工具 → 模式（三级）──
+        // 分类定义见 analysisDomains（与两层版完全一致，仅呈现改回三级）。
+        AnalysisDomainTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
+        AnalysisToolTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
+        AnalysisModeTabs(current = view, zh = zh) { tools.analysisView = it }
         GroupDivider()
 
         // ── 当前视图内容区 ──
@@ -1884,24 +1882,28 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
             val res = withContext(Dispatchers.IO) {
                 runCatching {
                     // v1.3.18: 原独立 hexdump 工具已收敛删除，这里直接用内置纯 Java HexDump。
-                    val file = java.io.File(p)
-                    if (!file.isFile) {
-                        JSONObject().put("error", "file not found: " + p)
+                    // content:// 文档 URI（SAF 选文件带进来的路径）不能当文件路径打开，需走 ContentResolver。
+                    val isUri = p.startsWith("content://")
+                    val data: ByteArray? = if (isUri) {
+                        runCatching { ctx.contentResolver.openInputStream(android.net.Uri.parse(p))?.use { it.readBytes() } }.getOrNull()
                     } else {
-                        val size = file.length()
-                        if (size > 128L * 1024 * 1024) {
-                            JSONObject().put("error", "file too large for hex view: " + size + " bytes (max 128MiB)")
-                        } else {
-                            val data = file.readBytes()
-                            val from = off.coerceIn(0, data.size)
-                            val actual = len.coerceAtMost(data.size - from)
-                            JSONObject()
-                                .put("file", file.name)
-                                .put("fileSize", data.size)
-                                .put("offset", from)
-                                .put("length", actual)
-                                .put("hexdump", com.soreverse.mcp.engine.standalone.HexDump.dump(data, 0L, from, actual))
-                        }
+                        val file = java.io.File(p)
+                        if (file.isFile) runCatching { file.readBytes() }.getOrNull() else null
+                    }
+                    val displayName = if (isUri) (android.net.Uri.parse(p).lastPathSegment ?: p) else java.io.File(p).name
+                    if (data == null) {
+                        JSONObject().put("error", if (isUri) "无法读取 URI：$p（无权限或文件不存在）" else "file not found: $p")
+                    } else if (data.size > 128L * 1024 * 1024) {
+                        JSONObject().put("error", "file too large for hex view: " + data.size + " bytes (max 128MiB)")
+                    } else {
+                        val from = off.coerceIn(0, data.size)
+                        val actual = len.coerceAtMost(data.size - from)
+                        JSONObject()
+                            .put("file", displayName)
+                            .put("fileSize", data.size)
+                            .put("offset", from)
+                            .put("length", actual)
+                            .put("hexdump", com.soreverse.mcp.engine.standalone.HexDump.dump(data, 0L, from, actual))
                     }
                 }.getOrElse { e -> JSONObject().put("error", e.message ?: "hexdump failed") }
             }
@@ -2587,30 +2589,55 @@ private suspend fun resolveCfgEntry(
     null
 }
 
-// ───────────────────── 导航（对齐 Explorer So：文件级对象 tab + 函数级视图 tab） ─────────────────────
+// ───────────────────── 导航（域 → 工具 → 模式，三级；分类定义见 analysisDomains） ─────────────────────
 
-/** 文件级对象 tab：与该 .so 的「表」一一对应。 */
-private val fileObjectTabs = listOf(
-    Triple("functions", "函数", "Functions"),
-    Triple("sections", "节区", "Sections"),
-    Triple("symbols", "符号", "Symbols"),
-    Triple("imports", "导入", "Imports"),
-    Triple("libraries", "依赖库", "Libraries"),
-    Triple("relocs", "重定位", "Relocs"),
-    Triple("strings", "字符串", "Strings"),
-    Triple("data", "数据", "Data"),
-    Triple("elfhdr", "ELF头", "ELF Header"),
-)
-private val fileObjectKeys = fileObjectTabs.map { it.first }
+/** 一级：域（函数 / 代码 / 结构 / 分析 / 工具）。 */
+@Composable
+private fun AnalysisDomainTabs(current: String, zh: Boolean, lastModeByTool: Map<String, String>, onPick: (String) -> Unit) {
+    val dom = analysisDomainOf(current)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        analysisDomains.forEach { d ->
+            TabChip(if (zh) d.short else d.en, selected = d.key == dom.key) { onPick(rememberedView(d, lastModeByTool)) }
+        }
+    }
+}
 
-/** 函数级视图 tab：进入某个函数后的四种看法（Exbin：汇编/控制流/伪C/交叉引用）。 */
-private val funcViewTabs = listOf(
-    Triple("disasm", "汇编", "Assembly"),
-    Triple("cfg", "控制流", "Flow"),
-    Triple("pseudo", "伪C", "Pseudo-C"),
-    Triple("xrefs", "交叉引用", "Xrefs"),
-)
-private val funcViewKeys = funcViewTabs.map { it.first }
+/** 二级：当前域下的工具。 */
+@Composable
+private fun AnalysisToolTabs(current: String, zh: Boolean, lastModeByTool: Map<String, String>, onPick: (String) -> Unit) {
+    val dom = analysisDomainOf(current)
+    if (dom.tools.size <= 1) return
+    val tool = analysisToolOf(current)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        dom.tools.forEach { t ->
+            TabChip(if (zh) t.short else t.en, selected = t.key == tool.key) { onPick(rememberedView(t, lastModeByTool)) }
+        }
+    }
+}
+
+/** 三级：当前工具下的模式（只有 1 个模式时不出这一行）。 */
+@Composable
+private fun AnalysisModeTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
+    val tool = analysisToolOf(current)
+    if (tool.modes.size <= 1) return
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        tool.modes.forEach { m ->
+            TabChip(analysisViewLabel(m, zh), selected = current == m) { onPick(m) }
+        }
+    }
+}
 
 /** 紧凑 tab chip（自绘，避免 FilterChip 的肥大）。 */
 @Composable
@@ -2632,44 +2659,7 @@ private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
     )
 }
 
-/** 一级：文件级对象 tab（函数/节区/符号/导入/依赖库/重定位/字符串/数据/ELF头）+「更多」。 */
-@Composable
-private fun FileObjectTabs(current: String, zh: Boolean, onPick: (String) -> Unit, onMore: () -> Unit) {
-    val inFunc = current in funcViewKeys
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        fileObjectTabs.forEach { (key, zhLabel, enLabel) ->
-            val selected = current == key || (key == "functions" && inFunc)
-            TabChip(if (zh) zhLabel else enLabel, selected) { onPick(key) }
-        }
-        TabChip(if (zh) "更多 ⋯" else "More ⋯", current !in fileObjectKeys && !inFunc) { onMore() }
-    }
-}
 
-/** 二级：函数级视图 tab（仅当已选中函数时显示）。 */
-@Composable
-private fun FuncViewTabs(current: String, zh: Boolean, visible: Boolean, onPick: (String) -> Unit) {
-    if (!visible) return
-    val cs = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            if (zh) "函数视图" else "Function",
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = AppText.label,
-            color = cs.onSurfaceVariant.copy(alpha = 0.7f),
-        )
-        funcViewTabs.forEach { (key, zhLabel, enLabel) ->
-            TabChip(if (zh) zhLabel else enLabel, current == key) { onPick(key) }
-        }
-    }
-}
 
 /** 抽屉：47 个视图的全量索引（域 / 工具 / 模式三级）。 */
 @Composable
@@ -3984,10 +3974,12 @@ private fun SymbolsView(
             val arr = itemsArray(json)
             (0 until arr.length()).mapNotNull { i ->
                 val it = arr.optJSONObject(i) ?: return@mapNotNull null
-                val va = it.optString("value").ifBlank { it.optString("addr") }.ifBlank { it.optString("startAddr") }
-                val name = it.optString("demangled").ifBlank { it.optString("name") }.ifBlank { it.optString("symbol") }
-                val type = it.optString("type")
-                val bind = it.optString("bind").ifBlank { it.optString("visibility") }
+                // optString 对 JSONObject.NULL 在 Android 上返回字符串 "null"，必须 cleanNull 过滤。
+                val va = it.optString("value").cleanNull().ifBlank { it.optString("addr").cleanNull() }.ifBlank { it.optString("startAddr").cleanNull() }
+                val name = it.optString("demangled").cleanNull().ifBlank { it.optString("name").cleanNull() }.ifBlank { it.optString("symbol").cleanNull() }
+                    .ifBlank { if (va.isNotBlank()) va else if (zh) "（未命名）" else "(unnamed)" }
+                val type = it.optString("type").cleanNull()
+                val bind = it.optString("bind").cleanNull().ifBlank { it.optString("visibility").cleanNull() }
                 val size = it.optLong("size", -1L)
                 AnalysisRow(
                     key = "y$i|$va|$name",
@@ -6821,9 +6813,17 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
             val res = withContext(Dispatchers.IO) {
                 runCatching {
                     val eng = EngineProvider.get(context)
-                    val cmd = if (mode == "code") "s $a; pdj 64" else "s $a; pxj 256"
+                    fun tryArr(cmds: List<String>): List<JSONObject>? {
+                        for (c in cmds) {
+                            val r = parseRzArray(eng.rzCommand(ws, "", c))
+                            if (r != null && r.isNotEmpty()) return r
+                        }
+                        return null
+                    }
+                    val l = if (mode == "code") tryArr(listOf("s $a; pdj 64", "s $a; pdj"))
+                            else tryArr(listOf("s $a; pxj 256", "s $a; pxj"))
                     val sec = eng.rzCommand(ws, "", "iSj")
-                    parseRzArray(eng.rzCommand(ws, "", cmd)) to sectionOf(sec, a)
+                    l to sectionOf(sec, a)
                 }.getOrElse { (null as List<JSONObject>?) to "" }
             }
             loading = false
@@ -6838,8 +6838,8 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
 
     Column(Modifier.fillMaxSize()) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "代码模式" else "Code", active = mode == "code") { mode = "code"; if (lines.isNotEmpty()) load() }
-            SmallAction(if (zh) "数据模式" else "Data", active = mode == "data") { mode = "data"; if (lines.isNotEmpty()) load() }
+            SmallAction(if (zh) "代码模式" else "Code", active = mode == "code") { mode = "code"; load() }
+            SmallAction(if (zh) "数据模式" else "Data", active = mode == "data") { mode = "data"; load() }
             SmallAction(if (zh) "前往" else "Go", loading = loading, enabled = addr.isNotBlank(), onClick = { load() })
             SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank()) { addr = tools.selectedFunctionVa }
             SmallAction(if (zh) "复制" else "Copy", enabled = lines.isNotEmpty()) {
@@ -8945,8 +8945,8 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
                 }
             }
             failReasons = reasons.toString().trimEnd()
-            text = r.optString("combined").ifBlank { r.optString("text") }.ifBlank {
-                r.optString("outFile").let { if (it.isNotBlank()) (if (zh) "已写入文件：$it" else "written to $it") else "" }
+            text = r.optString("combined").cleanNull().ifBlank { r.optString("text").cleanNull() }.ifBlank {
+                r.optString("outPath").cleanNull().let { if (it.isNotBlank()) (if (zh) "已写入文件：$it" else "written to $it") else "" }
             }
             if (text.isBlank()) error = if (zh) {
                 if (failCount > 0) "未生成内容：$failCount 个函数反编译失败（导入桩 sym.imp.* 无函数体，已默认跳过）"

@@ -739,6 +739,8 @@ object SoDeepTools {
                 .put("failed", failCount)
                 .put("functions", out)
                 .put("backend", "rizin-ghidra")
+            // 把合并后的伪 C 文本一并返回（前端「全局伪 C」直接展示，避免「成功 N 个却未生成内容」）。
+            if (merged.isNotEmpty()) payload.put("combined", merged.toString())
 
             val outFile = args.str("outFile")
             if (outFile.isNotBlank() && merged.isNotEmpty()) {

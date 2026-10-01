@@ -164,19 +164,29 @@ object SoDecompileTool {
                 return ok(r.put("workspaceId", workspaceId).put("locator", locator))
             }
 
-            var raw = engine.rzDecompile(workspaceId, "", locator, strict)
+            // auto 时也用 strict=true：Ghidra 失败会自动触发 Java 兜底（与手动选 Ghidra 行为一致）。
+            // 若用 strict=false，引擎会返回「ok=true 但无 pseudocode」的空壳 → 被判成功而不进降级链，
+            // 前端就表现为「auto 无输出，但手动 Ghidra 有输出」。
+            val ghidraStrict = if (wantEngine == "auto") true else strict
+            var raw = engine.rzDecompile(workspaceId, "", locator, ghidraStrict)
             var usedEngine = "ghidra-pdg"
-            if (wantEngine == "auto" && !raw.optBoolean("ok", false)) {
+            // 「成功」必须以确实产出了 pseudocode 为准，而不是只看 ok 标志。
+            fun hasPseudo(o: JSONObject): Boolean {
+                val p = o.optString("pseudocode")
+                return p.isNotBlank() && p != "null"
+            }
+            if (wantEngine == "auto" && !(raw.optBoolean("ok", false) && hasPseudo(raw))) {
                 // 依次降级：rizin pdc → r2dec 纯 Java → SimplePseudoC → Exbin microcode+SSA。
-                // 之前只接了前两级，导致 pdg 与 pdc/r2dec 都失败时直接报错（Exbin 引擎其实可用）。
                 val alt = runNativePdc() ?: runJavaHeuristic() ?: runExbinSimple() ?: runExbinDecomp()
                 if (alt != null) { raw = alt; usedEngine = alt.optString("engine") }
             }
 
-            if (!raw.optBoolean("ok", false)) {
+            if (!raw.optBoolean("ok", false) || !hasPseudo(raw)) {
                 val e = raw.optJSONObject("error")
                 val code = e?.optString("code").orEmpty().ifBlank { "DECOMPILE_FAILED" }
-                val message = e?.optString("message").orEmpty().ifBlank { "反编译失败" }
+                val message = e?.optString("message").orEmpty().ifBlank {
+                    if (!hasPseudo(raw)) "引擎未产出伪代码（该地址可能不是函数入口，或反编译输出为空）" else "反编译失败"
+                }
                 return err(
                     code,
                     message,

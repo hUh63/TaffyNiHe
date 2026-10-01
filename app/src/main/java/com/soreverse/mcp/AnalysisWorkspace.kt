@@ -9706,7 +9706,8 @@ private fun CallGraphCanvas(
         if (viewport.width <= 0 || viewport.height <= 0 || layout.nodes.isEmpty()) return
         val w = layout.width + 60f
         val h = layout.height + 60f
-        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.1f, 2.5f)
+        // LR 方向下图整体很高，缩放下限过大会让内容远超视口、只剩空白；放宽到 0.02。
+        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.02f, 2.5f)
         pan = Offset.Zero
     }
     LaunchedEffect(layout, viewport) {
@@ -9734,7 +9735,7 @@ private fun CallGraphCanvas(
             }
             .pointerInput(Unit) {
                 detectTransformGestures { _, panChange, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(0.1f, 6f)
+                    scale = (scale * zoom).coerceIn(0.02f, 6f)
                     pan += panChange
                 }
             },

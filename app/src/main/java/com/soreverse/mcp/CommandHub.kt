@@ -154,30 +154,30 @@ internal fun CommandHubScreen(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .safeDrawingPadding()
-            .padding(bottom = 16.dp),
+            .padding(bottom = 8.dp),
     ) {
         // ── Large Title 区 ──
         Column(Modifier.padding(horizontal = 16.dp)) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(2.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (zh) "塔菲逆核" else "Taffy NieHe",
-                        fontSize = 24.sp,
-                        lineHeight = 29.sp,
+                        fontSize = 21.sp,
+                        lineHeight = 25.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         if (zh) "命令中枢" else "Command Hub",
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp),
+                        modifier = Modifier.padding(top = 1.dp),
                     )
                 }
                 ConnPill(running = running, zh = zh)
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
         }
 
         // ── 引擎卡片 ──
@@ -294,10 +294,10 @@ private fun SatGrid(
 ) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items.chunked(4).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 row.forEach { sat ->
                     Column(
                         Modifier
@@ -305,15 +305,15 @@ private fun SatGrid(
                             .clip(RoundedCornerShape(AppShape.md))
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             .clickable { onNavigate(sat.tab, sat.toolCategory) }
-                            .padding(vertical = 10.dp),
+                            .padding(vertical = 7.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Box(
-                            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(satelliteColor(sat.accent)),
+                            Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(satelliteColor(sat.accent)),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(sat.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                            Icon(sat.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                         }
                         Text(
                             sat.label,
@@ -337,7 +337,7 @@ private fun IosGroupHeader(text: String) {
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 32.dp, end = 16.dp, top = 12.dp, bottom = 5.dp),
+        modifier = Modifier.padding(start = 32.dp, end = 16.dp, top = 8.dp, bottom = 3.dp),
     )
 }
 
@@ -358,11 +358,11 @@ private fun IosRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 40.dp)
+            .heightIn(min = 34.dp)
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 5.dp),
+            .padding(horizontal = 12.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // 彩色圆角方形图标（iOS Settings 图标语言）
         Box(

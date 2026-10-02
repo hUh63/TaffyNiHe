@@ -314,11 +314,8 @@ internal fun AnalysisWorkspace(
             onOpenTask = onOpenTask,
         )
         GroupDivider()
-        // ── 域 → 工具 → 模式（三级）──
-        // 分类定义见 analysisDomains（与两层版完全一致，仅呈现改回三级）。
-        AnalysisDomainTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
-        AnalysisToolTabs(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
-        AnalysisModeTabs(current = view, zh = zh) { tools.analysisView = it }
+        // ── 导航菜单（域 → 工具 → 模式）：收成一行，点按弹出三级菜单 ──
+        AnalysisNavMenu(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
         GroupDivider()
 
         // ── 当前视图内容区 ──
@@ -2585,50 +2582,63 @@ private suspend fun resolveCfgEntry(
 
 // ───────────────────── 导航（域 → 工具 → 模式，三级；分类定义见 analysisDomains） ─────────────────────
 
-/** 一级：域（函数 / 代码 / 结构 / 分析 / 工具）。 */
+/** 导航菜单：一行显示「域 › 工具 › 模式」，点按弹出三级菜单（对齐 Exbin 的分类树）。 */
 @Composable
-private fun AnalysisDomainTabs(current: String, zh: Boolean, lastModeByTool: Map<String, String>, onPick: (String) -> Unit) {
+private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<String, String>, onPick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
     val dom = analysisDomainOf(current)
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, top = 4.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        analysisDomains.forEach { d ->
-            TabChip(if (zh) d.short else d.en, selected = d.key == dom.key) { onPick(rememberedView(d, lastModeByTool)) }
-        }
-    }
-}
-
-/** 二级：当前域下的工具。 */
-@Composable
-private fun AnalysisToolTabs(current: String, zh: Boolean, lastModeByTool: Map<String, String>, onPick: (String) -> Unit) {
-    val dom = analysisDomainOf(current)
-    if (dom.tools.size <= 1) return
     val tool = analysisToolOf(current)
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        dom.tools.forEach { t ->
-            TabChip(if (zh) t.short else t.en, selected = t.key == tool.key) { onPick(rememberedView(t, lastModeByTool)) }
+    Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(AppShape.sm))
+                .background(cs.surfaceContainerHigh)
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.sm))
+                .clickable { open = true }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.Menu, null, tint = cs.primary, modifier = Modifier.size(15.dp))
+            Text(
+                (if (zh) dom.short else dom.en) + "  ›  " + (if (zh) tool.short else tool.en) + "  ›  " + analysisViewLabel(current, zh),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.bodyStrong,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(Icons.Filled.KeyboardArrowDown, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
         }
-    }
-}
-
-/** 三级：当前工具下的模式（只有 1 个模式时不出这一行）。 */
-@Composable
-private fun AnalysisModeTabs(current: String, zh: Boolean, onPick: (String) -> Unit) {
-    val tool = analysisToolOf(current)
-    if (tool.modes.size <= 1) return
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        tool.modes.forEach { m ->
-            TabChip(analysisViewLabel(m, zh), selected = current == m) { onPick(m) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Column(Modifier.width(276.dp).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                analysisDomains.forEach { d ->
+                    Text(
+                        (if (zh) d.short else d.en) + if (d.key == dom.key) "  ●" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        fontWeight = FontWeight.SemiBold,
+                        color = cs.primary,
+                        modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 2.dp),
+                    )
+                    FlowRow(
+                        Modifier.fillMaxWidth().padding(start = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        d.tools.forEach { t ->
+                            t.modes.forEach { m ->
+                                val label = (if (zh) t.short else t.en) + "·" + analysisViewLabel(m, zh)
+                                TabChip(label, selected = current == m) { onPick(m); open = false }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.size(6.dp))
+            }
         }
     }
 }
@@ -3692,7 +3702,8 @@ private fun CfgView(
 ) {
     val cs = MaterialTheme.colorScheme
     val density = androidx.compose.ui.platform.LocalDensity.current
-    var cfgLayout by remember { mutableStateOf("layered") }
+    // 默认用 ELK Layered + 正交边路由（交叉更少）；仍可在布局条切回「分层/Dagre/网格/力导向」。
+    var cfgLayout by remember { mutableStateOf("elk") }
     var cfgContent by remember { mutableStateOf("summary") }
     var cfgInsns by remember { mutableStateOf<Map<Long, List<String>>>(emptyMap()) }
     val scope = rememberCoroutineScope()

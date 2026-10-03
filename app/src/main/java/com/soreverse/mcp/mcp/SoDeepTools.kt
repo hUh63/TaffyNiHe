@@ -105,9 +105,23 @@ object SoDeepTools {
                 if (nm == ".text" && a >= 0) { textLo = minOf(textLo, a); textHi = maxOf(textHi, a + sz) }
                 if (nm.startsWith(".data.rel.ro") && a >= 0 && sz > 0) relroRanges.add(Triple(nm, a, a + sz))
             }
-            if (relroRanges.isEmpty() || textLo > textHi) return@runCatching
             fun relroOf(va: Long): String? = relroRanges.firstOrNull { va >= it.second && va < it.third }?.first
-            val relItems = engine.list(ws, "", "relocations", "", 8000).optJSONArray("items") ?: return@runCatching
+            // ① 符号级：_ZTV<类名>（Itanium ABI）直接给出虚表起始地址，C++ 未完全 strip 时最可靠
+            val vtNames = HashMap<Long, String>()
+            val symItems = engine.list(ws, "", "symbols", "", 4000).optJSONArray("items") ?: JSONArray()
+            for (i in 0 until symItems.length()) {
+                val s = symItems.optJSONObject(i) ?: continue
+                val nm = s.optString("name")
+                if (!nm.startsWith("_ZTV")) continue
+                val va = parseHex(s.optString("value"))
+                if (va >= 0) vtNames[va] = demangleVtableName(nm)
+            }
+            if (relroRanges.isEmpty() || textLo > textHi) {
+                // 无 .data.rel.ro：仍用 _ZTV 符号给出类名 + 起始地址（槽位留空）
+                for ((va, name) in vtNames) out.put(simpleVtableEntry(name, va, "", JSONArray()))
+                return@runCatching
+            }
+            val relItems = engine.list(ws, "", "relocations", "", 12000).optJSONArray("items") ?: return@runCatching
             val bySec = HashMap<String, ArrayList<Long>>()
             val fnOf = HashMap<Long, Long>()
             for (i in 0 until relItems.length()) {
@@ -121,22 +135,27 @@ object SoDeepTools {
                 bySec.getOrPut(sec) { ArrayList() }.add(off)
                 fnOf[off] = fn
             }
+            val covered = HashSet<Long>()
             for ((sec, offs) in bySec) {
                 offs.sort()
                 var run = ArrayList<Long>()
                 fun flush() {
                     if (run.size >= 2) {
+                        val start = run.first()
+                        covered.add(start)
                         val slots = JSONArray()
                         run.forEachIndexed { k, o ->
                             slots.put(JSONObject().put("index", k).put("name", "")
                                 .put("addr", "0x" + java.lang.Long.toHexString(fnOf[o] ?: 0L)))
                         }
-                        val head = "0x" + java.lang.Long.toHexString(run.first())
+                        val head = "0x" + java.lang.Long.toHexString(start)
+                        val cls = vtNames[start - 16] ?: vtNames[start] ?: "vtable_$head"
                         out.put(JSONObject()
-                            .put("className", "vtable_$head")
+                            .put("className", cls)
                             .put("vtableAddr", head)
                             .put("slotCount", run.size)
                             .put("section", sec)
+                            .put("source", "reloc")
                             .put("slots", slots))
                     }
                     run = ArrayList()
@@ -148,8 +167,49 @@ object SoDeepTools {
                 }
                 flush()
             }
+
+            // ③ 补齐：有 _ZTV 符号但重定位未覆盖到的虚表（槽位按其后连续重定位估算）
+            for ((va, name) in vtNames) {
+                if (covered.contains(va) || covered.contains(va + 16)) continue
+                val sec = relroOf(va) ?: relroOf(va + 16) ?: continue
+                val slots = JSONArray()
+                var k = 0
+                while (fnOf.containsKey(va + 16 + 8L * k)) {
+                    slots.put(JSONObject().put("index", k).put("name", "")
+                        .put("addr", "0x" + java.lang.Long.toHexString(fnOf[va + 16 + 8L * k] ?: 0L)))
+                    k++
+                }
+                out.put(simpleVtableEntry(name, va, sec, slots))
+            }
         }
         return out
+    }
+
+    private fun simpleVtableEntry(cls: String, va: Long, sec: String, slots: JSONArray): JSONObject =
+        JSONObject().put("className", cls)
+            .put("vtableAddr", "0x" + java.lang.Long.toHexString(va))
+            .put("slotCount", slots.length())
+            .put("section", sec)
+            .put("source", "symbol")
+            .put("slots", slots)
+
+    /** 简易 Itanium _ZTV 名称还原：_ZTVN3foo3BarE -> foo::Bar */
+    private fun demangleVtableName(sym: String): String {
+        val s = sym.removePrefix("_ZTV")
+        val parts = ArrayList<String>()
+        var i = if (s.startsWith("N")) 1 else 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == 'E') break
+            if (c.isDigit()) {
+                var j = i
+                while (j < s.length && s[j].isDigit()) j++
+                val len = s.substring(i, j).toIntOrNull() ?: break
+                if (j + len > s.length) break
+                parts.add(s.substring(j, j + len)); i = j + len
+            } else i++
+        }
+        return if (parts.isEmpty()) sym else parts.joinToString("::")
     }
 
     private fun functionItems(engine: NativeSoEngine, ws: String, limit: Int): JSONArray {

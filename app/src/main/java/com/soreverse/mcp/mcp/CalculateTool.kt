@@ -33,12 +33,12 @@ object CalculateTool {
                 "int_convert（任意精度↔Hex/Dec/Bin/Oct/8-16-32-64位有/无符号/端序/ASCII）、bitwise（and/or/xor/not/shl/shr/sar/rol/ror，位宽8/16/32/64）、" +
                 "endian_swap（大小端）、ieee754_convert（Float32/64 位域分解）、" +
                 "crypto_calc（action=hash|crc32|crc16|mod_pow|mod_inverse|gcd）、data_codec（action=to_base64|from_base64|to_hex|from_hex|url_encode|url_decode）。" +
-                "链式批量：传 steps=[{op,args}]（args 可引用更早结果 {\"$step\":0,\"field\":\"resultHex\"}）。",
+                "链式批量：传 steps=[{op,args}]（args 可引用更早结果 {\"\$step\":0,\"field\":\"resultHex\"}）。",
             "Deterministic high-precision calculator that removes LLM mental-math errors. op: arithmetic/stats/trig, " +
                 "int_convert (arbitrary precision <-> hex/dec/bin/oct, 8/16/32/64-bit signed/unsigned, endian, ASCII), " +
                 "bitwise (and/or/xor/not/shl/shr/sar/rol/ror at 8/16/32/64), endian_swap, ieee754_convert, " +
                 "crypto_calc (hash/crc32/crc16/mod_pow/mod_inverse/gcd), data_codec (base64/hex/url). " +
-                "Chained batch via steps=[{op,args}] with {\"$step\":0,\"field\":\"resultHex\"} references.",
+                "Chained batch via steps=[{op,args}] with {\"\$step\":0,\"field\":\"resultHex\"} references.",
             "analyze",
             ToolClass.EXTRA,
             heavy = false,
@@ -76,7 +76,7 @@ object CalculateTool {
                 "urlSafe" bool "Base64 使用 URL-safe 字母表"
                 "precision".oneOf("ieee754 精度", "float32", "float64", "both")
                 "widthBytes" int "endian_swap 目标字节长度（2/4/8）"
-                "steps" arr "链式批量：数组，每项 {op, args}，args 可用 {\"$step\":i,\"field\":\"...\"} 引用更早结果"
+                "steps" arr "链式批量：数组，每项 {op, args}，args 可用 {\"\$step\":i,\"field\":\"...\"} 引用更早结果"
             })
         }
 

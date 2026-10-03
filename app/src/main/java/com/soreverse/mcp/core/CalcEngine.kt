@@ -57,7 +57,7 @@ object CalcEngine {
                 val r = num(args, "numerator").mod(d) // BigInteger.mod -> always non-negative
                 num(r)
             }
-            "floor" -> num(num(args, "number").toDouble().let { BigDecimal_floor(it) })
+            "floor" -> num(Math.floor(num(args, "number").toDouble()).toLong())
             "ceiling" -> num(Math.ceil(num(args, "number").toDouble()).toLong())
             "round" -> num(Math.round(num(args, "number").toDouble()))
             "mean" -> {
@@ -99,8 +99,6 @@ object CalcEngine {
     }
 
     // ────────────────────────── 基础算术辅助 ──────────────────────────
-
-    private fun BigDecimal_floor(v: Double): Double = Math.floor(v)
 
     private fun num(v: BigInteger): JSONObject = JSONObject()
         .put("value", v.toLongSafe())
@@ -375,7 +373,7 @@ object CalcEngine {
             clean = pad(clean, byteLen * 2)
             return if (byteLen == 4) {
                 val bits = clean.toLong(16)
-                val out ="input", raw.toString())
+                val out = JSONObject().put("input", raw.toString())
                 if (precision != "float64") out.put("float32", f32(bits))
                 if (precision != "float32") out.put("float64", f64(java.lang.Double.doubleToRawLongBits(java.lang.Float.intBitsToFloat(bits.toInt()).toDouble())))
                 out
@@ -579,7 +577,7 @@ object CalcEngine {
             is JSONObject -> {
                 if (value.has("\$step")) {
                     val t = value.optInt("\$step", -1)
-                    if (t < 0 || t >= cur) throw IllegalArgumentException(if (cur == 0) "\"$step\" cannot be used in step 0" else "step $cur: \$step must reference an earlier step (0..${cur - 1})")
+                    if (t < 0 || t >= cur) throw IllegalArgumentException(if (cur == 0) "step 0 cannot reference an earlier step" else "step $cur: \$step must reference an earlier step (0..${cur - 1})")
                     deps.add(t)
                     return
                 }
@@ -617,5 +615,4 @@ object CalcEngine {
             else -> value
         }
     }
-}
 }

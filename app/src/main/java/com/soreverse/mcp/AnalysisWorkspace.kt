@@ -318,6 +318,19 @@ internal fun AnalysisWorkspace(
         AnalysisNavMenu(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
         GroupDivider()
 
+        // ── 工具内模式切换：菜单只列代表模式，这里可切到当前工具的全部模式 ──
+        val navToolModes = analysisToolOf(view).modes
+        if (navToolModes.size > 1) {
+            FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                navToolModes.forEach { m -> TabChip(analysisViewLabel(m, zh), selected = view == m) { tools.analysisView = m } }
+            }
+            GroupDivider()
+        }
+
         // ── 当前视图内容区 ──
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
                     when (view) {
@@ -2159,6 +2172,43 @@ private val analysisDomains = listOf(
     )),
 )
 
+/**
+ * 菜单用的**精简**导航（域 → 工具 → 代表模式）：把强相关的模式合并、次要模式入口去掉。
+ * 全部视图仍保留在 [analysisDomains]（抽屉 = 全量索引，不丢能力）；而当前工具的全部模式
+ * 又可在视图顶部用 chip 直接切换，所以菜单不必把每种模式都铺一遍。
+ */
+private val analysisMenuDomains = listOf(
+    AnalysisDomain("fns", "函数", "Functions", listOf(
+        AnalysisTool("fn", "函数", "Fns", listOf("functions")),
+        AnalysisTool("find", "搜索", "Find", listOf("search")),
+        AnalysisTool("refs", "引用", "Refs", listOf("callgraph", "xrefs")),
+        AnalysisTool("sig", "签名", "Sig", listOf("funcsig")),
+    )),
+    AnalysisDomain("code", "代码", "Code", listOf(
+        AnalysisTool("asm", "汇编", "Asm", listOf("disasm")),
+        AnalysisTool("pseudo", "伪C", "Pseudo", listOf("pseudo", "globalc")),
+        AnalysisTool("cfg", "CFG", "CFG", listOf("cfg")),
+        AnalysisTool("patch", "修改", "Patch", listOf("edit")),
+    )),
+    AnalysisDomain("data", "结构", "Structure", listOf(
+        AnalysisTool("hdr", "头部", "Header", listOf("elfhdr")),
+        AnalysisTool("sec", "段节", "Sections", listOf("sections", "relocs")),
+        AnalysisTool("sym", "符号", "Sym", listOf("symbols")),
+        AnalysisTool("str", "字符串", "Str", listOf("strings", "hex")),
+    )),
+    AnalysisDomain("judge", "分析", "Analyze", listOf(
+        AnalysisTool("hard", "加固", "Hard", listOf("hardening", "unpack")),
+        AnalysisTool("ai", "AI", "AI", listOf("analyze")),
+        AnalysisTool("exp", "导出", "Export", listOf("export")),
+        AnalysisTool("flutter", "Flutter", "Flutter", listOf("flutter")),
+    )),
+    AnalysisDomain("utils", "工具", "Tools", listOf(
+        AnalysisTool("conv", "转换", "Conv", listOf("base")),
+        AnalysisTool("mcp", "控制台", "Console", listOf("tools")),
+        AnalysisTool("out", "输出", "Out", listOf("results")),
+    )),
+)
+
 private fun analysisDomainOf(view: String): AnalysisDomain =
     analysisDomains.firstOrNull { d -> d.tools.any { view in it.modes } } ?: analysisDomains.first()
 
@@ -2615,7 +2665,7 @@ private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<St
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             Column(Modifier.width(276.dp).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                analysisDomains.forEach { d ->
+                analysisMenuDomains.forEach { d ->
                     Text(
                         (if (zh) d.short else d.en) + if (d.key == dom.key) "  ●" else "",
                         style = MaterialTheme.typography.labelSmall,
@@ -2631,7 +2681,8 @@ private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<St
                     ) {
                         d.tools.forEach { t ->
                             t.modes.forEach { m ->
-                                val label = (if (zh) t.short else t.en) + "·" + analysisViewLabel(m, zh)
+                                val toolName = if (zh) t.short else t.en
+                                val label = if (t.modes.size == 1) toolName else toolName + "·" + analysisViewLabel(m, zh)
                                 TabChip(label, selected = current == m) { onPick(m); open = false }
                             }
                         }

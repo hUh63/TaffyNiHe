@@ -96,28 +96,88 @@ object SoDecompileTool {
                 return null
             }
 
+            // rizin 0.9.x：`agf`/`agC` 是「nodes/edges」图格式，不再产出 r2dec 需要的
+            // `[{"blocks":[{"ops":[{offset,disasm}],"jump","fail"}]}]` —— 用 afbj(基本块) + pdfj(指令) 现场拼装。
+            fun rzTextOf(cmd: String): String = runCatching {
+                val r = engine.rzCommand(workspaceId, "", cmd)
+                r.optString("stdout").ifBlank { r.optString("text") }.trim()
+            }.getOrDefault("")
+
+            fun jsonListOf(t: String): org.json.JSONArray? {
+                if (t.isBlank()) return null
+                if (t.startsWith("[")) return runCatching { org.json.JSONArray(t) }.getOrNull()
+                if (t.startsWith("{")) {
+                    val o = runCatching { JSONObject(t) }.getOrNull() ?: return null
+                    return o.optJSONArray("ops") ?: o.optJSONArray("blocks")
+                }
+                return null
+            }
+
+            /** 现场拼出 r2dec 期望的 agfj 结构（blocks[] 内嵌 ops[]）。 */
+            fun buildAgfj(seek: String): String? {
+                val ops = jsonListOf(rzTextOf("s $seek; af; pdfj")) ?: return null
+                if (ops.length() == 0) return null
+                fun opEntry(op: JSONObject): JSONObject {
+                    val o = op.opt("offset") ?: op.opt("addr")
+                    val e = JSONObject().put("offset", o ?: 0)
+                    val dis = op.optString("disasm").ifBlank { op.optString("opcode") }
+                    if (dis.isNotBlank()) e.put("disasm", dis)
+                    val m = op.optString("mnemonic")
+                    if (m.isNotBlank()) e.put("mnemonic", m)
+                    return e
+                }
+                fun opsIn(lo: Long, hi: Long): org.json.JSONArray {
+                    val a = org.json.JSONArray()
+                    for (i in 0 until ops.length()) {
+                        val op = ops.optJSONObject(i) ?: continue
+                        val o = op.optLong("offset", op.optLong("addr", -1L))
+                        if (lo > 0 && o >= 0 && o < lo) continue
+                        if (hi > lo && o >= hi) continue
+                        a.put(opEntry(op))
+                    }
+                    return a
+                }
+                val fn = JSONObject().put("offset", ops.optJSONObject(0)?.opt("offset") ?: 0).put("name", locator)
+                val blocksOut = org.json.JSONArray()
+                val blocks = jsonListOf(rzTextOf("s $seek; af; afbj"))
+                if (blocks != null && blocks.length() > 0) {
+                    for (i in 0 until blocks.length()) {
+                        val b = blocks.optJSONObject(i) ?: continue
+                        val st = b.optLong("addr", b.optLong("offset", -1L))
+                        if (st < 0) continue
+                        val sz = b.optLong("size", 0L)
+                        val bo = JSONObject().put("offset", st)
+                        if (b.has("jump")) bo.put("jump", b.opt("jump"))
+                        if (b.has("fail")) bo.put("fail", b.opt("fail"))
+                        bo.put("ops", opsIn(st, if (sz > 0) st + sz else -1L))
+                        blocksOut.put(bo)
+                    }
+                }
+                if (blocksOut.length() == 0) {
+                    // 拿不到块划分：单块兜底（仍能出线性伪 C）
+                    blocksOut.put(JSONObject().put("offset", ops.optJSONObject(0)?.opt("offset") ?: 0).put("ops", opsIn(-1, -1)))
+                }
+                fn.put("blocks", blocksOut)
+                return org.json.JSONArray().put(fn).toString()
+            }
+
             fun runJavaHeuristic(): JSONObject? {
                 val seek = seekExpr()
-                // 1) 优先：移植自 Exbin 的 r2dec 纯 Java 引擎（rizin agfj 提供 CFG + 指令）
-                runCatching {
-                    val ag = engine.rzCommand(workspaceId, "", "s $seek; af; agfj")
-                    var agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
-                    // rizin 可能返回单个函数对象而非数组；规范化成数组再解析。
-                    if (agTxt.startsWith("{") && agTxt.contains("\"blocks\"")) agTxt = "[$agTxt]"
-                    if (agTxt.startsWith("[")) {
+                // 1) 优先：移植自 Exbin 的 r2dec 纯 Java 引擎（CFG 由 afbj+pdfj 注入）
+                val agTxt = buildAgfj(seek)
+                if (agTxt != null) {
+                    runCatching {
                         val code = com.soreverse.mcp.engine.R2DecEngine.decompile(agTxt, "")
                         if (!code.isNullOrBlank()) {
                             return JSONObject().put("ok", true).put("pseudocode", code)
                                 .put("engine", "java-r2dec")
-                                .put("engineNote", "r2dec 纯 Java 移植（Exbin 引擎；CFG 由 rizin agfj 注入）")
+                                .put("engineNote", "r2dec 纯 Java 移植（Exbin 引擎；CFG 由 rizin afbj+pdfj 注入）")
                         }
                     }
                 }
                 // 2) 兜底：纯 Kotlin 启发式引擎
-                val rj = engine.rzCommand(workspaceId, "", "s $seek; af; pdfj")
-                val txt = rj.optString("stdout").ifBlank { rj.optString("text") }.trim()
-                if (txt.isBlank() || !txt.startsWith("[")) return null
-                val arr = runCatching { org.json.JSONArray(txt) }.getOrNull() ?: return null
+                val arr = jsonListOf(rzTextOf("s $seek; af; pdfj")) ?: return null
+                if (arr.length() == 0) return null
                 val insns = com.soreverse.mcp.engine.HeuristicDecompiler.parse(arr)
                 if (insns.isEmpty()) return null
                 val fnName = "sub_" + java.lang.Long.toHexString(insns.first().addr)
@@ -130,16 +190,12 @@ object SoDecompileTool {
 
             fun runExbinSimple(): JSONObject? {
                 return runCatching {
-                    val seek = seekExpr()
-                    val ag = engine.rzCommand(workspaceId, "", "s $seek; af; agfj")
-                    var agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
-                    if (agTxt.startsWith("{") && agTxt.contains("\"blocks\"")) agTxt = "[$agTxt]"
-                    if (!agTxt.startsWith("[")) return@runCatching null
+                    val agTxt = buildAgfj(seekExpr()) ?: return@runCatching null
                     val code = com.soreverse.mcp.engine.R2DecEngine.decompileSimple(agTxt, "")
                     if (code.isNullOrBlank()) null
                     else JSONObject().put("ok", true).put("pseudocode", code)
                         .put("engine", "java-simple")
-                        .put("engineNote", "SimplePseudoC 结构化伪 C（Exbin v2.1.4 引擎；CFG 由 rizin agfj 注入）")
+                        .put("engineNote", "SimplePseudoC 结构化伪 C（Exbin v2.1.4 引擎；CFG 由 rizin afbj+pdfj 注入）")
                 }.getOrNull()
             }
 
@@ -158,8 +214,10 @@ object SoDecompileTool {
             }
 
             if (wantEngine == "native") {
-                val r = runNativePdc()
-                if (r == null) return err("DECOMPILER_UNAVAILABLE", "native 引擎无输出（当前 rizin 构建未提供可用的伪 C 命令 pdc/pdd/pdg）", "engine", "native")
+                // 本构建的 rizin 未内置 pdc/pdd/pdg（未打包 rz-ghidra/r2dec 插件）；
+                // 退回 Exbin 自研原生反编译器（libexbin_decomp.so，随 APK 打包），仍是 native 引擎。
+                val r = runNativePdc() ?: runExbinDecomp()
+                if (r == null) return err("DECOMPILER_UNAVAILABLE", "native 引擎无输出（本构建 rizin 未提供 pdc/pdd/pdg，且 Exbin 原生反编译器不可用）", "engine", "native")
                 return ok(r.put("workspaceId", workspaceId).put("locator", locator))
             }
             if (wantEngine == "java") {

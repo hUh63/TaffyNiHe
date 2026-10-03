@@ -2135,77 +2135,32 @@ private data class AnalysisDomain(val key: String, val short: String, val en: St
  * 47 个视图 → 5 个域 / 18 个工具 / 每个工具 1-5 个模式（模式只有 1 个时不出模式行）。
  */
 private val analysisDomains = listOf(
-    // 函数域：定位「哪个函数、被谁引用、长什么样」
-    AnalysisDomain("fns", "函数", "Functions", listOf(
+    // 代码域：围绕「一个函数」的一切看法与修改（合并原「函数域」）
+    AnalysisDomain("code", "代码", "Code", listOf(
         AnalysisTool("fn", "函数", "Fns", listOf("functions", "funcinfo", "comments")),
         AnalysisTool("find", "搜索", "Find", listOf("search")),
-        AnalysisTool("refs", "引用", "Refs", listOf("callgraph", "xrefs", "vtable", "addrview")),
-        AnalysisTool("sig", "签名", "Sig", listOf("funcsig", "jnireg")),
-    )),
-    // 代码域：同一个函数的几种看法 + 改它
-    AnalysisDomain("code", "代码", "Code", listOf(
         AnalysisTool("asm", "汇编", "Asm", listOf("disasm", "insnexp", "regs")),
         AnalysisTool("pseudo", "伪C", "Pseudo", listOf("pseudo", "globalc", "asm2c")),
         AnalysisTool("cfg", "CFG", "CFG", listOf("cfg", "asm2flow")),
+        AnalysisTool("refs", "引用", "Refs", listOf("callgraph", "xrefs", "vtable", "addrview")),
+        AnalysisTool("sig", "签名", "Sig", listOf("funcsig", "jnireg")),
         AnalysisTool("patch", "修改", "Patch", listOf("edit", "asm")),
     )),
-    // 结构域：ELF 的静态事实，同一来源的几张表合并
+    // 结构域：ELF 的静态事实（同一来源的几张表合并）
     AnalysisDomain("data", "结构", "Structure", listOf(
         AnalysisTool("hdr", "头部", "Header", listOf("elfhdr", "entries", "hashes", "versions")),
         AnalysisTool("sec", "段节", "Sections", listOf("sections", "segments", "relocs", "dynamic", "libraries")),
         AnalysisTool("sym", "符号", "Sym", listOf("symbols", "imports")),
         AnalysisTool("str", "字符串", "Str", listOf("strings", "hex")),
     )),
-    // 分析域：判定与产物
-    AnalysisDomain("judge", "分析", "Analyze", listOf(
+    // 工具域：判定、产物与通用小工具
+    AnalysisDomain("utils", "工具", "Tools", listOf(
         AnalysisTool("hard", "加固", "Hard", listOf("hardening", "unpack")),
-        AnalysisTool("ai", "AI", "AI", listOf("analyze")),
+        AnalysisTool("ai", "AI 分析", "AI", listOf("analyze")),
+        AnalysisTool("flutter", "Flutter", "Flutter", listOf("flutter")),
         AnalysisTool("exp", "导出", "Export", listOf("export", "data")),
-        // Flutter/Dart AOT：内置 Blutter Runner，全本地分析（后端早已存在，这里补上 UI 入口）
-        AnalysisTool("flutter", "Flutter", "Flutter", listOf("flutter")),
-    )),
-    // 工具域：和当前文件无关的通用小工具
-    AnalysisDomain("utils", "工具", "Tools", listOf(
         AnalysisTool("conv", "转换", "Conv", listOf("base", "demangle", "strdec", "xor", "bytediff")),
-        AnalysisTool("mcp", "控制台", "Console", listOf("tools")),
-        AnalysisTool("out", "输出", "Out", listOf("results")),
-    )),
-)
-
-/**
- * 菜单用的**精简**导航（域 → 工具 → 代表模式）：把强相关的模式合并、次要模式入口去掉。
- * 全部视图仍保留在 [analysisDomains]（抽屉 = 全量索引，不丢能力）；而当前工具的全部模式
- * 又可在视图顶部用 chip 直接切换，所以菜单不必把每种模式都铺一遍。
- */
-private val analysisMenuDomains = listOf(
-    AnalysisDomain("fns", "函数", "Functions", listOf(
-        AnalysisTool("fn", "函数", "Fns", listOf("functions")),
-        AnalysisTool("find", "搜索", "Find", listOf("search")),
-        AnalysisTool("refs", "引用", "Refs", listOf("callgraph", "xrefs")),
-        AnalysisTool("sig", "签名", "Sig", listOf("funcsig")),
-    )),
-    AnalysisDomain("code", "代码", "Code", listOf(
-        AnalysisTool("asm", "汇编", "Asm", listOf("disasm")),
-        AnalysisTool("pseudo", "伪C", "Pseudo", listOf("pseudo", "globalc")),
-        AnalysisTool("cfg", "CFG", "CFG", listOf("cfg")),
-        AnalysisTool("patch", "修改", "Patch", listOf("edit")),
-    )),
-    AnalysisDomain("data", "结构", "Structure", listOf(
-        AnalysisTool("hdr", "头部", "Header", listOf("elfhdr")),
-        AnalysisTool("sec", "段节", "Sections", listOf("sections", "relocs")),
-        AnalysisTool("sym", "符号", "Sym", listOf("symbols")),
-        AnalysisTool("str", "字符串", "Str", listOf("strings", "hex")),
-    )),
-    AnalysisDomain("judge", "分析", "Analyze", listOf(
-        AnalysisTool("hard", "加固", "Hard", listOf("hardening", "unpack")),
-        AnalysisTool("ai", "AI", "AI", listOf("analyze")),
-        AnalysisTool("exp", "导出", "Export", listOf("export")),
-        AnalysisTool("flutter", "Flutter", "Flutter", listOf("flutter")),
-    )),
-    AnalysisDomain("utils", "工具", "Tools", listOf(
-        AnalysisTool("conv", "转换", "Conv", listOf("base")),
-        AnalysisTool("mcp", "控制台", "Console", listOf("tools")),
-        AnalysisTool("out", "输出", "Out", listOf("results")),
+        AnalysisTool("mcp", "控制台", "Console", listOf("tools", "results")),
     )),
 )
 
@@ -2630,9 +2585,9 @@ private suspend fun resolveCfgEntry(
     null
 }
 
-// ───────────────────── 导航（域 → 工具 → 模式，三级；分类定义见 analysisDomains） ─────────────────────
+// ───────────────────── 导航（域 → 工具，两级；工具内的各视图用页内 chip 切换） ─────────────────────
 
-/** 导航菜单：一行显示「域 › 工具 › 模式」，点按弹出三级菜单（对齐 Exbin 的分类树）。 */
+/** 导航菜单：一行显示「域 › 工具」，点按弹出菜单（域分组 + 每工具一个入口）。 */
 @Composable
 private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<String, String>, onPick: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -2652,7 +2607,7 @@ private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<St
         ) {
             Icon(Icons.Filled.Menu, null, tint = cs.primary, modifier = Modifier.size(15.dp))
             Text(
-                (if (zh) dom.short else dom.en) + "  ›  " + (if (zh) tool.short else tool.en) + "  ›  " + analysisViewLabel(current, zh),
+                (if (zh) dom.short else dom.en) + "  ›  " + (if (zh) tool.short else tool.en),
                 style = MaterialTheme.typography.labelSmall,
                 fontSize = AppText.bodyStrong,
                 fontWeight = FontWeight.SemiBold,
@@ -2665,7 +2620,7 @@ private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<St
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             Column(Modifier.width(276.dp).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                analysisMenuDomains.forEach { d ->
+                analysisDomains.forEach { d ->
                     Text(
                         (if (zh) d.short else d.en) + if (d.key == dom.key) "  ●" else "",
                         style = MaterialTheme.typography.labelSmall,
@@ -2680,10 +2635,8 @@ private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<St
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         d.tools.forEach { t ->
-                            t.modes.forEach { m ->
-                                val toolName = if (zh) t.short else t.en
-                                val label = if (t.modes.size == 1) toolName else toolName + "·" + analysisViewLabel(m, zh)
-                                TabChip(label, selected = current == m) { onPick(m); open = false }
+                            TabChip(if (zh) t.short else t.en, selected = t.key == tool.key) {
+                                onPick(rememberedView(t, lastModeByTool)); open = false
                             }
                         }
                     }
@@ -3769,7 +3722,7 @@ private fun CfgView(
                     "pseudo" -> {
                         // 优先：r2dec 精确块映射（对标 Exbin BlockPseudoCProvider.convertWithBlockMap）
                         val engP = EngineProvider.get(context)
-                        val agTxt = rzText(engP.rzCommand(ws, "", "s $target; agfj"))
+                        val agTxt = rzText(engP.rzCommand(ws, "", "s $target; agf json"))
                         val mapped = com.soreverse.mcp.engine.R2DecEngine.decompileBlocks(agTxt, target)
                         if (mapped != null) {
                             splitPseudoBlocks(mapped.first, mapped.second)
@@ -6630,8 +6583,9 @@ private fun XRefsView(tools: ToolPagesState, zh: Boolean, context: android.conte
             val rs = withContext(Dispatchers.IO) {
                 runCatching {
                     val eng = EngineProvider.get(context)
-                    val axt = eng.rzCommand(ws, "", "s $loc; axtj")
-                    val axf = eng.rzCommand(ws, "", "s $loc; axfj")
+                    // aac：分析函数调用交叉引用。仅靠 aa 时 axt/axf 往往为空。
+                    val axt = eng.rzCommand(ws, "", "aac; s $loc; axtj")
+                    val axf = eng.rzCommand(ws, "", "aac; s $loc; axfj")
                     parseRzArray(axt) to parseRzArray(axf)
                 }.getOrElse { (null as List<JSONObject>?) to (null as List<JSONObject>?) }
             }
@@ -7417,7 +7371,10 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                 val eng = EngineProvider.get(context)
                 var raw = ""
                 var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
-                for (c in listOf("aa; aac; agCj", "aac; agCj", "agCj")) {
+                // rizin 0.9.x：图命令 agC/agf 是「格式参数」型（须 `agC json` / `agC j`），
+                // 不是 j 后缀模式型 —— `agCj` 会被当非法格式而失败（全局调用图恒空→降级函数清单）。
+                // rzCommand 已预跑全量分析，故直接 agC json；再退回 aac 前置 / 小写 agc / 旧写法。
+                for (c in listOf("agC json", "aac; agC json", "agc json", "agCj")) {
                     raw = rzText(eng.rzCommand(ws, "", c))
                     g = parseRizinGraph(raw)
                     if (g.first.isNotEmpty()) break

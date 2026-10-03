@@ -384,6 +384,8 @@ internal fun AnalysisWorkspace(
 
                         "base" -> BaseConvertView(zh = zh, context = context)
 
+                        "calc" -> CalcView(zh = zh, context = context)
+
                         "asm" -> AsmEditorView(tools = tools, zh = zh, context = context)
 
                         "elfhdr" -> ElfHeaderView(tools, zh, context, refreshAll)
@@ -2111,6 +2113,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("flutter", "Flutter", "Flutter", Icons.Filled.Memory),
     AnalysisNavItem("edit", "编辑", "Edit", Icons.Filled.Build),
     AnalysisNavItem("globalc", "全局伪C", "GpC", Icons.Filled.Description),
+    AnalysisNavItem("calc", "计算器", "Calc", Icons.Filled.Calculate),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -2160,6 +2163,7 @@ private val analysisDomains = listOf(
         AnalysisTool("flutter", "Flutter", "Flutter", listOf("flutter")),
         AnalysisTool("exp", "导出", "Export", listOf("export", "data")),
         AnalysisTool("conv", "转换", "Conv", listOf("base", "demangle", "strdec", "xor", "bytediff")),
+        AnalysisTool("calc", "计算器", "Calc", listOf("calc")),
         AnalysisTool("mcp", "控制台", "Console", listOf("tools", "results")),
     )),
 )
@@ -2583,6 +2587,148 @@ private suspend fun resolveCfgEntry(
         return@withContext (item.optString("name").ifBlank { va } to va)
     }
     null
+}
+
+// ───────────────────────── 计算器（内置高精度计算引擎 taffy_calculate 的 UI） ─────────────────────────
+
+private data class CalcField(val key: String, val label: String, val kind: String, val options: List<String> = emptyList(), val placeholder: String = "")
+
+private fun calcOpLabel(op: String): String = when (op) {
+    "add" -> "+"; "subtract" -> "−"; "multiply" -> "×"; "division" -> "÷"; "sum" -> "Σ"; "modulo" -> "%"
+    "floor" -> "⌊⌋"; "ceiling" -> "⌈⌉"; "round" -> "≈"
+    "mean" -> "均值"; "median" -> "中位"; "min" -> "最小"; "max" -> "最大"
+    "sin" -> "sin"; "cos" -> "cos"; "tan" -> "tan"
+    "int_convert" -> "进制"; "bitwise" -> "位运算"; "endian_swap" -> "端序"; "ieee754_convert" -> "IEEE754"
+    "crypto_calc" -> "哈希/CRC"; "data_codec" -> "编解码"
+    else -> op
+}
+
+private fun calcFieldsFor(op: String): List<CalcField> = when (op) {
+    "add", "multiply" -> listOf(CalcField("firstNumber", "第一数", "num"), CalcField("secondNumber", "第二数", "num"))
+    "subtract" -> listOf(CalcField("minuend", "被减数", "num"), CalcField("subtrahend", "减数", "num"))
+    "division", "modulo" -> listOf(CalcField("numerator", "被除数", "num"), CalcField("denominator", "除数", "num"))
+    "sum", "mean", "median", "mode", "min", "max" -> listOf(CalcField("numbers", "数字数组", "arr", placeholder = "1, 2, 3, 0x10"))
+    "floor", "ceiling", "round", "sin", "cos", "tan", "arcsin", "arccos", "arctan", "radiansToDegrees", "degreesToRadians" ->
+        listOf(CalcField("number", "数值", "num"))
+    "int_convert" -> listOf(CalcField("value", "单值", "str", placeholder = "0x1A / -42"), CalcField("values", "多值(逗号分隔)", "arrStr", placeholder = "0x1A, 12345"))
+    "bitwise" -> listOf(
+        CalcField("operation", "运算", "enum", listOf("and", "or", "xor", "not", "shl", "shr", "sar", "rol", "ror")),
+        CalcField("a", "a", "str", placeholder = "0x1234"), CalcField("b", "b", "str", placeholder = "0x5A"),
+        CalcField("bitWidth", "位宽", "enum", listOf("8", "16", "32", "64")))
+    "endian_swap" -> listOf(CalcField("value", "值 / hex", "str", placeholder = "0x12345678"), CalcField("widthBytes", "字节数", "int", placeholder = "2/4/8"))
+    "ieee754_convert" -> listOf(
+        CalcField("value", "浮点 / hex", "str", placeholder = "3.14159 / 0x3f800000"),
+        CalcField("precision", "精度", "enum", listOf("both", "float32", "float64")))
+    "crypto_calc" -> listOf(
+        CalcField("action", "动作", "enum", listOf("hash", "crc32", "crc16", "mod_pow", "mod_inverse", "gcd")),
+        CalcField("algorithm", "哈希算法", "enum", listOf("md5", "sha1", "sha256")),
+        CalcField("data", "数据", "str"), CalcField("inputFormat", "数据格式", "enum", listOf("text", "hex")),
+        CalcField("crcVariant", "CRC16 变体", "enum", listOf("modbus", "ccitt")),
+        CalcField("a", "a", "str"), CalcField("b", "b", "str"), CalcField("modulus", "模数", "str"))
+    "data_codec" -> listOf(
+        CalcField("action", "动作", "enum", listOf("to_base64", "from_base64", "to_hex", "from_hex", "url_encode", "url_decode")),
+        CalcField("input", "输入", "str"), CalcField("format", "格式", "enum", listOf("text", "hex")),
+        CalcField("urlSafe", "URL-safe", "enum", listOf("false", "true")))
+    else -> emptyList()
+}
+
+@Composable
+private fun CalcView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var op by remember { mutableStateOf("add") }
+    var inputs by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var result by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    val fields = remember(op) { calcFieldsFor(op) }
+
+    fun run() {
+        val args = JSONObject().put("op", op)
+        for (f in fields) {
+            val v = inputs[f.key].orEmpty().trim()
+            if (v.isBlank()) continue
+            when (f.kind) {
+                "num" -> v.toDoubleOrNull()?.let { args.put(f.key, it) }
+                "int" -> v.toIntOrNull()?.let { args.put(f.key, it) }
+                "bool" -> args.put(f.key, v == "true")
+                "arr" -> {
+                    val a = JSONArray()
+                    v.split(',', ' ', '\n').map { it.trim() }.filter { it.isNotEmpty() }.forEach { t -> a.put(t.toDoubleOrNull() ?: t) }
+                    args.put(f.key, a)
+                }
+                "arrStr" -> {
+                    val a = JSONArray()
+                    v.split(',', ' ', '\n').map { it.trim() }.filter { it.isNotEmpty() }.forEach { t -> a.put(t) }
+                    args.put(f.key, a)
+                }
+                else -> args.put(f.key, v)
+            }
+        }
+        scope.launch {
+            loading = true; error = ""; result = ""
+            val r = callMcpTool(context, "taffy_calculate", args)
+            loading = false
+            if (r == null) error = if (zh) "计算失败：引擎无响应" else "calc failed: no response"
+            else if (!r.optBoolean("ok", true)) error = r.optString("error").ifBlank { r.optString("message") }
+            else result = r.toString(2)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                "add", "subtract", "multiply", "division", "sum", "modulo", "floor", "ceiling", "round",
+                "mean", "median", "min", "max", "sin", "cos", "tan",
+                "int_convert", "bitwise", "endian_swap", "ieee754_convert", "crypto_calc", "data_codec",
+            ).forEach { o -> TabChip(calcOpLabel(o), selected = o == op) { op = o } }
+        }
+        Spacer(Modifier.size(8.dp))
+        Column(
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            fields.forEach { f ->
+                if (f.kind == "enum") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(f.label, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(64.dp))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val cur = inputs[f.key].orEmpty().ifBlank { f.options.first() }
+                            f.options.forEach { o -> TabChip(o, selected = cur == o) { inputs = inputs + (f.key to o) } }
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = inputs[f.key].orEmpty(),
+                        onValueChange = { inputs = inputs + (f.key to it) },
+                        singleLine = f.kind != "arr" && f.kind != "arrStr",
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                        shape = RoundedCornerShape(AppShape.sm),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                        label = { Text(f.label, fontSize = AppText.label) },
+                        placeholder = {
+                            if (f.placeholder.isNotBlank()) Text(f.placeholder, style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant)
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.size(4.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallAction(if (zh) "计算" else "Calc", loading = loading) { run() }
+                SmallAction(if (zh) "清空" else "Clear") { inputs = emptyMap(); result = ""; error = "" }
+                SmallAction(if (zh) "复制结果" else "Copy", enabled = result.isNotBlank()) { copyToClipboard(context, result, zh) }
+            }
+            if (error.isNotBlank()) { Spacer(Modifier.size(4.dp)); AnalysisErrorBanner(error) }
+            if (result.isNotBlank()) {
+                Spacer(Modifier.size(6.dp))
+                ToolResultBlock(if (zh) "结果" else "Result", result, zh = zh, onCopy = { copyToClipboard(context, result, zh) })
+            }
+        }
+    }
 }
 
 // ───────────────────── 导航（域 → 工具，两级；工具内的各视图用页内 chip 切换） ─────────────────────

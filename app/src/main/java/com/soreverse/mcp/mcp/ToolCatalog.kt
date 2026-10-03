@@ -1158,6 +1158,7 @@ object ToolCatalog {
         *NativeSelfTestTool.ALL.toTypedArray(),
         // 塔菲逆核: 内置高精度计算器(移植 calculate-mcp: 算术/统计/进制/位运算/IEEE754/hash/编解码 + 批量)
         *CalculateTool.ALL.toTypedArray(),
+        *IappDecryptTool.ALL.toTypedArray(),
         // 塔菲逆核: 高级DEX分析(指令级交叉引用/类大纲/字节码/deodex/增量重编)
         *DexAnalysisTools.ALL.toTypedArray(),
         // 塔菲逆核: 高精度Manifest编辑+资源交叉引用(用ARSCLib, 不用正则)

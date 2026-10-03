@@ -1,3 +1,24 @@
+# TaffyNiHe v1.3.65
+
+本版为**伪 C 反编译引擎修复**：修正 Native / Java / Simple 三个引擎「无输出」的根因。
+
+## 🐞 修复
+
+**Native（rizin 伪 C）引擎**
+- 根因：自建 rizin v0.9.1 已**移除内置 `pdc`**（`pdc` 仅存在于 radare2），故 `s …; pdc` 恒为空 → 一直报「native(pdc) 引擎无输出」。
+- 改为按可用性**依次尝试 `pdc → pdd（r2dec 插件）→ pdg（rz-ghidra 插件）**，取首个有效输出。
+
+**Java / Simple 引擎**
+- 根因：这两条路径把 locator 原文直接拼进 rizin 命令 `s <locator>; agfj/pdfj`；当 locator 是裸符号名 / `so_function:` 前缀等 rizin 无法直接 seek 的形式时，seek 失败 → 输出为空 → 报「地址无法反汇编或指令为空」。
+- 修复：与 Ghidra 路径口径统一，**先把 locator 解析成线性地址（`locatorHex`）再 seek**，并在 seek 后补 `af` 建函数；兼容 `agfj` 返回单对象。
+
+## 🔧 其它
+- 新增 `NativeSoEngine.locatorHex()`：复用 `resolveCodeAddress` 的符号/地址解析，三条引擎定位口径一致。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.64...v1.3.65
+
 # TaffyNiHe v1.3.64
 
 本版聚焦**界面精简与 CFG 可读性**：分析页导航改为一行触发的三级下拉菜单、CFG 默认改用 ELK 正交布局消除线条交叉、首页压缩间距让更多内容一屏可见。
@@ -125,4 +146,5 @@
 ---
 
 **完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.60...v1.3.61
+
 

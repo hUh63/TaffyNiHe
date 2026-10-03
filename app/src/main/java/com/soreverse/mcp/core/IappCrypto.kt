@@ -19,7 +19,8 @@ object IappCrypto {
     /** 截断向零除法（与原生 C 整数除法一致）。 */
     fun signedDiv(a: Int, b: Int): Int {
         require(b != 0) { "division by zero" }
-        if ((a < 0) != (b < 0) && a % b != 0) return a / b + 1
+        // Kotlin 的 `/` 本身就是「截断向零」除法，与原生 C 一致；
+        // 原版 Python 需 +1 是因为 Python `//` 向下取整，Kotlin 不需要。
         return a / b
     }
 

@@ -88,7 +88,7 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.AiDeep -> if (t.zh) "AI 深度分析" else "AI Deep Analysis"
     SettingsDest.Updates -> if (t.zh) "版本更新" else "Software Update"
     SettingsDest.Probe -> t.externalProbe
-    SettingsDest.ToolStats -> if (t.zh) "工具调用统计" else "Tool Call Stats"
+    SettingsDest.ToolStats -> if (t.zh) "运行统计" else "Runtime Stats"
     SettingsDest.TunnelStats -> if (t.zh) "隧道稳定性" else "Tunnel Stability"
     SettingsDest.Credits -> if (t.zh) "开源致谢" else "Credits"
     SettingsDest.Disclaimer -> t.disclaimer
@@ -180,7 +180,7 @@ internal fun SettingsHub(
                         SettingsNavRow(t, SettingsDest.AiDeep, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Probe, onDest)
                     }
-                    SettingsGroup(if (t.zh) "逆向分析" else "Reverse analysis") {
+                    SettingsGroup(if (t.zh) "分析与动态" else "Analysis & dynamic") {
                         SettingsNavRow(t, SettingsDest.Rizin, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Edbg, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.LogcatViewer, onDest); GroupDivider()
@@ -205,7 +205,6 @@ internal fun SettingsHub(
                         NavRow(settingsTitle(t, SettingsDest.Python), null, settingsIcon(SettingsDest.Python), onClick = onOpenEditor); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Git, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Workspace, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.TempWorkspace, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Extensions, onDest)
                     }
                     SettingsGroup(if (t.zh) "外观与保活" else "Appearance & keep-alive") {
@@ -214,7 +213,6 @@ internal fun SettingsHub(
                     }
                     SettingsGroup(if (t.zh) "诊断与关于" else "Diagnostics & about") {
                         SettingsNavRow(t, SettingsDest.ToolStats, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.TunnelStats, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Permissions, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Updates, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.BackupRestore, onDest); GroupDivider()
@@ -288,7 +286,11 @@ internal fun SettingsHub(
             // 编辑器已是顶层独立页面：子页路由到此处时直接切到 Editor tab（覆盖扩展页 / 工作流页的跳转）
             SettingsDest.Python -> LaunchedEffect(Unit) { onOpenEditor() }
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
-            SettingsDest.ToolStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } } }
+            SettingsDest.ToolStats -> PageScroll {
+                // 合并强相关入口：工具调用统计 + 隧道稳定性 同属「运行时统计」，合并到同一页。
+                GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } }
+                GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } }
+            }
             SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }
             SettingsDest.Credits -> SettingsCreditsPage(t)
             SettingsDest.Disclaimer -> PageScroll {
@@ -469,3 +471,4 @@ private fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
     SettingsDest.About -> Icons.Default.Info
     SettingsDest.Root -> Icons.Default.Settings
 }
+

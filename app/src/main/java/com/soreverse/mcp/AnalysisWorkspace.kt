@@ -6724,22 +6724,24 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
             val res = withContext(Dispatchers.IO) {
                 runCatching {
                     val eng = EngineProvider.get(context)
+                    // 地址容错：用户常漏写 0x 前缀（此时 rizin 按十进制解释 → 落到未映射区 → 读取为空）。
+                    val cands = if (a.startsWith("0x", true)) listOf(a) else listOf(a, "0x$a")
                     fun tryArr(cmds: List<String>): List<JSONObject>? {
-                        for (c in cmds) {
-                            val r = parseRzArray(eng.rzCommand(ws, "", c))
+                        for (cand in cands) for (c in cmds) {
+                            val r = parseRzArray(eng.rzCommand(ws, "", "s $cand; $c"))
                             if (r != null && r.isNotEmpty()) return r
                         }
                         return null
                     }
-                    val l = if (mode == "code") tryArr(listOf("s $a; pdj 64", "s $a; pdj"))
-                            else tryArr(listOf("s $a; pxj 256", "s $a; pxj"))
+                    val l = if (mode == "code") tryArr(listOf("pdj 64", "pdj"))
+                            else tryArr(listOf("pxj 256", "pxj"))
                     val sec = eng.rzCommand(ws, "", "iSj")
                     l to sectionOf(sec, a)
                 }.getOrElse { (null as List<JSONObject>?) to "" }
             }
             loading = false
             val (l, s) = res
-            if (l == null) error = if (zh) "读取失败：地址无法解析（试试 0x 开头的虚拟地址）" else "failed to read at address"
+            if (l == null) error = if (zh) "读取失败：该地址无可读内容（请确认是 0x 开头的虚拟地址，且落在文件映射区内）" else "read failed: no bytes at this address"
             lines = l ?: emptyList()
             info = s
         }
@@ -7384,9 +7386,10 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         }
         loading = false
         if (res == null) { error = if (zh) "引擎未就绪或命令失败" else "engine/command failed"; return@LaunchedEffect }
-        val (n, _, nt) = res
-        val (pn, pe) = parseCallGraph(n)
-        nodes = pn; edges = pe; note = nt
+        // 注意：parseRizinGraph 已同时产出 nodes 与 edges；不能再用「已剥离 out_nodes 的 nodes」
+        // 重新 parseCallGraph（那样 edges 恒为空 → 根下钻无出边、SCC 鸟瞰无连线）。
+        val (n, e, nt) = res
+        nodes = n; edges = e; note = nt
     }
 
     if (ws.isBlank()) return NeedWorkspace(zh)
@@ -9723,3 +9726,4 @@ private fun CallGraphGraphPane(
         CallGraphCanvas(subPair.first, subPair.second, dir, findQ, zh, Modifier.fillMaxWidth().weight(1f))
     }
 }
+

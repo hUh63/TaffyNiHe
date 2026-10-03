@@ -93,28 +93,31 @@ object SoDeepTools {
         runCatching {
             val secItems = engine.list(ws, "", "sections", "", 500).optJSONArray("items") ?: return@runCatching
             var textLo = Long.MAX_VALUE; var textHi = 0L
-            val relro = HashMap<String, Long>()
+            // 注意：ELF reloc 的 "section" 字段是「重定位表所在节」(.rela.dyn/.rel.dyn)，
+            // 不是被重定位的目标节名 —— 旧实现按 "== .data.rel.ro*" 过滤，恒为空（永远「未发现虚表」）。
+            // 改为按「重定位目标地址（offset = r_offset 的 VA）落在 .data.rel.ro* 区间」判定。
+            val relroRanges = ArrayList<Triple<String, Long, Long>>()
             for (i in 0 until secItems.length()) {
                 val s = secItems.optJSONObject(i) ?: continue
                 val nm = s.optString("name")
                 val a = parseHex(s.optString("addr"))
                 val sz = s.optLong("size", 0L)
                 if (nm == ".text" && a >= 0) { textLo = minOf(textLo, a); textHi = maxOf(textHi, a + sz) }
-                if (nm.startsWith(".data.rel.ro")) relro[nm] = a
+                if (nm.startsWith(".data.rel.ro") && a >= 0 && sz > 0) relroRanges.add(Triple(nm, a, a + sz))
             }
-            if (relro.isEmpty() || textLo > textHi) return@runCatching
+            if (relroRanges.isEmpty() || textLo > textHi) return@runCatching
+            fun relroOf(va: Long): String? = relroRanges.firstOrNull { va >= it.second && va < it.third }?.first
             val relItems = engine.list(ws, "", "relocations", "", 8000).optJSONArray("items") ?: return@runCatching
             val bySec = HashMap<String, ArrayList<Long>>()
             val fnOf = HashMap<Long, Long>()
             for (i in 0 until relItems.length()) {
                 val r = relItems.optJSONObject(i) ?: continue
-                val sec = r.optString("section")
-                if (!relro.containsKey(sec)) continue
                 val off = parseHex(r.optString("offset"))
                 if (off < 0) continue
+                val sec = relroOf(off) ?: continue
                 val addend = r.optLong("addend", -1L)
                 val fn = if (addend >= 0) addend else parseHex(r.optString("symbolValue"))
-                if (fn < 0 || fn < textLo || fn >= textHi) continue
+                if (fn < textLo || fn >= textHi) continue
                 bySec.getOrPut(sec) { ArrayList() }.add(off)
                 fnOf[off] = fn
             }
@@ -850,3 +853,4 @@ object SoDeepTools {
 
     val ALL: List<ToolHandler> = listOf(soVtable, soDemangle, soFuncSig, soJniReg, soPseudocBatch)
 }
+

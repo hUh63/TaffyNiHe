@@ -2,9 +2,7 @@ package com.soreverse.mcp.mcp
 
 import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
-import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction11n
-import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction21s
-import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction31i
+import com.android.tools.smali.dexlib2.iface.instruction.NarrowLiteralInstruction
 import com.reandroid.apk.ApkModule
 import com.soreverse.mcp.core.IappCrypto
 import com.soreverse.mcp.core.IappDecrypt
@@ -287,12 +285,7 @@ object IappDecryptTool {
                         val impl = m.implementation ?: continue
                         var lit: Int? = null
                         for (insn in impl.instructions) {
-                            when (insn) {
-                                is Instruction21s -> lit = insn.literal.toInt()
-                                is Instruction31i -> lit = insn.literal
-                                is Instruction11n -> lit = insn.literal.toInt()
-                                else -> {}
-                            }
+                            if (insn is NarrowLiteralInstruction) lit = insn.narrowLiteral
                         }
                         if (lit != null) return lit.toString()
                     }

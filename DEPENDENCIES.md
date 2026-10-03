@@ -113,7 +113,7 @@ capstone 与 fastjson 的情形**不同**：fastjson 的 2.x 兼容层保住了�
 | LIEF | 1.0.0 | 0.16.1 → 1.0.0：`LIEF::to_json` 在 1.0 拆到 `LIEF::ELF::to_json`，用 `LIEF_VERSION_MAJOR` 宏兼容两代；补丁集同步换代 |
 | rizin / unidbg | v0.9.1 / 0.9.9 | 均为上游最新（rizin main 仍有编译 bug，故 pin tag） |
 | fastjson | `com.alibaba:fastjson:2.0.65` | 1.2.83 → 2.0.65：改用官方 **fastjson1 兼容层**（内核 fastjson2，AutoType 默认关闭），保 `com.alibaba.fastjson.*` 类名，unidbg 反射零改动 |
-| cloudflared / frida-server | 2026.9.3 / 17.19.0 | CI 注入，版本常量在 `build-multiabi.yml` |
+| cloudflared / frida-server | 2026.9.3 / 17.22.0 | CI 注入，版本常量在 `build-multiabi.yml` |
 
 ## 升级作业规范（升级依赖时的检查清单）
 
@@ -122,3 +122,4 @@ capstone 与 fastjson 的情形**不同**：fastjson 的 2.x 兼容层保住了�
 3. **缓存必须感知输入**：CI 里 native 构建缓存 key 必须包含 LIEF 版本与 NDK 版本，否则旧产物会让升级「看起来成功其实没生效」。
 4. **补丁按版本选择**：上游补丁要绑定源码版本，并让「应用失败」只告警不中断（上游修好后旧补丁失配，不该把流水线弄红）。
 5. **API 变化的库要在代码里兼容或补依赖**（如 LIEF 1.0 的 `to_json` 拆分、ELK 0.12 需要 xtext runtime），不要用 R8 `dontwarn` 掩盖。
+

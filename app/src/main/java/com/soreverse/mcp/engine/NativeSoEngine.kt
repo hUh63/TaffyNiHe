@@ -21,6 +21,18 @@ class NativeSoEngine(context: Context) {
     internal fun exbinDataFor(workspaceId: String, editSessionId: String): ByteArray =
         runtime.dataFor(workspaceId, editSessionId)
 
+    /**
+     * 把 locator（so_function:xxx / 符号名 / 0xVA / fcn.x）解析成线性地址 hex；
+     * 解析失败返回 null（调用方回退为原始 locator）。
+     * 与 rzDecompile 共用同一套解析，避免 `s <裸符号名>` 无法定位导致引擎空输出。
+     */
+    internal fun locatorHex(workspaceId: String, editSessionId: String, locator: String): String? {
+        val bytes = runtime.dataFor(workspaceId, editSessionId)
+        val elf = runtime.elfFor(workspaceId, editSessionId)
+        val va = runtime.resolveCodeAddress(bytes, elf, locator) ?: return null
+        return runtime.hex(va)
+    }
+
     /** 用 Exbin FunctionSignatureAnalyzer 还原单函数签名（失败返回 null，调用方降级）。 */
     internal fun exbinSignature(workspaceId: String, name: String, va: Long): JSONObject? =
         ExbinSignature.analyze(runtime, workspaceId, name, va)
@@ -108,3 +120,4 @@ class NativeSoEngine(context: Context) {
     fun dumpMemory(workspaceId: String, editSessionId: String, addr: Long, size: Int): JSONObject = runtime.dumpMemory(workspaceId, editSessionId, addr, size)
 
 }
+

@@ -72,20 +72,38 @@ object SoDecompileTool {
             val strict = args.bool("strict", true)
             val wantEngine = args.str("engine", "auto").ifBlank { "auto" }
 
-            // ── 引擎分发：ghidra(pdg) / native(pdc) / java(纯 Kotlin 启发式) / auto 依次降级 ──
+            // locator → 线性地址(hex)：与 rzDecompile 共用同一套解析（so_function:xxx / 符号名 / 0xVA / fcn.x）。
+            // 直接 `s <裸符号名>` 在 rizin 里未必能定位（flag 名带 sym. 前缀等），是 native/java 引擎空输出的常见根因。
+            fun seekExpr(): String {
+                val hexVa = runCatching { engine.locatorHex(workspaceId, "", locator) }.getOrNull()
+                return hexVa?.takeIf { it.isNotBlank() } ?: locator.trim()
+            }
+
+            // ── 引擎分发：ghidra(pdg) / native(rizin 伪C) / java(纯 Java 启发式) / auto 依次降级 ──
             fun runNativePdc(): JSONObject? {
-                val r = engine.rzCommand(workspaceId, "", "s $locator; pdc")
-                val txt = r.optString("stdout").ifBlank { r.optString("text") }.trim()
-                if (txt.isBlank() || txt.startsWith("ERROR")) return null
-                return JSONObject().put("ok", true).put("pseudocode", txt).put("engine", "native-pdc")
-                    .put("engineNote", "rizin 内置 pdc（native 管线，非 Ghidra SLEIGH）")
+                val seek = seekExpr()
+                // rizin 0.9 起已移除内置 pdc：按可用性依次尝试 pdc → pdd(r2dec 插件) → pdg(rz-ghidra 插件)。
+                for (cmd in listOf("pdc", "pdd", "pdg")) {
+                    val r = engine.rzCommand(workspaceId, "", "s $seek; af; $cmd")
+                    val txt = r.optString("stdout").ifBlank { r.optString("text") }.trim()
+                    if (txt.isBlank()) continue
+                    if (txt.startsWith("{") || txt.startsWith("ERROR")) continue
+                    val lower = txt.lowercase()
+                    if (lower.contains("invalid command") || lower.contains("unknown command") || lower.contains("cannot find")) continue
+                    return JSONObject().put("ok", true).put("pseudocode", txt).put("engine", "native-$cmd")
+                        .put("engineNote", "rizin 伪 C 引擎（$cmd；native 管线，自动选用当前构建可用的命令）")
+                }
+                return null
             }
 
             fun runJavaHeuristic(): JSONObject? {
+                val seek = seekExpr()
                 // 1) 优先：移植自 Exbin 的 r2dec 纯 Java 引擎（rizin agfj 提供 CFG + 指令）
                 runCatching {
-                    val ag = engine.rzCommand(workspaceId, "", "s $locator; agfj")
-                    val agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
+                    val ag = engine.rzCommand(workspaceId, "", "s $seek; af; agfj")
+                    var agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
+                    // rizin 可能返回单个函数对象而非数组；规范化成数组再解析。
+                    if (agTxt.startsWith("{") && agTxt.contains("\"blocks\"")) agTxt = "[$agTxt]"
                     if (agTxt.startsWith("[")) {
                         val code = com.soreverse.mcp.engine.R2DecEngine.decompile(agTxt, "")
                         if (!code.isNullOrBlank()) {
@@ -96,7 +114,7 @@ object SoDecompileTool {
                     }
                 }
                 // 2) 兜底：纯 Kotlin 启发式引擎
-                val rj = engine.rzCommand(workspaceId, "", "s $locator; pdfj")
+                val rj = engine.rzCommand(workspaceId, "", "s $seek; af; pdfj")
                 val txt = rj.optString("stdout").ifBlank { rj.optString("text") }.trim()
                 if (txt.isBlank() || !txt.startsWith("[")) return null
                 val arr = runCatching { org.json.JSONArray(txt) }.getOrNull() ?: return null
@@ -112,8 +130,10 @@ object SoDecompileTool {
 
             fun runExbinSimple(): JSONObject? {
                 return runCatching {
-                    val ag = engine.rzCommand(workspaceId, "", "s $locator; agfj")
-                    val agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
+                    val seek = seekExpr()
+                    val ag = engine.rzCommand(workspaceId, "", "s $seek; af; agfj")
+                    var agTxt = ag.optString("stdout").ifBlank { ag.optString("text") }.trim()
+                    if (agTxt.startsWith("{") && agTxt.contains("\"blocks\"")) agTxt = "[$agTxt]"
                     if (!agTxt.startsWith("[")) return@runCatching null
                     val code = com.soreverse.mcp.engine.R2DecEngine.decompileSimple(agTxt, "")
                     if (code.isNullOrBlank()) null
@@ -139,7 +159,7 @@ object SoDecompileTool {
 
             if (wantEngine == "native") {
                 val r = runNativePdc()
-                if (r == null) return err("DECOMPILER_UNAVAILABLE", "native(pdc) 引擎无输出（该 rizin 构建可能未启用 pdc）", "engine", "native")
+                if (r == null) return err("DECOMPILER_UNAVAILABLE", "native 引擎无输出（当前 rizin 构建未提供可用的伪 C 命令 pdc/pdd/pdg）", "engine", "native")
                 return ok(r.put("workspaceId", workspaceId).put("locator", locator))
             }
             if (wantEngine == "java") {
@@ -237,3 +257,4 @@ object SoDecompileTool {
         "pseudocodePolicy",
     )
 }
+

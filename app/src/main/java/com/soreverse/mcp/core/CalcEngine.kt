@@ -199,8 +199,8 @@ object CalcEngine {
             val s = asIntN(bits, v)
             val hexRaw = pad(u.toString(16), bits / 4)
             return JSONObject()
-                .put("unsigned", if (bits <= 32) u.longValueExact() else u.toString())
-                .put("signed", if (bits <= 32) s.longValueExact() else s.toString())
+                .put("unsigned", u.toString())
+                .put("signed", s.toString())
                 .put("hex", "0x" + hexRaw)
                 .put("littleEndianHex", swapEndianHex(hexRaw, bits / 8))
         }
@@ -562,7 +562,7 @@ object CalcEngine {
                 val rawArgs = step.optJSONObject("args") ?: JSONObject()
                 val args = resolveRefs(rawArgs, outcomes) as JSONObject
                 val r = runOp(op, args)
-                outcomes[i] = JSONObject().put("status", "ok")
+                outcomes[i] = JSONObject().put("status", "ok").put("result", r)
                 results.put(JSONObject().put("step", i).put("op", op).put("status", "ok").put("result", r))
             } catch (e: Exception) {
                 outcomes[i] = JSONObject().put("status", "error")

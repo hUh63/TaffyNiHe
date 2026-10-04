@@ -7566,9 +7566,10 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var note by remember(ws, tick) { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var xTab by remember { mutableStateOf("overview") }
-    var ovView by remember { mutableStateOf("list") }
+    var ovView by remember { mutableStateOf("graph") }
     var drillRoot by remember { mutableStateOf("JNI_OnLoad") }
     var drillDepth by remember { mutableStateOf("3") }
+    var drillMax by remember { mutableStateOf("120") }
     var drillRan by remember { mutableStateOf(false) }
     var savedMsg by remember { mutableStateOf("") }
 
@@ -7636,12 +7637,12 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                 "scc" to (if (zh) "SCC 鸟瞰" else "SCC"),
                 "export" to (if (zh) "导出" else "Export"),
             ).forEach { (k, l) -> TabChip(l, selected = xTab == k) { xTab = k } }
-            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
+            SmallAction(if (zh) "重新分析" else "Re-analyze", loading = loading, onClick = onRefresh)
         }
         if (nodes.isNotEmpty()) {
             MonoLine(
-                if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 入口 $entryCount 个 · 全部函数 ${nodes.size}"
-                else "Global xref · ${edges.size} edges · $entryCount entries · ${nodes.size} fns",
+                if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 入口 $entryCount 个 · 函数 ${nodes.size} 个 · 枢纽高亮（入度 Top5）"
+                else "Global xref · ${edges.size} edges · $entryCount entries · ${nodes.size} fns · hubs (in-degree Top5)",
                 cs.onSurfaceVariant, AppText.label,
             )
         }
@@ -7666,8 +7667,8 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
                             placeholder = { Text(if (zh) "搜索函数名 / 地址…" else "search fn / addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         )
-                        TabChip(if (zh) "列表" else "List", ovView == "list") { ovView = "list" }
                         TabChip(if (zh) "图形" else "Graph", ovView == "graph") { ovView = "graph" }
+                        TabChip(if (zh) "列表" else "List", ovView == "list") { ovView = "list" }
                         if (query.isNotBlank()) SmallAction(if (zh) "重置" else "Reset") { query = "" }
                     }
                     Spacer(Modifier.size(6.dp))
@@ -7701,7 +7702,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     }
                 }
                 xTab == "drill" -> Column(Modifier.fillMaxSize()) {
-                    val levels = remember(names, edges, drillRoot, drillDepth, drillRan) {
+                    val levels = remember(names, edges, drillRoot, drillDepth, drillMax, drillRan) {
                         if (!drillRan) emptyList<Pair<String, List<String>>>()
                         else {
                             val outAdj = HashMap<String, MutableList<String>>()
@@ -7709,15 +7710,17 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                             val start = names.firstOrNull { it == drillRoot }
                                 ?: names.firstOrNull { it.contains(drillRoot, true) }
                                 ?: if (drillRoot.isBlank()) names.firstOrNull() else null
+                            val cap = drillMax.toIntOrNull()?.coerceIn(10, 2000) ?: 120
                             val out = ArrayList<Pair<String, List<String>>>()
                             if (!start.isNullOrBlank()) {
                                 val seen = HashSet<String>()
                                 seen.add(start)
+                                var total = 1
                                 var fr = listOf(start)
                                 val d = drillDepth.toIntOrNull()?.coerceIn(1, 8) ?: 3
                                 for (lvl in 0 until d) {
                                     val nx = LinkedHashSet<String>()
-                                    fr.forEach { u -> outAdj[u]?.forEach { v -> if (v != u && seen.add(v)) nx.add(v) } }
+                                    fr.forEach { u -> outAdj[u]?.forEach { v -> if (v != u && !seen.contains(v) && total < cap) { seen.add(v); nx.add(v); total++ } } }
                                     out.add((if (zh) "第 ${lvl + 1} 层" else "level ${lvl + 1}") to nx.toList())
                                     if (nx.isEmpty()) break
                                     fr = nx.toList()
@@ -7726,32 +7729,63 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                             out
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        SmallAction(if (zh) "开始下钻" else "Drill") { drillRan = true }
-                        SmallAction("JNI_OnLoad") { drillRoot = "JNI_OnLoad"; drillRan = true }
-                        SmallAction(if (zh) "取当前函数" else "Current", enabled = tools.selectedFunctionName.isNotBlank()) { drillRoot = tools.selectedFunctionName; drillRan = true }
-                        SmallAction(if (zh) "复制树" else "Copy", enabled = levels.isNotEmpty()) {
-                            val sb = StringBuilder()
-                            levels.forEach { (lvl, list) -> sb.append("$lvl (${list.size})\n"); list.forEach { sb.append("  $it\n") } }
-                            copyToClipboard(context, sb.toString().trimEnd(), zh)
-                        }
-                    }
-                    Spacer(Modifier.size(6.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // 参数区（对齐 Explorer So：根函数 / 深度 / 上限 + 主按钮「重新构建」）
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = drillRoot, onValueChange = { drillRoot = it }, singleLine = true,
                             modifier = Modifier.weight(1f).heightIn(min = 46.dp),
                             shape = RoundedCornerShape(AppShape.sm),
                             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                            label = { Text(if (zh) "根节点" else "root", fontSize = AppText.label) },
+                            label = { Text(if (zh) "根函数" else "Root function", fontSize = AppText.label) },
+                            placeholder = { Text(if (zh) "函数名 或 0x 地址" else "name or 0x addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         )
                         OutlinedTextField(
-                            value = drillDepth, onValueChange = { drillDepth = it }, singleLine = true,
-                            modifier = Modifier.width(80.dp).heightIn(min = 46.dp),
+                            value = drillDepth, onValueChange = { drillDepth = it.filter { c -> c.isDigit() }.take(2) }, singleLine = true,
+                            modifier = Modifier.width(74.dp).heightIn(min = 46.dp),
                             shape = RoundedCornerShape(AppShape.sm),
                             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                            label = { Text(if (zh) "层数" else "depth", fontSize = AppText.label) },
+                            label = { Text(if (zh) "深度" else "Depth", fontSize = AppText.label) },
                         )
+                        OutlinedTextField(
+                            value = drillMax, onValueChange = { drillMax = it.filter { c -> c.isDigit() }.take(4) }, singleLine = true,
+                            modifier = Modifier.width(84.dp).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(AppShape.sm),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                            label = { Text(if (zh) "上限" else "Max", fontSize = AppText.label) },
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(if (zh) "候选根函数" else "Roots", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                        FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            val cands = remember(names, edges) {
+                                val ind = HashMap<String, Int>()
+                                edges.forEach { (_, t) -> ind[t] = (ind[t] ?: 0) + 1 }
+                                buildList {
+                                    if (names.any { it == "JNI_OnLoad" }) add("JNI_OnLoad")
+                                    if (tools.selectedFunctionName.isNotBlank()) add(tools.selectedFunctionName)
+                                    names.filter { (ind[it] ?: 0) == 0 }.take(8).forEach { add(it) }
+                                }.distinct().take(10)
+                            }
+                            cands.forEach { r -> TabChip(r.take(22), selected = drillRoot == r) { drillRoot = r; drillRan = true } }
+                        }
+                        Button(
+                            onClick = { drillRan = true },
+                            shape = RoundedCornerShape(AppShape.sm),
+                            colors = ButtonDefaults.buttonColors(containerColor = cs.primary),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.size(5.dp))
+                            Text(if (zh) "重新构建" else "Rebuild", fontSize = AppText.label)
+                        }
+                    }
+                    if (levels.isNotEmpty()) {
+                        Spacer(Modifier.size(6.dp))
+                        SmallAction(if (zh) "复制调用树" else "Copy tree", onClick = {
+                            val sb = StringBuilder()
+                            levels.forEach { (lvl, list) -> sb.append("$lvl (${list.size})\n"); list.forEach { sb.append("  $it\n") } }
+                            copyToClipboard(context, sb.toString().trimEnd(), zh)
+                        })
                     }
                     Spacer(Modifier.size(8.dp))
                     when {
@@ -7767,7 +7801,11 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                             primaryLabel = if (zh) "刷新重分析" else "Re-analyze", onPrimary = onRefresh,
                         )
                         else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MonoLine((if (zh) "根：$drillRoot" else "root: $drillRoot"), cs.primary, AppText.bodyStrong)
+                            MonoLine(
+                                if (zh) "根下钻 $drillRoot ｜ 深度 $drillDepth ｜ 当前显示 ${levels.sumOf { it.second.size } + 1} / 上限 $drillMax 节点"
+                                else "drill $drillRoot | depth $drillDepth | ${levels.sumOf { it.second.size } + 1} nodes",
+                                cs.primary, AppText.bodyStrong,
+                            )
                             levels.forEach { (lvl, list) ->
                                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("$lvl · ${list.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
@@ -7793,6 +7831,11 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                         if (names.isEmpty()) emptyList() else tarjanScc(names, edges).sortedByDescending { it.size }
                     }
                     val cyclic = sccs.filter { it.size > 1 }
+                    MonoLine(
+                        if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · SCC ${sccs.size} 个 · 环状簇 ${cyclic.size} 个 · 枢纽高亮（入度 Top5）"
+                        else "Global xref · ${edges.size} edges · ${sccs.size} SCCs · hubs (in-degree Top5)",
+                        cs.onSurfaceVariant, AppText.label,
+                    )
                     KeyValueCard(zh, listOf(
                         (if (zh) "强连通分量" else "SCCs") to "${sccs.size}",
                         (if (zh) "环状簇(>1)" else "cyclic (>1)") to "${cyclic.size}",
@@ -9890,9 +9933,12 @@ private fun CallGraphGraphPane(
     val cs = MaterialTheme.colorScheme
     var mode by remember { mutableStateOf("hot") }
     var dir by remember { mutableStateOf("TB") }
-    var depth by remember { mutableStateOf(2) }
-    var maxN by remember { mutableStateOf(120) }
+    var depthText by remember { mutableStateOf("2") }
+    var maxText by remember { mutableStateOf("120") }
     var root by remember { mutableStateOf("") }
+    var rebuild by remember { mutableStateOf(0) }
+    val depth = depthText.toIntOrNull()?.coerceIn(1, 8) ?: 2
+    val maxN = maxText.toIntOrNull()?.coerceIn(10, 400) ?: 120
     val rootCandidates = remember(nodes, edges) {
         val indeg = HashMap<String, Int>()
         edges.forEach { (_, t) -> indeg[t] = (indeg[t] ?: 0) + 1 }
@@ -9900,33 +9946,59 @@ private fun CallGraphGraphPane(
             .filter { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
             .take(40)
     }
-    val subPair = remember(nodes, edges, mode, root, depth, maxN) {
+    val subPair = remember(nodes, edges, mode, root, depth, maxN, rebuild) {
         buildCallSubgraph(nodes, edges, mode, root, depth, maxN)
     }
     Column(Modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(if (zh) "热点" else "Hot", active = mode == "hot") { mode = "hot" }
-            SmallAction(if (zh) "根展开" else "Root", active = mode == "root") { mode = "root" }
-            SmallAction(if (zh) "完整" else "Full", active = mode == "full") { mode = "full" }
-            SmallAction(if (dir == "TB") "TB → LR" else "LR → TB") { dir = if (dir == "TB") "LR" else "TB" }
-            if (mode != "full") {
-                SmallAction("-${if (zh) "上限" else "max"}") { maxN = (maxN - 40).coerceAtLeast(20) }
-                SmallAction("+${if (zh) "上限" else "max"}") { maxN = (maxN + 40).coerceAtMost(400) }
-            }
+        // ── 模式（对齐 Explorer So：热点模式 / 根展开 / 完整模式）──
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (zh) "模式" else "Mode", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            TabChip(if (zh) "热点模式" else "Hotspot", selected = mode == "hot") { mode = "hot" }
+            TabChip(if (zh) "根展开" else "Rooted", selected = mode == "root") { mode = "root" }
+            TabChip(if (zh) "完整模式" else "Full", selected = mode == "full") { mode = "full" }
+            Spacer(Modifier.weight(1f))
+            Text(if (zh) "显示 ${subPair.first.size} / ${nodes.size} 节点" else "${subPair.first.size}/${nodes.size} nodes", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1)
+        }
+        // ── 参数区（对齐 Explorer So：根函数 / 深度 / 上限 + 主按钮「重新构建」）──
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (mode == "root") {
-                SmallAction("-${if (zh) "层" else "d"}") { depth = (depth - 1).coerceAtLeast(1) }
-                SmallAction(if (zh) "深 $depth" else "d $depth") { }
-                SmallAction("+${if (zh) "层" else "d"}") { depth = (depth + 1).coerceAtMost(8) }
+                OutlinedTextField(
+                    value = root, onValueChange = { root = it }, singleLine = true,
+                    modifier = Modifier.weight(1f).heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                    label = { Text(if (zh) "根函数" else "Root function", fontSize = AppText.label) },
+                    placeholder = { Text(if (zh) "函数名 或 0x 地址（留空取首个入口）" else "name or 0x addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
+            } else {
+                Text(
+                    if (mode == "hot") (if (zh) "热点模式：按调用度取 Top 函数" else "Hotspot: top functions by degree")
+                    else (if (zh) "完整模式：显示全部函数" else "Full: all functions"),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 2,
+                )
             }
-            Text(
-                "${subPair.first.size} / ${nodes.size}",
-                style = MaterialTheme.typography.labelSmall,
-                color = cs.onSurfaceVariant,
+            OutlinedTextField(
+                value = depthText, onValueChange = { depthText = it.filter { c -> c.isDigit() }.take(2) }, singleLine = true,
+                enabled = mode == "root", modifier = Modifier.width(74.dp).heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "深度" else "Depth", fontSize = AppText.label) },
             )
+            OutlinedTextField(
+                value = maxText, onValueChange = { maxText = it.filter { c -> c.isDigit() }.take(4) }, singleLine = true,
+                enabled = mode != "full", modifier = Modifier.width(84.dp).heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                label = { Text(if (zh) "上限" else "Max", fontSize = AppText.label) },
+            )
+            Button(
+                onClick = { rebuild++ },
+                shape = RoundedCornerShape(AppShape.sm),
+                colors = ButtonDefaults.buttonColors(containerColor = cs.primary),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.size(5.dp))
+                Text(if (zh) "重新构建" else "Rebuild", fontSize = AppText.label)
+            }
         }
         if (mode == "root" && rootCandidates.isNotEmpty()) {
             FlowRow(
@@ -9934,10 +10006,14 @@ private fun CallGraphGraphPane(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                rootCandidates.take(12).forEach { r ->
-                    SmallAction(r.take(24), active = root == r) { root = r }
-                }
+                Text(if (zh) "候选根函数" else "Roots", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                rootCandidates.take(12).forEach { r -> TabChip(r.take(22), selected = root == r) { root = r } }
             }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (zh) "布局" else "Layout", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            TabChip(if (zh) "上下" else "TB", selected = dir == "TB") { dir = "TB" }
+            TabChip(if (zh) "左右" else "LR", selected = dir == "LR") { dir = "LR" }
         }
         Spacer(Modifier.size(6.dp))
         CallGraphCanvas(subPair.first, subPair.second, dir, findQ, zh, Modifier.fillMaxWidth().weight(1f))

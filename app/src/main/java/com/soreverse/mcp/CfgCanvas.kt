@@ -33,7 +33,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +51,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -1316,6 +1322,73 @@ private fun DrawScope.drawCfgMinimap(
 /**
  * CFG 图形画布。json 为 rzCfg 原始 JSON；空/非法 JSON 时显示「无 CFG 数据」而不是崩溃。
  */
+/** CFG 节点列表（对标 Exbin CfgNodeListFragment）：搜索节点地址/指令，点击选中。 */
+@Composable
+private fun NodeListOverlay(
+    modifier: Modifier = Modifier,
+    layout: CfgLayoutResult,
+    zh: Boolean,
+    colors: androidx.compose.material3.ColorScheme,
+    onPick: (Int) -> Unit,
+) {
+    var q by remember { mutableStateOf("") }
+    val all = remember(layout) { layout.boxes.filter { !it.isDummy } }
+    val rows = remember(all, q) {
+        if (q.isBlank()) all else all.filter { it.addrText.contains(q, true) || it.summary.contains(q, true) }
+    }
+    Surface(
+        shape = RoundedCornerShape(AppShape.sm),
+        color = colors.surfaceContainerHigh.copy(alpha = 0.97f),
+        border = BorderStroke(1.dp, colors.outlineVariant),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = modifier,
+    ) {
+        Column(Modifier.fillMaxSize().padding(8.dp)) {
+            OutlinedTextField(
+                value = q, onValueChange = { q = it }, singleLine = true,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                label = { Text(if (zh) "\u641c\u7d22\u8282\u70b9\u5730\u5740\u3001\u6307\u4ee4\u2026" else "search addr / insn\u2026", fontSize = AppText.label) },
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                if (zh) "\u8282\u70b9\u5217\u8868 \u00b7 " + rows.size + " / " + all.size + " \u5757" else "nodes " + rows.size + " / " + all.size,
+                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.size(6.dp))
+            Column(
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                rows.forEach { b ->
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(AppShape.xs))
+                            .background(colors.surfaceContainerLow)
+                            .border(BorderStroke(1.dp, colors.outlineVariant), RoundedCornerShape(AppShape.xs))
+                            .clickable { onPick(b.index) }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            b.addrText + (if (b.endText.isNotBlank()) " \u2026 " + b.endText else ""),
+                            style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace,
+                            color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        if (b.summary.isNotBlank()) {
+                            Text(
+                                b.summary, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
+                                color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 internal fun CfgCanvas(
     json: String,
@@ -1379,6 +1452,7 @@ internal fun CfgCanvas(
     var showMinimap by remember { mutableStateOf(true) }
     // 控制面板是否展开（收起后只留一行标题，避免与画布重叠）。
     var panelOpen by remember { mutableStateOf(true) }
+    var showNodeList by remember { mutableStateOf(false) }
 
     val ctx = LocalContext.current
     val densityObj = LocalDensity.current
@@ -1598,6 +1672,7 @@ internal fun CfgCanvas(
                             CfgChip(routeStyleLabel(zh, routing), colors.onSurfaceVariant) { routing = nextRouting(routing) }
                             CfgChip(if (zh) "\u62d6\u52a8\u8282\u70b9" else "Drag", colors.onSurfaceVariant, active = dragMode) { dragMode = !dragMode }
                             CfgChip(if (zh) "\u5c0f\u5730\u56fe" else "Minimap", colors.onSurfaceVariant, active = showMinimap) { showMinimap = !showMinimap }
+                            CfgChip(if (zh) "\u8282\u70b9\u5217\u8868" else "NodeList", colors.onSurfaceVariant, active = showNodeList) { showNodeList = !showNodeList }
                             if (dragOffsets.isNotEmpty()) {
                                 CfgChip(if (zh) "\u590d\u4f4d" else "Reset", failColor) { dragOffsets = emptyMap() }
                             }
@@ -1656,6 +1731,13 @@ internal fun CfgCanvas(
                         drawCfgMinimap(effective, colors, size, viewport, scale, pan)
                     }
                 }
+            }
+
+            if (showNodeList) {
+                NodeListOverlay(
+                    modifier = Modifier.align(Alignment.Center).padding(10.dp).fillMaxWidth(0.94f).fillMaxHeight(0.82f),
+                    layout = effective, zh = zh, colors = colors,
+                ) { pick -> selected = pick; showNodeList = false }
             }
 
         }
@@ -2045,3 +2127,4 @@ internal fun layoutCfgForce(graph: CfgGraph, density: Float, maxLines: Int = 2):
         returnIndices = emptySet(),
     )
 }
+

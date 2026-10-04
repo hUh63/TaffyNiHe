@@ -7635,7 +7635,8 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var drillMax by remember { mutableStateOf("120") }
     var drillRan by remember { mutableStateOf(false) }
     var egoRoot by remember { mutableStateOf("") }
-    var egoDepth by remember { mutableStateOf("2") }
+    var egoDepth by remember { mutableStateOf("1") }
+    var egoDir by remember { mutableStateOf("callees") }
     var egoRan by remember { mutableStateOf(false) }
     var savedMsg by remember { mutableStateOf("") }
 
@@ -7700,7 +7701,6 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
             listOf(
                 "overview" to (if (zh) "入口概览" else "Overview"),
                 "drill" to (if (zh) "根下钻" else "Root drill"),
-                "nodes" to (if (zh) "节点列表" else "Nodes"),
                 "ego" to (if (zh) "邻域" else "Neighborhood"),
                 "scc" to (if (zh) "SCC 鸟瞰" else "SCC"),
                 "export" to (if (zh) "导出" else "Export"),
@@ -7894,55 +7894,14 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                         }
                     }
                 }
-                xTab == "nodes" -> Column(Modifier.fillMaxSize()) {
-                    MonoLine(
-                        if (zh) "节点列表 · ${shown.size} / ${nodes.size} · 点条目设为选中函数，右侧「邻域」进入双向展开"
-                        else "Nodes · ${shown.size}/${nodes.size}",
-                        cs.onSurfaceVariant, AppText.label,
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    if (shown.isEmpty()) {
-                        AnalysisEmptyState(
-                            title = if (zh) "无匹配节点" else "No matching nodes",
-                            hint = if (zh) "换个关键字再试" else "Try another keyword",
-                        )
-                    } else {
-                        LazyColumn(
-                            Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            contentPadding = PaddingValues(bottom = 12.dp),
-                        ) {
-                            items(shown.take(800), key = { o -> "cg|" + o.optString("name") + "|" + o.optString("id") + "|" + o.opt("offset") }) { o ->
-                                val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
-                                val addr = hexAddr(o.opt("offset") ?: o.opt("id"))
-                                val oN = outCnt[nm] ?: 0
-                                val iN = inCnt[nm] ?: 0
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        .clip(RoundedCornerShape(AppShape.md))
-                                        .background(cs.surfaceContainerHigh)
-                                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                                        .clickable { tools.selectedFunctionName = nm }
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Text(nm, style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                            if (iN == 0) TypeBadge(if (zh) "入口" else "entry", cs.tertiary)
-                                        }
-                                        MonoLine((if (addr.isNotBlank()) "$addr  " else "") + (if (zh) "调用 $oN · 被调 $iN" else "$oN out · $iN in"), cs.onSurfaceVariant, AppText.label)
-                                    }
-                                    SmallAction(if (zh) "邻域" else "Ego") {
-                                        egoRoot = nm; egoRan = true; xTab = "ego"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
                 xTab == "ego" -> Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(if (zh) "方向" else "Dir", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                        TabChip(if (zh) "我调用的" else "Callees", selected = egoDir == "callees") { egoDir = "callees" }
+                        TabChip(if (zh) "调用者" else "Callers", selected = egoDir == "callers") { egoDir = "callers" }
+                        TabChip(if (zh) "双向" else "Both", selected = egoDir == "both") { egoDir = "both" }
+                    }
+                    Spacer(Modifier.size(6.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = egoRoot, onValueChange = { egoRoot = it }, singleLine = true,
@@ -7953,7 +7912,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                             placeholder = { Text(if (zh) "函数名 或 0x 地址（留空取首个入口）" else "name or 0x addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         )
                         OutlinedTextField(
-                            value = egoDepth, onValueChange = { egoDepth = it.filter { c -> c.isDigit() }.take(2) }, singleLine = true,
+                            value = egoDepth, onValueChange = { egoDepth = it.filter { c -> c.isDigit() }.take(1) }, singleLine = true,
                             modifier = Modifier.width(74.dp).heightIn(min = 46.dp),
                             shape = RoundedCornerShape(AppShape.sm),
                             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
@@ -7971,14 +7930,14 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                         }
                     }
                     Spacer(Modifier.size(6.dp))
-                    val egoSub = remember(names, edges, egoRoot, egoDepth, egoRan) {
+                    val egoSub = remember(names, edges, egoRoot, egoDepth, egoRan, egoDir) {
                         if (!egoRan) emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
-                        else buildEgoSubgraph(nodes, edges, egoRoot, egoDepth.toIntOrNull()?.coerceIn(1, 6) ?: 2, 200)
+                        else buildEgoSubgraph(nodes, edges, egoRoot, egoDepth.toIntOrNull()?.coerceIn(1, 5) ?: 1, 200, egoDir)
                     }
                     when {
                         !egoRan -> AnalysisEmptyState(
                             title = if (zh) "邻域视图" else "Neighborhood",
-                            hint = if (zh) "以某个函数为中心，同时显示它的调用者与被调用者（双向展开）。" else "Center on a function; show callers and callees in both directions.",
+                            hint = if (zh) "以某个函数为中心，按方向展开它的调用关系（对标 Exbin XRefEgoModel）。" else "Center on a function; expand by direction.",
                             primaryLabel = if (zh) "从 JNI_OnLoad 开始" else "From JNI_OnLoad",
                             onPrimary = { egoRoot = "JNI_OnLoad"; egoRan = true },
                         )
@@ -7988,13 +7947,14 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                             primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
                         )
                         else -> {
+                            val tc = remember(egoSub) { classifyCallEdges(egoSub.first.size, egoSub.second) }
                             MonoLine(
-                                if (zh) "邻域 · 中心 ${egoSub.first.firstOrNull()?.first ?: egoRoot} · ${egoSub.first.size} 节点 · ${egoSub.second.size} 边"
-                                else "ego · ${egoSub.first.size} nodes · ${egoSub.second.size} edges",
+                                if (zh) "邻域 · 中心 ${egoSub.first.firstOrNull()?.first ?: egoRoot} · ${egoSub.first.size} 节点 · ${egoSub.second.size} 边 · 树边 ${tc.first.size} · 交叉边 ${tc.second.size}"
+                                else "ego · ${egoSub.first.size} nodes · ${egoSub.second.size} edges · tree ${tc.first.size} · cross ${tc.second.size}",
                                 cs.onSurfaceVariant, AppText.label,
                             )
                             Spacer(Modifier.size(6.dp))
-                            CallGraphCanvas(egoSub.first, egoSub.second, "TB", query, zh, Modifier.fillMaxWidth().weight(1f))
+                            CallGraphCanvas(egoSub.first, egoSub.second, "TB", query, zh, "curve", Modifier.fillMaxWidth().weight(1f))
                         }
                     }
                 }
@@ -8062,7 +8022,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                             widthPx = (lay.width + 60f).toInt(),
                             heightPx = (lay.height + 60f).toInt(),
                             density = d,
-                        ) { drawCgScene(lay, cs, df, 1f, Offset.Zero, this.size, -1, "", "TB") }
+                        ) { drawCgScene(lay, cs, df, 1f, Offset.Zero, this.size, -1, "", "TB", "curve") }
                         savedMsg = if (path != null) (if (zh) "已导出：$path" else "saved: $path") else (if (zh) "导出失败" else "export failed")
                     }
                     SmallAction(if (zh) "导出 JSON（完整数据）" else "JSON") {
@@ -9748,6 +9708,7 @@ private fun buildEgoSubgraph(
     root: String,
     depth: Int,
     maxNodes: Int,
+    dir: String,
 ): Pair<List<Pair<String, String>>, List<Pair<Int, Int>>> {
     if (nodes.isEmpty()) return emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
     val addrOf = HashMap<String, String>()
@@ -9776,8 +9737,8 @@ private fun buildEgoSubgraph(
     repeat(depth.coerceIn(1, 6)) {
         val next = ArrayList<String>()
         frontier.forEach { u ->
-            (outAdj[u] ?: emptyList()).forEach { v -> if (seen.size < cap && seen.add(v)) next.add(v) }
-            (inAdj[u] ?: emptyList()).forEach { v -> if (seen.size < cap && seen.add(v)) next.add(v) }
+            if (dir != "callers") (outAdj[u] ?: emptyList()).forEach { v -> if (seen.size < cap && seen.add(v)) next.add(v) }
+            if (dir != "callees") (inAdj[u] ?: emptyList()).forEach { v -> if (seen.size < cap && seen.add(v)) next.add(v) }
         }
         if (next.isEmpty()) return@repeat
         frontier = next
@@ -9828,13 +9789,6 @@ private fun classifyCallEdges(n: Int, edges: List<Pair<Int, Int>>): Pair<HashSet
     val cross = HashSet<Int>()
     for (i in edges.indices) if (i !in tree) cross.add(i)
     return tree to cross
-}
-
-private fun callEdgesByStyle(n: Int, edges: List<Pair<Int, Int>>, style: String): List<Pair<Int, Int>> = when (style) {
-    "tree" -> { val (t, _) = classifyCallEdges(n, edges); edges.filterIndexed { i, _ -> i in t } }
-    "cross" -> { val (_, c) = classifyCallEdges(n, edges); edges.filterIndexed { i, _ -> i in c } }
-    "agg" -> edges.distinct()
-    else -> edges
 }
 
 /** 按模式（hot/root/full）过滤出子图；节点索引化。 */
@@ -10016,6 +9970,7 @@ private fun DrawScope.drawCgScene(
     selected: Int,
     findQ: String,
     dir: String,
+    route: String,
 ) {
     val sc = scale
     val originX = viewportSize.width / 2f + pan.x
@@ -10037,12 +9992,26 @@ private fun DrawScope.drawCgScene(
         val p1 = if (horiz) Offset(if (dx >= 0) b.left else b.right, b.y) else Offset(b.x, if (dy >= 0) b.top else b.bottom)
         val path = Path()
         path.moveTo(px(p0.x), py(p0.y))
-        if (dir != "LR") {
-            val my = (p0.y + p1.y) / 2f
-            path.cubicTo(px(p0.x), py(my), px(p1.x), py(my), px(p1.x), py(p1.y))
-        } else {
-            val mx = (p0.x + p1.x) / 2f
-            path.cubicTo(px(mx), py(p0.y), px(mx), py(p1.y), px(p1.x), py(p1.y))
+        when (route) {
+            "straight" -> path.lineTo(px(p1.x), py(p1.y))
+            "ortho" -> {
+                if (dir != "LR") {
+                    val my = (p0.y + p1.y) / 2f
+                    path.lineTo(px(p0.x), py(my)); path.lineTo(px(p1.x), py(my)); path.lineTo(px(p1.x), py(p1.y))
+                } else {
+                    val mx = (p0.x + p1.x) / 2f
+                    path.lineTo(px(mx), py(p0.y)); path.lineTo(px(mx), py(p1.y)); path.lineTo(px(p1.x), py(p1.y))
+                }
+            }
+            else -> {
+                if (dir != "LR") {
+                    val my = (p0.y + p1.y) / 2f
+                    path.cubicTo(px(p0.x), py(my), px(p1.x), py(my), px(p1.x), py(p1.y))
+                } else {
+                    val mx = (p0.x + p1.x) / 2f
+                    path.cubicTo(px(mx), py(p0.y), px(mx), py(p1.y), px(p1.x), py(p1.y))
+                }
+            }
         }
         drawPath(path, edgeColor, style = Stroke(width = strokeW, cap = StrokeCap.Round))
         cgArrowHead(Offset(px(p1.x), py(p1.y)), Offset(px(p0.x), py(p0.y)), edgeColor, max(4f, 6f * density * scl))
@@ -10086,6 +10055,7 @@ private fun CallGraphCanvas(
     dir: String,
     findQ: String,
     zh: Boolean,
+    route: String = "curve",
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current.density
@@ -10137,7 +10107,7 @@ private fun CallGraphCanvas(
             },
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            drawCgScene(layout, cs, density, scale, pan, size, selected, findQ, dir)
+            drawCgScene(layout, cs, density, scale, pan, size, selected, findQ, dir, route)
         }
         Surface(
             shape = RoundedCornerShape(AppShape.xs),
@@ -10214,12 +10184,9 @@ private fun CallGraphGraphPane(
             .filter { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
             .take(40)
     }
-    var eStyle by remember { mutableStateOf("all") }
+    var eStyle by remember { mutableStateOf("curve") }
     val subPair = remember(nodes, edges, mode, root, depth, maxN, rebuild) {
         buildCallSubgraph(nodes, edges, mode, root, depth, maxN)
-    }
-    val dispEdges = remember(subPair, eStyle) {
-        callEdgesByStyle(subPair.first.size, subPair.second, eStyle)
     }
     Column(Modifier.fillMaxSize()) {
         // ── 模式（对齐 Explorer So：热点模式 / 根展开 / 完整模式）──
@@ -10288,14 +10255,13 @@ private fun CallGraphGraphPane(
             TabChip(if (zh) "左右" else "LR", selected = dir == "LR") { dir = "LR" }
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (zh) "边风格" else "Edges", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-            TabChip(if (zh) "全部" else "All", selected = eStyle == "all") { eStyle = "all" }
-            TabChip(if (zh) "树边" else "Tree", selected = eStyle == "tree") { eStyle = "tree" }
-            TabChip(if (zh) "交叉边" else "Cross", selected = eStyle == "cross") { eStyle = "cross" }
-            TabChip(if (zh) "聚合" else "Agg", selected = eStyle == "agg") { eStyle = "agg" }
+            Text(if (zh) "边路由" else "Edges", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            TabChip(if (zh) "折线" else "Ortho", selected = eStyle == "ortho") { eStyle = "ortho" }
+            TabChip(if (zh) "曲线" else "Curve", selected = eStyle == "curve") { eStyle = "curve" }
+            TabChip(if (zh) "直线" else "Line", selected = eStyle == "straight") { eStyle = "straight" }
         }
         Spacer(Modifier.size(6.dp))
-        CallGraphCanvas(subPair.first, dispEdges, dir, findQ, zh, Modifier.fillMaxWidth().weight(1f))
+        CallGraphCanvas(subPair.first, subPair.second, dir, findQ, zh, eStyle, Modifier.fillMaxWidth().weight(1f))
     }
 }
 

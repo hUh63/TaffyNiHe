@@ -7089,12 +7089,13 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
             lines = l ?: emptyList()
             info = s
         }
-        fun step(d: Int) {
-            val cur = addrOf(addr.trim())
-            val page = if (mode == "code") 0x200L else 0x100L
-            val nx = cur + d * page
-            if (nx >= 0) { addr = "0x" + java.lang.Long.toHexString(nx); load() }
-        }
+    }
+
+    fun step(d: Int) {
+        val cur = addrOf(addr.trim())
+        val page = if (mode == "code") 0x200L else 0x100L
+        val nx = cur + d * page
+        if (nx >= 0) { addr = "0x" + java.lang.Long.toHexString(nx); load() }
     }
 
     if (ws.isBlank()) return NeedWorkspace(zh)

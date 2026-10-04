@@ -151,6 +151,47 @@ jobs:
           echo "构建任务: ${TASK_NAME}"
           ./gradlew "${TASK_NAME}" --no-daemon --stacktrace
 
+      - name: dcc 定位（临时·排查 androguard 解析点）
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          APK=""
+          for d in app/build/outputs/apk/arm64V8a/release app/build/outputs/apk/arm64-v8a/release app/build/outputs/apk/release app/build/outputs/apk/arm64V8a/debug app/build/outputs/apk/debug; do
+            if [ -d "$d" ] && [ -n "$(ls "$d"/*.apk 2>/dev/null)" ]; then APK="$(ls "$d"/*.apk | head -1)"; break; fi
+          done
+          APK="${APK:-$(find app/build/outputs/apk -name '*.apk' | head -1)}"
+          echo "[locate] apk=$APK"
+          python3 -m pip install --quiet --disable-pip-version-check networkx pydot future pyasn1 cryptography lxml asn1crypto
+          rm -rf /tmp/dcc
+          git clone --quiet https://github.com/amimo/dcc.git /tmp/dcc
+          git -C /tmp/dcc checkout --quiet 17de4fd3202bd0e46735974211a43cda39fca5f3
+          python3 - "$APK" /tmp/dcc <<'PY'
+          import sys, zipfile
+          apk, dccdir = sys.argv[1], sys.argv[2]
+          sys.path.insert(0, dccdir)
+          from androguard.core.bytecodes import dvm
+          from androguard.core.analysis import analysis
+          z = zipfile.ZipFile(apk)
+          dexes = [n for n in z.namelist() if n.startswith('classes') and n.endswith('.dex')]
+          print('[locate] dex:', dexes)
+          for dn in dexes:
+              data = z.read(dn)
+              vm = dvm.DalvikVMFormat(data)
+              ntot = 0; nfail = 0
+              for cls in vm.get_classes():
+                  for m in cls.get_methods():
+                      ntot += 1
+                      try:
+                          if m.get_code() is None:
+                              continue
+                          analysis.MethodAnalysis(vm, m)
+                      except Exception as e:
+                          nfail += 1
+                          if nfail <= 25:
+                              print('[FAIL]', dn, cls.get_name(), m.get_name(), m.get_descriptor(), '::', type(e).__name__, str(e)[:160])
+              print('[locate]', dn, 'methods=', ntot, 'fail=', nfail)
+          PY
+
       - name: 收集 APK 产物 (Collect APK artifacts)
         id: collect
         run: |
@@ -243,4 +284,5 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+
 

@@ -1,3 +1,23 @@
+# TaffyNiHe v1.3.71
+
+本版修复 **Dex2C 发布加固**，恢复 v1.3.70 里丢失的加固层（BackupCrypto native 化）。
+
+## 🔧 根因与修复
+
+- **现象**：`build-multiabi` 的 Dex2C 加固步骤失败（`InvalidInstruction for 0x100`），4 个 ABI 全部回落为未加固。
+- **定位**：在 CI 里用 dcc 自带的 androguard 对 release dex **逐方法**解析，唯一失败的方法是三方库
+  **`com.alibaba.fastjson2.JSONReaderUTF8.of([B I I JSONReader$Context)`**（内含大 `packed-switch`）。
+- **根因**：dcc 内置的旧 androguard 解析 `packed-switch` / `sparse-switch` payload 时**越界读取**
+  （`max_size = len(buff) - idx - 8` 计算错误），且 `get_instruction_payload` 会把 `struct.error`
+  转成 `InvalidInstruction`，外层 `except struct.error` 抓不到 → 整个 dex 分析崩溃、加固失败。
+- **修复**：加固步骤在 dcc 源码里给 androguard 打补丁，把 payload 读取边界收紧为「实际可用字节数」
+  （仅解析健壮性修复，不改变目标类的逻辑）。
+- **验证**：同一次构建中，打补丁前 `classes.dex fail=1`，打补丁后 `classes.dex fail=0`。
+
+> 说明：`v1.3.70` 的功能改动（分析页列表统一、调用图按源码校正、CFG 节点列表、加固页/函数详情对齐）一并包含在本版中。
+
+---
+
 # TaffyNiHe v1.3.70
 
 本版对照 **Explorer So 源码**（`so逆向工具-开源.zip`）继续把分析页「抄明白」：全局交叉引用/调用图按源码校正，加固与函数详情对齐源码结构，分析页各列表工具统一成 Explorer So 的页面范式。

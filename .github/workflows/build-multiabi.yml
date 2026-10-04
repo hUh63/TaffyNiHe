@@ -424,6 +424,28 @@ jobs:
 
           git clone --quiet https://github.com/amimo/dcc.git "$WORK/dcc"
           git -C "$WORK/dcc" checkout --quiet "$DCC_COMMIT"
+
+          # androguard payload 越界修复：fastjson2 等含大 packed-switch/sparse-switch 的方法会让旧
+          # androguard 抛 InvalidInstruction（get_instruction_payload 把 struct.error 转成
+          # InvalidInstruction，外层 except struct.error 抓不到）→ 整个 dcc 分析崩溃、加固失败。
+          # 把 payload 读取边界收紧到「实际可用字节数」，不再越界（仅提升解析健壮性，不改目标类逻辑）。
+          echo "[dex2c] patching androguard payload bounds"
+          python3 - "$WORK/dcc/androguard/core/bytecodes/dvm.py" <<'PY_AGFIX'
+          import sys
+          p = sys.argv[1]
+          s = open(p, encoding='utf-8').read()
+          o1 = "        max_size = self.size\n        if (max_size * 4) > len(buff):\n            max_size = len(buff) - idx - 8\n\n        for i in range(0, max_size):"
+          n1 = "        max_size = min(self.size, max(0, (len(buff) - idx) // 4))\n\n        for i in range(0, max_size):"
+          assert s.count(o1) == 1, ('packed', s.count(o1))
+          s = s.replace(o1, n1)
+          o2 = "        idx = self.format_general_size\n        for i in range(0, self.size):\n            self.keys.append(unpack('=l', buff[idx:idx + 4])[0])\n            idx += 4\n\n        for i in range(0, self.size):\n            self.targets.append(unpack('=l', buff[idx:idx + 4])[0])\n            idx += 4"
+          n2 = "        idx = self.format_general_size\n        avail = max(0, (len(buff) - idx) // 4)\n        n = min(self.size, avail)\n        for i in range(0, n):\n            self.keys.append(unpack('=l', buff[idx:idx + 4])[0])\n            idx += 4\n\n        for i in range(0, n):\n            self.targets.append(unpack('=l', buff[idx:idx + 4])[0])\n            idx += 4"
+          assert s.count(o2) == 1, ('sparse', s.count(o2))
+          s = s.replace(o2, n2)
+          open(p, 'w', encoding='utf-8').write(s)
+          print('[androguard-patch] payload bounds fixed in', p)
+          PY_AGFIX
+
           python3 -m venv "$WORK/venv"
           "$WORK/venv/bin/pip" install --quiet --disable-pip-version-check -r "$WORK/dcc/requirements.txt"
           curl -fsSL --retry 3 -o "$WORK/dcc/tools/apktool.jar" \

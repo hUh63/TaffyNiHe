@@ -154,6 +154,7 @@ object IappDecryptTool {
         var sok = args.str("sok")
         var dek = args.str("dek")
         var signB64 = args.str("signB64")
+        var nativeSoBytes: ByteArray? = null
         val signKey = args.str("signKey")
         if (apk != null && apk.isFile && (pkg.isBlank() || ver.isBlank() || code.isBlank() || label.isBlank() || sok.isBlank() || dek.isBlank() || signB64.isBlank())) {
             runCatching {
@@ -181,9 +182,18 @@ object IappDecryptTool {
             sok = sok, dek = dek, entryFile = args.str("entryFile", "mian.iyu").ifBlank { "mian.iyu" },
             signKey = signKey, signB64 = signB64, pwdKey = args.str("pwdKey"),
         )
+        // 读取原生库字节以提取密钥表候选（best-effort）
+        if (apk != null && apk.isFile) {
+            runCatching {
+                ZipFile(apk).use { zip ->
+                    findEntry(zip, SO_PATHS, { it.endsWith("libygsiyu.so") })
+                        ?.let { nativeSoBytes = zip.getInputStream(zip.getEntry(it)).use { s -> s.readBytes() } }
+                }
+            }
+        }
         val mode = args.str("mode", "auto").ifBlank { "auto" }
         val maxFiles = args.intValue("maxFiles", 300).coerceIn(1, 5000)
-        val result = IappDecrypt.decrypt(libSo, config, mode)
+        val result = IappDecrypt.decrypt(libSo, config, mode, nativeSoBytes)
 
         val out = resolveOutDir(ctx, args, (apk?.nameWithoutExtension ?: "iapp"))
         val filesArr = JSONArray()
@@ -213,7 +223,8 @@ object IappDecryptTool {
             .put("containerSize", result.container.size)
             .put("files", filesArr)
             .put("failed", failedArr)
-            .put("strategy", traceObj))
+            .put("strategy", traceObj)
+            .put("keySetCandidates", if (nativeSoBytes != null) "已从原生库提取密钥候选" else "仅默认密钥"))
     }
 
     // ── 辅助 ─────────────────────────────────────────────────────

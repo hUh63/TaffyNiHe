@@ -83,10 +83,11 @@ object SoDeepTools {
     }
 
     /**
-     * 启发式虚表候选（rizin avj 无结果时兜底）：
-     * 在 .data.rel.ro / .data.rel.ro.* 这些只读重定位段里，找「由 RELATIVE 重定位指向 .text 函数、
-     * 且目标偏移连续（步长 8）的指针数组」，每个数组当作一个候选虚表。
-     * 纯静态启发式，结果需人工核对；任何异常一律返回空（不抛）。
+     * 启发式虚表候选（rizin avj 无结果时兜底）。三条来源，按可靠性排序：
+     *  ① `_ZTV<类名>` 符号（Itanium ABI，可还原类名，并配对 `_ZTI` RTTI）；
+     *  ② `.data.rel.ro*` 中由 RELATIVE 重定位指向 `.text`、且目标地址连续（步长 8）的指针数组；
+     *  ③ 原始字节指针表扫描（重定位缺失 / 被 strip 时的兜底，对 REL / 32 位库有效）。
+     * 槽位自动标注函数名。纯静态启发式，结果需人工核对；任何异常一律返回空（不抛）。
      */
     private fun heuristicVtables(engine: NativeSoEngine, ws: String): JSONArray {
         val out = JSONArray()
@@ -108,17 +109,31 @@ object SoDeepTools {
             fun relroOf(va: Long): String? = relroRanges.firstOrNull { va >= it.second && va < it.third }?.first
             // ① 符号级：_ZTV<类名>（Itanium ABI）直接给出虚表起始地址，C++ 未完全 strip 时最可靠
             val vtNames = HashMap<Long, String>()
+            val rttiByClass = HashMap<String, Long>()
             val symItems = engine.list(ws, "", "symbols", "", 4000).optJSONArray("items") ?: JSONArray()
             for (i in 0 until symItems.length()) {
                 val s = symItems.optJSONObject(i) ?: continue
                 val nm = s.optString("name")
-                if (!nm.startsWith("_ZTV")) continue
                 val va = parseHex(s.optString("value"))
-                if (va >= 0) vtNames[va] = demangleVtableName(nm)
+                if (va < 0) continue
+                when {
+                    nm.startsWith("_ZTV") -> vtNames[va] = demangleVtableName(nm, "_ZTV")
+                    nm.startsWith("_ZTI") -> rttiByClass[demangleVtableName(nm, "_ZTI")] = va
+                }
+            }
+            // ④ 槽位函数名映射（供虚表槽位标注函数名）
+            val fnName = HashMap<Long, String>()
+            runCatching {
+                val fnItems = engine.list(ws, "", "functions", "", 4000).optJSONArray("items") ?: JSONArray()
+                for (i in 0 until fnItems.length()) {
+                    val f = fnItems.optJSONObject(i) ?: continue
+                    val a = parseHex(f.optString("startAddr"))
+                    if (a >= 0) fnName[a] = f.optString("name")
+                }
             }
             if (relroRanges.isEmpty() || textLo > textHi) {
                 // 无 .data.rel.ro：仍用 _ZTV 符号给出类名 + 起始地址（槽位留空）
-                for ((va, name) in vtNames) out.put(simpleVtableEntry(name, va, "", JSONArray()))
+                for ((va, name) in vtNames) out.put(simpleVtableEntry(name, va, "", JSONArray(), rttiByClass[name]))
                 return@runCatching
             }
             val relItems = engine.list(ws, "", "relocations", "", 12000).optJSONArray("items") ?: return@runCatching
@@ -143,20 +158,8 @@ object SoDeepTools {
                     if (run.size >= 2) {
                         val start = run.first()
                         covered.add(start)
-                        val slots = JSONArray()
-                        run.forEachIndexed { k, o ->
-                            slots.put(JSONObject().put("index", k).put("name", "")
-                                .put("addr", "0x" + java.lang.Long.toHexString(fnOf[o] ?: 0L)))
-                        }
-                        val head = "0x" + java.lang.Long.toHexString(start)
-                        val cls = vtNames[start - 16] ?: vtNames[start] ?: "vtable_$head"
-                        out.put(JSONObject()
-                            .put("className", cls)
-                            .put("vtableAddr", head)
-                            .put("slotCount", run.size)
-                            .put("section", sec)
-                            .put("source", "reloc")
-                            .put("slots", slots))
+                        val cls = vtNames[start - 16] ?: vtNames[start] ?: ("vtable_0x" + java.lang.Long.toHexString(start))
+                        out.put(vtableEntry(cls, start, sec, "reloc", run.map { fnOf[it] ?: 0L }, fnName, rttiByClass[cls]))
                     }
                     run = ArrayList()
                 }
@@ -172,30 +175,75 @@ object SoDeepTools {
             for ((va, name) in vtNames) {
                 if (covered.contains(va) || covered.contains(va + 16)) continue
                 val sec = relroOf(va) ?: relroOf(va + 16) ?: continue
-                val slots = JSONArray()
+                val addrs = ArrayList<Long>()
                 var k = 0
-                while (fnOf.containsKey(va + 16 + 8L * k)) {
-                    slots.put(JSONObject().put("index", k).put("name", "")
-                        .put("addr", "0x" + java.lang.Long.toHexString(fnOf[va + 16 + 8L * k] ?: 0L)))
-                    k++
+                while (fnOf.containsKey(va + 16 + 8L * k)) { addrs.add(fnOf[va + 16 + 8L * k] ?: 0L); k++ }
+                out.put(vtableEntry(name, va, sec, "symbol", addrs, fnName, rttiByClass[name]))
+            }
+
+            // ④ 原始字节指针表扫描兜底：重定位缺失 / 被 strip 时（尤其 REL 与 32 位库），
+            //    直接在 .data.rel.ro* 原始字节里找「连续 ≥3 个 8 字节值落入 .text」的指针序列。
+            if (out.length() == 0) runCatching {
+                val elf = engine.exbinElfFor(ws, "")
+                val data = engine.exbinDataFor(ws, "")
+                for ((sec, lo, _) in relroRanges) {
+                    val info = elf.sections.firstOrNull { it.name == sec } ?: continue
+                    val start = info.offset.toInt(); val end = (info.offset + info.size).toInt()
+                    if (start < 0 || end > data.size || end - start < 24) continue
+                    val words = ArrayList<Long>((end - start) / 8)
+                    var p = start
+                    while (p + 8 <= end) {
+                        var v = 0L
+                        for (b in 0 until 8) v = v or ((data[p + b].toLong() and 0xFF) shl (8 * b))
+                        words.add(v); p += 8
+                    }
+                    var i = 0
+                    while (i < words.size) {
+                        if (words[i] in textLo until textHi) {
+                            var e = i
+                            while (e + 1 < words.size && words[e + 1] in textLo until textHi) e++
+                            if (e - i + 1 >= 3) {
+                                val firstFnVa = lo + i * 8L
+                                val cls = vtNames[firstFnVa - 16] ?: ("vtable_0x" + java.lang.Long.toHexString(firstFnVa))
+                                out.put(vtableEntry(cls, firstFnVa, sec, "scan", words.subList(i, e + 1), fnName, rttiByClass[cls]))
+                            }
+                            i = e + 1
+                        } else i++
+                    }
                 }
-                out.put(simpleVtableEntry(name, va, sec, slots))
             }
         }
         return out
     }
 
-    private fun simpleVtableEntry(cls: String, va: Long, sec: String, slots: JSONArray): JSONObject =
+    private fun simpleVtableEntry(cls: String, va: Long, sec: String, slots: JSONArray, typeInfoVa: Long? = null): JSONObject =
         JSONObject().put("className", cls)
             .put("vtableAddr", "0x" + java.lang.Long.toHexString(va))
             .put("slotCount", slots.length())
             .put("section", sec)
             .put("source", "symbol")
+            .apply { if (typeInfoVa != null) put("typeInfoAddr", "0x" + java.lang.Long.toHexString(typeInfoVa)) }
             .put("slots", slots)
 
-    /** 简易 Itanium _ZTV 名称还原：_ZTVN3foo3BarE -> foo::Bar */
-    private fun demangleVtableName(sym: String): String {
-        val s = sym.removePrefix("_ZTV")
+    /** 组装一条虚表记录：槽位带函数名标注，可选 RTTI 地址。 */
+    private fun vtableEntry(cls: String, vtableVa: Long, sec: String, source: String, fnAddrs: List<Long>, fnName: Map<Long, String>, typeInfoVa: Long?): JSONObject {
+        val slots = JSONArray()
+        fnAddrs.forEachIndexed { k, a ->
+            slots.put(JSONObject().put("index", k).put("name", fnName[a] ?: "").put("addr", "0x" + java.lang.Long.toHexString(a)))
+        }
+        return JSONObject()
+            .put("className", cls)
+            .put("vtableAddr", "0x" + java.lang.Long.toHexString(vtableVa))
+            .put("slotCount", fnAddrs.size)
+            .put("section", sec)
+            .put("source", source)
+            .apply { if (typeInfoVa != null) put("typeInfoAddr", "0x" + java.lang.Long.toHexString(typeInfoVa)) }
+            .put("slots", slots)
+    }
+
+    /** 简易 Itanium _ZTV / _ZTI 名称还原：_ZTVN3foo3BarE -> foo::Bar */
+    private fun demangleVtableName(sym: String, prefix: String): String {
+        val s = sym.removePrefix(prefix)
         val parts = ArrayList<String>()
         var i = if (s.startsWith("N")) 1 else 0
         while (i < s.length) {

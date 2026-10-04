@@ -71,14 +71,34 @@ object IappDecrypt {
     fun normalizeMemberName(name: String): String =
         name.trim().trim('"', '\'').replace('\\', '/').lowercase(Locale.ROOT)
 
-    fun generateKeySets(manualPost: ByteArray? = null, manualXor: ByteArray? = null): List<KeySet> {
+    fun generateKeySets(nativeSo: ByteArray? = null, manualPost: ByteArray? = null, manualXor: ByteArray? = null): List<KeySet> {
+        // 从原生库启发式提取密钥表候选（提高非默认密钥包的命中率）；默认密钥优先试。
+        val soCands = if (nativeSo != null) IappElfKeys.extractCandidates(nativeSo) else emptyList()
+        val posts = ArrayList<ByteArray>()
+        if (manualPost != null) posts.add(manualPost)
+        posts.add(MAGIC_BYTES)
+        posts.addAll(soCands)
+        val xors = ArrayList<ByteArray>()
+        if (manualXor != null) xors.add(manualXor)
+        xors.add(BURDEN_XOR_KEY)
+        xors.addAll(soCands)
+        val postsU = uniqBytes(posts).take(5)
+        val xorsU = uniqBytes(xors).take(5)
         val out = ArrayList<KeySet>()
-        val posts = if (manualPost != null) listOf(manualPost, MAGIC_BYTES) else listOf(MAGIC_BYTES)
-        val xors = if (manualXor != null) listOf(manualXor, BURDEN_XOR_KEY) else listOf(BURDEN_XOR_KEY)
-        for (p in posts) for (x in xors) {
-            val name = if (p.contentEquals(MAGIC_BYTES) && x.contentEquals(BURDEN_XOR_KEY)) "generic" else "custom"
+        val seen = HashSet<String>()
+        for (pi in postsU.indices) for (xi in xorsU.indices) {
+            val p = postsU[pi]; val x = xorsU[xi]
+            if (!seen.add(p.toHex() + ":" + x.toHex())) continue
+            val name = if (p.contentEquals(MAGIC_BYTES) && x.contentEquals(BURDEN_XOR_KEY)) "generic" else "post[$pi]/xor[$xi]"
             out.add(KeySet(name, p, x))
+            if (out.size >= 12) return out
         }
+        return out
+    }
+
+    private fun uniqBytes(list: List<ByteArray>): List<ByteArray> {
+        val seen = HashSet<String>(); val out = ArrayList<ByteArray>()
+        for (b in list) if (seen.add(b.toHex())) out.add(b)
         return out
     }
 
@@ -107,15 +127,15 @@ object IappDecrypt {
         return resolved
     }
 
-    fun decrypt(libSo: ByteArray, config: IappConfig, mode: String = "auto"): Result {
+    fun decrypt(libSo: ByteArray, config: IappConfig, mode: String = "auto", nativeSo: ByteArray? = null): Result {
         val resolved = resolveConfig(config)
         return when (mode.trim().lowercase(Locale.ROOT)) {
             "legacy4" -> decryptLegacy4(libSo, resolved)
             "transitional" -> decryptTransitional(libSo, resolved)
             "current", "legacy", "auto" -> if (mode.trim().lowercase(Locale.ROOT) == "auto" && resolved.sok.length <= 4) {
-                runCatching { decryptLegacy4(libSo, resolved) }.getOrElse { decryptCurrent(libSo, resolved) }
+                runCatching { decryptLegacy4(libSo, resolved) }.getOrElse { decryptCurrent(libSo, resolved, nativeSo) }
             } else {
-                decryptCurrent(libSo, resolved)
+                decryptCurrent(libSo, resolved, nativeSo)
             }
             else -> throw IllegalArgumentException("mode must be auto, current, legacy, legacy4 or transitional")
         }
@@ -141,10 +161,10 @@ object IappDecrypt {
     }
 
     // ── current 族 ───────────────────────────────────────────────
-    private fun decryptCurrent(libSo: ByteArray, config: IappConfig): Result {
+    private fun decryptCurrent(libSo: ByteArray, config: IappConfig, nativeSo: ByteArray? = null): Result {
         val hasSig = config.signB64.isNotBlank()
         val candidates = generateOuterCandidates(hasSig)
-        val keySets = generateKeySets()
+        val keySets = generateKeySets(nativeSo)
         var tried = 0
         for (ks in keySets) for (c in candidates) {
             tried++

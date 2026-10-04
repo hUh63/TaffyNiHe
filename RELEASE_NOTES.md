@@ -1,41 +1,26 @@
-# TaffyNiHe v1.3.67
+# TaffyNiHe v1.3.68
 
-本版聚焦**分析引擎缺陷修复、内建工具扩充与界面收敛**。
+本版聚焦**逆向能力的深化**：虚表识别更强、iApp 解密更准、反编译更快，并新增 Material You 动态取色。
 
-## 🐞 修复：分析页伪 C / 引用 / 调用图（逐条定位到根因）
+## 🔎 虚表识别再深化（`taffy_so_vtable`）
 
-- **native 引擎无输出（伪 C 为空）**：本构建 rizin 未打包 `pdc/pdd/pdg`（缺 rz-ghidra 核心库）→ 已回退到**随包内置的 Exbin 原生反编译器**。
-- **java / simple 引擎无输出**：根因是 rizin 0.9 的 `agf` 改为输出 `nodes/edges`，而 r2dec 需要 `blocks[].ops[]` → 已用 `afbj` + `pdfj` **现场拼装**出 r2dec 所需结构。
-- **未取得全局调用图（降级为函数清单）/ 根节点无出边**：根因是 rizin 0.9 的 `agC` 是**格式参数型**命令（须 `agC json`），`agCj` 被当作非法格式而恒空 → 已改用 `agC json`，并保留小写 / `aac` 回退链。
-- **无交叉引用**：`axt/axf` 需先做函数调用分析 → 已前置 `aac`。
+- **新增第三来源：原始字节指针表扫描兜底** —— 当重定位信息缺失 / 被 strip 时（尤其 REL 与 32 位库），直接在 `.data.rel.ro*` 的原始字节里找「连续 ≥3 个 8 字节值落入 `.text`」的指针序列。
+- **`_ZTI` RTTI 配对**：为每个虚表附带 `typeInfoAddr`（对应 `_ZTI<类名>`）。
+- **槽位标注函数名**：虚表每个槽位不再只有地址，直接标出所指函数名，`数偏移` 变 `读代码`。
 
-## ✨ 虚表识别增强
+## 📦 iApp 解密增强（`taffy_iapp_decrypt`）
 
-- 新增 **`_ZTV<类名>` 符号级识别**（Itanium ABI，自动还原 `foo::Bar` 类名）；无重定位信息时兜底给出虚表起始地址。不再轻易报「未发现虚表」。
+- **从原生库静态提取 ELF 密钥候选**：解析 `libygsiyu.so` 的 `.rodata` / `.data.rel.ro*`，启发式挑出高二进制度定长密钥表作为 `post_key` / `xor_key` 候选，与内置默认密钥一起按「默认优先」组合试解 —— 显著提高**非默认密钥包**的命中率。
+- **分析页新增「iApp」视图**：填 APK / lib.so 路径即可「提取参数 → 解密导出」。
 
-## 🧭 分析页导航：三层 → 两层
+## ⚡ 分析引擎：反编译缓存
 
-- 「域 → 工具 → 模式」压成「**域 → 工具**」，域数量由 5 收敛为 3（**代码 / 结构 / 工具**）；工具内的各视图改用**页内 chip** 切换 —— 入口更少，**能力不丢**。
+- 为 r2dec / SimplePseudoC 两条纯 Java 反编译路径加入**输入指纹 LRU 缓存**（键 = 引擎标签 + 函数名 + thumb + `agfj` 文本的 SHA-256）——同一份反汇编输入必得同一份伪 C，**绝不返回过期结果**，只是避免同一函数被反复反编译。
+- 反编译结果新增 `cache` 字段（`size/hits/misses/max`），缓存命中一目了然。
 
-## 🧮 新增：内置高精度计算器（`taffy_calculate`）
+## 🎨 UI：Material You 动态取色
 
-- 移植 calculate-mcp：算术 / 统计 / 三角、任意精度进制转换、位运算、端序、IEEE-754、MD5 / SHA / CRC32 / CRC16、模运算、Base64 / Hex / URL，支持链式批量 `steps`（`{"$step":0,"field":"resultHex"}` 引用）。
-- 供 **MCP 调用**，分析页新增**计算器视图**。纯 JVM 实现，零外部进程。
-
-## 📦 新增：iApp v3 解密（`taffy_iapp_decrypt`）
-
-- 移植 aiysss/iapp-decrypt：解密 iApp 打包 APK 的 `assets/lib.so`（外层 AES-CBC 容器 + 内层按标记分隔的成员源码）。
-- `action=extract` 从 APK **自动提取** sok（libygsiyu.so）/ 签名 DER / 清单包名·版本·应用名 / dex 常量 dek；`action=decrypt` 递归导出 `mian.iyu` 等**全部内层源码**。
-- 覆盖 **current / legacy4 / transitional** 三套算法族；核心密码学原语（slky 哈希 + AES-CBC + 循环 XOR）附参考向量单测。
-
-## ⬆️ 升级
-
-- **frida-server 17.19.0 → 17.22.0**（构建期注入的版本常量已同步更新）。
-
-## 🧹 界面收敛（强相关功能合并）
-
-- 设置中心：**「运行统计」合并** —— 工具调用统计 + 隧道稳定性归入同一页。
-- 移除与「工作区」页重复的「临时工作区」根入口（该页仍可从「工作区」进入）。
+- 设置 → 外观新增「**动态取色（Material You）**」开关：Android 12+ 上跟随系统壁纸动态生成配色方案；关闭时保持原有苹果风配色。
 
 ---
 

@@ -171,6 +171,7 @@ object SoDecompileTool {
                         if (!code.isNullOrBlank()) {
                             return JSONObject().put("ok", true).put("pseudocode", code)
                                 .put("engine", "java-r2dec")
+                                .put("cache", com.soreverse.mcp.engine.R2DecEngine.cacheStats())
                                 .put("engineNote", "r2dec 纯 Java 移植（Exbin 引擎；CFG 由 rizin afbj+pdfj 注入）")
                         }
                     }
@@ -195,6 +196,7 @@ object SoDecompileTool {
                     if (code.isNullOrBlank()) null
                     else JSONObject().put("ok", true).put("pseudocode", code)
                         .put("engine", "java-simple")
+                        .put("cache", com.soreverse.mcp.engine.R2DecEngine.cacheStats())
                         .put("engineNote", "SimplePseudoC 结构化伪 C（Exbin v2.1.4 引擎；CFG 由 rizin afbj+pdfj 注入）")
                 }.getOrNull()
             }
@@ -315,4 +317,5 @@ object SoDecompileTool {
         "pseudocodePolicy",
     )
 }
+
 

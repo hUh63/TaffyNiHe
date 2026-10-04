@@ -4084,6 +4084,42 @@ private fun AnalysisCardList(
 
 /** 列表视图通用外壳（取数 + 状态分支 + 卡片列表）。 */
 @Composable
+/** Explorer So 式列表页：视图显示名（统计行用）。 */
+private fun analysisListTitle(view: String, zh: Boolean): String = when (view) {
+    "functions" -> if (zh) "函数" else "Functions"
+    "strings" -> if (zh) "字符串" else "Strings"
+    "symbols" -> if (zh) "符号" else "Symbols"
+    "imports" -> if (zh) "导入" else "Imports"
+    "sections" -> if (zh) "段节" else "Sections"
+    "segments" -> if (zh) "程序段" else "Segments"
+    "relocs" -> if (zh) "重定位" else "Relocations"
+    "dynamic" -> if (zh) "动态段" else "Dynamic"
+    "libraries" -> if (zh) "依赖库" else "Libraries"
+    "hashes" -> if (zh) "哈希" else "Hashes"
+    "versions" -> if (zh) "版本" else "Versions"
+    "entries" -> if (zh) "入口点" else "Entries"
+    "elfhdr" -> if (zh) "ELF 头" else "ELF header"
+    else -> analysisViewLabel(view, zh)
+}
+
+/** Explorer So 式搜索框说明：明确可搜范围，替代光秃秃的输入框。 */
+private fun analysisListHint(view: String, zh: Boolean): String = when (view) {
+    "functions" -> if (zh) "搜索函数（按名称 / 地址 / 节区）" else "search functions (name / addr / section)"
+    "strings" -> if (zh) "搜索字符串内容" else "search string content"
+    "symbols" -> if (zh) "搜索符号（按名称 / 地址）" else "search symbols (name / addr)"
+    "imports" -> if (zh) "搜索导入（按名称 / 库）" else "search imports (name / lib)"
+    "sections" -> if (zh) "搜索段节（按名称）" else "search sections (name)"
+    "segments" -> if (zh) "搜索程序段（按名称 / 类型）" else "search segments (name / type)"
+    "relocs" -> if (zh) "搜索重定位（按符号 / 地址）" else "search relocations (symbol / addr)"
+    "dynamic" -> if (zh) "搜索动态项（按名称 / 值）" else "search dynamic entries (name / value)"
+    "libraries" -> if (zh) "搜索依赖库" else "search libraries"
+    "hashes" -> if (zh) "搜索哈希" else "search hashes"
+    "versions" -> if (zh) "搜索版本符号" else "search version symbols"
+    "entries" -> if (zh) "搜索入口（按名称 / 地址）" else "search entries (name / addr)"
+    "elfhdr" -> if (zh) "搜索字段" else "search fields"
+    else -> if (zh) "搜索" else "Search"
+}
+
 private fun ListScaffold(
     tools: ToolPagesState,
     zh: Boolean,
@@ -4102,21 +4138,37 @@ private fun ListScaffold(
         loadListCache(context, tools, view, ws, cacheKey, limit)
     }
     val rows = remember(tools.viewCache[cacheKey]) { rowsFromJson(tools.viewCache[cacheKey]) }
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(rows, query) {
+        if (query.isBlank()) rows
+        else rows.filter {
+            it.title.contains(query, true) || it.meta.contains(query, true) || it.text.contains(query, true)
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(if (zh) "函数列表" else "Functions") { tools.analysisView = "functions" }
-            Text(
-                if (zh) "${rows.size} 项" else "${rows.size} items",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                color = cs.onSurfaceVariant,
-            )
-        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            placeholder = {
+                Text(
+                    analysisListHint(view, zh),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    color = cs.onSurfaceVariant,
+                )
+            },
+        )
+        Spacer(Modifier.size(6.dp))
+        MonoLine(
+            analysisListTitle(view, zh) + " · " + (if (zh) "共" else "total") + " ${rows.size} " + (if (zh) "项" else "items") +
+                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " ${filtered.size}" else ""),
+            cs.onSurfaceVariant, AppText.label,
+        )
         Spacer(Modifier.size(6.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -4136,8 +4188,12 @@ private fun ListScaffold(
                     primaryLabel = if (zh) "刷新" else "Refresh",
                     onPrimary = onRefresh,
                 )
+                filtered.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无匹配项" else "No match",
+                    hint = if (zh) "换个关键字再试" else "Try another keyword",
+                )
                 else -> AnalysisCardList(
-                    rows = rows,
+                    rows = filtered,
                     icon = analysisViewIcon(view),
                     onPick = onPick,
                 )
@@ -5005,30 +5061,33 @@ private fun RzViewScaffold(
     }
     val kv: JSONObject? = remember(data) { data as? JSONObject }
     val count = if (rows.isNotEmpty()) rows.size else strList.size
+    var query by remember { mutableStateOf("") }
+    val fRows = remember(rows, query) { if (query.isBlank()) rows else rows.filter { o -> o.toString().contains(query, true) } }
+    val fStrs = remember(strList, query) { if (query.isBlank()) strList else strList.filter { it.contains(query, true) } }
 
     Column(Modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(if (zh) "函数列表" else "Functions") { tools.analysisView = "functions" }
-            if (count > 0) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            placeholder = {
                 Text(
-                    if (zh) "$count 项" else "$count items",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = AppText.label,
+                    analysisListHint(view, zh),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
                     color = cs.onSurfaceVariant,
                 )
-            }
-            Text(
-                "${if (zh) "命令" else "cmd"}: $cmd",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                fontFamily = FontFamily.Monospace,
-                color = cs.onSurfaceVariant.copy(alpha = 0.7f),
-            )
-        }
+            },
+        )
+        Spacer(Modifier.size(6.dp))
+        MonoLine(
+            analysisListTitle(view, zh) + " · " + (if (zh) "共" else "total") + " $count " + (if (zh) "项" else "items") +
+                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " " + (if (fRows.isNotEmpty()) fRows.size else fStrs.size) else ""),
+            cs.onSurfaceVariant, AppText.label,
+        )
         Spacer(Modifier.size(6.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -5053,8 +5112,12 @@ private fun RzViewScaffold(
                     onPrimary = onRefresh,
                 )
                 kv != null -> RzKeyValueTable(kv, zh)
-                strList.isNotEmpty() && rows.isEmpty() -> RzStringList(strList)
-                rows.isNotEmpty() -> RzObjectTable(rows, effectiveCols(cols, rows), zh, context)
+                fStrs.isNotEmpty() && fRows.isEmpty() -> RzStringList(fStrs)
+                fRows.isNotEmpty() -> RzObjectTable(fRows, effectiveCols(cols, fRows), zh, context)
+                query.isNotBlank() && fRows.isEmpty() && fStrs.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无匹配项" else "No match",
+                    hint = if (zh) "换个关键字再试" else "Try another keyword",
+                )
                 else -> AnalysisEmptyState(
                     title = if (zh) "空清单" else "Empty list",
                     hint = if (zh) "该文件可能不含这一类内容" else "This file may not contain this kind of data",
@@ -7571,6 +7634,9 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var drillDepth by remember { mutableStateOf("3") }
     var drillMax by remember { mutableStateOf("120") }
     var drillRan by remember { mutableStateOf(false) }
+    var egoRoot by remember { mutableStateOf("") }
+    var egoDepth by remember { mutableStateOf("2") }
+    var egoRan by remember { mutableStateOf(false) }
     var savedMsg by remember { mutableStateOf("") }
 
     LaunchedEffect(ws, tick) {
@@ -7634,6 +7700,8 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
             listOf(
                 "overview" to (if (zh) "入口概览" else "Overview"),
                 "drill" to (if (zh) "根下钻" else "Root drill"),
+                "nodes" to (if (zh) "节点列表" else "Nodes"),
+                "ego" to (if (zh) "邻域" else "Neighborhood"),
                 "scc" to (if (zh) "SCC 鸟瞰" else "SCC"),
                 "export" to (if (zh) "导出" else "Export"),
             ).forEach { (k, l) -> TabChip(l, selected = xTab == k) { xTab = k } }
@@ -7823,6 +7891,110 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+                xTab == "nodes" -> Column(Modifier.fillMaxSize()) {
+                    MonoLine(
+                        if (zh) "节点列表 · ${shown.size} / ${nodes.size} · 点条目设为选中函数，右侧「邻域」进入双向展开"
+                        else "Nodes · ${shown.size}/${nodes.size}",
+                        cs.onSurfaceVariant, AppText.label,
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    if (shown.isEmpty()) {
+                        AnalysisEmptyState(
+                            title = if (zh) "无匹配节点" else "No matching nodes",
+                            hint = if (zh) "换个关键字再试" else "Try another keyword",
+                        )
+                    } else {
+                        LazyColumn(
+                            Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            contentPadding = PaddingValues(bottom = 12.dp),
+                        ) {
+                            items(shown.take(800), key = { o -> "cg|" + o.optString("name") + "|" + o.optString("id") + "|" + o.opt("offset") }) { o ->
+                                val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
+                                val addr = hexAddr(o.opt("offset") ?: o.opt("id"))
+                                val oN = outCnt[nm] ?: 0
+                                val iN = inCnt[nm] ?: 0
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(AppShape.md))
+                                        .background(cs.surfaceContainerHigh)
+                                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                                        .clickable { tools.selectedFunctionName = nm }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(nm, style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                            if (iN == 0) TypeBadge(if (zh) "入口" else "entry", cs.tertiary)
+                                        }
+                                        MonoLine((if (addr.isNotBlank()) "$addr  " else "") + (if (zh) "调用 $oN · 被调 $iN" else "$oN out · $iN in"), cs.onSurfaceVariant, AppText.label)
+                                    }
+                                    SmallAction(if (zh) "邻域" else "Ego") {
+                                        egoRoot = nm; egoRan = true; xTab = "ego"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                xTab == "ego" -> Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = egoRoot, onValueChange = { egoRoot = it }, singleLine = true,
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(AppShape.sm),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                            label = { Text(if (zh) "中心函数" else "Center function", fontSize = AppText.label) },
+                            placeholder = { Text(if (zh) "函数名 或 0x 地址（留空取首个入口）" else "name or 0x addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        )
+                        OutlinedTextField(
+                            value = egoDepth, onValueChange = { egoDepth = it.filter { c -> c.isDigit() }.take(2) }, singleLine = true,
+                            modifier = Modifier.width(74.dp).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(AppShape.sm),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                            label = { Text(if (zh) "深度" else "Depth", fontSize = AppText.label) },
+                        )
+                        Button(
+                            onClick = { egoRan = true },
+                            shape = RoundedCornerShape(AppShape.sm),
+                            colors = ButtonDefaults.buttonColors(containerColor = cs.primary),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.size(5.dp))
+                            Text(if (zh) "重新构建" else "Rebuild", fontSize = AppText.label)
+                        }
+                    }
+                    Spacer(Modifier.size(6.dp))
+                    val egoSub = remember(names, edges, egoRoot, egoDepth, egoRan) {
+                        if (!egoRan) emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
+                        else buildEgoSubgraph(nodes, edges, egoRoot, egoDepth.toIntOrNull()?.coerceIn(1, 6) ?: 2, 200)
+                    }
+                    when {
+                        !egoRan -> AnalysisEmptyState(
+                            title = if (zh) "邻域视图" else "Neighborhood",
+                            hint = if (zh) "以某个函数为中心，同时显示它的调用者与被调用者（双向展开）。" else "Center on a function; show callers and callees in both directions.",
+                            primaryLabel = if (zh) "从 JNI_OnLoad 开始" else "From JNI_OnLoad",
+                            onPrimary = { egoRoot = "JNI_OnLoad"; egoRan = true },
+                        )
+                        egoSub.first.isEmpty() -> AnalysisEmptyState(
+                            title = if (zh) "无邻域" else "No neighborhood",
+                            hint = if (zh) "该中心函数没有找到调用关系。" else "No call relations found for the center.",
+                            primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+                        )
+                        else -> {
+                            MonoLine(
+                                if (zh) "邻域 · 中心 ${egoSub.first.firstOrNull()?.first ?: egoRoot} · ${egoSub.first.size} 节点 · ${egoSub.second.size} 边"
+                                else "ego · ${egoSub.first.size} nodes · ${egoSub.second.size} edges",
+                                cs.onSurfaceVariant, AppText.label,
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            CallGraphCanvas(egoSub.first, egoSub.second, "TB", query, zh, Modifier.fillMaxWidth().weight(1f))
                         }
                     }
                 }
@@ -9569,6 +9741,102 @@ private class CgLayout(
     val height: Float,
 )
 
+/** 邻域（Ego）：以 root 为中心，双向（调用者 + 被调用者）BFS 展开 depth 层。 */
+private fun buildEgoSubgraph(
+    nodes: List<JSONObject>,
+    edges: List<Pair<String, String>>,
+    root: String,
+    depth: Int,
+    maxNodes: Int,
+): Pair<List<Pair<String, String>>, List<Pair<Int, Int>>> {
+    if (nodes.isEmpty()) return emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
+    val addrOf = HashMap<String, String>()
+    val all = ArrayList<String>(nodes.size)
+    nodes.forEach { o ->
+        val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
+        if (nm.isBlank()) return@forEach
+        all.add(nm)
+        addrOf[nm] = hexAddr(o.opt("offset") ?: o.opt("id"))
+    }
+    val valid = all.toHashSet()
+    val outAdj = HashMap<String, MutableList<String>>()
+    val inAdj = HashMap<String, MutableList<String>>()
+    edges.forEach { (f, t) ->
+        if (f == t || f !in valid || t !in valid) return@forEach
+        outAdj.getOrPut(f) { ArrayList() }.add(t)
+        inAdj.getOrPut(t) { ArrayList() }.add(f)
+    }
+    val center = all.firstOrNull { it == root } ?: all.firstOrNull { it.contains(root, true) }
+        ?: (if (root.isBlank()) all.firstOrNull { (inAdj[it]?.size ?: 0) == 0 } ?: all.firstOrNull() else null)
+    if (center.isNullOrBlank()) return emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
+    val seen = LinkedHashSet<String>()
+    seen.add(center)
+    var frontier = listOf(center)
+    val cap = maxNodes.coerceIn(10, 400)
+    repeat(depth.coerceIn(1, 6)) {
+        val next = ArrayList<String>()
+        frontier.forEach { u ->
+            (outAdj[u] ?: emptyList()).forEach { v -> if (seen.size < cap && seen.add(v)) next.add(v) }
+            (inAdj[u] ?: emptyList()).forEach { v -> if (seen.size < cap && seen.add(v)) next.add(v) }
+        }
+        if (next.isEmpty()) return@repeat
+        frontier = next
+    }
+    val sel = seen.toList()
+    val idx = HashMap<String, Int>(sel.size * 2)
+    sel.forEachIndexed { i, n -> idx[n] = i }
+    val sub = sel.map { it to (addrOf[it] ?: "") }
+    val subEdges = ArrayList<Pair<Int, Int>>()
+    edges.forEach { (f, t) ->
+        val a = idx[f]
+        val b = idx[t]
+        if (a != null && b != null && a != b) subEdges.add(a to b)
+    }
+    return sub to subEdges
+}
+
+/** 用迭代 DFS 把边分成「树边」与「交叉边」（对齐 Explorer So 的三种边路由风格）。 */
+private fun classifyCallEdges(n: Int, edges: List<Pair<Int, Int>>): Pair<HashSet<Int>, HashSet<Int>> {
+    val adj = Array(n) { ArrayList<Int>() }
+    edges.forEachIndexed { i, e -> if (e.first in 0 until n && e.second in 0 until n && e.first != e.second) adj[e.first].add(i) }
+    val color = IntArray(n)
+    val tree = HashSet<Int>()
+    for (s in 0 until n) {
+        if (color[s] != 0) continue
+        color[s] = 1
+        val stack = ArrayDeque<Int>()
+        stack.addLast(s)
+        while (stack.isNotEmpty()) {
+            val u = stack.last()
+            var advanced = false
+            for (ei in adj[u]) {
+                val v = edges[ei].second
+                if (color[v] == 0) {
+                    color[v] = 1
+                    tree.add(ei)
+                    stack.addLast(v)
+                    advanced = true
+                    break
+                }
+            }
+            if (!advanced) {
+                color[u] = 2
+                stack.removeLast()
+            }
+        }
+    }
+    val cross = HashSet<Int>()
+    for (i in edges.indices) if (i !in tree) cross.add(i)
+    return tree to cross
+}
+
+private fun callEdgesByStyle(n: Int, edges: List<Pair<Int, Int>>, style: String): List<Pair<Int, Int>> = when (style) {
+    "tree" -> { val (t, _) = classifyCallEdges(n, edges); edges.filterIndexed { i, _ -> i in t } }
+    "cross" -> { val (_, c) = classifyCallEdges(n, edges); edges.filterIndexed { i, _ -> i in c } }
+    "agg" -> edges.distinct()
+    else -> edges
+}
+
 /** 按模式（hot/root/full）过滤出子图；节点索引化。 */
 private fun buildCallSubgraph(
     nodes: List<JSONObject>,
@@ -9946,8 +10214,12 @@ private fun CallGraphGraphPane(
             .filter { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
             .take(40)
     }
+    var eStyle by remember { mutableStateOf("all") }
     val subPair = remember(nodes, edges, mode, root, depth, maxN, rebuild) {
         buildCallSubgraph(nodes, edges, mode, root, depth, maxN)
+    }
+    val dispEdges = remember(subPair, eStyle) {
+        callEdgesByStyle(subPair.first.size, subPair.second, eStyle)
     }
     Column(Modifier.fillMaxSize()) {
         // ── 模式（对齐 Explorer So：热点模式 / 根展开 / 完整模式）──
@@ -10015,8 +10287,15 @@ private fun CallGraphGraphPane(
             TabChip(if (zh) "上下" else "TB", selected = dir == "TB") { dir = "TB" }
             TabChip(if (zh) "左右" else "LR", selected = dir == "LR") { dir = "LR" }
         }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (zh) "边风格" else "Edges", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            TabChip(if (zh) "全部" else "All", selected = eStyle == "all") { eStyle = "all" }
+            TabChip(if (zh) "树边" else "Tree", selected = eStyle == "tree") { eStyle = "tree" }
+            TabChip(if (zh) "交叉边" else "Cross", selected = eStyle == "cross") { eStyle = "cross" }
+            TabChip(if (zh) "聚合" else "Agg", selected = eStyle == "agg") { eStyle = "agg" }
+        }
         Spacer(Modifier.size(6.dp))
-        CallGraphCanvas(subPair.first, subPair.second, dir, findQ, zh, Modifier.fillMaxWidth().weight(1f))
+        CallGraphCanvas(subPair.first, dispEdges, dir, findQ, zh, Modifier.fillMaxWidth().weight(1f))
     }
 }
 

@@ -80,6 +80,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -345,6 +347,7 @@ private fun SoReverseApp() {
     var motionMode by remember { mutableStateOf(settings.motionMode) }
     var showAdvancedHome by remember { mutableStateOf(settings.showAdvancedHome) }
     var highContrast by remember { mutableStateOf(settings.highContrast) }
+    var dynamicColor by remember { mutableStateOf(settings.dynamicColor) }
     var textScale by remember { mutableStateOf(settings.textScale) }
     var predictiveBack by remember { mutableStateOf(settings.predictiveBackEnabled) }
     var disclaimerAccepted by remember { mutableStateOf(settings.disclaimerAccepted) }
@@ -364,7 +367,16 @@ private fun SoReverseApp() {
         else -> isSystemInDarkTheme()
     }
     val accent = AppPalette.accent(accentColor, dark)
-    val colors = if (dark) appDarkColors(accent, pureBlackDark, highContrast) else appLightColors(accent, highContrast)
+    val colors = remember(dark, accent, pureBlackDark, highContrast, dynamicColor) {
+        if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Material You：Android 12+ 跟随系统壁纸动态取色
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        } else if (dark) {
+            appDarkColors(accent, pureBlackDark, highContrast)
+        } else {
+            appLightColors(accent, highContrast)
+        }
+    }
     val metrics = remember(uiDensity, cornerStyle) { uiMetrics(uiDensity, cornerStyle) }
     val typography = remember(textScale) { scaledTypography(textScaleFactor(textScale)) }
     val reduceMotion = when (motionMode) {
@@ -630,6 +642,8 @@ private fun SoReverseApp() {
                                     onShowAdvancedHome = { showAdvancedHome = it; settings.showAdvancedHome = it },
                                     highContrast = highContrast,
                                     onHighContrast = { highContrast = it; settings.highContrast = it },
+                                    dynamicColor = dynamicColor,
+                                    onDynamicColor = { dynamicColor = it; settings.dynamicColor = it },
                                     textScale = textScale,
                                     onTextScale = { textScale = it; settings.textScale = it },
                                     predictiveBack = predictiveBack,
@@ -790,3 +804,4 @@ private fun SoReverseApp() {
         }
     }
 }
+

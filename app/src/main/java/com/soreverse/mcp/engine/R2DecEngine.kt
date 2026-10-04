@@ -19,6 +19,49 @@ internal object R2DecEngine {
     private const val EM_ARM = 40
     private const val EM_AARCH64 = 183
 
+    // ── 反编译缓存 ────────────────────────────────────────────────
+    // 键 = (引擎标签, 函数名, thumb, agfj 文本) 的 SHA-256：同输入必同输出，
+    // 因此缓存绝不会返回过期结果；仅做内存 LRU 去重，避免同一函数被反复反编译。
+    private const val CACHE_MAX = 128
+    private val pcCache = object : LinkedHashMap<String, String>(16, 0.75f, true) {}
+    private var cacheHits = 0L
+    private var cacheMisses = 0L
+
+    private fun cacheKey(tag: String, agfjText: String, fnName: String, isThumb: Boolean): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update(tag.toByteArray(Charsets.UTF_8)); md.update(0)
+        md.update(fnName.toByteArray(Charsets.UTF_8)); md.update(if (isThumb) 1 else 0)
+        md.update(agfjText.toByteArray(Charsets.UTF_8))
+        val d = md.digest()
+        val sb = StringBuilder(d.size * 2)
+        for (b in d) sb.append(String.format("%02x", b.toInt() and 0xFF))
+        return sb.toString()
+    }
+
+    private fun cached(tag: String, agfjText: String, fnName: String, isThumb: Boolean, compute: () -> String?): String? {
+        if (agfjText.isBlank()) return null
+        val key = cacheKey(tag, agfjText, fnName, isThumb)
+        synchronized(pcCache) {
+            pcCache[key]?.let { cacheHits++; return it }
+            cacheMisses++
+        }
+        val value = compute()
+        if (value != null) synchronized(pcCache) {
+            pcCache[key] = value
+            while (pcCache.size > CACHE_MAX) {
+                val it = pcCache.entries.iterator()
+                if (it.hasNext()) { it.next(); it.remove() } else break
+            }
+        }
+        return value
+    }
+
+    fun cacheStats(): JSONObject = synchronized(pcCache) {
+        JSONObject().put("size", pcCache.size).put("hits", cacheHits).put("misses", cacheMisses).put("max", CACHE_MAX)
+    }
+
+    fun clearCache() = synchronized(pcCache) { pcCache.clear(); cacheHits = 0; cacheMisses = 0 }
+
     private val RE_ARM64_REG = Regex("\\b[wx]\\d{1,2}\\b")
     private val RE_ARM32_REG = Regex("\\b[rs]\\d{1,2}\\b")
 
@@ -169,15 +212,16 @@ internal object R2DecEngine {
      * @param agfjText rizin `agfj` 的 JSON（函数数组）
      * @return 伪 C 文本；无法解析或空结果时返回 null
      */
-    fun decompile(agfjText: String, fnNameIn: String, isThumb: Boolean = false): String? {
-        return try {
-            val ctx = buildCtx(agfjText, fnNameIn, isThumb) ?: return null
-            val text = R2DecPseudoC().convert(ctx).joinToString("\n")
-            if (text.isBlank()) null else text
-        } catch (t: Throwable) {
-            null
+    fun decompile(agfjText: String, fnNameIn: String, isThumb: Boolean = false): String? =
+        cached("r2dec", agfjText, fnNameIn, isThumb) {
+            try {
+                val ctx = buildCtx(agfjText, fnNameIn, isThumb) ?: return@cached null
+                val text = R2DecPseudoC().convert(ctx).joinToString("\n")
+                if (text.isBlank()) null else text
+            } catch (t: Throwable) {
+                null
+            }
         }
-    }
 
     /**
      * SimplePseudoC 结构化伪 C（Exbin `SimplePseudoC` v2.1.4 引擎）。
@@ -186,15 +230,16 @@ internal object R2DecEngine {
      * 结构化转换器：支配关系 + 循环识别 + 空分支裁剪 + goto 统一。
      * 适合作为 r2dec 之外的第二视角 / 交叉验证。
      */
-    fun decompileSimple(agfjText: String, fnNameIn: String, isThumb: Boolean = false): String? {
-        return try {
-            val ctx = buildCtx(agfjText, fnNameIn, isThumb) ?: return null
-            val text = com.exbin.app.elf.pseudoc.SimplePseudoC().convert(ctx).joinToString("\n")
-            if (text.isBlank()) null else text
-        } catch (t: Throwable) {
-            null
+    fun decompileSimple(agfjText: String, fnNameIn: String, isThumb: Boolean = false): String? =
+        cached("simple", agfjText, fnNameIn, isThumb) {
+            try {
+                val ctx = buildCtx(agfjText, fnNameIn, isThumb) ?: return@cached null
+                val text = com.exbin.app.elf.pseudoc.SimplePseudoC().convert(ctx).joinToString("\n")
+                if (text.isBlank()) null else text
+            } catch (t: Throwable) {
+                null
+            }
         }
-    }
 
     /**
      * 整函数伪 C + 块首行映射（对标 Exbin `BlockPseudoCProvider`）。
@@ -214,3 +259,4 @@ internal object R2DecEngine {
         }
     }
 }
+

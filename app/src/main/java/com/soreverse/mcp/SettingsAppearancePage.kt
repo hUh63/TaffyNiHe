@@ -41,6 +41,8 @@ internal fun SettingsAppearancePage(
     onShowAdvancedHome: (Boolean) -> Unit,
     highContrast: Boolean,
     onHighContrast: (Boolean) -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColor: (Boolean) -> Unit,
     textScale: String,
     onTextScale: (String) -> Unit,
     predictiveBack: Boolean,
@@ -150,9 +152,12 @@ internal fun SettingsAppearancePage(
         GlassGroup {
             ToggleRow(if (t.zh) "纯黑深色背景" else "Pure black dark mode", pureBlackDark, onPureBlack)
             GroupDivider()
+            ToggleRow(if (t.zh) "动态取色（Material You，Android 12+）" else "Dynamic color (Material You, Android 12+)", dynamicColor, onDynamicColor)
+            GroupDivider()
             ToggleRow(if (t.zh) "高对比" else "High contrast", highContrast, onHighContrast)
             GroupDivider()
             ToggleRow(t.predictiveBack, predictiveBack, onPredictiveBack)
         }
     }
 }
+

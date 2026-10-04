@@ -183,6 +183,11 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("pureBlackDark", true)
         set(value) = prefs.edit().putBoolean("pureBlackDark", value).apply()
 
+    /** true = Material You 动态取色（Android 12+，跟随系统壁纸）。 */
+    var dynamicColor: Boolean
+        get() = prefs.getBoolean("dynamicColor", false)
+        set(value) = prefs.edit().putBoolean("dynamicColor", value).apply()
+
     /** compact | comfortable | spacious */
     var uiDensity: String
         get() = prefs.getString("uiDensity", "comfortable") ?: "comfortable"
@@ -753,6 +758,7 @@ class SettingsStore(context: Context) {
                 .put("themeMode", themeMode)
                 .put("accentColor", accentColor)
                 .put("pureBlackDark", pureBlackDark)
+                .put("dynamicColor", dynamicColor)
                 .put("uiDensity", uiDensity)
                 .put("cornerStyle", cornerStyle)
                 .put("motionMode", motionMode)
@@ -892,6 +898,7 @@ class SettingsStore(context: Context) {
         applyStr(appearance, "themeMode") { themeMode = it }
         applyStr(appearance, "accentColor") { accentColor = it }
         applyBool(appearance, "pureBlackDark") { pureBlackDark = it }
+        applyBool(appearance, "dynamicColor") { dynamicColor = it }
         applyStr(appearance, "uiDensity") { uiDensity = it }
         applyStr(appearance, "cornerStyle") { cornerStyle = it }
         applyStr(appearance, "motionMode") { motionMode = it }
@@ -1010,7 +1017,7 @@ class SettingsStore(context: Context) {
 
         // Flat key support for AI convenience: taffy_app_config set key=value
         val flatKeys = listOf(
-            "language", "themeMode", "accentColor", "pureBlackDark", "uiDensity", "cornerStyle",
+            "language", "themeMode", "accentColor", "pureBlackDark", "dynamicColor", "uiDensity", "cornerStyle",
             "motionMode", "showAdvancedHome", "highContrast", "textScale", "predictiveBackEnabled",
             "port", "bindHost", "authEnabled", "accessToken", "floatingEnabled",
             "wakeLockEnabled", "bootAutoStart", "defaultLimit", "stringLimit", "disasmLimit",
@@ -1027,6 +1034,7 @@ class SettingsStore(context: Context) {
                 "themeMode" -> { themeMode = patch.optString(key); touch(key) }
                 "accentColor" -> { accentColor = patch.optString(key); touch(key) }
                 "pureBlackDark" -> { pureBlackDark = patch.optBoolean(key); touch(key) }
+                "dynamicColor" -> { dynamicColor = patch.optBoolean(key); touch(key) }
                 "uiDensity" -> { uiDensity = patch.optString(key); touch(key) }
                 "cornerStyle" -> { cornerStyle = patch.optString(key); touch(key) }
                 "motionMode" -> { motionMode = patch.optString(key); touch(key) }
@@ -1145,3 +1153,4 @@ Rules:
 
 /** 一次成功备份的记录（导出或导入）。 */
 data class BackupHistoryEntry(val timestamp: Long, val sizeBytes: Long)
+

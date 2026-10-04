@@ -386,6 +386,8 @@ internal fun AnalysisWorkspace(
 
                         "calc" -> CalcView(zh = zh, context = context)
 
+                        "iapp" -> IappView(zh = zh, context = context)
+
                         "asm" -> AsmEditorView(tools = tools, zh = zh, context = context)
 
                         "elfhdr" -> ElfHeaderView(tools, zh, context, refreshAll)
@@ -2114,6 +2116,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("edit", "编辑", "Edit", Icons.Filled.Build),
     AnalysisNavItem("globalc", "全局伪C", "GpC", Icons.Filled.Description),
     AnalysisNavItem("calc", "计算器", "Calc", Icons.Filled.Calculate),
+    AnalysisNavItem("iapp", "iApp", "iApp", Icons.Filled.LockOpen),
 )
 
 private fun analysisViewLabel(view: String, zh: Boolean): String =
@@ -2164,6 +2167,7 @@ private val analysisDomains = listOf(
         AnalysisTool("exp", "导出", "Export", listOf("export", "data")),
         AnalysisTool("conv", "转换", "Conv", listOf("base", "demangle", "strdec", "xor", "bytediff")),
         AnalysisTool("calc", "计算器", "Calc", listOf("calc")),
+        AnalysisTool("iapp", "iApp", "iApp", listOf("iapp")),
         AnalysisTool("mcp", "控制台", "Console", listOf("tools", "results")),
     )),
 )
@@ -2728,6 +2732,65 @@ private fun CalcView(zh: Boolean, context: android.content.Context) {
                 ToolResultBlock(if (zh) "结果" else "Result", result, zh = zh, onCopy = { copyToClipboard(context, result, zh) })
             }
         }
+    }
+}
+
+// ───────────────────────── iApp v3 解密（内置 taffy_iapp_decrypt 的 UI） ─────────────────────────
+
+@Composable
+private fun IappView(zh: Boolean, context: android.content.Context) {
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var apkPath by remember { mutableStateOf("") }
+    var soPath by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+
+    fun run(action: String) {
+        val args = JSONObject().put("action", action)
+        if (apkPath.isNotBlank()) args.put("path", apkPath.trim())
+        if (soPath.isNotBlank()) args.put("soPath", soPath.trim())
+        scope.launch {
+            loading = true; error = ""; result = ""
+            val r = callMcpTool(context, "taffy_iapp_decrypt", args)
+            loading = false
+            when {
+                r == null -> error = if (zh) "解密服务无响应" else "no response"
+                !r.optBoolean("ok", true) -> error = r.optString("error").ifBlank { r.optString("message") }
+                else -> result = r.toString(2)
+            }
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            if (zh) "解密 iApp v3 打包 APK 的 assets/lib.so（外层 AES-CBC 容器 + 内层成员源码）。先「提取参数」再「解密导出」。"
+            else "Decrypt iApp v3 packed assets/lib.so. Run Extract first, then Decrypt.",
+            style = MaterialTheme.typography.bodySmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = apkPath, onValueChange = { apkPath = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            label = { Text(if (zh) "APK 绝对路径" else "APK path", fontSize = AppText.label) },
+        )
+        OutlinedTextField(
+            value = soPath, onValueChange = { soPath = it }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+            label = { Text(if (zh) "lib.so 路径（可选，缺省取 APK 内 assets/lib.so）" else "lib.so path (optional)", fontSize = AppText.label) },
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "提取参数" else "Extract", loading = loading) { run("extract") }
+            SmallAction(if (zh) "解密导出" else "Decrypt", enabled = apkPath.isNotBlank() || soPath.isNotBlank()) { run("decrypt") }
+            SmallAction(if (zh) "复制结果" else "Copy", enabled = result.isNotBlank()) { copyToClipboard(context, result, zh) }
+        }
+        if (error.isNotBlank()) AnalysisErrorBanner(error)
+        if (result.isNotBlank()) ToolResultBlock(if (zh) "结果" else "Result", result, zh = zh, onCopy = { copyToClipboard(context, result, zh) })
     }
 }
 
@@ -9880,4 +9943,5 @@ private fun CallGraphGraphPane(
         CallGraphCanvas(subPair.first, subPair.second, dir, findQ, zh, Modifier.fillMaxWidth().weight(1f))
     }
 }
+
 

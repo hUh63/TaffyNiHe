@@ -94,6 +94,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -314,20 +316,12 @@ internal fun AnalysisWorkspace(
             onOpenTask = onOpenTask,
         )
         GroupDivider()
-        // ── 导航菜单（域 → 工具 → 模式）：收成一行，点按弹出三级菜单 ──
-        AnalysisNavMenu(current = view, zh = zh, lastModeByTool = lastModeByTool) { tools.analysisView = it }
-        GroupDivider()
-
-        // ── 工具内模式切换：菜单只列代表模式，这里可切到当前工具的全部模式 ──
-        val navToolModes = analysisToolOf(view).modes
-        if (navToolModes.size > 1) {
-            FlowRow(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                navToolModes.forEach { m -> TabChip(analysisViewLabel(m, zh), selected = view == m) { tools.analysisView = m } }
-            }
+        // ── 页签（对齐 Explorer So：主页结构视图 = 顶部可滚动 TabLayout；其余视图 = 当前工具的模式页签）──
+        val tabItems: List<String> =
+            if (view in analysisHomeTabKeys) analysisHomeTabs
+            else analysisToolOf(view).modes.let { if (it.size > 1) it else emptyList() }
+        if (tabItems.isNotEmpty()) {
+            AnalysisTabRow(tabItems, view, zh) { tools.analysisView = it }
             GroupDivider()
         }
 
@@ -2795,6 +2789,42 @@ private fun IappView(zh: Boolean, context: android.content.Context) {
 }
 
 // ───────────────────── 导航（域 → 工具，两级；工具内的各视图用页内 chip 切换） ─────────────────────
+
+/** 主页页签（对齐 Explorer So 的 SO 详情主页：结构类视图平铺为可滚动 TabLayout）。 */
+private val analysisHomeTabs = listOf(
+    "functions", "sections", "symbols", "imports", "libraries", "relocs",
+    "strings", "data", "elfhdr", "segments", "dynamic", "versions", "entries", "hashes", "hex",
+)
+private val analysisHomeTabKeys = analysisHomeTabs.toSet()
+
+/** 对齐 Explorer So 的 TabLayout：可滚动页签，选中=主色加粗。 */
+@Composable
+private fun AnalysisTabRow(items: List<String>, current: String, zh: Boolean, onPick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    ScrollableTabRow(
+        selectedTabIndex = items.indexOf(current).coerceAtLeast(0),
+        edgePadding = 8.dp,
+        containerColor = cs.surface,
+        contentColor = cs.primary,
+        divider = {},
+    ) {
+        items.forEach { k ->
+            Tab(
+                selected = k == current,
+                onClick = { onPick(k) },
+                text = {
+                    Text(
+                        analysisViewLabel(k, zh),
+                        fontSize = AppText.bodyStrong,
+                        fontWeight = if (k == current) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (k == current) cs.primary else cs.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                },
+            )
+        }
+    }
+}
 
 /** 导航菜单：一行显示「域 › 工具」，点按弹出菜单（域分组 + 每工具一个入口）。 */
 @Composable

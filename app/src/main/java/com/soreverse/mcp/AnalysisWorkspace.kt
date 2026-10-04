@@ -433,7 +433,7 @@ internal fun AnalysisWorkspace(
 
                         "vtable" -> VtableView(tools, zh, context, refreshAll)
 
-                        "xrefs" -> XRefsView(tools, zh, context, refreshAll)
+                        "xrefs" -> GlobalXRefView(tools, zh, context, refreshAll)
 
                         "addrview" -> AddrViewerView(tools, zh, context, refreshAll)
 
@@ -6832,93 +6832,96 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
 // ───────────────────────── 2. 交叉引用（含方向） ─────────────────────────
 
 @Composable
-private fun XRefsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
     val ws = tools.sharedWorkspaceId
+    val tick = tools.reloadTick
     val cs = MaterialTheme.colorScheme
-    var locator by remember { mutableStateOf("") }
-    var inRefs by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    var outRefs by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-    var ran by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    var nodes by remember(ws, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var edges by remember(ws, tick) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var loading by remember(ws, tick) { mutableStateOf(false) }
+    var error by remember(ws, tick) { mutableStateOf("") }
+    var note by remember(ws, tick) { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
 
-    LaunchedEffect(ws) {
-        if (locator.isBlank()) locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
-    }
-
-    fun go() {
-        val loc = locator.trim()
-        if (loc.isBlank() || ws.isBlank()) return
-        scope.launch {
-            loading = true; error = ""; ran = true
-            val rs = withContext(Dispatchers.IO) {
-                runCatching {
-                    val eng = EngineProvider.get(context)
-                    // aac：分析函数调用交叉引用。仅靠 aa 时 axt/axf 往往为空。
-                    val axt = eng.rzCommand(ws, "", "aac; s $loc; axtj")
-                    val axf = eng.rzCommand(ws, "", "aac; s $loc; axfj")
-                    parseRzArray(axt) to parseRzArray(axf)
-                }.getOrElse { (null as List<JSONObject>?) to (null as List<JSONObject>?) }
-            }
-            loading = false
-            val (a, b) = rs
-            if (a == null && b == null) error = if (zh) "定位失败：请检查符号名或地址（支持 0x… / 函数名）" else "failed to locate symbol/address"
-            inRefs = a ?: emptyList()
-            outRefs = b ?: emptyList()
+    LaunchedEffect(ws, tick) {
+        if (ws.isBlank()) return@LaunchedEffect
+        loading = true; error = ""; note = ""
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
+                val eng = EngineProvider.get(context)
+                var raw = ""
+                var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
+                // rizin 0.9.x：图命令 agC/agf 是「格式参数」型（须 `agC json`），j 后缀模式会失败。
+                for (c in listOf("agC json", "aac; agC json", "agc json", "agCj")) {
+                    raw = rzText(eng.rzCommand(ws, "", c))
+                    g = parseRizinGraph(raw)
+                    if (g.first.isNotEmpty()) break
+                }
+                if (g.first.isEmpty()) {
+                    val legacy = rzArrayText(raw)
+                    if (legacy.isNotEmpty()) g = parseCallGraph(legacy)
+                }
+                if (g.first.isNotEmpty()) Triple(g.first, g.second, "")
+                else {
+                    val fns = rzArray(eng.rzCommand(ws, "", "aflj"))
+                    Triple(fns, emptyList(), if (fns.isEmpty())
+                        (if (zh) "rizin 未返回调用图，也无法列出函数" else "no call graph / functions")
+                        else (if (zh) "未取得全局调用图，已降级为函数清单" else "no global call graph; fell back to function list"))
+                }
+            }.getOrNull()
         }
+        loading = false
+        if (res == null) { error = if (zh) "引擎未就绪或命令失败" else "engine/command failed"; return@LaunchedEffect }
+        val (n, e, nt) = res
+        nodes = n; edges = e; note = nt
     }
 
     if (ws.isBlank()) return NeedWorkspace(zh)
 
+    val names = remember(nodes) {
+        nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }.filter { it.isNotBlank() }
+    }
+    val inCnt = remember(edges) { edges.groupingBy { it.second }.eachCount() }
+    val entryCount = remember(names, inCnt) { names.count { (inCnt[it] ?: 0) == 0 } }
+
     Column(Modifier.fillMaxSize()) {
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "分析" else "Analyze", loading = loading, enabled = locator.isNotBlank(), onClick = { go() })
-            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank() || tools.selectedFunctionName.isNotBlank()) {
-                locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
-            }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
-            SmallAction(if (zh) "导出 CSV" else "CSV", enabled = inRefs.isNotEmpty() || outRefs.isNotEmpty()) {
-                val sb = StringBuilder("dir,from,to,type,opcode\n")
-                inRefs.forEach { sb.append("in,").append(it.optString("from")).append(',').append(locator.trim()).append(',').append(it.optString("type")).append(',').append(it.optString("opcode")).append('\n') }
-                outRefs.forEach { sb.append("out,").append(locator.trim()).append(',').append(it.optString("to")).append(',').append(it.optString("type")).append(',').append(it.optString("opcode")).append('\n') }
-                copyToClipboard(context, sb.toString().trimEnd(), zh)
-            }
-            Text(
-                if (zh) "入 ${inRefs.size} · 出 ${outRefs.size}" else "in ${inRefs.size} · out ${outRefs.size}",
-                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.size(6.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // 头部：搜索行（对齐 Explorer So 调用图：搜索框 + 重置）
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             OutlinedTextField(
-                value = locator, onValueChange = { locator = it }, singleLine = true,
+                value = query, onValueChange = { query = it }, singleLine = true,
                 modifier = Modifier.weight(1f).heightIn(min = 46.dp),
                 shape = RoundedCornerShape(AppShape.sm),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                label = { Text(if (zh) "函数名 / 地址" else "symbol / addr", fontSize = AppText.label) },
-                placeholder = { Text("JNI_OnLoad 或 0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
+                placeholder = { Text(if (zh) "搜索函数名 / 地址…" else "search fn / addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            )
+            if (query.isNotBlank()) SmallAction(if (zh) "重置" else "Reset") { query = "" }
+            SmallAction(if (zh) "重析" else "Re-run", loading = loading, onClick = onRefresh)
+        }
+        if (nodes.isNotEmpty()) {
+            Spacer(Modifier.size(4.dp))
+            MonoLine(
+                if (zh) "函数 ${nodes.size} 个 · 调用边 ${edges.size} 条 · 入口 $entryCount 个"
+                else "${nodes.size} fns · ${edges.size} edges · $entryCount entries",
+                cs.onSurfaceVariant, AppText.label,
             )
         }
-        Spacer(Modifier.size(8.dp))
-        when {
-            loading -> AnalysisLoading()
-            error.isNotBlank() -> AnalysisErrorBanner(error)
-            !ran -> AnalysisEmptyState(
-                title = if (zh) "交叉引用" else "Cross references",
-                hint = if (zh) "输入函数名或地址后点「分析」，得到该位置的入引用（谁调用/引用它）与出引用（它引用了谁）。"
-                    else "Enter a symbol or address, then Analyze, to list incoming and outgoing references.",
-                primaryLabel = if (zh) "取当前函数" else "Current fn",
-                onPrimary = { locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }; go() },
-            )
-            inRefs.isEmpty() && outRefs.isEmpty() -> AnalysisEmptyState(
-                title = if (zh) "无交叉引用" else "No references",
-                hint = if (zh) "该位置没有显式引用记录（可能是叶子函数，或未被 rizin 分析到）。"
-                    else "No references recorded here (leaf, or not analyzed by rizin).",
-            )
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                RefBlock(if (zh) "入引用（谁引用它）" else "Incoming", inRefs, "from", cs.primary, zh, context)
-                RefBlock(if (zh) "出引用（它引用谁）" else "Outgoing", outRefs, "to", cs.tertiary, zh, context)
+        if (note.isNotBlank()) { Spacer(Modifier.size(2.dp)); MonoLine(note, cs.onSurfaceVariant, AppText.label) }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                loading && nodes.isEmpty() -> AnalysisLoading()
+                error.isNotBlank() -> AnalysisErrorBanner(error)
+                nodes.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无调用图数据" else "No call graph",
+                    hint = if (zh) "rizin 未返回全局调用图。可先跑一次全量分析（aaaa）。" else "rizin returned no call graph. Run full analysis first.",
+                    primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+                )
+                else -> CallGraphGraphPane(nodes, edges, query, zh)
             }
         }
     }
@@ -7010,8 +7013,17 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
                         }
                         return null
                     }
+                    fun tryPx(cmds: List<String>): List<JSONObject>? {
+                        for (cand in cands) for (c in cmds) {
+                            val bytes = parsePxBytes(eng.rzCommand(ws, "", "s $cand; $c"))
+                            if (!bytes.isNullOrEmpty()) return hexRows(addrOf(cand), bytes)
+                        }
+                        return null
+                    }
+                    // rizin 的 pxj 输出的是「字节数值数组」([127,69,76,70,...])，不是对象数组，
+                    // 旧代码用 parseRzArray 解析恒为空 -> 误报“地址无法解析”。改为按字节数组解析后自绘行。
                     val l = if (mode == "code") tryArr(listOf("pdj 64", "pdj"))
-                            else tryArr(listOf("pxj 256", "pxj"))
+                            else tryPx(listOf("pxj 256", "pxj 128", "pxj"))
                     val sec = eng.rzCommand(ws, "", "iSj")
                     l to sectionOf(sec, a)
                 }.getOrElse { (null as List<JSONObject>?) to "" }
@@ -7100,6 +7112,54 @@ private fun sectionOf(res: JSONObject?, addr: String): String {
         }
     }
     return ""
+}
+
+/** rizin `pxj` 输出字节数值数组（[127,69,76,70]）；归一化为字节序列，失败返回 null。 */
+private fun parsePxBytes(res: JSONObject?): List<Int>? {
+    if (res == null) return null
+    val out = res.optString("stdout").ifBlank { res.optString("text") }.trim()
+    if (out.isBlank()) return null
+    val arr = runCatching { JSONArray(out) }.getOrNull() ?: return null
+    if (arr.length() == 0) return null
+    val bytes = ArrayList<Int>(arr.length())
+    for (i in 0 until arr.length()) {
+        val v = arr.optInt(i, -1)
+        if (v < 0) return null
+        bytes.add(v and 0xff)
+    }
+    return bytes
+}
+
+/** 字节序列 -> 16 字节/行 hexdump 行（offset / bytes / ascii）。 */
+private fun hexRows(base: Long, bytes: List<Int>): List<JSONObject> {
+    val rows = ArrayList<JSONObject>()
+    var i = 0
+    while (i < bytes.size) {
+        val n = minOf(16, bytes.size - i)
+        val hex = StringBuilder()
+        val ascii = StringBuilder()
+        for (j in 0 until n) {
+            val b = bytes[i + j]
+            hex.append("%02x".format(b))
+            if (j < n - 1) hex.append(' ')
+            ascii.append(if (b in 32..126) b.toChar() else '.')
+        }
+        rows.add(
+            JSONObject()
+                .put("offset", "0x" + java.lang.Long.toHexString(base + i))
+                .put("bytes", hex.toString())
+                .put("ascii", ascii.toString()),
+        )
+        i += 16
+    }
+    return rows
+}
+
+/** 按 rizin 的数值解释把输入解析为地址（0x 前缀=十六进制，否则十进制，回退十六进制）。 */
+private fun addrOf(s: String): Long {
+    val t = s.trim()
+    if (t.startsWith("0x", true)) return parseHex64(t) ?: 0L
+    return t.toLongOrNull() ?: (parseHex64(t) ?: 0L)
 }
 
 private fun parseHex64(s: String): Long? {
@@ -7677,7 +7737,7 @@ private fun hexAddr(v: Any?): String {
 // ───────────────────────── 全局调用图 ─────────────────────────
 
 @Composable
-private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
     val ws = tools.sharedWorkspaceId
     val tick = tools.reloadTick
     val cs = MaterialTheme.colorScheme
@@ -7688,7 +7748,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var note by remember(ws, tick) { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var xTab by remember { mutableStateOf("overview") }
-    var ovView by remember { mutableStateOf("graph") }
+    var ovView by remember { mutableStateOf("list") }
     var drillRoot by remember { mutableStateOf("JNI_OnLoad") }
     var drillDepth by remember { mutableStateOf("3") }
     var drillMax by remember { mutableStateOf("120") }
@@ -7760,7 +7820,6 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
             listOf(
                 "overview" to (if (zh) "入口概览" else "Overview"),
                 "drill" to (if (zh) "根下钻" else "Root drill"),
-                "ego" to (if (zh) "邻域" else "Neighborhood"),
                 "scc" to (if (zh) "SCC 鸟瞰" else "SCC"),
                 "export" to (if (zh) "导出" else "Export"),
             ).forEach { (k, l) -> TabChip(l, selected = xTab == k) { xTab = k } }

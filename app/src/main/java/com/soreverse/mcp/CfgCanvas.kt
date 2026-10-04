@@ -1326,13 +1326,13 @@ private fun DrawScope.drawCfgMinimap(
 @Composable
 private fun NodeListOverlay(
     modifier: Modifier = Modifier,
-    layout: CfgLayoutResult,
+    graph: CfgGraph,
     zh: Boolean,
     colors: androidx.compose.material3.ColorScheme,
     onPick: (Int) -> Unit,
 ) {
     var q by remember { mutableStateOf("") }
-    val all = remember(layout) { layout.boxes.filter { !it.isDummy } }
+    val all = remember(graph) { graph.blocks }
     val rows = remember(all, q) {
         if (q.isBlank()) all else all.filter { it.addrText.contains(q, true) || it.summary.contains(q, true) }
     }
@@ -1736,7 +1736,7 @@ internal fun CfgCanvas(
             if (showNodeList) {
                 NodeListOverlay(
                     modifier = Modifier.align(Alignment.Center).padding(10.dp).fillMaxWidth(0.94f).fillMaxHeight(0.82f),
-                    layout = effective, zh = zh, colors = colors,
+                    graph = graph, zh = zh, colors = colors,
                 ) { pick -> selected = pick; showNodeList = false }
             }
 

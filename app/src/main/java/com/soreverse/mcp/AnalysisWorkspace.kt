@@ -7089,6 +7089,12 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
             lines = l ?: emptyList()
             info = s
         }
+        fun step(d: Int) {
+            val cur = addrOf(addr.trim())
+            val page = if (mode == "code") 0x200L else 0x100L
+            val nx = cur + d * page
+            if (nx >= 0) { addr = "0x" + java.lang.Long.toHexString(nx); load() }
+        }
     }
 
     if (ws.isBlank()) return NeedWorkspace(zh)
@@ -7097,8 +7103,7 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             SmallAction(if (zh) "代码模式" else "Code", active = mode == "code") { mode = "code"; load() }
             SmallAction(if (zh) "数据模式" else "Data", active = mode == "data") { mode = "data"; load() }
-            SmallAction(if (zh) "前往" else "Go", loading = loading, enabled = addr.isNotBlank(), onClick = { load() })
-            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank()) { addr = tools.selectedFunctionVa }
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank()) { addr = tools.selectedFunctionVa; load() }
             SmallAction(if (zh) "复制" else "Copy", enabled = lines.isNotEmpty()) {
                 val sb = StringBuilder()
                 lines.forEach { o -> sb.append(if (mode == "code") "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("disasm")}" else "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("ascii")}").append('\n') }
@@ -7106,45 +7111,51 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
             }
             SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
         }
-        Spacer(Modifier.size(6.dp))
-        OutlinedTextField(
-            value = addr, onValueChange = { addr = it }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-            shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-            label = { Text(if (zh) "前往地址（0x… 虚拟地址）" else "go to address", fontSize = AppText.label) },
-            placeholder = { Text("0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
-        )
         if (info.isNotBlank()) {
             Spacer(Modifier.size(6.dp))
             MonoLine(info, cs.primary, AppText.label)
         }
-        Spacer(Modifier.size(8.dp))
-        when {
-            loading -> AnalysisLoading()
-            error.isNotBlank() -> AnalysisErrorBanner(error)
-            lines.isEmpty() -> AnalysisEmptyState(
-                title = if (zh) "地址查看器" else "Address viewer",
-                hint = if (zh) "输入虚拟地址，用「代码模式」看反汇编、用「数据模式」看 hex+ASCII；上方显示所在节区与地址范围。"
-                    else "Enter a VA: Code mode disassembles, Data mode shows hex+ASCII; the section is shown above.",
-                primaryLabel = if (zh) "取当前函数" else "Current fn", onPrimary = { addr = tools.selectedFunctionVa; load() },
-            )
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                lines.forEach { o ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                        MonoLine(o.optString("offset"), cs.primary, AppText.label)
-                        if (mode == "code") {
-                            MonoLine(o.optString("bytes"), cs.onSurfaceVariant, AppText.label)
-                            Text(o.optString("disasm"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                fontSize = AppText.body, color = cs.onSurface, modifier = Modifier.weight(1f), lineHeight = 16.sp)
-                        } else {
-                            Text(o.optString("bytes"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                fontSize = AppText.body, color = cs.onSurface, modifier = Modifier.weight(1f), lineHeight = 16.sp)
-                            MonoLine(o.optString("ascii"), cs.onSurfaceVariant, AppText.body)
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                loading -> AnalysisLoading()
+                error.isNotBlank() -> AnalysisErrorBanner(error)
+                lines.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "地址查看器" else "Address viewer",
+                    hint = if (zh) "输入虚拟地址，用「代码模式」看反汇编、用「数据模式」看 hex+ASCII；上方显示所在节区与地址范围。"
+                        else "Enter a VA: Code mode disassembles, Data mode shows hex+ASCII; the section is shown above.",
+                    primaryLabel = if (zh) "取当前函数" else "Current fn", onPrimary = { addr = tools.selectedFunctionVa; load() },
+                )
+                else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    lines.forEach { o ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                            MonoLine(o.optString("offset"), cs.primary, AppText.label)
+                            if (mode == "code") {
+                                MonoLine(o.optString("bytes"), cs.onSurfaceVariant, AppText.label)
+                                Text(o.optString("disasm"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    fontSize = AppText.body, color = cs.onSurface, modifier = Modifier.weight(1f), lineHeight = 16.sp)
+                            } else {
+                                Text(o.optString("bytes"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    fontSize = AppText.body, color = cs.onSurface, modifier = Modifier.weight(1f), lineHeight = 16.sp)
+                                MonoLine(o.optString("ascii"), cs.onSurfaceVariant, AppText.body)
+                            }
                         }
                     }
                 }
             }
+        }
+        // 底部地址栏（对齐 Explorer So 地址查看器：← 地址 前往 →）
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction("←") { step(-1) }
+            OutlinedTextField(
+                value = addr, onValueChange = { addr = it }, singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                placeholder = { Text(if (zh) "前往地址（0x… 虚地址）" else "go to address", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
+            )
+            SmallAction(if (zh) "前往" else "Go", loading = loading, enabled = addr.isNotBlank()) { load() }
+            SmallAction("→") { step(1) }
         }
     }
 }

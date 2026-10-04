@@ -3164,7 +3164,7 @@ private fun FunctionsView(
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
             placeholder = {
                 Text(
-                    if (zh) "按函数名 / 地址过滤" else "filter by name / address",
+                    if (zh) "搜索函数（按名称 / 地址）" else "search functions (name / addr)",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
                     color = cs.onSurfaceVariant,
                 )
@@ -6763,7 +6763,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
             shape = RoundedCornerShape(AppShape.sm),
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-            placeholder = { Text(if (zh) "过滤类名 / 虚表地址" else "filter class / vtable addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            placeholder = { Text(if (zh) "搜索虚表（按类名 / 地址）" else "search vtables (class / addr)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         )
         Spacer(Modifier.size(8.dp))
         when {
@@ -7307,7 +7307,7 @@ private fun JniRegView(tools: ToolPagesState, zh: Boolean, context: android.cont
             shape = RoundedCornerShape(AppShape.sm),
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-            placeholder = { Text(if (zh) "过滤 Java 方法名 / 签名" else "filter method / signature", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            placeholder = { Text(if (zh) "搜索 JNI 方法（按名称 / 签名）" else "search JNI methods (name / sig)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         )
         Spacer(Modifier.size(8.dp))
         when {
@@ -7435,6 +7435,49 @@ private fun shannonEntropy(bytes: ByteArray): Double {
     return h
 }
 
+/** 加固结论（对标 Exbin HardeningReport.severityLabel）。 */
+private fun hardVerdict(findings: List<HardFinding>, entropy: Double, zh: Boolean): String {
+    val sev = when {
+        findings.any { it.severity == "high" } || entropy >= 7.0 -> 3
+        findings.any { it.severity == "medium" } -> 2
+        findings.any { it.severity == "low" } -> 1
+        else -> 0
+    }
+    return when (sev) {
+        3 -> if (zh) "疑似强加固" else "likely heavy hardening"
+        2 -> if (zh) "疑似混淆 / 加壳" else "likely obfuscated / packed"
+        1 -> if (zh) "存在异常" else "anomalies found"
+        else -> if (zh) "未见明显加固" else "no obvious hardening"
+    }
+}
+
+/** 结构完整性评分 100=未被破坏（对标 Exbin HardeningReport.integrityScore）。 */
+private fun hardIntegrity(findings: List<HardFinding>, entropy: Double): Int {
+    var score = 100
+    findings.forEach { score -= when (it.severity) { "high" -> 22; "medium" -> 10; "low" -> 4; else -> 0 } }
+    if (entropy >= 7.0) score -= 25
+    return score.coerceIn(0, 100)
+}
+
+/** 推荐处理流程（对标 Exbin HardeningAnalyzer.buildRecommendations）。 */
+private fun hardSteps(packed: Boolean, zh: Boolean): List<String> = when {
+    !packed -> listOf(if (zh) "当前未发现强加固特征，可直接进行静态反编译。" else "No heavy hardening; static decompilation is fine.")
+    zh -> listOf(
+        "1) 内存 Dump：root 后用 Frida 脚本枚举模块并 dump 解密后的内存镜像。",
+        "2) 修复 ELF：用 SoFixer / ELF 重建工具恢复被抹除的 Section Headers、.dynsym、.dynstr、.rela.dyn。",
+        "3) 反混淆：对高跳转密度函数做控制流平坦化还原（不透明谓词 + 调度器状态机重建）。",
+        "4) 动态辅助：对无法静态还原的函数，用 Unidbg / Frida Stalker 记录实时执行路径。",
+        "5) 人工复核：VMP 字节码语义还原需结合 Handler 映射，建议标记为需人工介入。",
+    )
+    else -> listOf(
+        "1) Memory dump: use a Frida script to dump the decrypted image.",
+        "2) Repair ELF (SoFixer): rebuild section headers, .dynsym, .dynstr, .rela.dyn.",
+        "3) De-obfuscate control-flow flattening on high-branch-density functions.",
+        "4) Dynamic assist (Unidbg / Frida Stalker) for un-recoverable functions.",
+        "5) Manual review for VMP bytecode (needs handler mapping).",
+    )
+}
+
 @Composable
 private fun HardeningView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
     val ws = tools.sharedWorkspaceId
@@ -7493,11 +7536,27 @@ private fun HardeningView(tools: ToolPagesState, zh: Boolean, context: android.c
             loading -> AnalysisLoading()
             error.isNotBlank() -> AnalysisErrorBanner(error)
             else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val packed = findings.any { it.severity == "high" } || entropy >= 7.0
+                val vendor = findings.firstOrNull { it.category == "加固壳" }?.title
                 KeyValueCard(zh, listOf(
+                    (if (zh) "结论" else "verdict") to hardVerdict(findings, entropy, zh),
+                    (if (zh) "结构完整性" else "integrity") to "${hardIntegrity(findings, entropy)}/100",
                     (if (zh) "字符串数" else "strings") to "$textCount",
                     (if (zh) "命中项" else "findings") to "${findings.size}",
+                    (if (zh) "需内存 Dump" else "needs dump") to (if (packed) (if (zh) "是" else "yes") else (if (zh) "否" else "no")),
                     ("\u200b.text 熵") to if (entropy < 0) "—" else "%.3f / 8.0".format(entropy),
-                ))
+                ) + (if (vendor != null) listOf((if (zh) "命中厂商" else "vendor") to vendor) else emptyList()))
+                Column(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(if (zh) "推荐处理流程" else "Recommended steps", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+                    hardSteps(packed, zh).forEach { MonoLine(it, cs.onSurface, AppText.label) }
+                }
                 if (entropy >= 7.0) {
                     AnalysisErrorBanner(if (zh) "代码段熵值异常偏高（%.2f，接近 8.0），高度疑似加密或压缩——磁盘静态数据可能不是真实指令，通常需要内存 Dump。" else "Very high .text entropy — likely encrypted/compressed; memory dump may be required.")
                 }
@@ -8544,7 +8603,7 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
             shape = RoundedCornerShape(AppShape.sm),
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-            placeholder = { Text(if (zh) "过滤类型 / 值 / 地址 / 目标" else "filter type / value / addr / target", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            placeholder = { Text(if (zh) "搜索数据项（按类型 / 值 / 地址 / 目标）" else "search data (type / value / addr / target)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         )
         Spacer(Modifier.size(8.dp))
         when {
@@ -8717,6 +8776,16 @@ private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.co
             label = { Text(if (zh) "函数名 / 地址" else "symbol / addr", fontSize = AppText.label) },
             placeholder = { Text("JNI_OnLoad 或 0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
         )
+        Spacer(Modifier.size(6.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (zh) "跳转" else "Jump", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            listOf(
+                "disasm" to (if (zh) "汇编" else "Asm"),
+                "cfg" to (if (zh) "控制流" else "CFG"),
+                "pseudo" to (if (zh) "伪 C" else "PseudoC"),
+                "xrefs" to (if (zh) "交叉引用" else "XRef"),
+            ).forEach { (k, l) -> TabChip(l, selected = false) { tools.analysisView = k } }
+        }
         Spacer(Modifier.size(8.dp))
         when {
             loading -> AnalysisLoading()
@@ -8871,7 +8940,7 @@ private fun CommentsView(tools: ToolPagesState, zh: Boolean, context: android.co
             shape = RoundedCornerShape(AppShape.sm),
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-            placeholder = { Text(if (zh) "过滤目标 / 内容" else "filter", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            placeholder = { Text(if (zh) "搜索注释（按目标 / 内容）" else "search comments (target / text)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         )
         Spacer(Modifier.size(8.dp))
         when {

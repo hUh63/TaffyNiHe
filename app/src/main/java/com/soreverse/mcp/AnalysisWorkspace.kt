@@ -4075,37 +4075,48 @@ private fun AnalysisCardList(
     ) {
         items(rows, key = { r -> r.key }) { row ->
             val selected = selectedTitle.isNotBlank() && row.title == selectedTitle
-            val shape = RoundedCornerShape(AppShape.md)
-            Row(
+            val shape = RoundedCornerShape(10.dp)
+            Column(
                 Modifier.fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
                     .clip(shape)
-                    .background(if (selected) cs.primary.copy(alpha = 0.12f) else cs.surfaceContainerHigh)
-                    .border(BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.5f) else cs.outlineVariant), shape)
+                    .background(if (selected) cs.primaryContainer else cs.surfaceVariant)
                     .clickable { onPick(row) }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(12.dp),
             ) {
-                Icon(icon, null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                Column(Modifier.weight(1f)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         row.title.ifBlank { "--" },
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selected) cs.primary else cs.onSurface,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selected) cs.onPrimaryContainer else cs.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
-                    val meta = listOf(row.va, row.meta).filter { it.isNotBlank() }.joinToString(" · ")
-                    if (meta.isNotBlank()) {
+                    if (row.va.isNotBlank()) {
                         Text(
-                            meta,
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                            color = cs.onSurfaceVariant,
+                            row.va,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = AppText.label),
+                            color = cs.onPrimaryContainer,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .padding(start = 6.dp)
+                                .clip(RoundedCornerShape(AppShape.xs))
+                                .background(cs.primaryContainer)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
+                }
+                if (row.meta.isNotBlank()) {
+                    Text(
+                        row.meta,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
                 }
             }
         }
@@ -4185,6 +4196,13 @@ private fun ListScaffold(
             shape = RoundedCornerShape(AppShape.sm),
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
             placeholder = {
                 Text(
                     analysisListHint(view, zh),
@@ -5104,6 +5122,13 @@ private fun RzViewScaffold(
             shape = RoundedCornerShape(AppShape.sm),
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
             placeholder = {
                 Text(
                     analysisListHint(view, zh),

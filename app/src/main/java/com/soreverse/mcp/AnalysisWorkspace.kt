@@ -4083,7 +4083,6 @@ private fun AnalysisCardList(
 }
 
 /** 列表视图通用外壳（取数 + 状态分支 + 卡片列表）。 */
-@Composable
 /** Explorer So 式列表页：视图显示名（统计行用）。 */
 private fun analysisListTitle(view: String, zh: Boolean): String = when (view) {
     "functions" -> if (zh) "函数" else "Functions"
@@ -4120,6 +4119,7 @@ private fun analysisListHint(view: String, zh: Boolean): String = when (view) {
     else -> if (zh) "搜索" else "Search"
 }
 
+@Composable
 private fun ListScaffold(
     tools: ToolPagesState,
     zh: Boolean,

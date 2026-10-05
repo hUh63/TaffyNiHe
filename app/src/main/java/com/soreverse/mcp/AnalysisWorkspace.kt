@@ -3387,6 +3387,13 @@ private fun SearchView(
                     overflow = TextOverflow.Ellipsis,
                 )
             },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { tools.searchQuery = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
         )
         Spacer(Modifier.size(6.dp))
         FlowRow(
@@ -3430,74 +3437,14 @@ private fun SearchView(
                         hint = if (zh) "换个关键字或切换范围" else "Try another keyword or scope",
                     )
                 }
-                else -> Column(
-                    Modifier.fillMaxSize()
-                        .clip(RoundedCornerShape(AppShape.md))
-                        .background(cs.surfaceContainerHigh)
-                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (zh) "地址" else "ADDR",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = AppText.label,
-                            color = cs.onSurfaceVariant,
-                            modifier = Modifier.width(90.dp),
-                        )
-                        Text(
-                            secondCol,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = AppText.label,
-                            color = cs.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    GroupDivider()
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-                        items(rows, key = { r -> r.key }) { row ->
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .clickable {
-                                        if (scope == "functions") onSelect(row.title, row.va)
-                                        else copyToClipboard(context, row.text.ifBlank { row.title }, zh)
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    row.va.ifBlank { "--" },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = cs.onSurfaceVariant,
-                                    maxLines = 1,
-                                    modifier = Modifier.width(90.dp),
-                                )
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        row.text.ifBlank { row.title },
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                                        color = cs.onSurface,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (row.meta.isNotBlank()) {
-                                        Text(
-                                            row.meta,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontSize = AppText.label,
-                                            color = cs.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                            }
-                            GroupDivider()
-                        }
-                    }
-                }
+                else -> AnalysisCardList(
+                    rows = remember(rows) { rows.map { r -> if (r.title.isBlank()) r.copy(title = r.text) else r } },
+                    icon = analysisViewIcon(scope),
+                    onPick = { row ->
+                        if (scope == "functions") onSelect(row.title, row.va)
+                        else copyToClipboard(context, row.text.ifBlank { row.title }, zh)
+                    },
+                )
             }
         }
     }
@@ -6819,6 +6766,13 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
             placeholder = { Text(if (zh) "搜索虚表（按类名 / 地址）" else "search vtables (class / addr)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
         )
         Spacer(Modifier.size(8.dp))
         when {
@@ -8903,14 +8857,27 @@ private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.co
             placeholder = { Text("JNI_OnLoad 或 0x1234", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
         )
         Spacer(Modifier.size(6.dp))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (zh) "跳转" else "Jump", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+        // 函数详情页签（对齐 Explorer So FuncDetailActivity：汇编 / 控制流 / 伪C / 交叉引用）
+        ScrollableTabRow(
+            selectedTabIndex = 0,
+            edgePadding = 8.dp,
+            containerColor = cs.surface,
+            contentColor = cs.primary,
+            divider = {},
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             listOf(
                 "disasm" to (if (zh) "汇编" else "Asm"),
                 "cfg" to (if (zh) "控制流" else "CFG"),
                 "pseudo" to (if (zh) "伪 C" else "PseudoC"),
                 "xrefs" to (if (zh) "交叉引用" else "XRef"),
-            ).forEach { (k, l) -> TabChip(l, selected = false) { tools.analysisView = k } }
+            ).forEach { (k, l) ->
+                Tab(
+                    selected = false,
+                    onClick = { tools.analysisView = k },
+                    text = { Text(l, fontSize = AppText.bodyStrong, color = cs.onSurfaceVariant, maxLines = 1) },
+                )
+            }
         }
         Spacer(Modifier.size(8.dp))
         when {

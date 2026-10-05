@@ -3538,6 +3538,33 @@ private fun DisasmView(
     val hs = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
+        // 函数头（对齐 Explorer So 函数详情：函数名 + 地址 · 指令数）
+        if (target.isNotBlank()) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    tools.selectedFunctionName.ifBlank { target },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (addr.isNotBlank()) {
+                    Text(
+                        "$addr · $count insns",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        fontSize = AppText.label,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -3731,6 +3758,37 @@ private fun PseudoView(
     val vs = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
+        // 函数头（对齐 Explorer So 函数详情：函数名 + 范围）
+        if (target.isNotBlank()) {
+            val hRange = bounds?.let { b ->
+                val st = b.optString("startAddr"); val en = b.optString("endAddr")
+                if (st.isNotBlank()) "$st-$en" else ""
+            }.orEmpty()
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    tools.selectedFunctionName.ifBlank { target },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (hRange.isNotBlank()) {
+                    Text(
+                        hRange,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        fontSize = AppText.label,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),

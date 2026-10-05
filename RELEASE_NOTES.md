@@ -1,3 +1,15 @@
+# TaffyNiHe v1.3.75（分析页对齐 Explorer So · 第三批）
+
+继续按 Explorer So 逐个对齐。
+
+## 🧩 本次
+- **数据页**：`常量 / 全局变量` 分级改为 Explorer So `DataTabFragment` 式**子页签**，结果表改为 `item_detail` 卡片列表，过滤框加清除与计数行。
+- **注释页 / C++ 还原**：输入框加清除按钮，统一视觉与交互。
+
+> 累计：框架（顶部可滚动 TabLayout）、列表页（`item_detail`）、搜索、地址查看器（底部地址栏）、函数详情（4 页签 + 函数头）、调用图（GlobalCfg）、交叉引用（GlobalXRef）、数据页（子页签 + 卡片）、JNI（卡片）、加固/脱壳（Report/DumpStrategy）均已按 Explorer So 重排。
+
+---
+
 # TaffyNiHe v1.3.74（分析页对齐 Explorer So · 第二批）
 
 继续按 Explorer So 逐个对齐分析页。
@@ -140,6 +152,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

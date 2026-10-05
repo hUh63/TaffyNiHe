@@ -7447,6 +7447,13 @@ private fun JniRegView(tools: ToolPagesState, zh: Boolean, context: android.cont
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
             placeholder = { Text(if (zh) "搜索 JNI 方法（按名称 / 签名）" else "search JNI methods (name / sig)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
         )
         Spacer(Modifier.size(8.dp))
         when {
@@ -7457,34 +7464,24 @@ private fun JniRegView(tools: ToolPagesState, zh: Boolean, context: android.cont
                 hint = if (zh) "未在字符串中扫到 JNI 方法描述符（形如 (Landroid/…;)V）。可能是静态注册（Java_xxx 符号）或已加密。"
                     else "No JNI descriptors found in strings — may be statically registered or encrypted.",
             )
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            else -> Column(Modifier.fillMaxSize()) {
                 MonoLine(if (zh) "${shown.size} / ${pairs.size} 条配对" else "${shown.size} / ${pairs.size} pairs", cs.onSurfaceVariant, AppText.label)
-                Column(
-                    Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(AppShape.md))
-                        .background(cs.surfaceContainerHigh)
-                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    shown.take(600).forEach { p ->
-                        Column(Modifier.fillMaxWidth().clickable {
-                            copyToClipboard(context, p.optString("javaName") + " " + p.optString("signature"), zh)
-                        }, verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(p.optString("javaName").ifBlank { "(未命名)" },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                    fontSize = AppText.bodyStrong, color = cs.onSurface, modifier = Modifier.weight(1f),
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                MonoLine(p.optString("sigAddr"), cs.primary, AppText.label)
-                                TypeBadge(p.optString("confidence").ifBlank { "?" },
-                                    if (p.optString("confidence") == "medium") cs.primary else cs.onSurfaceVariant)
-                            }
-                            MonoLine(p.optString("signature"), cs.onSurfaceVariant, AppText.label)
+                Spacer(Modifier.size(6.dp))
+                AnalysisCardList(
+                    rows = remember(shown) {
+                        shown.take(600).map { p ->
+                            AnalysisRow(
+                                key = p.optString("javaName") + "|" + p.optString("sigAddr"),
+                                title = p.optString("javaName").ifBlank { "(未命名)" },
+                                meta = p.optString("signature"),
+                                va = p.optString("sigAddr"),
+                                text = p.optString("javaName") + " " + p.optString("signature"),
+                            )
                         }
-                    }
-                    if (shown.size > 600) MonoLine(if (zh) "… 仅显示前 600 条" else "… first 600", cs.onSurfaceVariant, AppText.label)
-                }
+                    },
+                    icon = Icons.Filled.DataObject,
+                    onPick = { row -> copyToClipboard(context, row.text, zh) },
+                )
             }
         }
     }

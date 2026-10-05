@@ -4561,6 +4561,13 @@ private fun DemangleView(zh: Boolean, context: android.content.Context) {
                     overflow = TextOverflow.Ellipsis,
                 )
             },
+            trailingIcon = {
+                if (input.isNotBlank()) {
+                    IconButton(onClick = { input = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
         )
         Spacer(Modifier.size(6.dp))
         FlowRow(
@@ -9103,6 +9110,13 @@ private fun CommentsView(tools: ToolPagesState, zh: Boolean, context: android.co
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
             placeholder = { Text(if (zh) "搜索注释（按目标 / 内容）" else "search comments (target / text)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            trailingIcon = {
+                if (filter.isNotBlank()) {
+                    IconButton(onClick = { filter = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
         )
         Spacer(Modifier.size(8.dp))
         when {

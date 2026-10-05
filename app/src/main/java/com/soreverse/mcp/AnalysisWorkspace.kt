@@ -8717,10 +8717,28 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
     }
 
     Column(Modifier.fillMaxSize()) {
+        ScrollableTabRow(
+            selectedTabIndex = listOf("all", "constants", "globals").indexOf(action).coerceAtLeast(0),
+            edgePadding = 8.dp,
+            containerColor = cs.surface,
+            contentColor = cs.primary,
+            divider = {},
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            listOf(
+                "all" to (if (zh) "全部" else "All"),
+                "constants" to (if (zh) "常量" else "Constants"),
+                "globals" to (if (zh) "全局变量" else "Globals"),
+            ).forEach { (k, l) ->
+                Tab(
+                    selected = action == k,
+                    onClick = { action = k },
+                    text = { Text(l, fontSize = AppText.bodyStrong, color = if (action == k) cs.primary else cs.onSurfaceVariant, maxLines = 1) },
+                )
+            }
+        }
+        Spacer(Modifier.size(6.dp))
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "全部" else "All", active = action == "all") { action = "all" }
-            SmallAction(if (zh) "常量" else "Constants", active = action == "constants") { action = "constants" }
-            SmallAction(if (zh) "全局变量" else "Globals", active = action == "globals") { action = "globals" }
             SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
             SmallAction(if (zh) "复制" else "Copy", enabled = shown.isNotEmpty()) {
                 val sb = StringBuilder("addr\toffset\tsize\ttype\tvalue\ttarget\n")
@@ -8729,7 +8747,8 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
                     .append(e.optString("value")).append('\t').append(e.optString("target")).append('\n') }
                 copyToClipboard(context, sb.toString().trimEnd(), zh)
             }
-            byType.forEach { (t, c) -> TypeBadge("$t $c", cs.primary) }
+            Text(if (zh) "${shown.size} / ${entries.size} 项" else "${shown.size} / ${entries.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            byType.take(4).forEach { (t, c) -> TypeBadge("$t $c", cs.primary) }
         }
         Spacer(Modifier.size(6.dp))
         OutlinedTextField(
@@ -8739,6 +8758,13 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
             leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
             placeholder = { Text(if (zh) "搜索数据项（按类型 / 值 / 地址 / 目标）" else "search data (type / value / addr / target)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            trailingIcon = {
+                if (filter.isNotBlank()) {
+                    IconButton(onClick = { filter = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
         )
         Spacer(Modifier.size(8.dp))
         when {
@@ -8750,37 +8776,25 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
                     else "No constants/globals recognized in .rodata/.data/.got. Try another action, or the SO may be stripped/encrypted.",
                 primaryLabel = if (zh) "重新扫描" else "Rescan", onPrimary = onRefresh,
             )
-            else -> Column(
-                Modifier.fillMaxSize()
-                    .clip(RoundedCornerShape(AppShape.md))
-                    .background(cs.surfaceContainerHigh)
-                    .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
-            ) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
-                    listOf(("ADDR" to 84.dp), ("TYPE" to 56.dp), ("VALUE" to 0.dp), ("TARGET" to 0.dp)).forEach { (t, w) ->
-                        Text(t, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
-                            modifier = if (w != 0.dp) Modifier.width(w) else Modifier.weight(1f))
+            else -> AnalysisCardList(
+                rows = remember(shown) {
+                    shown.map { e ->
+                        AnalysisRow(
+                            key = e.optString("addr") + "|" + e.optString("value"),
+                            title = e.optString("value").ifBlank { "--" },
+                            meta = listOf(
+                                e.optString("type"),
+                                e.optString("size").takeIf { it.isNotBlank() }?.let { "size=$it" } ?: "",
+                                e.optString("target").takeIf { it.isNotBlank() }?.let { "-> $it" } ?: "",
+                            ).filter { it.isNotBlank() }.joinToString(" · "),
+                            va = e.optString("addr"),
+                            text = e.optString("value"),
+                        )
                     }
-                }
-                GroupDivider()
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-                    items(shown.size, key = { it }) { idx ->
-                        val e = shown[idx]
-                        Row(Modifier.fillMaxWidth().clickable {
-                            copyToClipboard(context, e.optString("value"), zh)
-                        }.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(e.optString("addr"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                fontSize = AppText.label, color = cs.primary, modifier = Modifier.width(84.dp), maxLines = 1)
-                            Text(e.optString("type"), style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                fontSize = AppText.label, color = cs.tertiary, modifier = Modifier.width(56.dp), maxLines = 1)
-                            Text(e.optString("value"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                fontSize = AppText.label, color = cs.onSurface, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(e.optString("target").ifBlank { "--" }, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
+                },
+                icon = Icons.Filled.Inventory2,
+                onPick = { row -> copyToClipboard(context, row.text, zh) },
+            )
         }
     }
 }

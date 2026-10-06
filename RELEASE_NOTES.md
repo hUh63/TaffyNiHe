@@ -1,3 +1,32 @@
+# TaffyNiHe v1.3.83（调用图匹配定位 + 列表/汇编/伪C/字符串逐项对齐）
+
+继续把 Explorer So 的布局 XML 逐项对到分析页代码里。
+
+## 🧩 本次
+**调用图（`fragment_global_cfg.xml`）**
+- 搜索框右侧补上 **‹ › 上一个 / 下一个匹配** 按钮（44×48，M3 OutlinedButton，iconPadding 0，marginStart 6 / 4）。
+- 匹配定位对齐 Explorer So `runSearch` / `stepMatch`：按**节点名 / 地址**匹配，循环跳转并平移画布聚焦命中节点；无匹配时禁用按钮。
+- 匹配计数对齐 `tvMatch`：`第 k / N 个匹配`（tertiary 色）／无匹配显示「无匹配节点」（error 色）；无关键字时不显示。
+- 去掉调用图外层重复的搜索行与统计行（头部卡已含，避免两个搜索框）。
+
+**列表（`item_detail.xml`）**
+- 去掉列表卡片的**选中高亮**（`item_detail` 无选中态，底色恒为 surfaceVariant）。
+
+**汇编页（`fragment_asm_code_tab.xml`）**
+- 顺序改为 **计数行 → 搜索框 → 分隔线 → 列表**；计数行 padding 12dp / labelSmall。
+- 搜索框 marginH 12 / marginBottom 8、4dp 圆角、56dp 高、16sp。
+- 列表行改为 **monospace 12sp**、行 padding 8dp，去掉圆角卡片与表头（Explorer So 行即三列：地址 | 机器码 | 指令）。
+
+**伪 C 页（`fragment_pseudo_c.xml`）**
+- 新增顶部 **meta 行**（padding 8dp / bg `surfaceVariant` / labelSmall）：转换器 · 行数 · 范围 · 越界 · 类型推断 + **「复制全部」「导出」** 两个 tonal 按钮（12sp，导出 `.c` 到 exports 并分享）。
+- 代码区改为 **行号槽（bg surfaceVariant / monospace 13sp / 右对齐 / padding start12·end8）+ 代码（monospace 13sp / onSurface）**，行距 +2dp，去掉圆角卡片。
+
+**字符串页（`fragment_strings_tab.xml`）**
+- 新增 **过滤按钮行（编码 / 节区 / 长度）**，位于计数行与搜索框之间；按钮点击弹选项，选中后显示「编码: X」并高亮。
+- `AnalysisRow` 增加 编码 / 节区 / 长度 字段，过滤在关键字过滤之后叠加；计数行追加「显示 N」。
+
+---
+
 # TaffyNiHe v1.3.82（逐像素核对 Explorer So 布局）
 
 把 Explorer So 的布局 XML 尺寸逐项对到分析页代码里。
@@ -243,6 +272,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

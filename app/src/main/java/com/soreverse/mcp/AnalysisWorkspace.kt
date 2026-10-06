@@ -24,6 +24,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Build
@@ -100,6 +101,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -2067,11 +2069,11 @@ private fun DisasmLine(line: String) {
                 first && isAlpha -> cs.primary
                 else -> cs.onSurface
             }
-            withStyle(SpanStyle(color = color, fontFamily = FontFamily.Monospace, fontSize = AppText.label, fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal)) { append(tk) }
+            withStyle(SpanStyle(color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal)) { append(tk) }
             if (isAlpha) first = false
         }
         if (comment.isNotEmpty()) {
-            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) { append(comment) }
+            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = 12.sp)) { append(comment) }
         }
     }
     Text(out, style = monoStyle())
@@ -3673,14 +3675,14 @@ private fun disasmInstrAnnotated(instr: String, cs: androidx.compose.material3.C
                 SpanStyle(
                     color = color,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = AppText.label,
+                    fontSize = 12.sp,
                     fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal,
                 ),
             ) { append(tk) }
             if (isAlpha) first = false
         }
         if (comment.isNotEmpty()) {
-            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) { append(comment) }
+            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = 12.sp)) { append(comment) }
         }
     }
 }
@@ -3894,8 +3896,9 @@ private val funcDetailTabs = listOf(
 )
 
 /**
- * 函数详情页（对齐 Explorer So `FuncDetailActivity`）：
- * 顶部函数签名 + 4 页签（汇编 / 控制流 / 伪C / 交叉引用），点函数列表直接进入。
+ * 函数详情页（对齐 Explorer So `FuncDetailActivity` / `activity_func_detail.xml`）：
+ * MaterialToolbar（高 ?attr/actionBarSize + 返回导航 + 等宽标题）+ TabLayout（fixed，指示器/选中色 primary）
+ * + 4 个页签内容（汇编 / 控制流 / 伪C / 交叉引用）。
  */
 @Composable
 private fun FuncDetailView(
@@ -3911,16 +3914,23 @@ private fun FuncDetailView(
     var tab by remember { mutableStateOf("disasm") }
 
     Column(Modifier.fillMaxSize()) {
-        // 函数签名行（Explorer So 详情页顶栏：signature + 地址）
+        // MaterialToolbar：高 56dp（?attr/actionBarSize）/ navigationIcon 返回 / 标题等宽字体
         Row(
-            Modifier.fillMaxWidth().padding(bottom = 2.dp),
+            Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            IconButton(onClick = onGoFunctions, modifier = Modifier.size(44.dp)) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (zh) "返回函数列表" else "Back to functions",
+                    tint = cs.onSurface,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             Text(
                 fn.ifBlank { if (zh) "未选择函数" else "No function" },
-                style = MaterialTheme.typography.titleSmall,
-                fontSize = AppText.bodyStrong,
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
                 color = if (fn.isBlank()) cs.primary else cs.onSurface,
                 maxLines = 1,
@@ -3937,13 +3947,12 @@ private fun FuncDetailView(
                 )
             }
         }
-        // 4 页签
-        ScrollableTabRow(
+        // TabLayout（tabMode=fixed）：4 个页签等分，指示器 = colorPrimary
+        TabRow(
             selectedTabIndex = funcDetailTabs.indexOfFirst { it.first == tab }.coerceAtLeast(0),
-            edgePadding = 8.dp,
             containerColor = cs.surface,
             contentColor = cs.primary,
-            divider = {},
+            divider = { GroupDivider() },
         ) {
             funcDetailTabs.forEach { (k, lzh, len) ->
                 Tab(
@@ -3961,7 +3970,6 @@ private fun FuncDetailView(
                 )
             }
         }
-        GroupDivider()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (fn.isBlank() && va.isBlank()) {
                 AnalysisEmptyState(
@@ -3971,7 +3979,7 @@ private fun FuncDetailView(
                     onPrimary = onGoFunctions,
                 )
             } else when (tab) {
-                "cfg" -> CfgView(tools, zh, context, onGoFunctions)
+                "cfg" -> CfgView(tools, zh, context, onGoFunctions, embedded = true)
                 "pseudo" -> PseudoView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
                 "xrefs" -> FuncXRefView(tools, zh, context, onRefresh)
                 else -> DisasmView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
@@ -4142,8 +4150,9 @@ private fun DisasmView(
                         .width(IntrinsicSize.Max).padding(bottom = 10.dp),
                 ) {
                     shown.forEach { (a, bytes, instr) ->
+                        // item_insn/AsmAdapter：内容内边距 10 / 6 / 12 / 6，addr 100dp、bytes 140dp、asm 自适应
                         Row(
-                            Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
+                            Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -4152,17 +4161,17 @@ private fun DisasmView(
                                 color = cs.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
-                                modifier = Modifier.width(96.dp).clickable { if (a.isNotBlank()) copyToClipboard(context, a, zh) },
+                                modifier = Modifier.width(100.dp).clickable { if (a.isNotBlank()) copyToClipboard(context, a, zh) },
                             )
                             Text(
                                 bytes.ifBlank { " " },
                                 style = mono12,
-                                color = cs.primary.copy(alpha = 0.75f),
+                                color = cs.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
-                                modifier = Modifier.width(150.dp),
+                                modifier = Modifier.width(140.dp),
                             )
-                            Text(disasmInstrAnnotated(instr, cs), maxLines = 1, softWrap = false)
+                            Text(disasmInstrAnnotated(instr, cs), style = mono12, color = cs.onSurface, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -4426,6 +4435,7 @@ private fun CfgView(
     zh: Boolean,
     context: android.content.Context,
     onGoFunctions: () -> Unit,
+    embedded: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -4490,10 +4500,17 @@ private fun CfgView(
         }
     }
 
+    // 块 / 边数量（状态条用），直接复用 CfgCanvas 的解析。
+    val cfgCounts = remember(tools.cfgJson) {
+        runCatching { val g = parseCfgGraph(tools.cfgJson); g.blocks.size to g.edges.size }.getOrDefault(0 to 0)
+    }
     // 蓝图页：控制流图独占整页，操作条悬浮其上（不占布局高度）。
+    // 函数详情「控制流」页签（embedded）按 fragment_control_flow_tab.xml 加 状态条 + 底部提示条。
     // 刻意不提供任何「文本 / 原始 JSON」出口——CFG 只以图形呈现；
     // 出错与为空时都用页内覆盖态说明，不跳到别处。
-    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
+        if (embedded) CfgStatusBar(cfgCounts.first, cfgCounts.second, zh)
+        Box(Modifier.weight(1f).fillMaxSize()) {
         when {
             ws.isBlank() -> AnalysisEmptyState(
                 title = if (zh) "未打开工作区" else "No workspace",
@@ -4538,6 +4555,39 @@ private fun CfgView(
                 onPickFunction = onGoFunctions,
             )
         }
+        }
+        if (embedded) CfgHintBar(zh)
+    }
+}
+
+/** Explorer So 控制流页签顶部状态条（padding 10dp / bg surfaceVariant / 等宽 12sp）。 */
+@Composable
+private fun CfgStatusBar(blocks: Int, edges: Int, zh: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    Surface(color = cs.surfaceVariant) {
+        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                (if (zh) "控制流" else "Control flow") + "  ·  " + blocks + (if (zh) " 块" else " blocks") +
+                    "  ·  " + edges + (if (zh) " 边" else " edges"),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** Explorer So 控制流页签底部提示条（padding 8dp / 居中 / 11sp / bg surfaceVariant）。 */
+@Composable
+private fun CfgHintBar(zh: Boolean) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+        Text(
+            if (zh) "双指缩放 · 单指拖动 · 双击重置" else "pinch zoom · drag · double-tap reset",
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp,
+        )
     }
 }
 

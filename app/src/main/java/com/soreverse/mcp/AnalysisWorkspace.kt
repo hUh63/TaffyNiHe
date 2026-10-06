@@ -4689,6 +4689,13 @@ private fun BaseConvertView(zh: Boolean, context: android.content.Context) {
                     overflow = TextOverflow.Ellipsis,
                 )
             },
+            trailingIcon = {
+                if (input.isNotBlank()) {
+                    IconButton(onClick = { input = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
         )
         Spacer(Modifier.size(6.dp))
         FlowRow(
@@ -4889,12 +4896,21 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
     }
 
     Column(Modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ScrollableTabRow(
+            selectedTabIndex = asmArchs.indexOfFirst { it.first == arch }.coerceAtLeast(0),
+            edgePadding = 8.dp,
+            containerColor = cs.surface,
+            contentColor = cs.primary,
+            divider = {},
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            asmArchs.forEach { (key, label) -> SmallAction(label, active = arch == key) { arch = key } }
+            asmArchs.forEach { (key, label) ->
+                Tab(
+                    selected = arch == key,
+                    onClick = { arch = key },
+                    text = { Text(label, fontSize = AppText.bodyStrong, color = if (arch == key) cs.primary else cs.onSurfaceVariant, maxLines = 1) },
+                )
+            }
         }
         Spacer(Modifier.size(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {

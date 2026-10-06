@@ -1,3 +1,17 @@
+# TaffyNiHe v1.3.77（分析页外壳对齐 Explorer So）
+
+之前几版是把各视图「换皮」，分析页最外层的壳仍是塔菲自己的（自绘顶栏 + 文件选择条 + 全屏文字抽屉）。本版把**外壳**也换成 Explorer So `SoDetailActivity` 的真实结构。
+
+## 🧩 本次
+- **顶栏 → MaterialToolbar 形态**：`≡ + SO 详情标题 + 当前视图副标题 + 刷新 + ⋮`（对齐 Explorer So `MaterialToolbar("SO 详情")`），去掉塔菲原来的「当前函数大标题 + 文件/任务选择条」。
+- **全屏文字抽屉 → 左侧 NavigationRail（推挤内容）**：对齐 Explorer So `NavigationRailView`，条目为 主页 / 搜索 / 虚表 / 调用图 / 交叉引用 / 加固 / 脱壳 / 地址 / 导出 / Flutter + 更多视图（打开全量索引）。
+- **文件 / 任务选择移入侧栏头部**（Explorer So 由外部选好文件，塔菲需要在此选）。
+- 主页页签保持 Explorer So `DetailPagerAdapter` 顺序：函数 / 节区 / 符号 / 导入 / 依赖库 / 重定位 / 字符串 / 数据 / ELF 头 …
+
+> 说明：上一批（v1.3.73–76）已完成列表行 `item_detail`、搜索卡片、地址查看器底部地址栏、函数详情 4 页签、数据页子页签、调用图 GlobalCfg、交叉引用 4 页签等**内部**对齐；本版补齐**外层框架**。
+
+---
+
 # TaffyNiHe v1.3.76（分析页对齐 Explorer So · 第四批）
 
 继续按 Explorer So 逐个对齐，本批为工具类视图。
@@ -164,6 +178,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

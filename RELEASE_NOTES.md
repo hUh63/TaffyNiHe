@@ -1,3 +1,28 @@
+# TaffyNiHe v1.3.84（函数详情 / 控制流页签 / 指令行 / 通用列表卡 对齐 Explorer So）
+
+分析页逐项对齐收尾：把 Explorer So 剩余的四份布局规格全部落到代码里。
+
+## 🧩 本次
+**① 函数详情（`activity_func_detail.xml` / `fragment_func_detail.xml`）**
+- 顶栏改为 **MaterialToolbar 形态**：高 56dp（`?attr/actionBarSize`）、左侧返回导航（回到函数列表）、等宽字体标题（TitleMedium）。
+- 页签由滚动式改为 **TabLayout `tabMode=fixed`**：4 个页签等分，指示器与选中色 `colorPrimary`，未选中 `colorOnSurfaceVariant`。
+
+**② 控制流页签（`fragment_control_flow_tab.xml`）**
+- 函数详情「控制流」页签改为 **状态条 → 画布（weight 1）→ 底部提示条** 三段式：
+  - 状态条：padding 10dp / bg `surfaceVariant` / 等宽 12sp「控制流 · N 块 · M 边」（块边数直接复用 `parseCfgGraph`）。
+  - 提示条：padding 8dp / 居中 11sp / bg `surfaceVariant`「双指缩放 · 单指拖动 · 双击重置」。
+- 分析页的 CFG 蓝图页保持原样（整页画布 + 悬浮操作条）。
+
+**③ 指令行（`item_insn.xml` / `AsmAdapter` 实机参数）**
+- 汇编列表行：内容内边距 **10 / 6 / 12 / 6**，**地址 100dp、机器码 140dp**、指令自适应；三者均等宽 **12sp**，颜色 地址/机器码 `onSurfaceVariant`、指令 `onSurface`。
+- 结果页的单条指令行（`DisasmLine`）与汇编注解（`disasmInstrAnnotated`）同步从 11sp 提到 **12sp**。
+
+**④ 通用列表卡（`item_list_card.xml`）**
+- `CardRow` 改为卡片形态：**圆角 12dp、无描边、bg `surfaceVariant`、外边距 4dp、内边距 14dp**。
+- 图标 36dp；标题 `titleSmall`、副标题 `bodySmall`（单行省略）、说明 `labelSmall` 且用 **`primary`** 色。工具列表 / 各设置列表同步生效。
+
+---
+
 # TaffyNiHe v1.3.83（调用图匹配定位 + 列表/汇编/伪C/字符串逐项对齐）
 
 继续把 Explorer So 的布局 XML 逐项对到分析页代码里。
@@ -272,6 +297,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

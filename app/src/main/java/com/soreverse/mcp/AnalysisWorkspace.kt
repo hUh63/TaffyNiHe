@@ -285,7 +285,7 @@ internal fun AnalysisWorkspace(
         tools.selectedFunctionVa = va
         tools.decompileTarget = name
         tools.disasmAddr = va.ifBlank { name }
-        tools.analysisView = "disasm"
+        tools.analysisView = "funcdetail"
     }
 
     val refreshAll: () -> Unit = {
@@ -348,6 +348,12 @@ internal fun AnalysisWorkspace(
                         "search" -> SearchView(
                             tools = tools, zh = zh, context = context,
                         ) { n, v -> selectFunction(n, v) }
+
+                        "funcdetail" -> FuncDetailView(
+                            tools = tools, zh = zh, context = context,
+                            onRefresh = refreshAll,
+                            onGoFunctions = { tools.analysisView = "functions" },
+                        )
 
                         "disasm" -> DisasmView(
                             tools = tools, zh = zh, context = context,
@@ -2116,7 +2122,8 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
     AnalysisNavItem("data", "数据", "Data", Icons.Filled.Inventory2),
-    AnalysisNavItem("funcinfo", "函数详情", "Detail", Icons.Filled.Description),
+    AnalysisNavItem("funcdetail", "函数详情", "Func", Icons.Filled.Code),
+    AnalysisNavItem("funcinfo", "函数信息", "Info", Icons.Filled.Description),
     AnalysisNavItem("comments", "注释", "Note", Icons.Filled.Description),
     AnalysisNavItem("analyze", "分析", "Ana", Icons.Filled.FlashOn),
     AnalysisNavItem("flutter", "Flutter", "Flutter", Icons.Filled.Memory),
@@ -2151,6 +2158,7 @@ private val analysisDomains = listOf(
     // 代码域：围绕「一个函数」的一切看法与修改（合并原「函数域」）
     AnalysisDomain("code", "代码", "Code", listOf(
         AnalysisTool("fn", "函数", "Fns", listOf("functions", "funcinfo", "comments")),
+        AnalysisTool("fndet", "函数详情", "Func", listOf("funcdetail")),
         AnalysisTool("find", "搜索", "Find", listOf("search")),
         AnalysisTool("asm", "汇编", "Asm", listOf("disasm", "insnexp", "regs")),
         AnalysisTool("pseudo", "伪C", "Pseudo", listOf("pseudo", "globalc", "asm2c")),
@@ -3630,6 +3638,101 @@ private fun disasmInstrAnnotated(instr: String, cs: androidx.compose.material3.C
     }
 }
 
+/** 函数详情的 4 个页签（对齐 Explorer So FuncDetailActivity）。 */
+private val funcDetailTabs = listOf(
+    Triple("disasm", "汇编", "Asm"),
+    Triple("cfg", "控制流", "CFG"),
+    Triple("pseudo", "伪C", "Pseudo"),
+    Triple("xrefs", "交叉引用", "XRef"),
+)
+
+/**
+ * 函数详情页（对齐 Explorer So `FuncDetailActivity`）：
+ * 顶部函数签名 + 4 页签（汇编 / 控制流 / 伪C / 交叉引用），点函数列表直接进入。
+ */
+@Composable
+private fun FuncDetailView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+    onGoFunctions: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val fn = tools.selectedFunctionName
+    val va = tools.selectedFunctionVa
+    var tab by remember { mutableStateOf("disasm") }
+
+    Column(Modifier.fillMaxSize()) {
+        // 函数签名行（Explorer So 详情页顶栏：signature + 地址）
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                fn.ifBlank { if (zh) "未选择函数" else "No function" },
+                style = MaterialTheme.typography.titleSmall,
+                fontSize = AppText.bodyStrong,
+                fontWeight = FontWeight.SemiBold,
+                color = if (fn.isBlank()) cs.primary else cs.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (va.isNotBlank()) {
+                Text(
+                    va,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+        // 4 页签
+        ScrollableTabRow(
+            selectedTabIndex = funcDetailTabs.indexOfFirst { it.first == tab }.coerceAtLeast(0),
+            edgePadding = 8.dp,
+            containerColor = cs.surface,
+            contentColor = cs.primary,
+            divider = {},
+        ) {
+            funcDetailTabs.forEach { (k, lzh, len) ->
+                Tab(
+                    selected = tab == k,
+                    onClick = { tab = k },
+                    text = {
+                        Text(
+                            if (zh) lzh else len,
+                            fontSize = AppText.bodyStrong,
+                            fontWeight = if (tab == k) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (tab == k) cs.primary else cs.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    },
+                )
+            }
+        }
+        GroupDivider()
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (fn.isBlank() && va.isBlank()) {
+                AnalysisEmptyState(
+                    title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
+                    hint = if (zh) "函数详情包含：汇编 / 控制流 / 伪C / 交叉引用" else "detail = disasm / CFG / pseudo-C / xrefs",
+                    primaryLabel = if (zh) "去函数列表" else "Function list",
+                    onPrimary = onGoFunctions,
+                )
+            } else when (tab) {
+                "cfg" -> CfgView(tools, zh, context, onGoFunctions)
+                "pseudo" -> PseudoView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
+                "xrefs" -> GlobalXRefView(tools, zh, context, onRefresh)
+                else -> DisasmView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
+            }
+        }
+    }
+}
+
 /** 反汇编：三列对齐（地址可点复制 | 机器码 | 指令与操作数），整体可横滚不换行。 */
 @Composable
 private fun DisasmView(
@@ -3638,6 +3741,7 @@ private fun DisasmView(
     context: android.content.Context,
     onRefresh: () -> Unit,
     onGoFunctions: () -> Unit,
+    embedded: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -3662,8 +3766,8 @@ private fun DisasmView(
     val hs = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
-        // 函数头（对齐 Explorer So 函数详情：函数名 + 地址 · 指令数）
-        if (target.isNotBlank()) {
+        // 函数头（在「函数详情」容器内由容器统一显示）
+        if (!embedded && target.isNotBlank()) {
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -3854,6 +3958,7 @@ private fun PseudoView(
     context: android.content.Context,
     onRefresh: () -> Unit,
     onGoFunctions: () -> Unit,
+    embedded: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
     val ws = tools.sharedWorkspaceId
@@ -3882,8 +3987,8 @@ private fun PseudoView(
     val vs = rememberScrollState()
 
     Column(Modifier.fillMaxSize()) {
-        // 函数头（对齐 Explorer So 函数详情：函数名 + 范围）
-        if (target.isNotBlank()) {
+        // 函数头（在「函数详情」容器内由容器统一显示）
+        if (!embedded && target.isNotBlank()) {
             val hRange = bounds?.let { b ->
                 val st = b.optString("startAddr"); val en = b.optString("endAddr")
                 if (st.isNotBlank()) "$st-$en" else ""

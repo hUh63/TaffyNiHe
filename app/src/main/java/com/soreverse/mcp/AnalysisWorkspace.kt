@@ -2085,7 +2085,16 @@ private fun DisasmLine(line: String) {
 private data class AnalysisNavItem(val key: String, val short: String, val en: String, val icon: ImageVector)
 
 /** 列表行（由引擎 JSON 归一化而来，供 CardRow 渲染）。 */
-private data class AnalysisRow(val key: String, val title: String, val meta: String, val va: String, val text: String)
+private data class AnalysisRow(
+    val key: String,
+    val title: String,
+    val meta: String,
+    val va: String,
+    val text: String,
+    val enc: String = "",
+    val sec: String = "",
+    val len: Int = -1,
+)
 
 private val analysisNavItems = listOf(
     AnalysisNavItem("functions", "函数", "Fns", Icons.Filled.Memory),
@@ -4645,6 +4654,8 @@ private fun ListScaffold(
     onRefresh: () -> Unit,
     rowsFromJson: (String?) -> kotlin.collections.List<AnalysisRow>,
     onPick: (AnalysisRow) -> Unit,
+    filterBar: (@Composable () -> Unit)? = null,
+    rowFilter: ((kotlin.collections.List<AnalysisRow>) -> kotlin.collections.List<AnalysisRow>)? = null,
 ) {
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
@@ -4661,17 +4672,21 @@ private fun ListScaffold(
             it.title.contains(query, true) || it.meta.contains(query, true) || it.text.contains(query, true)
         }
     }
+    // 视图专属过滤（如字符串的 编码 / 节区 / 长度），在关键字过滤之后叠加。
+    val shown = if (rowFilter == null) filtered else rowFilter(filtered)
 
     Column(Modifier.fillMaxSize()) {
         // 计数行（对齐 fragment_list_tab：tv_count，padding 12dp / labelSmall / onSurfaceVariant）
         Text(
             analysisListTitle(view, zh) + " · " + (if (zh) "共" else "total") + " ${rows.size} " + (if (zh) "项" else "items") +
-                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " ${filtered.size}" else ""),
+                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " ${filtered.size}" else "") +
+                (if (rowFilter != null) " · " + (if (zh) "显示" else "shown") + " ${shown.size}" else ""),
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             style = MaterialTheme.typography.labelSmall,
             fontSize = AppText.label,
             color = cs.onSurfaceVariant,
         )
+        filterBar?.invoke()
         // 搜索框（对齐 fragment_list_tab：OutlinedBox / marginH 12dp / marginBottom 8dp）
         OutlinedTextField(
             value = query,
@@ -4722,7 +4737,7 @@ private fun ListScaffold(
                     hint = if (zh) "换个关键字再试" else "Try another keyword",
                 )
                 else -> AnalysisCardList(
-                    rows = filtered,
+                    rows = shown,
                     icon = analysisViewIcon(view),
                     onPick = onPick,
                 )
@@ -4730,6 +4745,45 @@ private fun ListScaffold(
         }
     }
 }
+
+/** Explorer So 字符串过滤按钮（MaterialButtonToggleGroup：编码 / 节区 / 长度，点击弹选项列表）。 */
+@Composable
+private fun FilterChipMenu(label: String, value: String, options: kotlin.collections.List<String>, onPick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    val all = options.firstOrNull().orEmpty()
+    val active = value != all
+    Box {
+        Surface(
+            onClick = { open = true },
+            shape = RoundedCornerShape(AppShape.sm),
+            color = if (active) cs.secondaryContainer else Color.Transparent,
+            contentColor = if (active) cs.onSecondaryContainer else cs.onSurfaceVariant,
+            border = BorderStroke(1.dp, if (active) Color.Transparent else cs.outlineVariant),
+            modifier = Modifier.heightIn(min = 32.dp),
+        ) {
+            Row(Modifier.padding(start = 10.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (active) "$label: $value" else label, fontSize = 12.sp, maxLines = 1)
+                Spacer(Modifier.size(4.dp))
+                Icon(Icons.Filled.KeyboardArrowDown, null, modifier = Modifier.size(14.dp))
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.take(60).forEach { o ->
+                DropdownMenuItem(
+                    text = { Text(o, fontSize = AppText.body) },
+                    onClick = { onPick(o); open = false },
+                )
+            }
+        }
+    }
+}
+
+/** 取 JSON 数组里某字段的去重取值（供过滤按钮列表）。 */
+private fun distinctOf(arr: JSONArray, key: String): kotlin.collections.List<String> =
+    (0 until arr.length()).mapNotNull { i ->
+        arr.optJSONObject(i)?.optString(key)?.takeIf { t -> t.isNotBlank() }
+    }.distinct().sorted().take(40)
 
 /** 字符串：地址 | 长度 | 内容（点行复制内容）。 */
 @Composable
@@ -4740,24 +4794,60 @@ private fun StringsView(
     onRefresh: () -> Unit,
     onPick: (AnalysisRow) -> Unit,
 ) {
+    val all = if (zh) "全部" else "All"
+    val cacheKey = "strings|${tools.sharedWorkspaceId}|"
+    val arr = remember(tools.viewCache[cacheKey], tools.reloadTick) { itemsArray(tools.viewCache[cacheKey]) }
+    val encOptions = remember(arr) { distinctOf(arr, "encoding") }
+    val secOptions = remember(arr) { distinctOf(arr, "section") }
+    var encF by remember { mutableStateOf(all) }
+    var secF by remember { mutableStateOf(all) }
+    var minLen by remember { mutableStateOf(0) }
     ListScaffold(
         tools = tools, zh = zh, context = context, view = "strings", limit = 400,
         onRefresh = onRefresh,
         rowsFromJson = { json ->
-            val arr = itemsArray(json)
-            (0 until arr.length()).mapNotNull { i ->
-                val it = arr.optJSONObject(i) ?: return@mapNotNull null
+            val a = itemsArray(json)
+            (0 until a.length()).mapNotNull { i ->
+                val it = a.optJSONObject(i) ?: return@mapNotNull null
                 val off = it.optString("offset").ifBlank { it.optString("addr") }
                 val len = it.optLong("length", -1L)
-                val enc = it.optString("encoding").ifBlank { it.optString("section") }
+                val enc = it.optString("encoding")
+                val sec = it.optString("section")
                 val value = it.optString("value")
                 AnalysisRow(
                     key = "s$i|$off",
                     title = value,
-                    meta = listOf("${if (len >= 0) len else "-"}", enc).filter { t -> t.isNotBlank() }.joinToString(" · "),
+                    meta = listOf("${if (len >= 0) len else "-"}", enc.ifBlank { sec })
+                        .filter { t -> t.isNotBlank() }.joinToString(" · "),
                     va = off,
                     text = value,
+                    enc = enc,
+                    sec = sec,
+                    len = if (len >= 0) len.toInt() else -1,
                 )
+            }
+        },
+        filterBar = {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                    .padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterChipMenu(if (zh) "编码" else "Encoding", encF, listOf(all) + encOptions) { encF = it }
+                FilterChipMenu(if (zh) "节区" else "Section", secF, listOf(all) + secOptions) { secF = it }
+                FilterChipMenu(
+                    if (zh) "长度" else "Length",
+                    if (minLen == 0) all else "≥$minLen",
+                    listOf(all, "≥4", "≥8", "≥16", "≥32"),
+                ) { v -> minLen = if (v.startsWith("≥")) v.drop(1).toIntOrNull() ?: 0 else 0 }
+            }
+        },
+        rowFilter = { list ->
+            list.filter { r ->
+                (encF == all || r.enc.equals(encF, true)) &&
+                    (secF == all || r.sec == secF) &&
+                    (minLen == 0 || r.len >= minLen)
             }
         },
         onPick = onPick,

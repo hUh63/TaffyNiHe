@@ -2810,35 +2810,45 @@ private fun IappView(zh: Boolean, context: android.content.Context) {
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            if (zh) "解密 iApp v3 打包 APK 的 assets/lib.so（外层 AES-CBC 容器 + 内层成员源码）。先「提取参数」再「解密导出」。"
-            else "Decrypt iApp v3 packed assets/lib.so. Run Extract first, then Decrypt.",
-            style = MaterialTheme.typography.bodySmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = apkPath, onValueChange = { apkPath = it }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-            label = { Text(if (zh) "APK 绝对路径" else "APK path", fontSize = AppText.label) },
-        )
-        OutlinedTextField(
-            value = soPath, onValueChange = { soPath = it }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-            label = { Text(if (zh) "lib.so 路径（可选，缺省取 APK 内 assets/lib.so）" else "lib.so path (optional)", fontSize = AppText.label) },
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "提取参数" else "Extract", loading = loading) { run("extract") }
-            SmallAction(if (zh) "解密导出" else "Decrypt", enabled = apkPath.isNotBlank() || soPath.isNotBlank()) { run("decrypt") }
+    ToolPageScaffold(
+        title = if (zh) "iApp v3 解密" else "iApp v3 decrypt",
+        hint = if (zh) "外层 AES-CBC 容器 + 内层成员源码" else "AES-CBC container + inner sources",
+        actions = {
+            SmallAction(if (zh) "提取参数" else "Extract", enabled = !loading) { run("extract") }
             SmallAction(if (zh) "复制结果" else "Copy", enabled = result.isNotBlank()) { copyToClipboard(context, result, zh) }
-        }
-        if (error.isNotBlank()) AnalysisErrorBanner(error)
-        if (result.isNotBlank()) ToolResultBlock(if (zh) "结果" else "Result", result, zh = zh, onCopy = { copyToClipboard(context, result, zh) })
-    }
+        },
+        content = {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    if (zh) "解密 iApp v3 打包 APK 的 assets/lib.so（外层 AES-CBC 容器 + 内层成员源码）。先「提取参数」再「解密导出」。"
+                    else "Decrypt iApp v3 packed assets/lib.so. Run Extract first, then Decrypt.",
+                    style = MaterialTheme.typography.bodySmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = apkPath, onValueChange = { apkPath = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                    label = { Text(if (zh) "APK 绝对路径" else "APK path", fontSize = AppText.label) },
+                )
+                OutlinedTextField(
+                    value = soPath, onValueChange = { soPath = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                    label = { Text(if (zh) "lib.so 路径（可选，缺省取 APK 内 assets/lib.so）" else "lib.so path (optional)", fontSize = AppText.label) },
+                )
+                BigActionButton(
+                    label = if (zh) "解密导出" else "Decrypt",
+                    enabled = apkPath.isNotBlank() || soPath.isNotBlank(),
+                    loading = loading,
+                ) { run("decrypt") }
+                if (error.isNotBlank()) AnalysisErrorBanner(error)
+                if (result.isNotBlank()) ToolResultBlock(if (zh) "结果" else "Result", result, zh = zh, onCopy = { copyToClipboard(context, result, zh) })
+            }
+        },
+    )
 }
 
 // ───────────────────── 导航（域 → 工具，两级；工具内的各视图用页内 chip 切换） ─────────────────────

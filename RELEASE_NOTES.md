@@ -1,3 +1,15 @@
+# TaffyNiHe v1.3.76（分析页对齐 Explorer So · 第四批）
+
+继续按 Explorer So 逐个对齐，本批为工具类视图。
+
+## 🧩 本次
+- **汇编器**：架构选择（AArch64 / ARM / x86 / x86_64）改为 Explorer So `AssemblerFragment` 式**页签**。
+- **进制转换**：输入框加清除按钮。
+
+> 累计到本版，分析页主结构（框架 / 列表 / 搜索 / 地址查看器 / 函数详情 / 调用图 / 交叉引用 / 数据页）与工具类视图均按 Explorer So 视觉语言统一。
+
+---
+
 # TaffyNiHe v1.3.75（分析页对齐 Explorer So · 第三批）
 
 继续按 Explorer So 逐个对齐。
@@ -152,6 +164,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

@@ -2204,6 +2204,33 @@ private fun rememberedView(domain: AnalysisDomain, lastModeByTool: Map<String, S
 
 // ───────────────────────── 通用小工具 ─────────────────────────
 
+/** 工具页标题行（与 ToolPageScaffold 同一视觉：名称 + 说明）。 */
+@Composable
+private fun ToolPageHeader(title: String, hint: String) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.bodySmall,
+            fontSize = AppText.bodyStrong,
+            fontWeight = FontWeight.SemiBold,
+            color = cs.onSurface,
+        )
+        Text(
+            hint,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 /** 小号动作按钮（Exbin 风：圆角 + 1dp 描边 + 无阴影）。 */
 @Composable
 private fun SmallAction(
@@ -4851,6 +4878,11 @@ private fun itemsArray(json: String?): JSONArray {
 @Composable
 private fun ResultsPane(tools: ToolPagesState, zh: Boolean) {
     Column(Modifier.fillMaxSize()) {
+        ToolPageHeader(
+            if (zh) "结果" else "Results",
+            if (zh) "控制台输出流（按标签分页）" else "console output stream (tabbed)",
+        )
+        Spacer(Modifier.size(6.dp))
         if (tools.resultTabs.isNotEmpty()) {
             FlowRow(
                 Modifier.fillMaxWidth().padding(4.dp),
@@ -4888,6 +4920,11 @@ private fun ToolsPane(
     val title = curDef?.let { if (zh) it.labelZh else it.labelEn } ?: ""
 
     Column(Modifier.fillMaxSize()) {
+        ToolPageHeader(
+            if (zh) "工具台" else "Tool console",
+            if (zh) "MCP 工具控制台" else "MCP tool console",
+        )
+        Spacer(Modifier.size(6.dp))
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -9653,6 +9690,10 @@ private fun AnalyzeModeView(tools: ToolPagesState, zh: Boolean, context: android
     if (ws.isBlank()) return NeedWorkspace(zh)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ToolPageHeader(
+            if (zh) "分析档位" else "Analysis depth",
+            if (zh) "快速 aa / 全量 aaaa" else "quick aa / full aaaa",
+        )
         Column(
             Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(AppShape.md))
@@ -9736,10 +9777,15 @@ private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.
     if (ws.isBlank()) return NeedWorkspace(zh)
 
     Column(Modifier.fillMaxSize()) {
+        ToolPageHeader(
+            if (zh) "编辑中心" else "Edit center",
+            if (zh) "函数改名 / 字符串改写 / 指令改写（写回编辑会话）" else "rename / string / insn (write to edit session)",
+        )
+        Spacer(Modifier.size(6.dp))
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "函数改名" else "Rename", active = tab == "symbol") { tab = "symbol" }
-            SmallAction(if (zh) "字符串" else "String", active = tab == "string") { tab = "string" }
-            SmallAction(if (zh) "指令" else "Insn", active = tab == "insn") { tab = "insn" }
+            TabChip(if (zh) "函数改名" else "Rename", selected = tab == "symbol") { tab = "symbol" }
+            TabChip(if (zh) "字符串" else "String", selected = tab == "string") { tab = "string" }
+            TabChip(if (zh) "指令" else "Insn", selected = tab == "insn") { tab = "insn" }
             SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank() || tools.selectedFunctionName.isNotBlank()) {
                 symLocator = tools.selectedFunctionName.ifBlank { tools.selectedFunctionVa }
                 insAddr = tools.selectedFunctionVa.ifBlank { tools.disasmAddr }

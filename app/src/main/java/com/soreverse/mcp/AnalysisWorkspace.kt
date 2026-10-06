@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -80,6 +81,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.AlertDialog
@@ -3337,6 +3339,7 @@ private fun FunctionsView(
     val query = tools.functionQuery
     var sortBy by remember { mutableStateOf("addr") }
     var asc by remember { mutableStateOf(true) }
+    var sortMenu by remember { mutableStateOf(false) }
 
     val shown = remember(all, query, sortBy, asc) {
         val fl = if (query.isBlank()) all
@@ -3354,48 +3357,74 @@ private fun FunctionsView(
     }
 
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { tools.functionQuery = it },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-            shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
-            placeholder = {
-                Text(
-                    if (zh) "搜索函数（按名称 / 地址）" else "search functions (name / addr)",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                    color = cs.onSurfaceVariant,
-                )
-            },
-        )
-        Spacer(Modifier.size(6.dp))
-        // 排序 chip + 计数（目标样式：无表头，靠卡片内的地址/大小行承载）
+        // 工具栏行（对齐 fragment_func_tab：marginH 12 / marginTop 8 / marginBottom 4）
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            listOf(
-                "addr" to (if (zh) "地址" else "ADDR"),
-                "name" to (if (zh) "名称" else "NAME"),
-                "size" to (if (zh) "大小" else "SIZE"),
-            ).forEach { (key, label) ->
-                SmallAction(
-                    label = label + if (sortBy == key) (if (asc) " ↑" else " ↓") else "",
-                    active = sortBy == key,
-                ) { toggleSort(key) }
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                if (zh) "${shown.size} 个函数" else "${shown.size} functions",
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                color = cs.onSurfaceVariant,
+            OutlinedTextField(
+                value = query,
+                onValueChange = { tools.functionQuery = it },
+                singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                shape = RoundedCornerShape(4.dp),
+                textStyle = MaterialTheme.typography.bodyLarge,
+                leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant) },
+                trailingIcon = {
+                    if (query.isNotBlank()) {
+                        IconButton(onClick = { tools.functionQuery = "" }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                        }
+                    }
+                },
+                placeholder = {
+                    Text(
+                        if (zh) "搜索函数 (按名称 / 地址 / 节区)" else "search fn (name / addr / section)",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
             )
+            // 过滤 / 排序（对齐 btn_filter）
+            Box {
+                IconButton(onClick = { sortMenu = true }) {
+                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = if (zh) "过滤/排序" else "filter/sort", tint = cs.primary)
+                }
+                DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                    listOf(
+                        "addr" to (if (zh) "按地址" else "by address"),
+                        "name" to (if (zh) "按名称" else "by name"),
+                        "size" to (if (zh) "按大小" else "by size"),
+                    ).forEach { (key, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label + if (sortBy == key) (if (asc) " ↑" else " ↓") else "", fontSize = AppText.body) },
+                            onClick = { sortMenu = false; toggleSort(key) },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(if (asc) (if (zh) "改为降序" else "descending") else (if (zh) "改为升序" else "ascending"), fontSize = AppText.body) },
+                        onClick = { sortMenu = false; asc = !asc },
+                    )
+                }
+            }
+            // 导出函数列表（对齐 btn_export，导出到剪贴板）
+            IconButton(onClick = {
+                copyToClipboard(context, shown.joinToString("\n") { "${it.addr}\t${it.name}\t${it.size}" }, zh)
+            }) {
+                Icon(Icons.Filled.Save, contentDescription = if (zh) "导出函数列表" else "export list", tint = cs.primary)
+            }
         }
-        Spacer(Modifier.size(6.dp))
+        // 计数行（tv_count：paddingH 14 / paddingTop 2 / paddingBottom 6，labelSmall）
+        Text(
+            if (zh) "${shown.size} 个函数" else "${shown.size} functions",
+            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+        )
+        GroupDivider()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 ws.isBlank() -> AnalysisEmptyState(
@@ -3421,57 +3450,26 @@ private fun FunctionsView(
                     primaryLabel = if (zh) "刷新" else "Refresh",
                     onPrimary = onRefresh,
                 )
-                else -> LazyColumn(
-                    Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(bottom = 12.dp),
-                ) {
-                    items(shown, key = { r -> r.addr + "|" + r.name }) { r ->
-                        val selected = r.name == tools.selectedFunctionName
-                        val shape = RoundedCornerShape(AppShape.md)
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .clip(shape)
-                                .background(if (selected) cs.primary.copy(alpha = 0.12f) else cs.surfaceContainerHigh)
-                                .border(BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.5f) else cs.outlineVariant), shape)
-                                .clickable { onSelect(r.name, r.addr) }
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Memory,
-                                null,
-                                tint = if (selected) cs.primary else cs.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    r.name,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                                    color = if (selected) cs.primary else cs.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    buildString {
-                                        if (r.addr.isNotBlank()) append(r.addr)
-                                        if (r.size >= 0L) {
-                                            if (isNotEmpty()) append(" · ")
-                                            append("${r.size} B")
-                                        }
-                                    }.ifBlank { "--" },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = cs.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            if (r.kind.isNotBlank()) TypeChip(r.kind)
-                        }
-                    }
-                }
+                else -> AnalysisCardList(
+                    rows = shown.map { r ->
+                        AnalysisRow(
+                            key = r.addr + "|" + r.name,
+                            title = r.name,
+                            va = r.kind,
+                            meta = buildString {
+                                if (r.addr.isNotBlank()) append(r.addr)
+                                if (r.size >= 0L) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append("${r.size} B")
+                                }
+                            }.ifBlank { "--" },
+                            text = r.addr,
+                        )
+                    },
+                    icon = Icons.Filled.Memory,
+                    selectedTitle = tools.selectedFunctionName,
+                    onPick = { row -> onSelect(row.title, row.text) },
+                )
             }
         }
     }
@@ -4555,15 +4553,6 @@ private fun AnalysisCardList(
                     .padding(12.dp),
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        row.title.ifBlank { "--" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selected) cs.onPrimaryContainer else cs.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
                     if (row.va.isNotBlank()) {
                         Text(
                             row.va,
@@ -4574,13 +4563,22 @@ private fun AnalysisCardList(
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             modifier = Modifier
-                                .padding(start = 6.dp)
+                                .padding(end = 6.dp)
                                 .defaultMinSize(minWidth = 22.dp)
                                 .clip(RoundedCornerShape(AppShape.xs))
                                 .background(cs.primaryContainer)
                                 .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
+                    Text(
+                        row.title.ifBlank { "--" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selected) cs.onPrimaryContainer else cs.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
                 if (row.meta.isNotBlank()) {
                     Text(

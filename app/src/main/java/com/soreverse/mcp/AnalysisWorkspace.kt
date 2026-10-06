@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -4541,8 +4542,6 @@ private fun AnalysisCardList(
     val cs = MaterialTheme.colorScheme
     LazyColumn(
         Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        contentPadding = PaddingValues(bottom = 12.dp),
     ) {
         items(rows, key = { r -> r.key }) { row ->
             val selected = selectedTitle.isNotBlank() && row.title == selectedTitle
@@ -4568,11 +4567,15 @@ private fun AnalysisCardList(
                     if (row.va.isNotBlank()) {
                         Text(
                             row.va,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = AppText.label),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            fontWeight = FontWeight.Bold,
                             color = cs.onPrimaryContainer,
+                            textAlign = TextAlign.Center,
                             maxLines = 1,
                             modifier = Modifier
                                 .padding(start = 6.dp)
+                                .defaultMinSize(minWidth = 22.dp)
                                 .clip(RoundedCornerShape(AppShape.xs))
                                 .background(cs.primaryContainer)
                                 .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -4582,7 +4585,7 @@ private fun AnalysisCardList(
                 if (row.meta.isNotBlank()) {
                     Text(
                         row.meta,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         color = cs.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -4659,14 +4662,24 @@ private fun ListScaffold(
     }
 
     Column(Modifier.fillMaxSize()) {
+        // 计数行（对齐 fragment_list_tab：tv_count，padding 12dp / labelSmall / onSurfaceVariant）
+        Text(
+            analysisListTitle(view, zh) + " · " + (if (zh) "共" else "total") + " ${rows.size} " + (if (zh) "项" else "items") +
+                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " ${filtered.size}" else ""),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+        )
+        // 搜索框（对齐 fragment_list_tab：OutlinedBox / marginH 12dp / marginBottom 8dp）
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-            shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp).heightIn(min = 56.dp),
+            shape = RoundedCornerShape(4.dp),
+            textStyle = MaterialTheme.typography.bodyLarge,
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant) },
             trailingIcon = {
                 if (query.isNotBlank()) {
                     IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
@@ -4677,18 +4690,14 @@ private fun ListScaffold(
             placeholder = {
                 Text(
                     analysisListHint(view, zh),
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             },
         )
-        Spacer(Modifier.size(6.dp))
-        MonoLine(
-            analysisListTitle(view, zh) + " · " + (if (zh) "共" else "total") + " ${rows.size} " + (if (zh) "项" else "items") +
-                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " ${filtered.size}" else ""),
-            cs.onSurfaceVariant, AppText.label,
-        )
-        Spacer(Modifier.size(6.dp))
+        GroupDivider()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 ws.isBlank() -> AnalysisEmptyState(
@@ -10902,6 +10911,51 @@ private fun CallGraphCanvas(
     }
 }
 
+/** Explorer So 调用图分段按钮（MaterialButtonToggleGroup：minHeight 36dp / paddingH 16dp / 12sp）。 */
+@Composable
+private fun SegButton(label: String, selected: Boolean, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(AppShape.sm),
+        color = if (selected) cs.secondaryContainer else Color.Transparent,
+        contentColor = if (selected) cs.onSecondaryContainer else cs.primary,
+        border = BorderStroke(1.dp, if (selected) Color.Transparent else cs.outlineVariant),
+        modifier = Modifier.heightIn(min = 36.dp),
+    ) {
+        Box(Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 12.sp, maxLines = 1)
+        }
+    }
+}
+
+/** Explorer So 统计 chip（ChipGroup 中的 chip）。 */
+@Composable
+private fun StatChip(text: String) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(AppShape.sm),
+        color = cs.surfaceVariant,
+        border = BorderStroke(1.dp, cs.outlineVariant),
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 调用图（逐项对齐 Explorer So `fragment_global_cfg.xml`）：
+ * 头部卡（marginH 10 / marginTop 6，corner 16，stroke 1 outlineVariant，bg surfaceContainer，内 padding H12 T10 B8）
+ * 内含搜索行（圆角 12dp / 13.5sp）、匹配计数（11sp）、模式分段（36dp / paddingH 16 / 12sp）+ 选项折叠
+ * 统计行（marginH 12 / T6 / B4，chip 间距 6dp，来源 10.5sp marginStart 10）
+ * 画布卡（weight 1 / marginH 10 / marginBottom 10，corner 16，bg surfaceContainerHigh）+ 右下角布局方向按钮 44x44。
+ */
 @Composable
 private fun CallGraphGraphPane(
     nodes: List<JSONObject>,
@@ -10916,6 +10970,10 @@ private fun CallGraphGraphPane(
     var maxText by remember { mutableStateOf("120") }
     var root by remember { mutableStateOf("") }
     var rebuild by remember { mutableStateOf(0) }
+    var eStyle by remember { mutableStateOf("curve") }
+    var optionsOpen by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf(findQ) }
+
     val depth = depthText.toIntOrNull()?.coerceIn(1, 8) ?: 2
     val maxN = maxText.toIntOrNull()?.coerceIn(10, 400) ?: 120
     val rootCandidates = remember(nodes, edges) {
@@ -10925,85 +10983,227 @@ private fun CallGraphGraphPane(
             .filter { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
             .take(40)
     }
-    var eStyle by remember { mutableStateOf("curve") }
     val subPair = remember(nodes, edges, mode, root, depth, maxN, rebuild) {
         buildCallSubgraph(nodes, edges, mode, root, depth, maxN)
     }
-    Column(Modifier.fillMaxSize()) {
-        // ── 模式（对齐 Explorer So：热点模式 / 根展开 / 完整模式）──
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (zh) "模式" else "Mode", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-            TabChip(if (zh) "热点模式" else "Hotspot", selected = mode == "hot") { mode = "hot" }
-            TabChip(if (zh) "根展开" else "Rooted", selected = mode == "root") { mode = "root" }
-            TabChip(if (zh) "完整模式" else "Full", selected = mode == "full") { mode = "full" }
-            Spacer(Modifier.weight(1f))
-            Text(if (zh) "显示 ${subPair.first.size} / ${nodes.size} 节点" else "${subPair.first.size}/${nodes.size} nodes", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 1)
+    val entryCount = remember(nodes, edges) {
+        val indeg = HashMap<String, Int>()
+        edges.forEach { (_, t) -> indeg[t] = (indeg[t] ?: 0) + 1 }
+        nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }
+            .count { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
+    }
+    val matchCount = remember(nodes, query) {
+        if (query.isBlank()) 0
+        else nodes.count {
+            it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) }.contains(query, true)
         }
-        // ── 参数区（对齐 Explorer So：根函数 / 深度 / 上限 + 主按钮「重新构建」）──
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (mode == "root") {
+    }
+
+    Column(Modifier.fillMaxSize().background(cs.surface)) {
+        // ══ 头部卡 ══
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 6.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = cs.surfaceContainer,
+            border = BorderStroke(1.dp, cs.outlineVariant),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp)) {
+                // 搜索行（searchBox：圆角 12dp / textSize 13.5sp）
                 OutlinedTextField(
-                    value = root, onValueChange = { root = it }, singleLine = true,
-                    modifier = Modifier.weight(1f).heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                    label = { Text(if (zh) "根函数" else "Root function", fontSize = AppText.label) },
-                    placeholder = { Text(if (zh) "函数名 或 0x 地址（留空取首个入口）" else "name or 0x addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant) },
+                    placeholder = {
+                        Text(
+                            if (zh) "搜索" else "search",
+                            fontSize = 13.5.sp,
+                            color = cs.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    trailingIcon = {
+                        if (query.isNotBlank()) {
+                            IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                            }
+                        }
+                    },
                 )
-            } else {
-                Text(
-                    if (mode == "hot") (if (zh) "热点模式：按调用度取 Top 函数" else "Hotspot: top functions by degree")
-                    else (if (zh) "完整模式：显示全部函数" else "Full: all functions"),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall, fontSize = AppText.label, color = cs.onSurfaceVariant, maxLines = 2,
-                )
+                // 匹配计数（tvMatch：marginH 6 / marginTop 4，11sp）
+                if (matchCount > 0) {
+                    Text(
+                        if (zh) "匹配 $matchCount 个节点" else "$matchCount matches",
+                        modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp),
+                        fontSize = 11.sp,
+                        color = cs.onSurfaceVariant,
+                    )
+                }
+                // 模式行（marginTop 10dp）：分段 + 选项
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SegButton(if (zh) "热点模式" else "Hotspot", mode == "hot") { mode = "hot" }
+                    Spacer(Modifier.size(4.dp))
+                    SegButton(if (zh) "根展开" else "Rooted", mode == "root") { mode = "root" }
+                    Spacer(Modifier.size(4.dp))
+                    SegButton(if (zh) "完整模式" else "Full", mode == "full") { mode = "full" }
+                    Spacer(Modifier.weight(1f))
+                    Surface(
+                        onClick = { optionsOpen = !optionsOpen },
+                        shape = RoundedCornerShape(AppShape.sm),
+                        color = Color.Transparent,
+                        contentColor = cs.primary,
+                        border = BorderStroke(1.dp, cs.outlineVariant),
+                        modifier = Modifier.heightIn(min = 36.dp),
+                    ) {
+                        Row(
+                            Modifier.padding(start = 14.dp, end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(if (zh) "选项" else "Options", fontSize = 12.sp, maxLines = 1)
+                            Icon(
+                                if (optionsOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
+                // 选项面板（默认折叠）根函数 / 深度 / 上限 / 重新构建
+                if (optionsOpen) {
+                    Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                        OutlinedTextField(
+                            value = root,
+                            onValueChange = { root = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                            shape = RoundedCornerShape(AppShape.sm),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                            label = { Text(if (zh) "根函数" else "Root", fontSize = AppText.label) },
+                            placeholder = {
+                                Text(
+                                    if (zh) "函数名 或 0x 地址（留空取首个入口）" else "name or 0x addr",
+                                    fontSize = 13.sp,
+                                    color = cs.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = depthText,
+                                onValueChange = { depthText = it.filter { c -> c.isDigit() }.take(1) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                                shape = RoundedCornerShape(AppShape.sm),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                label = { Text(if (zh) "深度" else "Depth", fontSize = AppText.label) },
+                            )
+                            OutlinedTextField(
+                                value = maxText,
+                                onValueChange = { maxText = it.filter { c -> c.isDigit() }.take(4) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                                shape = RoundedCornerShape(AppShape.sm),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                label = { Text(if (zh) "上限" else "Max", fontSize = AppText.label) },
+                            )
+                        }
+                        Button(
+                            onClick = { rebuild++ },
+                            shape = RoundedCornerShape(AppShape.sm),
+                            colors = ButtonDefaults.buttonColors(containerColor = cs.primary),
+                            contentPadding = PaddingValues(vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(min = 44.dp),
+                        ) {
+                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text(if (zh) "重新构建" else "Rebuild", fontSize = 13.sp)
+                        }
+                    }
+                }
+                // 边路由（Explorer So 由画布工具条承载，这里收在头部卡内）
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(if (zh) "边路由" else "Edges", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                    TabChip(if (zh) "折线" else "Ortho", selected = eStyle == "ortho") { eStyle = "ortho" }
+                    TabChip(if (zh) "曲线" else "Curve", selected = eStyle == "curve") { eStyle = "curve" }
+                    TabChip(if (zh) "直线" else "Line", selected = eStyle == "straight") { eStyle = "straight" }
+                }
+                if (mode == "root" && rootCandidates.isNotEmpty()) {
+                    FlowRow(
+                        Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Text(if (zh) "候选根函数" else "Roots", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                        rootCandidates.take(12).forEach { r -> TabChip(r.take(22), selected = root == r) { root = r } }
+                    }
+                }
             }
-            OutlinedTextField(
-                value = depthText, onValueChange = { depthText = it.filter { c -> c.isDigit() }.take(2) }, singleLine = true,
-                enabled = mode == "root", modifier = Modifier.width(74.dp).heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                label = { Text(if (zh) "深度" else "Depth", fontSize = AppText.label) },
+        }
+        // ══ 统计行 ══
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                StatChip(if (zh) "函数 ${nodes.size}" else "fns ${nodes.size}")
+                StatChip(if (zh) "调用边 ${edges.size}" else "edges ${edges.size}")
+                StatChip(if (zh) "入口 $entryCount" else "entries $entryCount")
+                StatChip(if (zh) "显示 ${subPair.first.size}/${nodes.size}" else "shown ${subPair.first.size}/${nodes.size}")
+            }
+            Text(
+                if (zh) "来源：rizin 调用图" else "source: rizin call graph",
+                modifier = Modifier.padding(start = 10.dp),
+                fontSize = 10.5.sp,
+                color = cs.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            OutlinedTextField(
-                value = maxText, onValueChange = { maxText = it.filter { c -> c.isDigit() }.take(4) }, singleLine = true,
-                enabled = mode != "full", modifier = Modifier.width(84.dp).heightIn(min = 46.dp), shape = RoundedCornerShape(AppShape.sm),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                label = { Text(if (zh) "上限" else "Max", fontSize = AppText.label) },
-            )
-            Button(
-                onClick = { rebuild++ },
-                shape = RoundedCornerShape(AppShape.sm),
-                colors = ButtonDefaults.buttonColors(containerColor = cs.primary),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            ) {
-                Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.size(5.dp))
-                Text(if (zh) "重新构建" else "Rebuild", fontSize = AppText.label)
+        }
+        // ══ 画布卡 ══
+        Surface(
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = cs.surfaceContainerHigh,
+            border = BorderStroke(1.dp, cs.outlineVariant),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                CallGraphCanvas(subPair.first, subPair.second, dir, query, zh, eStyle, Modifier.fillMaxSize())
+                // 布局方向（btnRankDir：44x44，右下角，marginEnd 12 / marginBottom 12）
+                Surface(
+                    onClick = { dir = if (dir == "TB") "LR" else "TB" },
+                    shape = RoundedCornerShape(AppShape.sm),
+                    color = cs.surface,
+                    contentColor = cs.onSurfaceVariant,
+                    border = BorderStroke(1.dp, cs.outlineVariant),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp).size(44.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.SwapHoriz,
+                            contentDescription = if (zh) "切换布局方向 (TB/LR)" else "toggle layout direction",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
         }
-        if (mode == "root" && rootCandidates.isNotEmpty()) {
-            FlowRow(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Text(if (zh) "候选根函数" else "Roots", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-                rootCandidates.take(12).forEach { r -> TabChip(r.take(22), selected = root == r) { root = r } }
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (zh) "布局" else "Layout", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-            TabChip(if (zh) "上下" else "TB", selected = dir == "TB") { dir = "TB" }
-            TabChip(if (zh) "左右" else "LR", selected = dir == "LR") { dir = "LR" }
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (zh) "边路由" else "Edges", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-            TabChip(if (zh) "折线" else "Ortho", selected = eStyle == "ortho") { eStyle = "ortho" }
-            TabChip(if (zh) "曲线" else "Curve", selected = eStyle == "curve") { eStyle = "curve" }
-            TabChip(if (zh) "直线" else "Line", selected = eStyle == "straight") { eStyle = "straight" }
-        }
-        Spacer(Modifier.size(6.dp))
-        CallGraphCanvas(subPair.first, subPair.second, dir, findQ, zh, eStyle, Modifier.fillMaxWidth().weight(1f))
     }
 }
-
-

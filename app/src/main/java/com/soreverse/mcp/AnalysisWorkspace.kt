@@ -3648,6 +3648,206 @@ private fun disasmInstrAnnotated(instr: String, cs: androidx.compose.material3.C
     }
 }
 
+/** rizin axtj/axfj 条目是否代码引用（type=CODE）。 */
+private fun xrefIsCode(o: JSONObject): Boolean = o.optString("type").equals("CODE", true)
+
+/** axtj/axfj 条目 → 列表行。pick 取 "from"（谁引用我）或 "to"（我引用谁）。 */
+private fun xrefRows(list: List<JSONObject>, pick: String): List<AnalysisRow> =
+    list.mapNotNull { o ->
+        val va = o.optString("addr").ifBlank { hexAddr(o.opt("addr")) }
+        val name = o.optString(pick).ifBlank { o.optString("ref") }.ifBlank { va }
+        val type = o.optString("type")
+        val op = o.optString("opcode").ifBlank { o.optString("text") }
+        val meta = listOf(type, op).filter { it.isNotBlank() }.joinToString("  ")
+        if (name.isBlank() && va.isBlank()) null
+        else AnalysisRow(key = "$va|$name", title = name, meta = meta, va = va, text = name)
+    }
+
+/**
+ * 函数详情 · 交叉引用页（对齐 Explorer So `XRefTabFragment`）：
+ * 4 个子页签 —— 外部引用 / 内部引用 / 数据引用 / 图形化（默认图形化）；
+ * 列表页有搜索 + 状态行，图形化页有方向 / 深度 / 重置 + 邻域画布。
+ */
+@Composable
+private fun FuncXRefView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val ws = tools.sharedWorkspaceId
+    val tick = tools.reloadTick
+    val loc = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+
+    var tab by remember { mutableStateOf("graph") }
+    var query by remember { mutableStateOf("") }
+    var ext by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var int by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var data by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var gNodes by remember(ws, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var gEdges by remember(ws, tick) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var loading by remember(loc, tick) { mutableStateOf(false) }
+    var dir by remember { mutableStateOf("both") }
+    var depth by remember { mutableStateOf(1) }
+
+    LaunchedEffect(loc, ws, tick) {
+        if (ws.isBlank() || loc.isBlank()) return@LaunchedEffect
+        loading = true
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
+                val eng = EngineProvider.get(context)
+                val a = parseRzArray(eng.rzCommand(ws, "", "s $loc; axtj")) ?: emptyList()
+                val b = parseRzArray(eng.rzCommand(ws, "", "s $loc; axfj")) ?: emptyList()
+                var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
+                for (c in listOf("agC json", "aac; agC json", "agc json")) {
+                    g = parseRizinGraph(rzText(eng.rzCommand(ws, "", c)))
+                    if (g.first.isNotEmpty()) break
+                }
+                Triple(a, b, g)
+            }.getOrNull()
+        }
+        loading = false
+        if (res != null) {
+            val (a, b, g) = res
+            ext = a.filter { xrefIsCode(it) }
+            int = b.filter { xrefIsCode(it) }
+            data = (b + a).filter { !xrefIsCode(it) }
+            gNodes = g.first
+            gEdges = g.second
+        }
+    }
+
+    if (ws.isBlank() || loc.isBlank()) {
+        AnalysisEmptyState(
+            title = if (zh) "请先选择一个函数" else "Pick a function first",
+            hint = if (zh) "交叉引用以当前选中函数为目标" else "XRefs target the selected function",
+        )
+        return
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // 子页签（Explorer So：外部引用 / 内部引用 / 数据引用 / 图形化）
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            listOf(
+                "external" to (if (zh) "外部引用" else "Callers"),
+                "internal" to (if (zh) "内部引用" else "Callees"),
+                "data" to (if (zh) "数据引用" else "Data"),
+                "graph" to (if (zh) "图形化" else "Graph"),
+            ).forEach { (k, l) -> TabChip(l, selected = tab == k) { tab = k } }
+            Spacer(Modifier.weight(1f))
+            SmallAction(if (zh) "重新分析" else "Re-analyze", loading = loading, onClick = onRefresh)
+        }
+        // 搜索（图形化页签隐藏，对齐 Explorer So）
+        if (tab != "graph") {
+            Spacer(Modifier.size(6.dp))
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+                placeholder = {
+                    Text(
+                        if (zh) "搜索函数名称或地址" else "search name or address",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                        color = cs.onSurfaceVariant,
+                    )
+                },
+                trailingIcon = {
+                    if (query.isNotBlank()) {
+                        IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                        }
+                    }
+                },
+            )
+        }
+        Spacer(Modifier.size(6.dp))
+
+        val cur: List<JSONObject> = when (tab) {
+            "external" -> ext
+            "internal" -> int
+            "data" -> data
+            else -> emptyList()
+        }
+        val curRows = remember(cur, query, tab) {
+            val r = xrefRows(cur, if (tab == "internal" || tab == "data") "to" else "from")
+            if (query.isBlank()) r else r.filter { it.title.contains(query, true) || it.va.contains(query, true) }
+        }
+
+        if (tab != "graph") {
+            MonoLine(
+                when (tab) {
+                    "external" -> if (zh) "找到 ${curRows.size} 个外部引用 (调用者)" else "${curRows.size} external refs (callers)"
+                    "internal" -> if (zh) "找到 ${curRows.size} 个内部引用 (被调用)" else "${curRows.size} internal refs (callees)"
+                    else -> if (zh) "找到 ${curRows.size} 个数据引用" else "${curRows.size} data refs"
+                },
+                cs.onSurfaceVariant, AppText.label,
+            )
+            Spacer(Modifier.size(6.dp))
+        }
+
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                loading && cur.isEmpty() && tab != "graph" -> AnalysisLoading()
+                tab == "graph" -> Column(Modifier.fillMaxSize()) {
+                    // 控制条（对齐 Explorer So：我调用的 / 调用者 / 深度 − N + / 重置）
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TabChip(if (zh) "我调用的" else "Callees", selected = dir == "callees") { dir = "callees" }
+                        TabChip(if (zh) "调用者" else "Callers", selected = dir == "callers") { dir = "callers" }
+                        TabChip(if (zh) "双向" else "Both", selected = dir == "both") { dir = "both" }
+                        SmallAction("−", enabled = depth > 1) { depth-- }
+                        SmallAction(if (zh) "深度 $depth" else "depth $depth", active = true) {}
+                        SmallAction("+", enabled = depth < 5) { depth++ }
+                        SmallAction(if (zh) "重置" else "Reset") { depth = 1; dir = "both" }
+                    }
+                    Spacer(Modifier.size(6.dp))
+                    val sub = remember(gNodes, gEdges, loc, depth, dir) {
+                        buildEgoSubgraph(gNodes, gEdges, loc, depth, 200, dir)
+                    }
+                    if (sub.first.isEmpty()) {
+                        AnalysisEmptyState(
+                            title = if (zh) "无调用关系" else "No relations",
+                            hint = if (zh) "该函数没有找到调用关系（可能尚未分析出调用图）。" else "No call relations found.",
+                            primaryLabel = if (zh) "重新分析" else "Re-analyze",
+                            onPrimary = onRefresh,
+                        )
+                    } else {
+                        val tc = remember(sub) { classifyCallEdges(sub.first.size, sub.second) }
+                        MonoLine(
+                            if (zh) "邻域 · ${sub.first.size} 节点 · ${sub.second.size} 边 · 树边 ${tc.first.size} · 交叉边 ${tc.second.size}"
+                            else "ego · ${sub.first.size} nodes · ${sub.second.size} edges · tree ${tc.first.size} · cross ${tc.second.size}",
+                            cs.onSurfaceVariant, AppText.label,
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        CallGraphCanvas(sub.first, sub.second, "TB", query, zh, "curve", Modifier.fillMaxWidth().weight(1f))
+                    }
+                }
+                curRows.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无引用" else "No refs",
+                    hint = if (zh) "该函数在此类别下没有找到交叉引用。" else "No xrefs in this category.",
+                    primaryLabel = if (zh) "重新分析" else "Re-analyze",
+                    onPrimary = onRefresh,
+                )
+                else -> AnalysisCardList(curRows, analysisViewIcon("xrefs")) { row ->
+                    copyToClipboard(context, row.va.ifBlank { row.title }, zh)
+                }
+            }
+        }
+    }
+}
+
 /** 函数详情的 4 个页签（对齐 Explorer So FuncDetailActivity）。 */
 private val funcDetailTabs = listOf(
     Triple("disasm", "汇编", "Asm"),
@@ -3736,7 +3936,7 @@ private fun FuncDetailView(
             } else when (tab) {
                 "cfg" -> CfgView(tools, zh, context, onGoFunctions)
                 "pseudo" -> PseudoView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
-                "xrefs" -> GlobalXRefView(tools, zh, context, onRefresh)
+                "xrefs" -> FuncXRefView(tools, zh, context, onRefresh)
                 else -> DisasmView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
             }
         }

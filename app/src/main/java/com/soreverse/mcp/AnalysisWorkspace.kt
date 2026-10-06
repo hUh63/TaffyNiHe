@@ -299,16 +299,28 @@ internal fun AnalysisWorkspace(
     LaunchedEffect(view) { lastModeByTool = lastModeByTool + (analysisToolOf(view).key to view) }
 
     var showDrawer by remember { mutableStateOf(false) }
+    var railOpen by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        // ── 顶栏（≡ 抽屉 + 当前函数 + 刷新 + ⋮） ──
+    Row(Modifier.fillMaxSize()) {
+        // ── 侧栏（对齐 Explorer So 的 NavigationRail：主页 / 搜索 / 虚表 / 调用图 / 交叉引用 / …）──
+        if (railOpen) {
+            AnalysisRail(
+                current = view, zh = zh, state = state, tools = tools,
+                onPick = { tools.analysisView = it; railOpen = false },
+                onOpenTask = onOpenTask,
+                onMore = { railOpen = false; showDrawer = true },
+                onClose = { railOpen = false },
+            )
+        }
+        Column(Modifier.weight(1f).fillMaxHeight().statusBarsPadding()) {
+        // ── 顶栏（对齐 Explorer So 的 MaterialToolbar：≡ + 标题 + 刷新 + ⋮） ──
         AnalysisAppBar(
             state = state,
             tools = tools,
             zh = zh,
             view = view,
-            onOpenDrawer = { showDrawer = true },
+            onOpenDrawer = { railOpen = true },
             onPickFunction = { tools.analysisView = "functions" },
             onRefresh = refreshAll,
             onOpenTree = { showTree = true },
@@ -468,7 +480,8 @@ internal fun AnalysisWorkspace(
                 }
     }
 
-    // ── 抽屉（47 个视图全量索引） ──
+    }
+    // ── 「更多视图」全量索引抽屉 ──
     if (showDrawer) {
         AnalysisDrawer(
             current = view,
@@ -2911,6 +2924,100 @@ private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 
 
+/** 侧栏条目（对齐 Explorer So 的 NavigationRail 六项，另补塔菲需要的入口）。 */
+private val analysisRailItems = listOf(
+    "functions", "search", "vtable", "callgraph", "xrefs",
+    "hardening", "unpack", "addrview", "export", "flutter",
+)
+
+/** 左侧导航栏（Explorer So 的 NavigationRail：推挤内容、选中主色）。 */
+@Composable
+private fun AnalysisRail(
+    current: String,
+    zh: Boolean,
+    state: WorkspaceState,
+    tools: ToolPagesState,
+    onPick: (String) -> Unit,
+    onOpenTask: () -> Unit,
+    onMore: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.width(210.dp).fillMaxHeight()
+            .background(cs.surfaceContainerLow)
+            .padding(vertical = 8.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.ListAlt, null, tint = cs.primary, modifier = Modifier.size(18.dp))
+            Text(
+                if (zh) "导航" else "Navigate",
+                style = MaterialTheme.typography.titleMedium,
+                fontSize = AppText.title,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onClose, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Filled.Close, contentDescription = if (zh) "收起" else "Close", modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+            }
+        }
+        // 文件 / 任务（Explorer So 由外部选好文件；塔菲需要在此选）
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            WorkspacePicker(state, zh)
+            TaskChip(state, zh, onOpenTask)
+        }
+        GroupDivider()
+        LazyColumn(Modifier.weight(1f)) {
+            items(analysisRailItems, key = { it }) { k ->
+                val selected = k == current || (k == "functions" && current in analysisHomeTabKeys)
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(if (selected) cs.primary.copy(alpha = 0.12f) else Color.Transparent)
+                        .clickable { onPick(k) }
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(analysisViewIcon(k), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(19.dp))
+                    Text(
+                        analysisViewLabel(k, zh),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = AppText.bodyStrong,
+                        color = if (selected) cs.primary else cs.onSurface,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            item(key = "more") {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onMore() }
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(Icons.Filled.MoreVert, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(19.dp))
+                    Text(
+                        if (zh) "更多视图" else "More views",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = AppText.bodyStrong,
+                        color = cs.onSurface,
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** 抽屉：47 个视图的全量索引（域 / 工具 / 模式三级）。 */
 @Composable
 private fun AnalysisDrawer(current: String, zh: Boolean, onPick: (String) -> Unit, onDismiss: () -> Unit) {
@@ -3018,29 +3125,23 @@ private fun AnalysisAppBar(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         IconButton(onClick = onOpenDrawer) {
-            Icon(Icons.Filled.Menu, contentDescription = if (zh) "全部视图" else "All views", tint = cs.onSurfaceVariant)
+            Icon(Icons.Filled.Menu, contentDescription = if (zh) "导航" else "Navigation", tint = cs.onSurfaceVariant)
         }
-        // 标题区：当前函数（点一下 → 函数列表换一个）
+        // 标题区（对齐 Explorer So：SO 详情标题 + 当前视图副标题）
         Column(
-            Modifier.weight(1f).clip(RoundedCornerShape(AppShape.sm))
-                .clickable(onClick = onPickFunction)
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+            Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 4.dp),
         ) {
             Text(
-                if (fnName.isBlank()) (if (zh) "未选择函数" else "No function") else fnName,
+                tools.sharedSoName.ifBlank { if (zh) "SO 详情" else "SO detail" },
                 style = MaterialTheme.typography.titleMedium,
                 fontSize = AppText.title,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                color = if (fnName.isBlank()) cs.primary else cs.onSurface,
+                color = cs.onSurface,
             )
             Text(
-                if (fnName.isBlank()) {
-                    if (zh) "点这里去函数列表" else "tap for function list"
-                } else {
-                    fnVa.ifBlank { analysisViewLabel(view, zh) }
-                },
+                (analysisViewLabel(view, zh) + if (fnName.isNotBlank()) " · " + fnVa.ifBlank { fnName } else ""),
                 style = MaterialTheme.typography.labelSmall,
                 fontSize = AppText.label,
                 maxLines = 1,
@@ -3079,15 +3180,6 @@ private fun AnalysisAppBar(
                 )
             }
         }
-    }
-    // 文件 / 任务选择条
-    FlowRow(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        WorkspacePicker(state, zh)
-        TaskChip(state, zh, onOpenTask)
     }
 }
 

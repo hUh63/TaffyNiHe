@@ -3322,7 +3322,7 @@ private fun FunctionsView(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
+                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 tools.viewLoading == cacheKey && all.isEmpty() -> AnalysisLoading()
                 all.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> {
@@ -3513,7 +3513,7 @@ private fun SearchView(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
+                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 query.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "输入关键字开始搜索" else "Type a keyword to search",
@@ -4110,7 +4110,7 @@ private fun CfgView(
         when {
             ws.isBlank() -> AnalysisEmptyState(
                 title = if (zh) "未打开工作区" else "No workspace",
-                hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK first",
+                hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
             )
             target.isBlank() -> AnalysisEmptyState(
                 title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
@@ -4319,7 +4319,7 @@ private fun ListScaffold(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
+                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
                 rows.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> AnalysisErrorBanner(
@@ -5268,7 +5268,7 @@ private fun RzViewScaffold(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先用顶部「选文件」打开一个 SO / APK" else "Open a SO / APK from the top bar first",
+                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 loading -> AnalysisLoading()
                 error.isNotBlank() -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {

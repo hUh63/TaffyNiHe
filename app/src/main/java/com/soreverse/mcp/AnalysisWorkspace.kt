@@ -87,6 +87,9 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -3467,7 +3470,6 @@ private fun FunctionsView(
                         )
                     },
                     icon = Icons.Filled.Memory,
-                    selectedTitle = tools.selectedFunctionName,
                     onPick = { row -> onSelect(row.title, row.text) },
                 )
             }
@@ -4534,7 +4536,6 @@ private fun CfgView(
 private fun AnalysisCardList(
     rows: kotlin.collections.List<AnalysisRow>,
     icon: ImageVector,
-    selectedTitle: String = "",
     onPick: (AnalysisRow) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -4542,13 +4543,12 @@ private fun AnalysisCardList(
         Modifier.fillMaxSize(),
     ) {
         items(rows, key = { r -> r.key }) { row ->
-            val selected = selectedTitle.isNotBlank() && row.title == selectedTitle
             val shape = RoundedCornerShape(10.dp)
             Column(
                 Modifier.fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 3.dp)
                     .clip(shape)
-                    .background(if (selected) cs.primaryContainer else cs.surfaceVariant)
+                    .background(cs.surfaceVariant)
                     .clickable { onPick(row) }
                     .padding(12.dp),
             ) {
@@ -4574,7 +4574,7 @@ private fun AnalysisCardList(
                         row.title.ifBlank { "--" },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (selected) cs.onPrimaryContainer else cs.onSurface,
+                        color = cs.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -7409,7 +7409,6 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var loading by remember(ws, tick) { mutableStateOf(false) }
     var error by remember(ws, tick) { mutableStateOf("") }
     var note by remember(ws, tick) { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -7446,40 +7445,9 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
 
     if (ws.isBlank()) return NeedWorkspace(zh)
 
-    val names = remember(nodes) {
-        nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }.filter { it.isNotBlank() }
-    }
-    val inCnt = remember(edges) { edges.groupingBy { it.second }.eachCount() }
-    val entryCount = remember(names, inCnt) { names.count { (inCnt[it] ?: 0) == 0 } }
 
     Column(Modifier.fillMaxSize()) {
-        // 头部：搜索行（对齐 Explorer So 调用图：搜索框 + 重置）
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            OutlinedTextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
-                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-                shape = RoundedCornerShape(AppShape.sm),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-                placeholder = { Text(if (zh) "搜索函数名 / 地址…" else "search fn / addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            )
-            if (query.isNotBlank()) SmallAction(if (zh) "重置" else "Reset") { query = "" }
-            SmallAction(if (zh) "重析" else "Re-run", loading = loading, onClick = onRefresh)
-        }
-        if (nodes.isNotEmpty()) {
-            Spacer(Modifier.size(4.dp))
-            MonoLine(
-                if (zh) "函数 ${nodes.size} 个 · 调用边 ${edges.size} 条 · 入口 $entryCount 个"
-                else "${nodes.size} fns · ${edges.size} edges · $entryCount entries",
-                cs.onSurfaceVariant, AppText.label,
-            )
-        }
-        if (note.isNotBlank()) { Spacer(Modifier.size(2.dp)); MonoLine(note, cs.onSurfaceVariant, AppText.label) }
-        Spacer(Modifier.size(6.dp))
+        if (note.isNotBlank()) { MonoLine(note, cs.onSurfaceVariant, AppText.label); Spacer(Modifier.size(4.dp)) }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 loading && nodes.isEmpty() -> AnalysisLoading()
@@ -7489,7 +7457,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     hint = if (zh) "rizin 未返回全局调用图。可先跑一次全量分析（aaaa）。" else "rizin returned no call graph. Run full analysis first.",
                     primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
                 )
-                else -> CallGraphGraphPane(nodes, edges, query, zh)
+                else -> CallGraphGraphPane(nodes, edges, "", zh)
             }
         }
     }
@@ -10805,6 +10773,8 @@ private fun CallGraphCanvas(
     zh: Boolean,
     route: String = "curve",
     modifier: Modifier = Modifier,
+    focusToken: Int = 0,
+    focusIndex: Int = -1,
 ) {
     val density = LocalDensity.current.density
     val cs = MaterialTheme.colorScheme
@@ -10814,7 +10784,6 @@ private fun CallGraphCanvas(
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     var selected by remember(layout) { mutableStateOf(-1) }
     var fitted by remember(layout) { mutableStateOf(false) }
-    var mi by remember(layout, findQ) { mutableStateOf(0) }
 
     fun applyFit() {
         if (viewport.width <= 0 || viewport.height <= 0 || layout.nodes.isEmpty()) return
@@ -10830,6 +10799,15 @@ private fun CallGraphCanvas(
             fitted = true
         }
     }
+
+    LaunchedEffect(focusToken) {
+        if (focusToken > 0 && focusIndex in layout.nodes.indices) {
+            selected = focusIndex
+            val nd = layout.nodes[focusIndex]
+            pan = Offset(-nd.x * scale, -nd.y * scale)
+        }
+    }
+
 
     val shape = RoundedCornerShape(AppShape.md)
     Box(
@@ -10875,18 +10853,6 @@ private fun CallGraphCanvas(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             SmallAction(if (zh) "适应" else "Fit") { applyFit() }
-            if (findQ.isNotBlank()) {
-                SmallAction(if (zh) "下一个" else "Next") {
-                    val matches = layout.nodes.indices.filter { layout.nodes[it].name.contains(findQ, true) }
-                    if (matches.isNotEmpty()) {
-                        val k = matches[mi % matches.size]
-                        mi++
-                        selected = k
-                        val nd = layout.nodes[k]
-                        pan = Offset(-nd.x * scale, -nd.y * scale)
-                    }
-                }
-            }
         }
         if (selected in layout.nodes.indices) {
             Surface(
@@ -10906,6 +10872,32 @@ private fun CallGraphCanvas(
                 )
             }
         }
+    }
+}
+
+/** Explorer So 搜索行 chevron 按钮（btnPrev/btnNext：44x48，M3 OutlinedButton，iconPadding 0）。 */
+@Composable
+private fun ChevronButton(
+    icon: ImageVector,
+    desc: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(AppShape.sm),
+        contentPadding = PaddingValues(0.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = cs.onSurfaceVariant,
+            disabledContentColor = cs.onSurfaceVariant.copy(alpha = 0.38f),
+        ),
+        border = BorderStroke(1.dp, if (enabled) cs.outlineVariant else cs.outlineVariant.copy(alpha = 0.38f)),
+        modifier = modifier.width(44.dp).height(48.dp),
+    ) {
+        Icon(icon, contentDescription = desc, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -10984,17 +10976,39 @@ private fun CallGraphGraphPane(
     val subPair = remember(nodes, edges, mode, root, depth, maxN, rebuild) {
         buildCallSubgraph(nodes, edges, mode, root, depth, maxN)
     }
+    var focusToken by remember { mutableStateOf(0) }
+    var focusIndex by remember { mutableStateOf(-1) }
+    var matchCursor by remember { mutableStateOf(-1) }
+
+    // 匹配定位（Explorer So runSearch/stepMatch：按名称 / 地址匹配，‹ › 循环跳转并聚焦节点）
+    val matchIndices = remember(subPair, query) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) emptyList<Int>() else {
+            val bare = q.removePrefix("0x")
+            subPair.first.mapIndexedNotNull { i, p ->
+                val nm = p.first.lowercase()
+                val hex = p.second.lowercase().removePrefix("0x")
+                if (nm.contains(q) || (bare.isNotEmpty() && hex.contains(bare))) i else null
+            }
+        }
+    }
+    LaunchedEffect(matchIndices) {
+        if (matchIndices.isEmpty()) { matchCursor = -1; focusIndex = -1 }
+        else { matchCursor = 0; focusIndex = matchIndices[0]; focusToken++ }
+    }
+    fun stepMatch(delta: Int) {
+        if (matchIndices.isEmpty()) return
+        val size = matchIndices.size
+        matchCursor = ((matchCursor + delta) % size + size) % size
+        focusIndex = matchIndices[matchCursor]
+        focusToken++
+    }
+
     val entryCount = remember(nodes, edges) {
         val indeg = HashMap<String, Int>()
         edges.forEach { (_, t) -> indeg[t] = (indeg[t] ?: 0) + 1 }
         nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }
             .count { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
-    }
-    val matchCount = remember(nodes, query) {
-        if (query.isBlank()) 0
-        else nodes.count {
-            it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) }.contains(query, true)
-        }
     }
 
     Column(Modifier.fillMaxSize().background(cs.surface)) {
@@ -11006,39 +11020,45 @@ private fun CallGraphGraphPane(
             border = BorderStroke(1.dp, cs.outlineVariant),
         ) {
             Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp)) {
-                // 搜索行（searchBox：圆角 12dp / textSize 13.5sp）
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant) },
-                    placeholder = {
-                        Text(
-                            if (zh) "搜索" else "search",
-                            fontSize = 13.5.sp,
-                            color = cs.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    trailingIcon = {
-                        if (query.isNotBlank()) {
-                            IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                // 搜索行（searchBox 圆角 12dp / 13.5sp；btnPrev/btnNext：44x48 上一个/下一个匹配）
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant) },
+                        placeholder = {
+                            Text(
+                                if (zh) "搜索" else "search",
+                                fontSize = 13.5.sp,
+                                color = cs.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailingIcon = {
+                            if (query.isNotBlank()) {
+                                IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                                    Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                                }
                             }
-                        }
-                    },
-                )
-                // 匹配计数（tvMatch：marginH 6 / marginTop 4，11sp）
-                if (matchCount > 0) {
+                        },
+                    )
+                    ChevronButton(Icons.Filled.ChevronLeft, if (zh) "上一个匹配" else "prev match", matchIndices.isNotEmpty(), Modifier.padding(start = 6.dp)) { stepMatch(-1) }
+                    ChevronButton(Icons.Filled.ChevronRight, if (zh) "下一个匹配" else "next match", matchIndices.isNotEmpty(), Modifier.padding(start = 4.dp)) { stepMatch(1) }
+                }
+                // 匹配计数（tvMatch：marginHorizontal 6 / marginTop 4，11sp；无匹配 error 色，有匹配 tertiary 色）
+                if (query.isNotBlank()) {
                     Text(
-                        if (zh) "匹配 $matchCount 个节点" else "$matchCount matches",
+                        if (matchIndices.isEmpty()) (if (zh) "无匹配节点" else "no match")
+                        else if (zh) "第 ${matchCursor + 1} / ${matchIndices.size} 个匹配"
+                        else "match ${matchCursor + 1} / ${matchIndices.size}",
                         modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp),
                         fontSize = 11.sp,
-                        color = cs.onSurfaceVariant,
+                        color = if (matchIndices.isEmpty()) cs.error else cs.tertiary,
                     )
                 }
                 // 模式行（marginTop 10dp）：分段 + 选项

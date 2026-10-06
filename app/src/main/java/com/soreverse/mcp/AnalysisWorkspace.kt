@@ -2232,6 +2232,37 @@ private fun SmallAction(
     }
 }
 
+/** Explorer So `GlowButton` 式主操作按钮：整宽、56dp、主色。 */
+@Composable
+private fun BigActionButton(
+    label: String,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        onClick = { if (enabled && !loading) onClick() },
+        enabled = enabled && !loading,
+        shape = RoundedCornerShape(AppShape.md),
+        color = if (enabled) cs.primary else cs.surfaceContainerHigh,
+        contentColor = if (enabled) cs.onPrimary else cs.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().height(56.dp),
+    ) {
+        Row(
+            Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (loading) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = if (enabled) cs.onPrimary else cs.onSurfaceVariant)
+                Spacer(Modifier.size(8.dp))
+            }
+            Text(label, style = MaterialTheme.typography.titleMedium, fontSize = AppText.bodyStrong, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
 @Composable
 private fun AnalysisLoading() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2728,8 +2759,9 @@ private fun CalcView(zh: Boolean, context: android.content.Context) {
                 }
             }
             Spacer(Modifier.size(4.dp))
+            BigActionButton(if (zh) "计算" else "Calc", loading = loading) { run() }
+            Spacer(Modifier.size(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallAction(if (zh) "计算" else "Calc", loading = loading) { run() }
                 SmallAction(if (zh) "清空" else "Clear") { inputs = emptyMap(); result = ""; error = "" }
                 SmallAction(if (zh) "复制结果" else "Copy", enabled = result.isNotBlank()) { copyToClipboard(context, result, zh) }
             }
@@ -4662,17 +4694,13 @@ private fun DemangleView(zh: Boolean, context: android.content.Context) {
             },
         )
         Spacer(Modifier.size(6.dp))
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(
-                label = if (zh) "还原" else "Demangle",
-                enabled = input.isNotBlank(),
-                loading = working,
-                onClick = { run() },
-            )
+        BigActionButton(
+            label = if (zh) "还原" else "Demangle",
+            enabled = input.isNotBlank(),
+            loading = working,
+        ) { run() }
+        Spacer(Modifier.size(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SmallAction(
                 label = if (zh) "清空" else "Clear",
                 enabled = input.isNotBlank() || result.isNotBlank(),
@@ -5081,22 +5109,21 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                 shape = RoundedCornerShape(AppShape.sm),
             )
-            FlowRow(
+            BigActionButton(
+                label = if (zh) "写入编辑会话" else "Apply",
+                enabled = ws.isNotBlank() && asm.isNotBlank() && locator.isNotBlank(),
+                loading = patching,
+            ) { applyToSession(false) }
+            Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 SmallAction(
                     label = if (zh) "预览改动" else "Preview",
                     enabled = ws.isNotBlank() && asm.isNotBlank() && locator.isNotBlank(),
                     loading = patching,
                     onClick = { applyToSession(true) },
-                )
-                SmallAction(
-                    label = if (zh) "写入编辑会话" else "Apply",
-                    enabled = ws.isNotBlank() && asm.isNotBlank() && locator.isNotBlank(),
-                    loading = patching,
-                    onClick = { applyToSession(false) },
                 )
                 if (sessionId.isNotBlank()) {
                     Text(

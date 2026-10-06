@@ -1,3 +1,29 @@
+# TaffyNiHe v1.3.82（逐像素核对 Explorer So 布局）
+
+把 Explorer So 的布局 XML 尺寸逐项对到分析页代码里。
+
+## 🧩 本次
+**`item_detail.xml`（列表行卡片）**
+- 卡片间距：去掉多余的 `spacedBy(6dp)`／底部 padding，只保留 `marginV 3dp`（与 Explorer So 一致，共 6dp）。
+- 返回类型 chip 移到**标题左侧**（对齐 `tv_ret_type`），LabelSmall / bold / **minWidth 22dp** / paddingH6·V2 / 居中。
+- meta 行改用 `textAppearanceLabelSmall`（11sp）+ monospace + marginTop 2dp。
+
+**`fragment_list_tab.xml`（列表页）**
+- 顺序改为 **计数行 → 搜索框 → 分隔线 → 列表**；计数行 padding **12dp** / LabelSmall。
+- 搜索框 **marginH 12dp / marginBottom 8dp**，OutlinedBox 圆角 4dp、高度 56dp、字号 16sp（bodyLarge）。
+
+**`fragment_global_cfg.xml`（调用图）** 整体重排为三层：
+- **头部卡**：marginH 10 / marginTop 6，圆角 **16dp**、**1dp outlineVariant 描边**、底色 `surfaceContainer`，内边距 H12·T10·B8；内含搜索行（圆角 **12dp**、**13.5sp**）、匹配计数（11sp）、模式分段（**minHeight 36dp / paddingH 16dp / 12sp**：热点模式·根展开·完整模式）+ **「选项」折叠**（根函数 / 深度 / 上限 / 重新构建 44dp）。
+- **统计行**：marginH 12 / T6 / B4，chip 间距 6dp，来源文字 10.5sp。
+- **画布卡**：weight 1、marginH 10 / marginBottom 10，圆角 16dp、底色 `surfaceContainerHigh`；右下角 **44×44 布局方向按钮**（对齐 `btnRankDir`）。
+
+**`fragment_func_tab.xml`（函数页）**
+- 工具栏 **marginH 12 / T8 / B4**：搜索框 weight1（56dp / 4dp 圆角 / 16sp）+ **过滤（排序下拉）+ 导出** 两个图标按钮。
+- 计数行 paddingH 14 / top 2 / bottom 6；列表前加分隔线。
+- 函数列表改用 `item_detail` 卡片（与其余列表页统一）。
+
+---
+
 # TaffyNiHe v1.3.81（交叉引用页签重做 + 塔菲特有页面统一）
 
 ## 🧩 本次
@@ -217,6 +243,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

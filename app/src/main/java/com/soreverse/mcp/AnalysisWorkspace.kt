@@ -3971,7 +3971,9 @@ private fun FuncDetailView(
     }
 }
 
-/** 反汇编：三列对齐（地址可点复制 | 机器码 | 指令与操作数），整体可横滚不换行。 */
+/** 反汇编（对齐 Explorer So fragment_asm_code_tab.xml）：
+ *  计数行（tv_count：padding 12dp / labelSmall）→ 搜索框（til_search：marginH 12 / marginBottom 8）
+ *  → MaterialDivider → 列表（addr | bytes | asm，monospace 12sp，行 padding 8dp）。 */
 @Composable
 private fun DisasmView(
     tools: ToolPagesState,
@@ -4001,7 +4003,15 @@ private fun DisasmView(
     val addr = obj?.optString("addr").orEmpty()
     val count = obj?.optInt("instructionCount", lines.size) ?: lines.size
     val parsed = remember(lines) { lines.map { splitDisasmLine(it) } }
+    var query by remember { mutableStateOf("") }
+    val shown = remember(parsed, query) {
+        if (query.isBlank()) parsed
+        else parsed.filter { t ->
+            t.first.contains(query, true) || t.second.contains(query, true) || t.third.contains(query, true)
+        }
+    }
     val hs = rememberScrollState()
+    val mono12 = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp)
 
     Column(Modifier.fillMaxSize()) {
         // 函数头（在「函数详情」容器内由容器统一显示）
@@ -4022,7 +4032,7 @@ private fun DisasmView(
                 )
                 if (addr.isNotBlank()) {
                     Text(
-                        "$addr · $count insns",
+                        addr,
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         fontSize = AppText.label,
                         color = cs.onSurfaceVariant,
@@ -4031,6 +4041,7 @@ private fun DisasmView(
                 }
             }
         }
+        // 操作行（塔菲特有：更多指令 / 重新加载 / 语义注解）
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -4054,16 +4065,44 @@ private fun DisasmView(
                     scope.launch { fetchDisasm(context, tools, zh, ws, target, key, tools.disasmLimit) }
                 },
             )
-            if (addr.isNotBlank()) {
-                Text(
-                    "$addr · $count / ${tools.disasmLimit}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = AppText.label,
-                    color = cs.onSurfaceVariant,
-                )
-            }
         }
-        Spacer(Modifier.size(6.dp))
+        // 计数行（tv_count：padding 12dp / labelSmall / onSurfaceVariant）
+        Text(
+            (if (zh) "反汇编 · " else "asm · ") + count + (if (zh) " 条" else " insns") +
+                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " ${shown.size}" else "") +
+                (if (addr.isNotBlank()) " · $addr · ${tools.disasmLimit}" else ""),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+        )
+        // 搜索框（til_search：OutlinedBox / marginH 12dp / marginBottom 8dp）
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp).heightIn(min = 56.dp),
+            shape = RoundedCornerShape(4.dp),
+            textStyle = MaterialTheme.typography.bodyLarge,
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
+            placeholder = {
+                Text(
+                    if (zh) "搜索 (按名称 / 地址 / 类型)" else "search (name / addr / type)",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
+        GroupDivider()
         if (ws.isBlank() || target.isBlank()) {
             AnalysisEmptyState(
                 title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
@@ -4082,53 +4121,39 @@ private fun DisasmView(
                 primaryLabel = if (zh) "函数列表" else "Function list",
                 onPrimary = onGoFunctions,
             )
+        } else if (shown.isEmpty()) {
+            AnalysisEmptyState(
+                title = if (zh) "无匹配项" else "No match",
+                hint = if (zh) "换个关键字再试" else "Try another keyword",
+            )
         } else {
-            Column(
-                Modifier.weight(1f).fillMaxWidth()
-                    .clip(RoundedCornerShape(AppShape.md))
-                    .background(cs.surfaceContainerHigh)
-                    .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
-            ) {
-                // 表头
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(hs).padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            Box(Modifier.weight(1f).fillMaxWidth().horizontalScroll(hs)) {
+                Column(
+                    Modifier.fillMaxHeight().verticalScroll(rememberScrollState())
+                        .width(IntrinsicSize.Max).padding(bottom = 10.dp),
                 ) {
-                    Text(if (zh) "地址" else "ADDR", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(96.dp))
-                    Text(if (zh) "机器码" else "BYTES", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant, modifier = Modifier.width(150.dp))
-                    Text(if (zh) "指令" else "INSTRUCTION", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-                }
-                GroupDivider()
-                // 横滚 + 竖滚：Column 用 IntrinsicSize.Max 让所有行同宽，列起点据此对齐。
-                val vs = rememberScrollState()
-                Box(Modifier.weight(1f).fillMaxWidth().horizontalScroll(hs)) {
-                    Column(
-                        Modifier.fillMaxHeight().verticalScroll(vs).width(IntrinsicSize.Max)
-                            .padding(bottom = 10.dp),
-                    ) {
-                        parsed.forEach { (a, bytes, instr) ->
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    a,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = cs.onSurfaceVariant,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier.width(96.dp).clickable { if (a.isNotBlank()) copyToClipboard(context, a, zh) },
-                                )
-                                Text(
-                                    bytes.ifBlank { " " },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = cs.primary.copy(alpha = 0.75f),
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier.width(150.dp),
-                                )
-                                Text(disasmInstrAnnotated(instr, cs), maxLines = 1, softWrap = false)
-                            }
+                    shown.forEach { (a, bytes, instr) ->
+                        Row(
+                            Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                a,
+                                style = mono12,
+                                color = cs.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.width(96.dp).clickable { if (a.isNotBlank()) copyToClipboard(context, a, zh) },
+                            )
+                            Text(
+                                bytes.ifBlank { " " },
+                                style = mono12,
+                                color = cs.primary.copy(alpha = 0.75f),
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.width(150.dp),
+                            )
+                            Text(disasmInstrAnnotated(instr, cs), maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -4188,7 +4213,9 @@ private fun highlightPseudo(line: String, cs: androidx.compose.material3.ColorSc
     }
 }
 
-/** 伪 C 代码视图：行号槽 + 轻量高亮；顶部显示签名/范围/覆盖率等元信息。 */
+/** 伪 C 代码视图（对齐 Explorer So fragment_pseudo_c.xml）：
+ *  顶部 meta 行（padding 8dp / bg surfaceVariant / labelSmall）放转换器与范围信息 + 复制全部 / 导出；
+ *  下方两栏：行号槽（bg surfaceVariant / monospace 13sp / 右对齐）+ 代码区（monospace 13sp / 行距 +2dp）。 */
 @Composable
 private fun PseudoView(
     tools: ToolPagesState,
@@ -4199,6 +4226,7 @@ private fun PseudoView(
     embedded: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
     var engineMode by remember { mutableStateOf("auto") }
@@ -4221,41 +4249,12 @@ private fun PseudoView(
     val allLines = remember(pseudo) { if (pseudo.isBlank()) emptyList() else pseudo.split("\n") }
     val truncated = allLines.size > 3000
     val lines = remember(allLines) { if (truncated) allLines.take(3000) else allLines }
-    val hs = rememberScrollState()
     val vs = rememberScrollState()
+    val codeStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+    val gutterW = (lines.size.toString().length.coerceAtLeast(2) * 9 + 20).dp
 
     Column(Modifier.fillMaxSize()) {
-        // 函数头（在「函数详情」容器内由容器统一显示）
-        if (!embedded && target.isNotBlank()) {
-            val hRange = bounds?.let { b ->
-                val st = b.optString("startAddr"); val en = b.optString("endAddr")
-                if (st.isNotBlank()) "$st-$en" else ""
-            }.orEmpty()
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    tools.selectedFunctionName.ifBlank { target },
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = cs.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (hRange.isNotBlank()) {
-                    Text(
-                        hRange,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        fontSize = AppText.label,
-                        color = cs.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
-            }
-        }
+        // 操作行（塔菲特有：重新生成 / 函数列表 / 引擎切换）
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -4271,14 +4270,7 @@ private fun PseudoView(
             listOf("auto" to "Auto", "ghidra" to "Ghidra", "native" to "Native", "java" to "Java").forEach { (k, l) ->
                 SmallAction(l, active = engineMode == k) { engineMode = k }
             }
-            SmallAction(
-                label = if (zh) "复制全部" else "Copy",
-                enabled = pseudo.isNotBlank(),
-                onClick = { copyToClipboard(context, pseudo, zh) },
-            )
-            if (usedEngine.isNotBlank()) TypeBadge(usedEngine, cs.primary)
         }
-        Spacer(Modifier.size(6.dp))
         if (ws.isBlank() || target.isBlank()) {
             AnalysisEmptyState(
                 title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
@@ -4298,90 +4290,101 @@ private fun PseudoView(
                 onPrimary = onGoFunctions,
             )
         } else {
-            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // 元信息：范围 / 声明 / 越界 / 类型推断 —— 以 chip 形式固定在上方（不随代码滚动）
-                val meta = ArrayList<String>(4)
-                if (bounds != null) {
-                    val s = bounds.optString("startAddr")
-                    val e = bounds.optString("endAddr")
-                    val sz = bounds.optLong("size", -1L)
-                    if (s.isNotBlank()) meta.add("${if (zh) "范围" else "range"} $s-$e")
-                    if (sz >= 0L) meta.add("$sz B")
+            // 顶部 meta 行（padding 8dp / bg surfaceVariant / labelSmall）
+            Row(
+                Modifier.fillMaxWidth().background(cs.surfaceVariant).padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val metaParts = ArrayList<String>(5)
+                if (usedEngine.isNotBlank()) metaParts.add(usedEngine)
+                metaParts.add(if (zh) "${lines.size} 行" else "${lines.size} lines")
+                bounds?.let { b ->
+                    val s = b.optString("startAddr")
+                    val e = b.optString("endAddr")
+                    if (s.isNotBlank()) metaParts.add("$s-$e")
                 }
-                if (coverage != null) {
-                    val d0 = coverage.optString("declaredStart")
-                    val d1 = coverage.optString("declaredEnd")
-                    val oob = coverage.optJSONArray("outOfBoundsAddrs")?.length() ?: 0
-                    if (d0.isNotBlank()) meta.add("${if (zh) "声明" else "declared"} $d0-$d1")
-                    if (oob > 0) meta.add(if (zh) "越界地址 $oob" else "oob $oob")
+                coverage?.let { c ->
+                    val oob = c.optJSONArray("outOfBoundsAddrs")?.length() ?: 0
+                    if (oob > 0) metaParts.add(if (zh) "越界 $oob" else "oob $oob")
                 }
-                if (typeInf != null) {
-                    val keys = typeInf.keys()
-                    val parts = ArrayList<String>()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        parts.add("$k=${typeInf.opt(k)}")
-                    }
-                    if (parts.isNotEmpty()) meta.add(parts.joinToString(" · "))
+                typeInf?.let { ti ->
+                    val ks = ti.keys()
+                    val ps = ArrayList<String>()
+                    while (ks.hasNext()) { val kk = ks.next(); ps.add("$kk=${ti.opt(kk)}") }
+                    if (ps.isNotEmpty()) metaParts.add(ps.joinToString(" · "))
                 }
-                if (meta.isNotEmpty() || lines.isNotEmpty()) {
-                    FlowRow(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        meta.forEach { m ->
-                            Text(
-                                m,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = AppText.label,
-                                fontFamily = FontFamily.Monospace,
-                                color = cs.onSurfaceVariant,
-                                maxLines = 1,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(AppShape.sm))
-                                    .background(cs.surfaceContainerHigh)
-                                    .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.sm))
-                                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                            )
+                Text(
+                    metaParts.joinToString(" · "),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                TonalMiniButton(if (zh) "复制全部" else "Copy", Modifier.padding(start = 8.dp)) {
+                    copyToClipboard(context, pseudo, zh)
+                }
+                TonalMiniButton(if (zh) "导出" else "Export", Modifier.padding(start = 8.dp)) {
+                    scope.launch {
+                        val f = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val dir = exportsDir(context)
+                                if (!dir.exists()) dir.mkdirs()
+                                val nm = tools.selectedFunctionName.ifBlank { target }
+                                    .replace(Regex("[^A-Za-z0-9_.-]"), "_").take(48)
+                                val out = java.io.File(dir, (nm.ifBlank { "func" }) + ".c")
+                                out.writeText(pseudo)
+                                out
+                            }.getOrNull()
                         }
+                        if (f != null) shareExportFile(context, f, zh)
                     }
                 }
-                if (warn.isNotBlank()) AnalysisErrorBanner(warn)
-
-                Box(
-                    Modifier.weight(1f).fillMaxWidth().horizontalScroll(hs)
-                        .clip(RoundedCornerShape(AppShape.md))
-                        .background(cs.surfaceContainerHigh)
-                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+            }
+            if (warn.isNotBlank()) AnalysisErrorBanner(warn)
+            // 代码区（行号槽 + 代码，共用一套竖向滚动）
+            Box(Modifier.weight(1f).fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                Column(
+                    Modifier.fillMaxHeight().verticalScroll(vs)
+                        .width(IntrinsicSize.Max).padding(bottom = 8.dp),
                 ) {
-                    Column(
-                        Modifier.fillMaxHeight().verticalScroll(vs).width(IntrinsicSize.Max).padding(vertical = 8.dp),
-                    ) {
-                        lines.forEachIndexed { idx, line ->
-                            Row(Modifier.padding(horizontal = 8.dp)) {
+                    lines.forEachIndexed { idx, line ->
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                            Box(
+                                Modifier.width(gutterW).fillMaxHeight()
+                                    .background(cs.surfaceVariant)
+                                    .padding(start = 12.dp, end = 8.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
                                 Text(
                                     "${idx + 1}",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = cs.onSurfaceVariant.copy(alpha = 0.5f),
+                                    style = codeStyle,
+                                    color = cs.onSurfaceVariant,
                                     textAlign = TextAlign.End,
                                     maxLines = 1,
                                     softWrap = false,
-                                    modifier = Modifier.width(40.dp).padding(end = 8.dp),
                                 )
-                                Text(highlightPseudo(line, cs), maxLines = 1, softWrap = false)
                             }
-                        }
-                        if (truncated) {
                             Text(
-                                if (zh) "… 已截断，仅显示前 3000 行（完整内容点「复制全部」）"
-                                else "… truncated to first 3000 lines (use Copy for full text)",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = AppText.label,
-                                color = cs.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                highlightPseudo(line, cs),
+                                style = codeStyle,
+                                color = cs.onSurface,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(start = 8.dp, end = 8.dp),
                             )
                         }
+                    }
+                    if (truncated) {
+                        Text(
+                            if (zh) "… 已截断，仅显示前 3000 行（完整内容点「复制全部」）"
+                            else "… truncated to first 3000 lines (use Copy for full text)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
                     }
                 }
             }
@@ -10871,6 +10874,23 @@ private fun CallGraphCanvas(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+/** Explorer So 按钮（MaterialButton.TonalButton：12sp），用于伪 C 顶部 meta 行。 */
+@Composable
+private fun TonalMiniButton(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(AppShape.sm),
+        color = cs.secondaryContainer,
+        contentColor = cs.onSecondaryContainer,
+        modifier = modifier.heightIn(min = 32.dp),
+    ) {
+        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 12.sp, maxLines = 1)
         }
     }
 }

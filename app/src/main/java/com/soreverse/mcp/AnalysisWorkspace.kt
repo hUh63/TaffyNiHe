@@ -9540,7 +9540,7 @@ private fun DrawScope.drawDagScene(
             val cyy = my + oy / ol * 36f * density
             val p = Path().apply { moveTo(ax, ay); quadraticBezierTo(cxx, cyy, bx, by) }
             drawPath(p, colors.primary, style = Stroke(2.2f * density, pathEffect = dash, cap = StrokeCap.Round))
-            cgArrowHead(Offset(cxx, cyy), Offset(ax, ay), colors.primary, 8f * density)
+            cgArrowHead(Offset(bx, by), Offset(cxx, cyy), colors.primary, 8f * density)
         } else {
             val p0 = dagEdgePoint(ax, ay, bx, by, a.w * sc, a.h * sc)
             val p1 = dagEdgePoint(bx, by, ax, ay, b.w * sc, b.h * sc)
@@ -10729,6 +10729,31 @@ internal fun exportDrawToPng(
     f.outputStream().use { out -> bmp.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out) }
     f.absolutePath
 }.getOrNull()
+
+// ══════════════════ 全局调用图 · 图形画布（对标 Exbin GlobalCfgView） ══════════════════
+
+private class CgNode(
+    val name: String,
+    val addr: String,
+    var level: Int,
+    var x: Float,
+    var y: Float,
+    val w: Float,
+    val h: Float,
+) {
+    val left: Float get() = x - w / 2f
+    val right: Float get() = x + w / 2f
+    val top: Float get() = y - h / 2f
+    val bottom: Float get() = y + h / 2f
+    fun contains(px: Float, py: Float): Boolean = px in left..right && py in top..bottom
+}
+
+private class CgLayout(
+    val nodes: List<CgNode>,
+    val edges: List<Pair<Int, Int>>,
+    val width: Float,
+    val height: Float,
+)
 
 /** 邻域（Ego）：以 root 为中心，双向（调用者 + 被调用者）BFS 展开 depth 层。 */
 private fun buildEgoSubgraph(

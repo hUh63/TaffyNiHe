@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -8628,6 +8629,17 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
                             label = { Text(if (zh) "上限" else "Max", fontSize = AppText.label) },
                         )
                     }
+                    // 分层画布模型（对标 XRefDagModel.drill：BFS 逐层 + TopN + 总数上限 + 回边）
+                    val drillDensity = LocalDensity.current.density
+                    val drillDag = remember(names, edges, drillRoot, drillDepth, drillMax, drillRan, cs.primary, drillDensity) {
+                        if (!drillRan) null
+                        else buildDrillDag(
+                            names, edges, drillRoot,
+                            drillDepth.toIntOrNull()?.coerceIn(1, 8) ?: 3,
+                            drillMax.toIntOrNull()?.coerceIn(10, 2000) ?: 120,
+                            cs.primary, drillDensity,
+                        )
+                    }
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(if (zh) "候选根函数" else "Roots", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
                         FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -8674,29 +8686,20 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
                             hint = if (zh) "该根节点没有出边（可能是叶子函数，或尚未分析出调用关系）。可点「刷新」重跑全量分析再试。" else "The root has no outgoing edges (leaf, or calls not analyzed yet).",
                             primaryLabel = if (zh) "刷新重分析" else "Re-analyze", onPrimary = onRefresh,
                         )
-                        else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             MonoLine(
-                                if (zh) "根下钻 $drillRoot ｜ 深度 $drillDepth ｜ 当前显示 ${levels.sumOf { it.second.size } + 1} / 上限 $drillMax 节点"
-                                else "drill $drillRoot | depth $drillDepth | ${levels.sumOf { it.second.size } + 1} nodes",
+                                if (zh) "根下钻 $drillRoot ｜ 深度 $drillDepth ｜ 当前显示 ${drillDag?.nodes?.size ?: 1} / 上限 $drillMax 节点"
+                                else "drill $drillRoot | depth $drillDepth | ${drillDag?.nodes?.size ?: 1} nodes",
                                 cs.primary, AppText.bodyStrong,
                             )
-                            levels.forEach { (lvl, list) ->
-                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("$lvl · ${list.size}", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
-                                    Column(
-                                        Modifier.fillMaxWidth()
-                                            .clip(RoundedCornerShape(AppShape.md))
-                                            .background(cs.surfaceContainerHigh)
-                                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                                    ) {
-                                        if (list.isEmpty()) MonoLine(if (zh) "（无）" else "(none)", cs.onSurfaceVariant, AppText.label)
-                                        list.take(80).forEach { nm -> MonoLine("→ $nm", cs.onSurface, AppText.label) }
-                                        if (list.size > 80) MonoLine(if (zh) "… 共 ${list.size} 个" else "… ${list.size} total", cs.onSurfaceVariant, AppText.label)
-                                    }
-                                }
-                            }
+                            XRefDagCanvas(
+                                nodes = drillDag?.nodes ?: emptyList(),
+                                edges = drillDag?.edges ?: emptyList(),
+                                back = drillDag?.back ?: emptySet(),
+                                zh = zh,
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                onTap = { i -> drillDag?.nodes?.getOrNull(i)?.let { copyToClipboard(context, it.label, zh) } },
+                            )
                         }
                     }
                 }
@@ -8764,9 +8767,14 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
                         }
                     }
                 }
-                xTab == "scc" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                xTab == "scc" -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     val sccs = remember(names, edges) {
                         if (names.isEmpty()) emptyList() else tarjanScc(names, edges).sortedByDescending { it.size }
+                    }
+                    // SCC → DAG 分层画布模型（对标 XRefScc.collapse + XRefDagView：超级节点 tertiary 色，枢纽 Top5 高亮）
+                    val sccDensity = LocalDensity.current.density
+                    val sccDag = remember(names, edges, cs.tertiary, cs.primary, sccDensity) {
+                        buildSccDag(names, edges, cs.tertiary, cs.primary, sccDensity)
                     }
                     val cyclic = sccs.filter { it.size > 1 }
                     MonoLine(
@@ -8785,8 +8793,22 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
                             indegTop.forEach { (name, c) -> TypeBadge("$name  ×$c", cs.primary) }
                         }
                     }
-                    if (sccs.isNotEmpty()) {
-                        SccGraphCanvas(comps = sccs, edges = edges, zh = zh, modifier = Modifier.fillMaxWidth().height(360.dp))
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (sccDag == null || sccDag.nodes.isEmpty()) {
+                            AnalysisEmptyState(
+                                title = if (zh) "暂无分层数据" else "No layered data",
+                                hint = if (zh) "尚未分析出函数调用关系，可先点「刷新」重跑全量分析" else "No call relations yet; run full analysis first",
+                                primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+                            )
+                        } else {
+                            XRefDagCanvas(
+                                nodes = sccDag.nodes,
+                                edges = sccDag.edges,
+                                back = emptySet(),
+                                zh = zh,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                     if (cyclic.isEmpty()) {
                         AnalysisEmptyState(
@@ -8796,7 +8818,7 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
                     } else {
                         Text(if (zh) "环状簇（互相调用，建议整体理解）" else "Cyclic clusters", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
                         Column(
-                            Modifier.fillMaxWidth()
+                            Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())
                                 .clip(RoundedCornerShape(AppShape.md))
                                 .background(cs.surfaceContainerHigh)
                                 .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
@@ -9413,7 +9435,386 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
 
 // ───────────────────────── 函数详情（对齐 Exbin FuncDetailActivity / FuncSignatureDialog） ─────────────────────────
 
-/** 本地 Tarjan 强连通分量（用于调用图 SCC 鸟瞰）。 */
+// ══════════ 全局交叉引用 · 分层画布（对齐 Explorer So XRefDagView / XRefDagModel / XRefScc） ══════════
+
+/** 分层节点：圆角 8dp + surfaceContainer 底 + 类型色描边/文字（13sp），高 32dp，宽 clamp(72dp..240dp, 文本+18dp)。 */
+private class DagNode(val label: String, val depth: Int, val color: Color, val highlight: Boolean) {
+    var x = 0f
+    var y = 0f
+    var w = 0f
+    val h = 32f
+    val left get() = x - w / 2f
+    val right get() = x + w / 2f
+    val top get() = y - h / 2f
+    val bottom get() = y + h / 2f
+}
+
+/** 已布局的分层数据：edges 为节点下标对，back 为回边下标集合。 */
+private class DagLayout(
+    val nodes: List<DagNode>,
+    val edges: List<Pair<Int, Int>>,
+    val back: Set<Int>,
+    val width: Float,
+    val height: Float,
+)
+
+/** middleEllipsis（对齐 XRefEgoModel.middleEllipsis，18 字）。 */
+private fun dagMiddleEllipsis(s: String, max: Int): String =
+    if (s.length <= max) s else s.take(max / 2) + "…" + s.takeLast(max - max / 2 - 1)
+
+/** layered：横轴 = depth 列（gapX 150dp），纵轴 = 层内名称序（gapY 72dp），整体居中，确定性输出。 */
+private fun layoutDagGraph(
+    nodes: List<DagNode>,
+    edges: List<Pair<Int, Int>>,
+    back: Set<Int>,
+    density: Float,
+): DagLayout {
+    if (nodes.isEmpty()) return DagLayout(nodes, edges, back, 0f, 0f)
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        textSize = 13f * density
+    }
+    val gapX = 150f * density
+    val gapY = 72f * density
+    val maxW = 240f * density
+    val byDepth = LinkedHashMap<Int, MutableList<Int>>()
+    nodes.forEachIndexed { i, n -> byDepth.getOrPut(n.depth) { ArrayList() }.add(i) }
+    var maxX = 0f
+    var maxY = 0f
+    byDepth.keys.sorted().forEach { d ->
+        val col = byDepth[d]!!.sortedBy { nodes[it].label }
+        col.forEachIndexed { row, i ->
+            val n = nodes[i]
+            n.w = maxOf(72f * density, minOf(maxW, paint.measureText(dagMiddleEllipsis(n.label, 18)) + 18f * density))
+            n.x = d * gapX
+            n.y = row * gapY
+            if (n.x > maxX) maxX = n.x
+            if (n.y > maxY) maxY = n.y
+        }
+    }
+    val cx = maxX / 2f
+    val cy = maxY / 2f
+    nodes.forEach { it.x -= cx; it.y -= cy }
+    return DagLayout(nodes, edges, back, maxX, maxY)
+}
+
+/** 边端点裁剪到节点矩形边界（对齐 XRefDagView.edgePoint）。 */
+private fun dagEdgePoint(cx: Float, cy: Float, tx: Float, ty: Float, w: Float, h: Float): Offset {
+    val dx = tx - cx
+    val dy = ty - cy
+    if (kotlin.math.abs(dx) < 0.001f && kotlin.math.abs(dy) < 0.001f) return Offset(cx, cy)
+    val sx = if (kotlin.math.abs(dx) > 0.001f) (w / 2f) / kotlin.math.abs(dx) else Float.MAX_VALUE
+    val sy = if (kotlin.math.abs(dy) > 0.001f) (h / 2f) / kotlin.math.abs(dy) else Float.MAX_VALUE
+    val k = minOf(sx, sy)
+    return Offset(cx + dx * k, cy + dy * k)
+}
+
+private fun DrawScope.drawDagScene(
+    layout: DagLayout,
+    colors: androidx.compose.material3.ColorScheme,
+    density: Float,
+    sc: Float,
+    pan: Offset,
+    viewportSize: Size,
+    selected: Int,
+) {
+    val originX = viewportSize.width / 2f + pan.x
+    val originY = viewportSize.height / 2f + pan.y
+    fun px(v: Float) = v * sc + originX
+    fun py(v: Float) = v * sc + originY
+    val dash = PathEffect.dashPathEffect(floatArrayOf(7f * density, 5f * density), 0f)
+    layout.edges.forEachIndexed { ei, (u, v) ->
+        val a = layout.nodes.getOrNull(u) ?: return@forEachIndexed
+        val b = layout.nodes.getOrNull(v) ?: return@forEachIndexed
+        val ax = px(a.x); val ay = py(a.y); val bx = px(b.x); val by = py(b.y)
+        if (ei in layout.back) {
+            // 回边：primary 2.2dp 虚线 + 中点垂直偏移 36dp 的二次曲线（对齐 XRefDagView.drawEdges）
+            val mx = (ax + bx) / 2f
+            val my = (ay + by) / 2f
+            var ox = -(by - ay)
+            var oy = bx - ax
+            val ol = kotlin.math.sqrt(ox * ox + oy * oy)
+            if (ol < 1f) { ox = 0f; oy = -36f * density }
+            val cxx = mx + ox / ol * 36f * density
+            val cyy = my + oy / ol * 36f * density
+            val p = Path().apply { moveTo(ax, ay); quadraticBezierTo(cxx, cyy, bx, by) }
+            drawPath(p, colors.primary, style = Stroke(2.2f * density, pathEffect = dash, cap = StrokeCap.Round))
+            cgArrowHead(Offset(cxx, cyy), Offset(ax, ay), colors.primary, 8f * density)
+        } else {
+            val p0 = dagEdgePoint(ax, ay, bx, by, a.w * sc, a.h * sc)
+            val p1 = dagEdgePoint(bx, by, ax, ay, b.w * sc, b.h * sc)
+            val c = b.color.copy(alpha = 0.7f)
+            drawLine(c, p0, p1, strokeWidth = 1.5f * density, cap = StrokeCap.Round)
+            cgArrowHead(p1, p0, c, 8f * density)
+        }
+    }
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        textSize = (13f * density * sc).coerceIn(6f, 30f)
+    }
+    val dot = sc < 0.42f
+    layout.nodes.forEachIndexed { i, n ->
+        val cx = px(n.x)
+        val cy = py(n.y)
+        val active = n.highlight || i == selected
+        if (dot) {
+            drawCircle(n.color, if (active) 9f * density else 6f * density, Offset(cx, cy))
+            return@forEachIndexed
+        }
+        val w = n.w * sc
+        val h = n.h * sc
+        val tl = Offset(cx - w / 2f, cy - h / 2f)
+        val sz = Size(w, h)
+        val r = CornerRadius(8f * density * sc)
+        if (active) {
+            drawRoundRect(
+                colors.primary.copy(alpha = 0.27f),
+                Offset(tl.x - 3f * density, tl.y - 3f * density),
+                Size(w + 6f * density, h + 6f * density),
+                CornerRadius(11f * density * sc),
+                style = Stroke(4f * density),
+            )
+        }
+        drawRoundRect(colors.surfaceContainer, tl, sz, r)
+        drawRoundRect(
+            if (active) colors.primary else n.color,
+            tl, sz, r,
+            style = Stroke(if (active) 3f * density else 1.5f * density),
+        )
+        paint.color = (if (active) colors.primary else n.color).toArgb()
+        val label = dagMiddleEllipsis(n.label, 18)
+        drawIntoCanvas { c ->
+            c.nativeCanvas.drawText(label, tl.x + 8f * density, cy + paint.textSize * 0.34f, paint)
+        }
+    }
+}
+
+/**
+ * 分层画布（根下钻 / SCC 鸟瞰 共用，对齐 Explorer So XRefDagView）：
+ * 节点圆角 8dp / surfaceContainer 底 / 类型色描边与文字，回边 primary 虚线曲线，
+ * 缩放 0.5–4（双击适配），scale<0.42 降级为圆点，空态「暂无分层数据」。
+ */
+@Composable
+private fun XRefDagCanvas(
+    nodes: List<DagNode>,
+    edges: List<Pair<Int, Int>>,
+    back: Set<Int>,
+    zh: Boolean,
+    modifier: Modifier = Modifier,
+    onTap: (Int) -> Unit = {},
+) {
+    val density = LocalDensity.current.density
+    val cs = MaterialTheme.colorScheme
+    val layout = remember(nodes, edges, back, density) { layoutDagGraph(nodes, edges, back, density) }
+    var scale by remember(layout) { mutableStateOf(1f) }
+    var pan by remember(layout) { mutableStateOf(Offset.Zero) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    var selected by remember(layout) { mutableStateOf(-1) }
+    var fitted by remember(layout) { mutableStateOf(false) }
+
+    fun fit() {
+        if (viewport.width <= 0 || viewport.height <= 0 || layout.nodes.isEmpty()) return
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        layout.nodes.forEach { n ->
+            minX = minOf(minX, n.left); minY = minOf(minY, n.top)
+            maxX = maxOf(maxX, n.right); maxY = maxOf(maxY, n.bottom)
+        }
+        val w = maxOf(1f, maxX - minX)
+        val h = maxOf(1f, maxY - minY)
+        scale = minOf(
+            (viewport.width - 32f * density) / w,
+            (viewport.height - 32f * density) / h,
+        ).coerceIn(0.5f, 3f)
+        pan = Offset(
+            viewport.width / 2f - (minX + maxX) / 2f * scale,
+            viewport.height / 2f - (minY + maxY) / 2f * scale,
+        )
+    }
+    LaunchedEffect(layout, viewport) {
+        if (!fitted && viewport.width > 0 && layout.nodes.isNotEmpty()) { fit(); fitted = true }
+    }
+    Box(
+        modifier
+            .clip(RoundedCornerShape(AppShape.md))
+            .background(cs.surface)
+            .onSizeChanged { viewport = it }
+            .pointerInput(layout) {
+                detectTapGestures(onDoubleTap = { fit() }) { pos ->
+                    val wx = (pos.x - viewport.width / 2f - pan.x) / scale
+                    val wy = (pos.y - viewport.height / 2f - pan.y) / scale
+                    val hit = layout.nodes.indexOfFirst {
+                        kotlin.math.abs(wx - it.x) <= it.w / 2f && kotlin.math.abs(wy - it.y) <= it.h / 2f
+                    }
+                    selected = hit
+                    if (hit >= 0) onTap(hit)
+                }
+            }
+            .pointerInput(Unit) {
+                detectTransformGestures { _, p, z, _ ->
+                    scale = (scale * z).coerceIn(0.5f, 4f)
+                    pan += p
+                }
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawDagScene(layout, cs, density, scale, pan, size, selected)
+        }
+        if (layout.nodes.isEmpty()) {
+            Text(
+                if (zh) "暂无分层数据" else "No layered data",
+                modifier = Modifier.align(Alignment.Center),
+                style = MaterialTheme.typography.labelSmall,
+                color = cs.onSurfaceVariant,
+            )
+        } else if (selected in layout.nodes.indices) {
+            Surface(
+                shape = RoundedCornerShape(AppShape.xs),
+                color = cs.surfaceVariant.copy(alpha = 0.72f),
+                modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
+            ) {
+                Text(
+                    layout.nodes[selected].label,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** 根下钻：BFS 逐层（每节点 TopN 12 个被调，总数上限），指向已访问节点的边计回边。 */
+private fun buildDrillDag(
+    names: List<String>,
+    edges: List<Pair<String, String>>,
+    rootQ: String,
+    depth: Int,
+    cap: Int,
+    color: Color,
+    density: Float,
+): DagLayout? {
+    if (names.isEmpty()) return null
+    val start = names.firstOrNull { it == rootQ }
+        ?: names.firstOrNull { it.contains(rootQ, true) }
+        ?: names.firstOrNull()
+        ?: return null
+    val out = HashMap<String, MutableList<String>>()
+    edges.forEach { (f, t) -> if (f != t) out.getOrPut(f) { ArrayList() }.add(t) }
+    val nodes = ArrayList<DagNode>()
+    val indexOf = HashMap<String, Int>()
+    fun intern(label: String, d: Int, highlight: Boolean): Int =
+        indexOf.getOrPut(label) { nodes += DagNode(label, d, color, highlight); nodes.size - 1 }
+    intern(start, 0, true)
+    val edgeList = ArrayList<Pair<Int, Int>>()
+    val seen = HashSet<String>()
+    val backSet = HashSet<Int>()
+    var frontier = listOf(start)
+    var d = 0
+    while (frontier.isNotEmpty() && d < depth && nodes.size < cap) {
+        val next = ArrayList<String>()
+        frontier.forEach { u ->
+            val ui = indexOf[u] ?: return@forEach
+            out[u].orEmpty().filter { it != u }.sorted().take(12).forEach { v ->
+                val vi = indexOf[v]
+                if (vi != null) {
+                    if (seen.add("$ui|$vi")) { backSet += edgeList.size; edgeList += ui to vi }
+                } else if (nodes.size < cap) {
+                    val ni = intern(v, d + 1, false)
+                    if (seen.add("$ui|$ni")) edgeList += ui to ni
+                    next += v
+                }
+            }
+        }
+        frontier = next.distinct()
+        d++
+    }
+    return layoutDagGraph(nodes, edgeList, backSet, density)
+}
+
+/** SCC 鸟瞰：强连通折叠成超级节点（N 个函数）→ DAG 最长路分层，入度 Top5 为枢纽高亮。 */
+private fun buildSccDag(
+    names: List<String>,
+    edges: List<Pair<String, String>>,
+    tertiaryColor: Color,
+    primaryColor: Color,
+    density: Float,
+): DagLayout? {
+    if (names.isEmpty()) return null
+    val sccs = tarjanScc(names, edges)
+    if (sccs.isEmpty()) return null
+    val compOf = HashMap<String, Int>()
+    sccs.forEachIndexed { i, c -> c.forEach { compOf[it] = i } }
+    val n = sccs.size
+    val dagEdges = linkedSetOf<Pair<Int, Int>>()
+    edges.forEach { (f, t) ->
+        val a = compOf[f]
+        val b = compOf[t]
+        if (a != null && b != null && a != b) dagEdges += a to b
+    }
+    val indeg = IntArray(n)
+    val adj = Array(n) { ArrayList<Int>() }
+    val deg = IntArray(n)
+    dagEdges.forEach { (a, b) -> adj[a] += b; deg[b]++; indeg[b]++ }
+    val depthArr = IntArray(n)
+    val q = ArrayDeque<Int>()
+    (0 until n).filter { deg[it] == 0 }.forEach { q.add(it) }
+    while (q.isNotEmpty()) {
+        val u = q.removeFirst()
+        adj[u].forEach { v ->
+            if (depthArr[v] < depthArr[u] + 1) depthArr[v] = depthArr[u] + 1
+            deg[v]--
+            if (deg[v] == 0) q.add(v)
+        }
+    }
+    val hubs = sccs.indices.filter { indeg[it] > 0 }.sortedByDescending { indeg[it] }.take(5).toSet()
+    val nodes = sccs.mapIndexed { i, c ->
+        val head = c.firstOrNull().orEmpty().ifBlank { "0x0" }
+        val label = if (c.size > 1) "$head (" + c.size + " 个函数)" else head
+        DagNode(label, depthArr[i], if (c.size > 1) tertiaryColor else primaryColor, i in hubs)
+    }
+    return layoutDagGraph(nodes, dagEdges.toList(), emptySet(), density)
+}
+
+/** 调用图 → CFG 画布 JSON（GlobalCfgView extends CfgCanvasView：复用 CFG 画布渲染）。 */
+private fun callGraphCfgJson(
+    sub: List<Pair<String, String>>,
+    subEdges: List<Pair<Int, Int>>,
+    zh: Boolean,
+): String {
+    val outDeg = IntArray(sub.size)
+    val inDeg = IntArray(sub.size)
+    subEdges.forEach { (a, b) ->
+        if (a in sub.indices && b in sub.indices) { outDeg[a]++; inDeg[b]++ }
+    }
+    val keys = ArrayList<String>(sub.size)
+    val used = HashSet<String>()
+    val arr = JSONArray()
+    sub.forEachIndexed { i, p ->
+        var key = p.first.ifBlank { "sub_${i + 1}" }
+        if (!used.add(key)) { key = "$key #${i + 1}"; used.add(key) }
+        keys += key
+        arr.put(
+            JSONObject()
+                .put("addr", key)
+                .put("summary", (if (zh) "调用 " else "out ") + outDeg[i] + " · " + (if (zh) "被调 " else "in ") + inDeg[i]),
+        )
+    }
+    val earr = JSONArray()
+    subEdges.forEach { (a, b) ->
+        if (a in sub.indices && b in sub.indices) {
+            earr.put(JSONObject().put("from", keys[a]).put("to", keys[b]))
+        }
+    }
+    return JSONObject().put("basicBlocks", arr).put("edges", earr).toString()
+}
+
+/** 全局图强连通分量（Tarjan，迭代版）：返回按簇大小排序的函数名簇。 */
 private fun tarjanScc(nodes: List<String>, edges: List<Pair<String, String>>): List<List<String>> {
     val adj = HashMap<String, MutableList<String>>()
     nodes.forEach { adj[it] = mutableListOf() }
@@ -10329,237 +10730,6 @@ internal fun exportDrawToPng(
     f.absolutePath
 }.getOrNull()
 
-private data class SccNode(val id: Int, val members: List<String>, var level: Int, var x: Float = 0f, var y: Float = 0f)
-
-private class SccLayout(
-    val nodes: List<SccNode>,
-    val comps: List<List<String>>,
-    val ce: List<Pair<Int, Int>>,
-    val cellW: Float,
-    val cellH: Float,
-    val contentW: Float,
-    val contentH: Float,
-)
-
-private const val SCC_CELL_W = 176f
-private const val SCC_CELL_H = 98f
-
-/** 缩点 + Kahn 拓扑分层布局。 */
-private fun layoutScc(comps: List<List<String>>, edges: List<Pair<String, String>>): SccLayout {
-    val owner = HashMap<String, Int>()
-    comps.forEachIndexed { i, c -> c.forEach { owner[it] = i } }
-    val nodes = comps.mapIndexed { i, c -> SccNode(i, c, 0) }
-    val ceSet = LinkedHashSet<Pair<Int, Int>>()
-    edges.forEach { (f, t) ->
-        val a = owner[f] ?: return@forEach
-        val b = owner[t] ?: return@forEach
-        if (a != b) ceSet.add(a to b)
-    }
-    val ce = ceSet.toList()
-    run {
-        val indeg = HashMap<Int, Int>()
-        nodes.forEach { indeg[it.id] = 0 }
-        ce.forEach { indeg[it.second] = (indeg[it.second] ?: 0) + 1 }
-        val level = HashMap<Int, Int>()
-        nodes.forEach { level[it.id] = 0 }
-        var guard = 0
-        var changed = true
-        while (changed && guard++ < comps.size + 5) {
-            changed = false
-            ce.forEach { (a, b) ->
-                val la = level[a] ?: 0
-                val lb = level[b] ?: 0
-                if (lb < la + 1 && (indeg[b] ?: 0) > 0) { level[b] = la + 1; changed = true }
-            }
-        }
-        nodes.forEach { it.level = minOf(level[it.id] ?: 0, 12) }
-    }
-    val byLevel = nodes.groupBy { it.level }.toSortedMap()
-    byLevel.forEach { (lvl, list) ->
-        list.forEachIndexed { i, n -> n.x = i * SCC_CELL_W; n.y = lvl * SCC_CELL_H }
-    }
-    val maxCols = byLevel.values.maxOfOrNull { it.size } ?: 1
-    val maxLevel = byLevel.keys.maxOrNull() ?: 0
-    return SccLayout(
-        nodes = nodes, comps = comps, ce = ce,
-        cellW = SCC_CELL_W, cellH = SCC_CELL_H,
-        contentW = maxCols * SCC_CELL_W + 32f,
-        contentH = (maxLevel + 1) * SCC_CELL_H + 32f,
-    )
-}
-
-/** 统一的场景绘制（Composable 画布与 PNG 导出共用）。 */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSccScene(
-    layout: SccLayout,
-    cs: androidx.compose.material3.ColorScheme,
-    scale: Float,
-    offset: Offset,
-    selected: Int,
-    tm: androidx.compose.ui.text.TextMeasurer,
-) {
-    val nodes = layout.nodes
-    val ce = layout.ce
-    val cellW = layout.cellW
-    val cellH = layout.cellH
-    val ox = offset.x + 16f
-    val oy = offset.y + 16f
-    fun nx(x: Float) = ox + x * scale
-    fun ny(y: Float) = oy + y * scale
-
-    ce.forEach { (a, b) ->
-        val na = nodes.getOrNull(a); val nb = nodes.getOrNull(b)
-        if (na == null || nb == null) return@forEach
-        val sx = nx(na.x + (cellW - 34f) * scale / 2f)
-        val sy = ny(na.y + cellH * scale - 26f * scale)
-        val ex = nx(nb.x + (cellW - 34f) * scale / 2f)
-        val ey = ny(nb.y + 12f * scale)
-        val path = Path().apply {
-            moveTo(sx, sy)
-            cubicTo(sx, (sy + ey) / 2f, ex, (sy + ey) / 2f, ex, ey)
-        }
-        drawPath(path, cs.onSurfaceVariant.copy(alpha = 0.42f), style = Stroke(width = 1.4f * scale))
-        val ang = kotlin.math.atan2((ey - sy).toDouble(), (ex - sx).toDouble())
-        val ax = ex - (kotlin.math.cos(ang) * 7.0 * scale).toFloat()
-        val ay = ey - (kotlin.math.sin(ang) * 7.0 * scale).toFloat()
-        val p2 = Path().apply {
-            moveTo(ex, ey)
-            lineTo(ax - (kotlin.math.sin(ang) * 4.0 * scale).toFloat(), ay + (kotlin.math.cos(ang) * 4.0 * scale).toFloat())
-            lineTo(ax + (kotlin.math.sin(ang) * 4.0 * scale).toFloat(), ay - (kotlin.math.cos(ang) * 4.0 * scale).toFloat())
-            close()
-        }
-        drawPath(p2, cs.onSurfaceVariant.copy(alpha = 0.6f))
-    }
-    nodes.forEach { n ->
-        val x = nx(n.x + 8f)
-        val y = ny(n.y + 12f)
-        val w = (cellW - 34f) * scale
-        val h = (cellH - 44f) * scale
-        val sel = n.id == selected
-        val cyc = n.members.size > 1
-        val fill = when {
-            sel -> cs.primary.copy(alpha = 0.28f)
-            cyc -> cs.tertiary.copy(alpha = 0.20f)
-            else -> cs.surfaceContainerHighest
-        }
-        drawRoundRect(
-            color = fill,
-            topLeft = Offset(x, y),
-            size = androidx.compose.ui.geometry.Size(w, h),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f * scale, 10f * scale),
-        )
-        drawRoundRect(
-            color = if (sel) cs.primary else if (cyc) cs.tertiary else cs.outlineVariant,
-            topLeft = Offset(x, y),
-            size = androidx.compose.ui.geometry.Size(w, h),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f * scale, 10f * scale),
-            style = Stroke(width = if (sel) 2f else 1f),
-        )
-        val label = "#${n.id} · ${n.members.size}"
-        val tl = tm.measure(label, TextStyle(fontSize = (11 * scale).coerceIn(7f, 20f).sp, color = cs.onSurface))
-        drawText(tl, topLeft = Offset(x + 7f * scale, y + 5f * scale))
-        val first = n.members.firstOrNull()?.take(14) ?: ""
-        if (first.isNotBlank()) {
-            val t2 = tm.measure(first, TextStyle(fontSize = (9 * scale).coerceIn(6f, 16f).sp, color = cs.onSurfaceVariant))
-            drawText(t2, topLeft = Offset(x + 7f * scale, y + 20f * scale))
-        }
-        if (cyc) {
-            val t3 = tm.measure("SCC", TextStyle(fontSize = (8 * scale).coerceIn(6f, 14f).sp, color = cs.tertiary))
-            drawText(t3, topLeft = Offset(x + w - 30f * scale, y + 5f * scale))
-        }
-    }
-}
-
-@Composable
-private fun SccGraphCanvas(
-    comps: List<List<String>>,
-    edges: List<Pair<String, String>>,
-    zh: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val cs = MaterialTheme.colorScheme
-    val layout = remember(comps, edges) { layoutScc(comps, edges) }
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    var selected by remember { mutableStateOf(-1) }
-    var saved by remember { mutableStateOf("") }
-    val tm = rememberTextMeasurer()
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val ctx = LocalContext.current
-
-    Box(
-        modifier
-            .clip(RoundedCornerShape(AppShape.md))
-            .background(cs.surfaceContainerHigh)
-            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-            .pointerInput(layout) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(0.4f, 3.0f)
-                    offset += pan
-                }
-            }
-            .pointerInput(layout, scale, offset) {
-                detectTapGestures { pos ->
-                    val px = (pos.x - offset.x - 16f) / scale
-                    val py = (pos.y - offset.y - 16f) / scale
-                    val hit = layout.nodes.firstOrNull { n ->
-                        px >= n.x + 8f && px <= n.x + layout.cellW - 26f && py >= n.y + 12f && py <= n.y + layout.cellH - 34f
-                    }
-                    selected = hit?.id ?: -1
-                }
-            },
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            drawSccScene(layout, cs, scale, offset, selected, tm)
-        }
-        Column(Modifier.align(Alignment.BottomStart).padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            MonoLine(if (zh) "拖动平移 · 双指缩放 · 点按选中" else "drag / pinch / tap", cs.onSurfaceVariant, AppText.label)
-            if (saved.isNotBlank()) MonoLine(saved, cs.primary, AppText.label)
-        }
-        Row(Modifier.align(Alignment.TopEnd).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "导出 PNG" else "PNG") {
-                val path = exportDrawToPng(
-                    context = ctx,
-                    fileName = "scc_graph_${System.currentTimeMillis()}.png",
-                    widthPx = layout.contentW.toInt(),
-                    heightPx = layout.contentH.toInt(),
-                    density = density,
-                ) { drawSccScene(layout, cs, 1f, Offset.Zero, selected, tm) }
-                saved = if (path != null) (if (zh) "已导出：$path" else "saved: $path") else (if (zh) "导出失败" else "export failed")
-            }
-            SmallAction(if (zh) "选中成员" else "Members", enabled = selected >= 0) {
-                val m = layout.comps.getOrNull(selected)
-                if (m != null) copyToClipboard(ctx, m.joinToString("\n"), zh)
-            }
-        }
-    }
-}
-
-
-// ══════════════════ 全局调用图 · 图形画布（对标 Exbin GlobalCfgView） ══════════════════
-
-private class CgNode(
-    val name: String,
-    val addr: String,
-    var level: Int,
-    var x: Float,
-    var y: Float,
-    val w: Float,
-    val h: Float,
-) {
-    val left: Float get() = x - w / 2f
-    val right: Float get() = x + w / 2f
-    val top: Float get() = y - h / 2f
-    val bottom: Float get() = y + h / 2f
-    fun contains(px: Float, py: Float): Boolean = px in left..right && py in top..bottom
-}
-
-private class CgLayout(
-    val nodes: List<CgNode>,
-    val edges: List<Pair<Int, Int>>,
-    val width: Float,
-    val height: Float,
-)
-
 /** 邻域（Ego）：以 root 为中心，双向（调用者 + 被调用者）BFS 展开 depth 层。 */
 private fun buildEgoSubgraph(
     nodes: List<JSONObject>,
@@ -11115,12 +11285,10 @@ private fun CallGraphGraphPane(
 ) {
     val cs = MaterialTheme.colorScheme
     var mode by remember { mutableStateOf("hot") }
-    var dir by remember { mutableStateOf("TB") }
     var depthText by remember { mutableStateOf("2") }
     var maxText by remember { mutableStateOf("120") }
     var root by remember { mutableStateOf("") }
     var rebuild by remember { mutableStateOf(0) }
-    var eStyle by remember { mutableStateOf("curve") }
     var optionsOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf(findQ) }
 
@@ -11163,6 +11331,13 @@ private fun CallGraphGraphPane(
         focusIndex = matchIndices[matchCursor]
         focusToken++
     }
+    // 搜索命中的节点名集合 + 当前焦点名（传给 CfgCanvas：setSearchMatches + focusNode）
+    val matchNames = remember(matchIndices, subPair) {
+        matchIndices.mapNotNull { subPair.first.getOrNull(it)?.first }.toSet()
+    }
+    val focusName = if (matchCursor >= 0 && matchIndices.isNotEmpty()) {
+        subPair.first.getOrNull(matchIndices[matchCursor])?.first.orEmpty()
+    } else ""
 
     val entryCount = remember(nodes, edges) {
         val indeg = HashMap<String, Int>()
@@ -11311,17 +11486,6 @@ private fun CallGraphGraphPane(
                         }
                     }
                 }
-                // 边路由（Explorer So 由画布工具条承载，这里收在头部卡内）
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(if (zh) "边路由" else "Edges", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-                    TabChip(if (zh) "折线" else "Ortho", selected = eStyle == "ortho") { eStyle = "ortho" }
-                    TabChip(if (zh) "曲线" else "Curve", selected = eStyle == "curve") { eStyle = "curve" }
-                    TabChip(if (zh) "直线" else "Line", selected = eStyle == "straight") { eStyle = "straight" }
-                }
                 if (mode == "root" && rootCandidates.isNotEmpty()) {
                     FlowRow(
                         Modifier.fillMaxWidth().padding(top = 6.dp),
@@ -11363,24 +11527,18 @@ private fun CallGraphGraphPane(
             border = BorderStroke(1.dp, cs.outlineVariant),
         ) {
             Box(Modifier.fillMaxSize()) {
-                CallGraphCanvas(subPair.first, subPair.second, dir, query, zh, eStyle, Modifier.fillMaxSize())
-                // 布局方向（btnRankDir：44x44，右下角，marginEnd 12 / marginBottom 12）
-                Surface(
-                    onClick = { dir = if (dir == "TB") "LR" else "TB" },
-                    shape = RoundedCornerShape(AppShape.sm),
-                    color = cs.surface,
-                    contentColor = cs.onSurfaceVariant,
-                    border = BorderStroke(1.dp, cs.outlineVariant),
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp).size(44.dp),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Filled.SwapHoriz,
-                            contentDescription = if (zh) "切换布局方向 (TB/LR)" else "toggle layout direction",
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
+                // GlobalCfgView extends CfgCanvasView：全局调用图复用 CFG 画布（节点/边/迷你图/布局引擎）
+                CfgCanvas(
+                    json = callGraphCfgJson(subPair.first, subPair.second, zh),
+                    zh = zh,
+                    modifier = Modifier.fillMaxSize(),
+                    layoutMode = "elk",
+                    contentMode = "summary",
+                    fnLabel = if (zh) "全局调用图" else "Call graph",
+                    highlightTexts = matchNames,
+                    focusText = focusName,
+                    focusToken = focusToken,
+                )
             }
         }
     }

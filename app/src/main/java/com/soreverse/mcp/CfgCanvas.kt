@@ -1402,6 +1402,9 @@ internal fun CfgCanvas(
     onContentChange: (String) -> Unit = {},
     onRebuild: () -> Unit = {},
     onEntry: () -> Unit = {},
+    highlightTexts: Set<String> = emptySet(),
+    focusText: String = "",
+    focusToken: Int = 0,
     onPickFunction: () -> Unit = {},
 ) {
     val density = LocalDensity.current.density
@@ -1507,6 +1510,13 @@ internal fun CfgCanvas(
             fitted = true
         }
     }
+    // 搜索命中聚焦（对齐 Explorer So GlobalCfgFragment.gotoMatch → focusNode）
+    LaunchedEffect(focusToken) {
+        if (focusToken <= 0 || focusText.isBlank()) return@LaunchedEffect
+        val box = effective.boxes.firstOrNull { !it.isDummy && it.addrText == focusText } ?: return@LaunchedEffect
+        selected = box.index
+        pan = Offset(-box.cx * scale, -box.cy * scale)
+    }
 
     val shape = RoundedCornerShape(AppShape.md)
     Column(modifier.fillMaxWidth()) {
@@ -1564,7 +1574,7 @@ internal fun CfgCanvas(
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                drawCfgScene(effective, colors, density, scale, pan, size, simpleView, selected, bgStyle, routing)
+                drawCfgScene(effective, colors, density, scale, pan, size, simpleView, selected, bgStyle, routing, highlightTexts)
             }
 
             if (layout.boxes.isEmpty()) {
@@ -1686,7 +1696,7 @@ internal fun CfgCanvas(
                                     heightPx = h.toInt(),
                                     density = densityObj,
                                 ) {
-                                    drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, bgStyle, routing)
+                                    drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, bgStyle, routing, emptySet())
                                 }
                                 Toast.makeText(
                                     ctx,
@@ -1813,6 +1823,7 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     selected: Int,
     bgStyle: String = "grid",
     routing: String = "ortho",
+    highlight: Set<String> = emptySet(),
 ) {
     val jumpColor = colors.primary
     val failColor = AppPalette.orange
@@ -1888,8 +1899,10 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     layout.boxes.forEach { box ->
         if (box.isDummy) return@forEach
         val isSel = box.index == selected
+        val isHit = !simpleView && box.addrText in highlight
         val roleColor = when {
             isSel -> colors.primary
+            isHit -> AppPalette.orange
             layout.loopHeadIndices.contains(box.index) -> loopColor
             box.index == layout.entryIndex -> entryColor
             layout.returnIndices.contains(box.index) -> returnColor
@@ -1920,7 +1933,7 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
             topLeft = topLeft,
             size = rectSize,
             cornerRadius = radius,
-            style = Stroke(width = if (isSel) nodeStroke * 2f else nodeStroke),
+            style = Stroke(width = if (isSel || isHit) nodeStroke * 2f else nodeStroke),
         )
         if (!showText) return@forEach
         val maxTextW = box.w * sc - 12f * density

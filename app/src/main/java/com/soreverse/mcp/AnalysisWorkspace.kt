@@ -2144,8 +2144,6 @@ private fun analysisViewLabel(view: String, zh: Boolean): String =
 private fun analysisViewIcon(view: String): ImageVector =
     analysisNavItems.firstOrNull { it.key == view }?.icon ?: Icons.Filled.ListAlt
 
-        ?: domain.tools.first().modes.first()
-
 // ───────────────────────── 通用小工具 ─────────────────────────
 
 /** 工具页标题行（与 ToolPageScaffold 同一视觉：名称 + 说明）。 */
@@ -2961,7 +2959,8 @@ private fun AnalysisRail(
 @Composable
 private fun AnalysisFileBar(state: WorkspaceState, zh: Boolean, onOpenTask: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

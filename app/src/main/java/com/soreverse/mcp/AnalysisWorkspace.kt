@@ -86,6 +86,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -254,6 +255,8 @@ internal fun AnalysisWorkspace(
     onOpenTask: () -> Unit,
     /** AI 深度分析入口（对当前任务主文件发起，MainActivity 挂载聊天页）。 */
     onAiAnalyze: (String) -> Unit,
+    /** 侧栏「返回」（对齐 Explorer So nav_back → finish()）：离开分析页。 */
+    onLeave: () -> Unit = {},
 ) {
     val zh = t.zh
     val tools = state.tools
@@ -303,11 +306,6 @@ internal fun AnalysisWorkspace(
     }
 
     val view = tools.analysisView
-    // 每个工具里上次停留的模式：切回同一个工具时回到原处，而不是每次都跳回第一个模式
-    var lastModeByTool by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    LaunchedEffect(view) { lastModeByTool = lastModeByTool + (analysisToolOf(view).key to view) }
-
-    var showDrawer by remember { mutableStateOf(false) }
     var railOpen by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
@@ -315,10 +313,9 @@ internal fun AnalysisWorkspace(
         // ── 侧栏（对齐 Explorer So 的 NavigationRail：主页 / 搜索 / 虚表 / 调用图 / 交叉引用 / …）──
         if (railOpen) {
             AnalysisRail(
-                current = view, zh = zh, state = state, tools = tools,
-                onPick = { tools.analysisView = it; railOpen = false },
-                onOpenTask = onOpenTask,
-                onMore = { railOpen = false; showDrawer = true },
+                current = view, zh = zh,
+                onPick = { tools.analysisView = it },
+                onLeave = onLeave,
                 onClose = { railOpen = false },
             )
         }
@@ -329,7 +326,8 @@ internal fun AnalysisWorkspace(
             tools = tools,
             zh = zh,
             view = view,
-            onOpenDrawer = { railOpen = true },
+            onOpenDrawer = { railOpen = !railOpen },
+            onOpenView = { tools.analysisView = it },
             onPickFunction = { tools.analysisView = "functions" },
             onRefresh = refreshAll,
             onOpenTree = { showTree = true },
@@ -337,10 +335,12 @@ internal fun AnalysisWorkspace(
             onOpenTask = onOpenTask,
         )
         GroupDivider()
-        // ── 页签（对齐 Explorer So：主页结构视图 = 顶部可滚动 TabLayout；其余视图 = 当前工具的模式页签）──
+        // ── 文件 / 任务小条 ──
+        AnalysisFileBar(state = state, zh = zh, onOpenTask = onOpenTask)
+        GroupDivider()
+        // ── 页签（对齐 Explorer So：仅「主页」有页签，即 DetailPagerAdapter 的 9 张表）──
         val tabItems: List<String> =
-            if (view in analysisHomeTabKeys) analysisHomeTabs
-            else analysisToolOf(view).modes.let { if (it.size > 1) it else emptyList() }
+            if (view in analysisHomeTabKeys || view == "home") analysisHomeTabs else emptyList()
         if (tabItems.isNotEmpty()) {
             AnalysisTabRow(tabItems, view, zh) { tools.analysisView = it }
             GroupDivider()
@@ -349,7 +349,7 @@ internal fun AnalysisWorkspace(
         // ── 当前视图内容区 ──
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
                     when (view) {
-                        "functions" -> FunctionsView(
+                        "home", "functions" -> FunctionsView(
                             tools = tools, zh = zh, context = context,
                             onRefresh = refreshAll, onOpenTree = { showTree = true },
                         ) { n, v -> selectFunction(n, v) }
@@ -411,21 +411,15 @@ internal fun AnalysisWorkspace(
 
                         "asm" -> AsmEditorView(tools = tools, zh = zh, context = context)
 
-                        "elfhdr" -> ElfHeaderView(tools, zh, context, refreshAll)
-
-                        "segments" -> SegmentsView(tools, zh, context, refreshAll)
+                        "elfhdr" -> ElfMetaView(tools, zh, context, refreshAll)
 
                         "relocs" -> RelocsView(tools, zh, context, refreshAll)
 
-                        "dynamic" -> DynamicView(tools, zh, context, refreshAll)
-
                         "libraries" -> LibrariesView(tools, zh, context, refreshAll)
 
-                        "hashes" -> HashesView(tools, zh, context, refreshAll)
-
-                        "versions" -> VersionsView(tools, zh, context, refreshAll)
-
-                        "entries" -> EntriesView(tools, zh, context, refreshAll)
+                        // Exbin 把 程序段 / 动态 / 版本 / 入口点 / 哈希 并进「ELF 头」一页
+                        "segments", "dynamic", "versions", "entries", "hashes" ->
+                            ElfMetaView(tools, zh, context, refreshAll)
 
                         "hex" -> AppCard(Modifier.fillMaxSize()) { HexPane(state, zh) }
 
@@ -495,15 +489,6 @@ internal fun AnalysisWorkspace(
                 }
     }
 
-    }
-    // ── 「更多视图」全量索引抽屉 ──
-    if (showDrawer) {
-        AnalysisDrawer(
-            current = view,
-            zh = zh,
-            onPick = { tools.analysisView = it; showDrawer = false },
-            onDismiss = { showDrawer = false },
-        )
     }
     }
 
@@ -2100,6 +2085,8 @@ private data class AnalysisRow(
 )
 
 private val analysisNavItems = listOf(
+    AnalysisNavItem("home", "主页", "Home", Icons.Filled.Home),
+    AnalysisNavItem("back", "返回", "Back", Icons.AutoMirrored.Filled.ArrowBack),
     AnalysisNavItem("functions", "函数", "Fns", Icons.Filled.Memory),
     AnalysisNavItem("search", "搜索", "Find", Icons.Filled.Search),
     AnalysisNavItem("disasm", "汇编", "Asm", Icons.Filled.Code),
@@ -2157,67 +2144,6 @@ private fun analysisViewLabel(view: String, zh: Boolean): String =
 private fun analysisViewIcon(view: String): ImageVector =
     analysisNavItems.firstOrNull { it.key == view }?.icon ?: Icons.Filled.ListAlt
 
-/**
- * 导航：域（一级 Tab）→ 工具（二级 chip）→ 模式（三级 chip）。
- * 47 个视图全部落在这 5 域 18 工具里，抽屉作为全量索引。
- */
-private data class AnalysisTool(val key: String, val short: String, val en: String, val modes: List<String>)
-
-private data class AnalysisDomain(val key: String, val short: String, val en: String, val tools: List<AnalysisTool>)
-
-/**
- * 导航模型：域 → 工具 → 模式。
- *
- * 之前 47 个视图平铺成一行 chip，同类数据（ELF 的九张表、交叉引用的五种视角）混在一起，
- * 想找某个视图只能横向滚动翻。现在按「同一份数据只出现在一个工具里」聚合：
- * 47 个视图 → 5 个域 / 18 个工具 / 每个工具 1-5 个模式（模式只有 1 个时不出模式行）。
- */
-private val analysisDomains = listOf(
-    // 代码域：围绕「一个函数」的一切看法与修改（合并原「函数域」）
-    AnalysisDomain("code", "代码", "Code", listOf(
-        AnalysisTool("fn", "函数", "Fns", listOf("functions", "funcinfo", "comments")),
-        AnalysisTool("fndet", "函数详情", "Func", listOf("funcdetail")),
-        AnalysisTool("find", "搜索", "Find", listOf("search")),
-        AnalysisTool("asm", "汇编", "Asm", listOf("disasm", "insnexp", "regs")),
-        AnalysisTool("pseudo", "伪C", "Pseudo", listOf("pseudo", "globalc", "asm2c")),
-        AnalysisTool("cfg", "CFG", "CFG", listOf("cfg", "asm2flow")),
-        AnalysisTool("refs", "引用", "Refs", listOf("callgraph", "xrefs", "vtable", "addrview")),
-        AnalysisTool("sig", "签名", "Sig", listOf("funcsig", "jnireg")),
-        AnalysisTool("patch", "修改", "Patch", listOf("edit", "asm")),
-    )),
-    // 结构域：ELF 的静态事实（同一来源的几张表合并）
-    AnalysisDomain("data", "结构", "Structure", listOf(
-        AnalysisTool("hdr", "头部", "Header", listOf("elfhdr", "entries", "hashes", "versions")),
-        AnalysisTool("sec", "段节", "Sections", listOf("sections", "segments", "relocs", "dynamic", "libraries")),
-        AnalysisTool("sym", "符号", "Sym", listOf("symbols", "imports")),
-        AnalysisTool("str", "字符串", "Str", listOf("strings", "hex")),
-    )),
-    // 工具域：判定、产物与通用小工具
-    AnalysisDomain("utils", "工具", "Tools", listOf(
-        AnalysisTool("hard", "加固", "Hard", listOf("hardening", "unpack")),
-        AnalysisTool("ai", "AI 分析", "AI", listOf("analyze")),
-        AnalysisTool("flutter", "Flutter", "Flutter", listOf("flutter")),
-        AnalysisTool("exp", "导出", "Export", listOf("export", "data")),
-        AnalysisTool("conv", "转换", "Conv", listOf("base", "demangle", "strdec", "xor", "bytediff")),
-        AnalysisTool("calc", "计算器", "Calc", listOf("calc")),
-        AnalysisTool("iapp", "iApp", "iApp", listOf("iapp")),
-        AnalysisTool("mcp", "控制台", "Console", listOf("tools", "results")),
-    )),
-)
-
-private fun analysisDomainOf(view: String): AnalysisDomain =
-    analysisDomains.firstOrNull { d -> d.tools.any { view in it.modes } } ?: analysisDomains.first()
-
-private fun analysisToolOf(view: String): AnalysisTool =
-    analysisDomainOf(view).tools.firstOrNull { view in it.modes } ?: analysisDomainOf(view).tools.first()
-
-/** 切回某个工具/域时回到上次停留的模式（没有记录就取第一个模式）。 */
-private fun rememberedView(tool: AnalysisTool, lastModeByTool: Map<String, String>): String =
-    lastModeByTool[tool.key]?.takeIf { it in tool.modes } ?: tool.modes.first()
-
-private fun rememberedView(domain: AnalysisDomain, lastModeByTool: Map<String, String>): String =
-    domain.tools.firstOrNull { lastModeByTool[it.key]?.takeIf { m -> m in it.modes } != null }
-        ?.let { rememberedView(it, lastModeByTool) }
         ?: domain.tools.first().modes.first()
 
 // ───────────────────────── 通用小工具 ─────────────────────────
@@ -2898,10 +2824,10 @@ private fun IappView(zh: Boolean, context: android.content.Context) {
 
 // ───────────────────── 导航（域 → 工具，两级；工具内的各视图用页内 chip 切换） ─────────────────────
 
-/** 主页页签（对齐 Explorer So 的 SO 详情主页：结构类视图平铺为可滚动 TabLayout）。 */
+/** 主页页签：完全对齐 Explorer So DetailPagerAdapter（函数/节区/符号/导入/依赖库/重定位/字符串/数据/ELF 头）。 */
 private val analysisHomeTabs = listOf(
     "functions", "sections", "symbols", "imports", "libraries", "relocs",
-    "strings", "data", "elfhdr", "segments", "dynamic", "versions", "entries", "hashes", "hex",
+    "strings", "data", "elfhdr",
 )
 private val analysisHomeTabKeys = analysisHomeTabs.toSet()
 
@@ -2934,66 +2860,6 @@ private fun AnalysisTabRow(items: List<String>, current: String, zh: Boolean, on
     }
 }
 
-/** 导航菜单：一行显示「域 › 工具」，点按弹出菜单（域分组 + 每工具一个入口）。 */
-@Composable
-private fun AnalysisNavMenu(current: String, zh: Boolean, lastModeByTool: Map<String, String>, onPick: (String) -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    var open by remember { mutableStateOf(false) }
-    val dom = analysisDomainOf(current)
-    val tool = analysisToolOf(current)
-    Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
-        Row(
-            Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(AppShape.sm))
-                .background(cs.surfaceContainerHigh)
-                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.sm))
-                .clickable { open = true }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Icon(Icons.Filled.Menu, null, tint = cs.primary, modifier = Modifier.size(15.dp))
-            Text(
-                (if (zh) dom.short else dom.en) + "  ›  " + (if (zh) tool.short else tool.en),
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.bodyStrong,
-                fontWeight = FontWeight.SemiBold,
-                color = cs.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(Icons.Filled.KeyboardArrowDown, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            Column(Modifier.width(276.dp).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                analysisDomains.forEach { d ->
-                    Text(
-                        (if (zh) d.short else d.en) + if (d.key == dom.key) "  ●" else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = AppText.label,
-                        fontWeight = FontWeight.SemiBold,
-                        color = cs.primary,
-                        modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 2.dp),
-                    )
-                    FlowRow(
-                        Modifier.fillMaxWidth().padding(start = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        d.tools.forEach { t ->
-                            TabChip(if (zh) t.short else t.en, selected = t.key == tool.key) {
-                                onPick(rememberedView(t, lastModeByTool)); open = false
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.size(6.dp))
-            }
-        }
-    }
-}
-
 /** 紧凑 tab chip（自绘，Exbin 风：选中=主色底+描边+加粗，未选中=浅底纯字）。 */
 @Composable
 private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
@@ -3019,170 +2885,336 @@ private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 
 
-/** 侧栏条目（对齐 Explorer So 的 NavigationRail 六项，另补塔菲需要的入口）。 */
-private val analysisRailItems = listOf(
-    "functions", "search", "vtable", "callgraph", "xrefs",
-    "hardening", "unpack", "addrview", "export", "flutter",
-)
+/**
+ * 侧栏条目：完全对齐 Explorer So `@menu/menu_so_detail_nav` 的六项
+ * （主页 / 搜索 / 虚表 / 调用图 / 交叉引用 / 返回）。
+ *
+ * Explorer So 把「地址查看 / 快速跳转 / 全量分析 / 全局伪 C / 静态数据流追踪」放在 toolbar ⋮ 菜单里，
+ * 塔菲沿用同一范式：Exbin 没有的分析页（加固 / 脱壳 / 导出 / Flutter / AI / 转码 …）只在 ⋮ 菜单出现，
+ * 侧栏与主页页签保持与 Exbin 一一对应。
+ */
+private val analysisRailItems = listOf("home", "search", "vtable", "callgraph", "xrefs", "back")
 
-/** 左侧导航栏（Explorer So 的 NavigationRail：推挤内容、选中主色）。 */
+/**
+ * 左侧导航栏：对齐 Explorer So 的 NavigationRailView
+ * （宽 80dp、labelVisibilityMode=labeled、图标 24dp + 文字在下、选中 pill = secondaryContainer、
+ * 选中 tint = primary / 未选 = onSurfaceVariant、menuGravity=top、推开式）。
+ */
 @Composable
 private fun AnalysisRail(
     current: String,
     zh: Boolean,
-    state: WorkspaceState,
-    tools: ToolPagesState,
     onPick: (String) -> Unit,
-    onOpenTask: () -> Unit,
-    onMore: () -> Unit,
+    onLeave: () -> Unit,
     onClose: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     Column(
-        Modifier.width(210.dp).fillMaxHeight()
-            .background(cs.surfaceContainerLow)
-            .padding(vertical = 8.dp),
+        Modifier.width(80.dp).fillMaxHeight()
+            .background(cs.surface)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Icon(Icons.Filled.ListAlt, null, tint = cs.primary, modifier = Modifier.size(18.dp))
-            Text(
-                if (zh) "导航" else "Navigate",
-                style = MaterialTheme.typography.titleMedium,
-                fontSize = AppText.title,
-                fontWeight = FontWeight.SemiBold,
-                color = cs.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(onClick = onClose, modifier = Modifier.size(30.dp)) {
-                Icon(Icons.Filled.Close, contentDescription = if (zh) "收起" else "Close", modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant)
-            }
-        }
-        // 文件 / 任务（Explorer So 由外部选好文件；塔菲需要在此选）
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            WorkspacePicker(state, zh)
-            TaskChip(state, zh, onOpenTask)
-        }
-        GroupDivider()
-        LazyColumn(Modifier.weight(1f)) {
-            items(analysisRailItems, key = { it }) { k ->
-                val selected = k == current || (k == "functions" && current in analysisHomeTabKeys)
-                Row(
-                    Modifier.fillMaxWidth()
-                        .background(if (selected) cs.primary.copy(alpha = 0.12f) else Color.Transparent)
-                        .clickable { onPick(k) }
-                        .padding(horizontal = 14.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+        analysisRailItems.forEach { k ->
+            val isBack = k == "back"
+            val selected = if (k == "home") current == "home" || current in analysisHomeTabKeys
+            else !isBack && k == current
+            val tint = if (selected) cs.primary else cs.onSurfaceVariant
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        if (isBack) return@clickable onLeave()
+                        onPick(if (k == "home") "functions" else k)
+                        onClose()
+                        Unit
+                    }
+                    .padding(vertical = 2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.size(width = 56.dp, height = 32.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (selected) cs.secondaryContainer else Color.Transparent),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(analysisViewIcon(k), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(19.dp))
-                    Text(
-                        analysisViewLabel(k, zh),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontSize = AppText.bodyStrong,
-                        color = if (selected) cs.primary else cs.onSurface,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Icon(analysisViewIcon(k), null, tint = tint, modifier = Modifier.size(22.dp))
                 }
-            }
-            item(key = "more") {
-                Row(
-                    Modifier.fillMaxWidth().clickable { onMore() }
-                        .padding(horizontal = 14.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Icon(Icons.Filled.MoreVert, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(19.dp))
-                    Text(
-                        if (zh) "更多视图" else "More views",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontSize = AppText.bodyStrong,
-                        color = cs.onSurface,
-                    )
-                }
+                Spacer(Modifier.size(3.dp))
+                Text(
+                    analysisViewLabel(k, zh),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 11.sp,
+                    color = tint,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
 }
 
-/** 抽屉：47 个视图的全量索引（域 / 工具 / 模式三级）。 */
+/** 顶栏下方「文件 / 任务」小条（Explorer So 在进入详情前已选好文件；塔菲在此提供入口）。 */
 @Composable
-private fun AnalysisDrawer(current: String, zh: Boolean, onPick: (String) -> Unit, onDismiss: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable { onDismiss() },
+private fun AnalysisFileBar(state: WorkspaceState, zh: Boolean, onOpenTask: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            Modifier.width(272.dp).fillMaxHeight()
-                .background(cs.surface)
-                .clickable { }
-                .padding(vertical = 8.dp),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(analysisViewIcon(current), null, tint = cs.primary, modifier = Modifier.size(18.dp))
-                Text(
-                    if (zh) "分析视图" else "Analysis views",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontSize = AppText.title,
-                    fontWeight = FontWeight.SemiBold,
-                    color = cs.onSurface,
-                )
-            }
-            GroupDivider()
-            LazyColumn(Modifier.fillMaxSize()) {
-                analysisDomains.forEach { d ->
-                    item(key = "d-${d.key}") {
-                        Text(
-                            if (zh) d.short else d.en,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = AppText.label,
-                            color = cs.primary,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, top = 12.dp, bottom = 2.dp),
-                        )
+        WorkspacePicker(state, zh)
+        TaskChip(state, zh, onOpenTask)
+    }
+}
+
+// ══════════════════ 分析页导航（完全复刻 Explorer So SoDetailActivity） ══════════════════
+
+/**
+ * ⋮ 溢出菜单里的塔菲自有分析页（Explorer So 没有这些页，因此不在侧栏/页签里单列）。
+ * 与 Exbin 把「地址查看 / 快速跳转 / 全量分析 / 全局伪 C / 静态数据流追踪」放进 toolbar 菜单同一范式。
+ */
+private val analysisOverflowViews = listOf(
+    "hardening", "unpack", "export", "flutter", "analyze", "edit", "calc", "iapp",
+    "hex", "results", "tools", "funcdetail", "funcinfo", "comments", "funcsig",
+    "asm", "insnexp", "regs", "asm2c", "asm2flow", "base", "demangle", "strdec", "xor", "bytediff",
+)
+
+/** 菜单分组标题（不可点）。 */
+@Composable
+private fun AnalysisMenuHeader(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        fontSize = AppText.label,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 14.dp, top = 8.dp, bottom = 2.dp),
+    )
+}
+
+/** 菜单项（图标 + 名称）。 */
+@Composable
+private fun AnalysisMenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, fontSize = AppText.body) },
+        leadingIcon = { Icon(icon, null, modifier = Modifier.size(18.dp)) },
+        onClick = onClick,
+    )
+}
+
+// ── ELF 元数据（Exbin HeaderTabFragment：一页可搜索的键值列表）──
+
+/** 一个元数据分区：取数命令 + 显示名。 */
+private data class MetaSection(val key: String, val zhTitle: String, val enTitle: String, val cmd: String)
+
+/** Explorer So 把段 / 动态 / 版本 / 入口 / 哈希都并进「ELF 头」一页。 */
+private val elfMetaSections = listOf(
+    MetaSection("elfhdr", "ELF 头", "ELF header", "ihj"),
+    MetaSection("hashes", "哈希", "Hashes", "iTj"),
+    MetaSection("entries", "入口点", "Entries", "iej"),
+    MetaSection("segments", "程序段", "Segments", "iSSj"),
+    MetaSection("dynamic", "动态表", "Dynamic", "iHj"),
+    MetaSection("versions", "版本需求", "Versions", "iVj"),
+)
+
+/** 扁平化后的一行元数据（分组 / 字段 / 值）。 */
+private data class MetaRow(val group: String, val field: String, val value: String)
+
+/** 把某分区的 rizin 返回（对象 / 数组）摊平成行（对象一层展开，数组取每项的标量字段）。 */
+private fun metaRows(sec: MetaSection, d: Any?, zh: Boolean): List<MetaRow> {
+    if (d == null) return emptyList()
+    val g = if (zh) sec.zhTitle else sec.enTitle
+    val out = ArrayList<MetaRow>()
+    if (d is JSONObject) {
+        val ks = ArrayList<String>()
+        val it = d.keys()
+        while (it.hasNext()) ks.add(it.next())
+        ks.sort()
+        ks.forEach { k ->
+            when (val v = d.opt(k)) {
+                is JSONObject -> {
+                    val it2 = v.keys()
+                    while (it2.hasNext()) {
+                        val k2 = it2.next()
+                        val s = jsonScalar(v.opt(k2))
+                        if (s.isNotBlank()) out.add(MetaRow("$g · $k", k2, s))
                     }
-                    d.tools.forEach { tool ->
-                        item(key = "t-${tool.key}") {
-                            Text(
-                                if (zh) tool.short else tool.en,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontSize = AppText.bodyStrong,
-                                color = cs.onSurface,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.fillMaxWidth().padding(start = 22.dp, top = 8.dp, bottom = 2.dp),
-                            )
-                        }
-                        items(tool.modes, key = { it }) { key ->
-                            val selected = key == current
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .background(if (selected) cs.primary.copy(alpha = 0.10f) else Color.Transparent)
-                                    .clickable { onPick(key) }
-                                    .padding(start = 34.dp, end = 14.dp, top = 7.dp, bottom = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                Icon(analysisViewIcon(key), null, tint = if (selected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                }
+                is JSONArray -> out.add(MetaRow(g, k, if (zh) "数组 · ${v.length()} 项" else "arr · ${v.length()}"))
+                else -> {
+                    val s = jsonScalar(v)
+                    if (s.isNotBlank()) out.add(MetaRow(g, k, s))
+                }
+            }
+        }
+    } else if (d is JSONArray) {
+        for (i in 0 until d.length()) {
+            when (val e = d.opt(i)) {
+                is JSONObject -> {
+                    val name = e.optString("name").ifBlank { if (zh) "第 ${i + 1} 项" else "#${i + 1}" }
+                    val parts = ArrayList<String>()
+                    val ks = e.keys()
+                    while (ks.hasNext()) {
+                        val k = ks.next()
+                        val raw = e.opt(k)
+                        if (raw is JSONObject || raw is JSONArray) continue
+                        val s = jsonScalar(raw)
+                        if (s.isNotBlank()) parts.add("$k=$s")
+                    }
+                    out.add(MetaRow(g, name, parts.joinToString("   ")))
+                }
+                is String -> out.add(MetaRow(g, "#${i + 1}", e))
+                else -> {
+                    val s = jsonScalar(e)
+                    if (s.isNotBlank()) out.add(MetaRow(g, "#${i + 1}", s))
+                }
+            }
+        }
+    }
+    return out
+}
+
+/**
+ * 「ELF 头」页：Explorer So 的单列表元数据页 —— 一个搜索框 + 分组键值表，
+ * ELF 头 / 哈希 / 入口点 / 程序段 / 动态表 / 版本需求 全在这一页（不再各占一个页签）。
+ */
+@Composable
+private fun ElfMetaView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+) {
+    val ws = tools.sharedWorkspaceId
+    val cs = MaterialTheme.colorScheme
+    val tick = tools.reloadTick
+    var loading by remember(ws, tick) { mutableStateOf(false) }
+    var error by remember(ws, tick) { mutableStateOf("") }
+    var loaded by remember(ws, tick) { mutableStateOf<List<Pair<MetaSection, Any?>>>(emptyList()) }
+    var query by remember { mutableStateOf("") }
+
+    LaunchedEffect(ws, tick) {
+        if (ws.isBlank()) { loaded = emptyList(); return@LaunchedEffect }
+        loading = true
+        error = ""
+        val acc = ArrayList<Pair<MetaSection, Any?>>(elfMetaSections.size)
+        elfMetaSections.forEach { sec ->
+            val (d, e) = withContext(Dispatchers.IO) { rzFetch(context, ws, sec.cmd) }
+            if (e.isNotBlank() && error.isBlank()) error = e
+            acc.add(sec to d)
+        }
+        loaded = acc
+        loading = false
+    }
+
+    val rows = remember(loaded) { loaded.flatMap { (sec, d) -> metaRows(sec, d, zh) } }
+    val shown = remember(rows, query) {
+        if (query.isBlank()) rows
+        else rows.filter {
+            it.field.contains(query, true) || it.value.contains(query, true) || it.group.contains(query, true)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
+            placeholder = {
+                Text(
+                    if (zh) "搜索字段 / 值（如 machine、hash、段名）" else "search field / value",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                    color = cs.onSurfaceVariant,
+                )
+            },
+        )
+        Spacer(Modifier.size(6.dp))
+        MonoLine(
+            (if (zh) "ELF 元数据 · 共 " else "ELF metadata · ") + "${rows.size}" + (if (zh) " 项" else " items") +
+                (if (query.isNotBlank()) " · " + (if (zh) "匹配 " else "match ") + shown.size else ""),
+            cs.onSurfaceVariant, AppText.label,
+        )
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "未打开工作区" else "No workspace",
+                    hint = if (zh) "点顶部「选文件」按钮选择文件" else "Tap Open (top bar) to pick a file",
+                )
+                loading -> AnalysisLoading()
+                rows.isEmpty() && error.isNotBlank() -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AnalysisErrorBanner(error)
+                    Text(
+                        if (zh) "点「刷新」重试" else "Tap Refresh to retry",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = AppText.body,
+                        color = cs.onSurfaceVariant,
+                    )
+                }
+                rows.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无元数据" else "No metadata",
+                    hint = if (zh) "引擎未返回内容，点「刷新」重试" else "Engine returned nothing; tap Refresh",
+                    primaryLabel = if (zh) "刷新" else "Refresh",
+                    onPrimary = onRefresh,
+                )
+                shown.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无匹配项" else "No match",
+                    hint = if (zh) "换个关键字再试" else "Try another keyword",
+                )
+                else -> LazyColumn(
+                    Modifier.fillMaxSize()
+                        .clip(RoundedCornerShape(AppShape.md))
+                        .background(cs.surfaceContainerHigh)
+                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md)),
+                    contentPadding = PaddingValues(bottom = 10.dp),
+                ) {
+                    var lastGroup = ""
+                    shown.forEach { r ->
+                        if (r.group != lastGroup) {
+                            lastGroup = r.group
+                            item {
                                 Text(
-                                    analysisViewLabel(key, zh),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontSize = AppText.body,
-                                    color = if (selected) cs.primary else cs.onSurface,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    r.group,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = AppText.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.primary,
+                                    modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 10.dp, bottom = 3.dp),
+                                )
+                            }
+                        }
+                        item {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    r.field,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = cs.onSurfaceVariant,
+                                    modifier = Modifier.width(120.dp),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    r.value,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
+                                    color = cs.onSurface,
+                                    modifier = Modifier.weight(1f),
                                 )
                             }
                         }
@@ -3193,6 +3225,7 @@ private fun AnalysisDrawer(current: String, zh: Boolean, onPick: (String) -> Uni
     }
 }
 
+
 // ───────────────────────── 顶部条 ─────────────────────────
 
 @Composable
@@ -3202,6 +3235,7 @@ private fun AnalysisAppBar(
     zh: Boolean,
     view: String,
     onOpenDrawer: () -> Unit,
+    onOpenView: (String) -> Unit,
     onPickFunction: () -> Unit,
     onRefresh: () -> Unit,
     onOpenTree: () -> Unit,
@@ -3253,26 +3287,26 @@ private fun AnalysisAppBar(
                 Icon(Icons.Filled.MoreVert, contentDescription = if (zh) "更多" else "More", tint = cs.onSurfaceVariant)
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(
-                    text = { Text(if (zh) "换函数" else "Pick function", fontSize = AppText.body) },
-                    leadingIcon = { Icon(Icons.Filled.Memory, null, modifier = Modifier.size(18.dp)) },
-                    onClick = { menu = false; onPickFunction() },
-                )
-                DropdownMenuItem(
-                    text = { Text(if (zh) "对象树" else "Object tree", fontSize = AppText.body) },
-                    leadingIcon = { Icon(Icons.Filled.ListAlt, null, modifier = Modifier.size(18.dp)) },
-                    onClick = { menu = false; onOpenTree() },
-                )
-                DropdownMenuItem(
-                    text = { Text(if (zh) "输出结果" else "Results", fontSize = AppText.body) },
-                    leadingIcon = { Icon(Icons.Filled.Terminal, null, modifier = Modifier.size(18.dp)) },
-                    onClick = { menu = false; onOpenOutput() },
-                )
-                DropdownMenuItem(
-                    text = { Text(if (zh) "当前任务" else "Task", fontSize = AppText.body) },
-                    leadingIcon = { Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(18.dp)) },
-                    onClick = { menu = false; onOpenTask() },
-                )
+                // ── Explorer So toolbar 溢出菜单（menu_so_detail_addr.xml）──
+                AnalysisMenuHeader(if (zh) "SO 详情" else "SO detail")
+                AnalysisMenuItem(if (zh) "地址查看" else "Address view", Icons.Filled.MyLocation) { menu = false; onOpenView("addrview") }
+                AnalysisMenuItem(if (zh) "快速跳转" else "Quick jump", Icons.Filled.Search) { menu = false; onOpenView("search") }
+                AnalysisMenuItem(if (zh) "全量分析" else "Full analysis", Icons.Filled.FlashOn) { menu = false; onRefresh() }
+                AnalysisMenuItem(if (zh) "全局伪 C" else "Global pseudo-C", Icons.Filled.Description) { menu = false; onOpenView("globalc") }
+                AnalysisMenuItem(if (zh) "静态数据流追踪" else "Static data flow", Icons.Filled.DataObject) { menu = false; onOpenView("jnireg") }
+                // ── 当前目标 ──
+                AnalysisMenuHeader(if (zh) "当前目标" else "Target")
+                AnalysisMenuItem(if (zh) "换函数" else "Pick function", Icons.Filled.Memory) { menu = false; onPickFunction() }
+                AnalysisMenuItem(if (zh) "对象树" else "Object tree", Icons.Filled.ListAlt) { menu = false; onOpenTree() }
+                AnalysisMenuItem(if (zh) "输出结果" else "Results", Icons.Filled.Terminal) { menu = false; onOpenOutput() }
+                AnalysisMenuItem(if (zh) "当前任务" else "Task", Icons.Filled.FolderOpen) { menu = false; onOpenTask() }
+                // ── Explorer So 没有、塔菲自有的分析页（Exbin 没有的分析页不单列，只在此入口）──
+                AnalysisMenuHeader(if (zh) "塔菲工具" else "Taffy tools")
+                analysisOverflowViews.forEach { key ->
+                    AnalysisMenuItem(analysisViewLabel(key, zh), analysisViewIcon(key)) {
+                        menu = false; onOpenView(key)
+                    }
+                }
             }
         }
     }
@@ -3444,7 +3478,7 @@ private fun FunctionsView(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
+                    hint = if (zh) "点顶部「选文件」按钮选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 tools.viewLoading == cacheKey && all.isEmpty() -> AnalysisLoading()
                 all.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> {
@@ -3603,7 +3637,7 @@ private fun SearchView(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
+                    hint = if (zh) "点顶部「选文件」按钮选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 query.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "输入关键字开始搜索" else "Type a keyword to search",
@@ -4515,7 +4549,7 @@ private fun CfgView(
         when {
             ws.isBlank() -> AnalysisEmptyState(
                 title = if (zh) "未打开工作区" else "No workspace",
-                hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
+                hint = if (zh) "点顶部「选文件」按钮选择文件" else "Open the ≡ rail (top-left) to pick a file",
             )
             target.isBlank() -> AnalysisEmptyState(
                 title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
@@ -4769,7 +4803,7 @@ private fun ListScaffold(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
+                    hint = if (zh) "点顶部「选文件」按钮选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
                 rows.isEmpty() && !tools.viewCache.containsKey(cacheKey) -> AnalysisErrorBanner(
@@ -5798,7 +5832,7 @@ private fun RzViewScaffold(
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
-                    hint = if (zh) "先点左上角 ≡ 打开侧栏，选择文件" else "Open the ≡ rail (top-left) to pick a file",
+                    hint = if (zh) "点顶部「选文件」按钮选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
                 loading -> AnalysisLoading()
                 error.isNotBlank() -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -6054,24 +6088,7 @@ private fun RzObjectTable(rows: List<JSONObject>, cols: List<RzCol>, zh: Boolean
 }
 
 // ── 各视图（列定义即页面的“字段设计”，互不共用） ──
-
-@Composable
-private fun ElfHeaderView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
-    RzViewScaffold(tools, zh, context, "elfhdr", "ihj", emptyList(), onRefresh)
-
-@Composable
-private fun SegmentsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
-    RzViewScaffold(
-        tools, zh, context, "segments", "iSSj",
-        listOf(
-            RzCol("name", "名称", "NAME", 110.dp),
-            RzCol("vaddr", "虚拟地址", "VADDR", 86.dp),
-            RzCol("size", "大小", "SIZE", 64.dp, end = true),
-            RzCol("perm", "权限", "PERM", 52.dp),
-            RzCol("align", "对齐", "ALIGN", null),
-        ),
-        onRefresh,
-    )
+// 注：ELF 头 / 哈希 / 入口点 / 程序段 / 动态表 / 版本需求 已按 Explorer So 合并到 ElfMetaView 一页。
 
 @Composable
 private fun RelocsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
@@ -6086,39 +6103,8 @@ private fun RelocsView(tools: ToolPagesState, zh: Boolean, context: android.cont
     )
 
 @Composable
-private fun DynamicView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
-    RzViewScaffold(tools, zh, context, "dynamic", "iHj", emptyList(), onRefresh)
-
-@Composable
 private fun LibrariesView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
     RzViewScaffold(tools, zh, context, "libraries", "ilj", emptyList(), onRefresh)
-
-@Composable
-private fun HashesView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
-    RzViewScaffold(tools, zh, context, "hashes", "iTj", emptyList(), onRefresh)
-
-@Composable
-private fun VersionsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
-    RzViewScaffold(
-        tools, zh, context, "versions", "iVj",
-        listOf(
-            RzCol("name", "名称", "NAME", null),
-            RzCol("version", "版本", "VERSION", 90.dp),
-        ),
-        onRefresh,
-    )
-
-@Composable
-private fun EntriesView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
-    RzViewScaffold(
-        tools, zh, context, "entries", "iej",
-        listOf(
-            RzCol("vaddr", "虚拟地址", "VADDR", 88.dp),
-            RzCol("type", "类型", "TYPE", 66.dp),
-            RzCol("name", "名称", "NAME", null),
-        ),
-        onRefresh,
-    )
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  逆向工程工具集（复刻 Exbin ToolsHubFragment 的 12 项）

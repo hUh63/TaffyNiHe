@@ -596,6 +596,8 @@ private fun SoReverseApp() {
                                             onAiAnalyze = { path ->
                                                 launchDeepAnalysis(context, path, "", settings, analyzeState, appScope, deepService, t.zh)
                                             },
+                                            // 侧栏「返回」= 离开分析页（对齐 Explorer So nav_back）
+                                            onLeave = { tab = MainTab.Home },
                                         )
                                     }
                                 }

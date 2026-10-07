@@ -1,3 +1,32 @@
+# TaffyNiHe v1.3.85（分析页图形化 + 导航完全复刻 Explorer So）
+
+本轮两件事：把「根下钻 / SCC 鸟瞰 / 调用图」的图形化换成 Explorer So 的分层画布与 CFG 画布；把分析页侧栏与工具分类完全对齐 Explorer So 的 SoDetailActivity。
+
+## 🧩 本次
+**① 调用图 = GlobalCfgView（复用 CFG 画布）**
+- `GlobalCfgView extends CfgCanvasView`：全局调用图不再自绘，改为把调用子图（模式 / 根 / 深度 / 上限）转成 CFG 画布 JSON（`basicBlocks` + `edges`，节点摘要「调用 N · 被调 M」）交给 `CfgCanvas` 渲染，白拿 ELK 布局、小地图、背景图案、缩放平移全套能力。
+- 修掉一个遗留 bug：搜索框旁的 ‹ › 上一/下一匹配此前只改计数文本、画布不聚焦 —— 现在把命中集合与当前焦点传进画布，命中节点橙色高亮并自动居中（对齐 Explorer So 的 `setSearchMatches` + `focusNode`）。
+
+**② 根下钻 / SCC 鸟瞰 = XRefDagView（共用分层画布 `XRefDagCanvas`）**
+- 节点规格：圆角 8dp、`surfaceContainer` 底、类型色描边与文字（13sp sans-serif-medium）、高 32dp、宽 clamp(72dp, 文本+18dp)，文本中段省略（18 字）。
+- 边规格：1.5dp 目标色（alpha 70%）+ 8dp 箭头；回边 primary 2.2dp 虚线（7,5）+ 中点垂直偏移 36dp 的二次曲线。
+- 交互：缩放 0.5–4、双击适配（边距 32dp，clamp 0.5–3）、scale<0.42 自动降级为圆点；空态「暂无分层数据」。
+- 根下钻：BFS 逐层（每节点 TopN 12、总数上限）转分层数据；SCC 鸟瞰：Tarjan 强连通折叠成超级节点（「首名 (N 个函数)」，tertiary 色）+ DAG 最长路分层 + 入度 Top5 枢纽高亮（对齐 `XRefScc`）。
+- 顺带删掉被替换掉的自研 SCC 画布死代码。
+
+**③ 侧栏完全复刻 Explorer So 的 NavigationRail**
+- 侧栏只有六项：**主页 / 搜索 / 虚表 / 调用图 / 交叉引用 / 返回**（对应 `menu_so_detail_nav`），宽 80dp、labelVisibilityMode=labeled、选中 pill = `secondaryContainer`、tint 选中 `primary` / 未选 `onSurfaceVariant`、推送式推开内容；「返回」直接离开分析页（对齐 `nav_back → finish()`）。
+
+**④ 主页页签 = Exbin DetailPagerAdapter 的 9 项**
+- 函数 / 节区 / 符号 / 导入 / 依赖库 / 重定位 / 字符串 / 数据 / **ELF 头**。
+- 程序段、动态表、版本需求、入口点、哈希按 Explorer So 的做法并入「ELF 头」一页：一个搜索框 + 分组键值表，六个分区的字段与值全量可搜（对齐 `HeaderTabFragment` 的单列表元数据页）。
+
+**⑤ Explorer So 没有的分析页收进顶栏 ⋮ 溢出菜单**
+- ⋮ 菜单分组：**SO 详情**（地址查看 / 快速跳转 / 全量分析 / 全局伪 C / 静态数据流追踪 —— 逐项对标 `menu_so_detail_addr.xml`）、**当前目标**（换函数 / 对象树 / 输出结果 / 当前任务）、**塔菲工具**（加固检测 / 脱壳 / 导出 / Flutter 分析 / AI 分析 / 编辑中心 / 计算器 / iApp / 十六进制 / 结果 / 工具台 / 函数信息 / 注释 / 签名 / 汇编器 / 指令解释 / 寄存器 / 汇编→C / 汇编→框图 / 进制转换 / C++ 反修饰 / 字符串解码 / XOR / 字节差分）。
+- 文件 / 任务选择从侧栏移到顶栏下方小条（Explorer So 在进入详情前已选好文件，属功能必需）。
+- 删除「域 › 工具 › 模式」三级导航与 47 视图抽屉：Exbin 没有单列的分析页一律不在侧栏/页签里单列。
+
+---
 # TaffyNiHe v1.3.84（函数详情 / 控制流页签 / 指令行 / 通用列表卡 对齐 Explorer So）
 
 分析页逐项对齐收尾：把 Explorer So 剩余的四份布局规格全部落到代码里。
@@ -297,6 +326,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

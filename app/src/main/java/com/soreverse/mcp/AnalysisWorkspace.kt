@@ -102,6 +102,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.ScrollableTabRow
@@ -111,6 +112,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -8410,11 +8412,23 @@ private fun hexAddr(v: Any?): String {
 
 // ───────────────────────── 全局调用图 ─────────────────────────
 
+/**
+ * 全局交叉引用页（完全对齐 Explorer So GlobalXRefFragment）：
+ * 四页签（入口概览 / 根下钻 / SCC 鸟瞰 / 导出）+ 搜索行（重置）+ 一行状态文案 +
+ * 单一内容区（入口概览/搜索 = 根列表，根下钻/SCC = 分层画布 XRefDagView）。
+ */
 @Composable
-private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+private fun GlobalXRefView(
+    tools: ToolPagesState,
+    zh: Boolean,
+    context: android.content.Context,
+    onRefresh: () -> Unit,
+) {
     val ws = tools.sharedWorkspaceId
     val tick = tools.reloadTick
     val cs = MaterialTheme.colorScheme
+    val dens = LocalDensity.current
+    val df = dens.density
     var nodes by remember(ws, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
     var edges by remember(ws, tick) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var loading by remember(ws, tick) { mutableStateOf(false) }
@@ -8422,15 +8436,9 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
     var note by remember(ws, tick) { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var xTab by remember { mutableStateOf("overview") }
-    var ovView by remember { mutableStateOf("list") }
-    var drillRoot by remember { mutableStateOf("JNI_OnLoad") }
-    var drillDepth by remember { mutableStateOf("3") }
-    var drillMax by remember { mutableStateOf("120") }
-    var drillRan by remember { mutableStateOf(false) }
-    var egoRoot by remember { mutableStateOf("") }
-    var egoDepth by remember { mutableStateOf("1") }
-    var egoDir by remember { mutableStateOf("callees") }
-    var egoRan by remember { mutableStateOf(false) }
+    var drillRoot by remember { mutableStateOf("") }
+    var exportSheet by remember { mutableStateOf(false) }
+    var sccMembers by remember { mutableStateOf<List<String>?>(null) }
     var savedMsg by remember { mutableStateOf("") }
 
     LaunchedEffect(ws, tick) {
@@ -8464,8 +8472,8 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
         }
         loading = false
         if (res == null) { error = if (zh) "引擎未就绪或命令失败" else "engine/command failed"; return@LaunchedEffect }
-        // 注意：parseRizinGraph 已同时产出 nodes 与 edges；不能再用「已剥离 out_nodes 的 nodes」
-        // 重新 parseCallGraph（那样 edges 恒为空 → 根下钻无出边、SCC 鸟瞰无连线）。
+        // parseRizinGraph 已同时产出 nodes 与 edges；不能再用「已剥离 out_nodes 的 nodes」重新解析
+        // （那样 edges 恒为空 → 根下钻无出边、SCC 鸟瞰无连线）。
         val (n, e, nt) = res
         nodes = n; edges = e; note = nt
     }
@@ -8473,19 +8481,70 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
     if (ws.isBlank()) return NeedWorkspace(zh)
 
     val names = remember(nodes) {
-        nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }.filter { it.isNotBlank() }
+        nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }
+            .filter { it.isNotBlank() }
+    }
+    val addrOf = remember(nodes) {
+        val m = HashMap<String, String>()
+        nodes.forEach { o ->
+            val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
+            if (nm.isNotBlank()) m[nm] = hexAddr(o.opt("offset") ?: o.opt("id"))
+        }
+        m
     }
     val outCnt = remember(edges) { edges.groupingBy { it.first }.eachCount() }
     val inCnt = remember(edges) { edges.groupingBy { it.second }.eachCount() }
-    val indegTop = remember(inCnt) { inCnt.entries.sortedByDescending { it.value }.take(5) }
-    val entryCount = remember(names, inCnt) { names.count { (inCnt[it] ?: 0) == 0 } }
-    val shown = remember(nodes, query) {
-        if (query.isBlank()) nodes else nodes.filter {
-            it.optString("name").contains(query, true) || it.optString("id").contains(query, true)
+    // 入口候选（对齐 Explorer So computeRoots：入口点 → JNI_OnLoad → 入度 0）
+    val roots = remember(names, edges) { xrefRoots(names, edges) }
+    val effRoot = drillRoot.ifBlank { roots.firstOrNull().orEmpty() }
+    val drillDag = remember(names, edges, effRoot, cs.primary, df) {
+        if (effRoot.isBlank()) null
+        else buildDrillDag(names, edges, effRoot, 5, 1500, 12, cs.primary, df, 240f * df)
+    }
+    val sccDag = remember(names, edges, cs.tertiary, cs.primary, df) {
+        buildSccDag(names, edges, cs.tertiary, cs.primary, df, 240f * df)
+    }
+    val hits = remember(nodes, query) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) emptyList()
+        else nodes.mapNotNull { o ->
+            val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
+            val hex = hexAddr(o.opt("offset") ?: o.opt("id")).lowercase()
+            if (nm.lowercase().contains(q) || hex.contains(q)) nm else null
+        }.take(200)
+    }
+    val listRows: List<String> = if (query.isBlank()) roots else hits
+    val showList = query.isNotBlank() || xTab == "overview"
+    val omitted = drillDag?.omitted ?: 0
+    val status = when {
+        xTab == "scc" ->
+            if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · SCC ${sccDag?.nodes?.size ?: 0} 个 · 枢纽高亮（入度 Top5）"
+            else "Global xref · ${edges.size} edges · ${sccDag?.nodes?.size ?: 0} SCCs · hubs (in-degree Top5)"
+        xTab == "drill" ->
+            (if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 当前显示 ${drillDag?.nodes?.size ?: 0} 节点 · 根下钻 $effRoot"
+            else "Global xref · ${edges.size} edges · ${drillDag?.nodes?.size ?: 0} nodes · drill $effRoot") +
+                (if (omitted > 0) (if (zh) " · 省略 $omitted 条" else " · omitted $omitted") else "")
+        else ->
+            if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 入口 ${roots.size} 个 · 全部函数 ${names.size}"
+            else "Global xref · ${edges.size} edges · ${roots.size} entries · ${names.size} fns"
+    }
+
+    /** 打开函数详情（对齐 Exbin openFuncDetail）；import 类节点只复制名字。 */
+    fun openDetail(name: String) {
+        if (name.isBlank()) return
+        if (name.startsWith("sym.imp.") || name.startsWith("imp.")) {
+            copyToClipboard(context, name, zh)
+            return
         }
+        tools.selectedFunctionName = name
+        tools.selectedFunctionVa = ""
+        tools.decompileTarget = name
+        tools.disasmAddr = name
+        tools.analysisView = "funcdetail"
     }
 
     Column(Modifier.fillMaxSize()) {
+        // ── 页签（对齐 Explorer So GlobalXRefFragment 的 TabLayout scrollable）──
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -8495,19 +8554,71 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
                 "overview" to (if (zh) "入口概览" else "Overview"),
                 "drill" to (if (zh) "根下钻" else "Root drill"),
                 "scc" to (if (zh) "SCC 鸟瞰" else "SCC"),
-                "export" to (if (zh) "导出" else "Export"),
-            ).forEach { (k, l) -> TabChip(l, selected = xTab == k) { xTab = k } }
-            SmallAction(if (zh) "重新分析" else "Re-analyze", loading = loading, onClick = onRefresh)
+            ).forEach { (k, l) ->
+                TabChip(l, selected = xTab == k && query.isBlank()) { xTab = k; query = "" }
+            }
+            TabChip(if (zh) "导出" else "Export", selected = false) { exportSheet = true }
         }
-        if (nodes.isNotEmpty()) {
-            MonoLine(
-                if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 入口 $entryCount 个 · 函数 ${nodes.size} 个 · 枢纽高亮（入度 Top5）"
-                else "Global xref · ${edges.size} edges · $entryCount entries · ${nodes.size} fns · hubs (in-degree Top5)",
-                cs.onSurfaceVariant, AppText.label,
+        // ── 搜索行（EditText + 重置，对齐 Exbin searchRow padding 8/4/8/4）──
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                shape = RoundedCornerShape(AppShape.sm),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = cs.surfaceContainer,
+                    focusedContainerColor = cs.surfaceContainer,
+                ),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                placeholder = {
+                    Text(
+                        if (zh) "搜索函数名 / 地址…" else "search fn / addr",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = AppText.bodyStrong,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+            )
+            Text(
+                if (zh) "重置" else "Reset",
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = AppText.bodyStrong,
+                fontWeight = FontWeight.Bold,
+                color = cs.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(AppShape.sm))
+                    .clickable { query = ""; drillRoot = ""; xTab = "overview"; savedMsg = "" }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
-        if (note.isNotBlank()) { Spacer(Modifier.size(4.dp)); MonoLine(note, cs.onSurfaceVariant, AppText.label) }
-        Spacer(Modifier.size(6.dp))
+        // ── 状态行（Exbin status：12sp onSurfaceVariant padding 8/5）──
+        Text(
+            status,
+            modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+            style = MaterialTheme.typography.bodySmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (note.isNotBlank()) {
+            Text(
+                note,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        // ── 内容区（Exbin content FrameLayout weight=1：画布恒占满，列表覆盖其上）──
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 loading && nodes.isEmpty() -> AnalysisLoading()
@@ -8517,351 +8628,263 @@ private fun GlobalXRefView(tools: ToolPagesState, zh: Boolean, context: android.
                     hint = if (zh) "rizin 未返回全局调用图。可先跑一次全量分析（aaaa）。" else "rizin returned no call graph. Run full analysis (aaaa) first.",
                     primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
                 )
-                xTab == "overview" -> Column(Modifier.fillMaxSize()) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(
-                            value = query, onValueChange = { query = it }, singleLine = true,
-                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-                            shape = RoundedCornerShape(AppShape.sm),
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-                            placeholder = { Text(if (zh) "搜索函数名 / 地址…" else "search fn / addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        )
-                        TabChip(if (zh) "图形" else "Graph", ovView == "graph") { ovView = "graph" }
-                        TabChip(if (zh) "列表" else "List", ovView == "list") { ovView = "list" }
-                        if (query.isNotBlank()) SmallAction(if (zh) "重置" else "Reset") { query = "" }
-                    }
-                    Spacer(Modifier.size(6.dp))
-                    if (ovView == "graph") {
-                        CallGraphGraphPane(nodes, edges, query, zh)
-                    } else {
-                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            shown.take(400).forEach { o ->
-                                val nm = o.optString("name").ifBlank { hexAddr(o.opt("offset") ?: o.opt("id")) }
-                                val addr = hexAddr(o.opt("offset") ?: o.opt("id"))
-                                val oN = outCnt[nm] ?: 0
-                                val iN = inCnt[nm] ?: 0
-                                Column(
-                                    Modifier.fillMaxWidth()
-                                        .clip(RoundedCornerShape(AppShape.md))
-                                        .background(cs.surfaceContainerHigh)
-                                        .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                                        .clickable { copyToClipboard(context, nm, zh) }
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(nm, style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                        if (iN == 0) TypeBadge(if (zh) "入口" else "entry", cs.tertiary)
-                                    }
-                                    MonoLine((if (addr.isNotBlank()) "$addr  " else "") + (if (zh) "调用 $oN · 被调 $iN" else "$oN out · $iN in"), cs.onSurfaceVariant, AppText.label)
-                                }
-                            }
-                            if (shown.size > 400) MonoLine(if (zh) "… 共 ${shown.size} 个（用搜索缩小）" else "… ${shown.size} total", cs.onSurfaceVariant, AppText.label)
-                        }
-                    }
-                }
-                xTab == "drill" -> Column(Modifier.fillMaxSize()) {
-                    val levels = remember(names, edges, drillRoot, drillDepth, drillMax, drillRan) {
-                        if (!drillRan) emptyList<Pair<String, List<String>>>()
-                        else {
-                            val outAdj = HashMap<String, MutableList<String>>()
-                            edges.forEach { (f, t) -> outAdj.getOrPut(f) { ArrayList() }.add(t) }
-                            val start = names.firstOrNull { it == drillRoot }
-                                ?: names.firstOrNull { it.contains(drillRoot, true) }
-                                ?: if (drillRoot.isBlank()) names.firstOrNull() else null
-                            val cap = drillMax.toIntOrNull()?.coerceIn(10, 2000) ?: 120
-                            val out = ArrayList<Pair<String, List<String>>>()
-                            if (!start.isNullOrBlank()) {
-                                val seen = HashSet<String>()
-                                seen.add(start)
-                                var total = 1
-                                var fr = listOf(start)
-                                val d = drillDepth.toIntOrNull()?.coerceIn(1, 8) ?: 3
-                                for (lvl in 0 until d) {
-                                    val nx = LinkedHashSet<String>()
-                                    fr.forEach { u -> outAdj[u]?.forEach { v -> if (v != u && !seen.contains(v) && total < cap) { seen.add(v); nx.add(v); total++ } } }
-                                    out.add((if (zh) "第 ${lvl + 1} 层" else "level ${lvl + 1}") to nx.toList())
-                                    if (nx.isEmpty()) break
-                                    fr = nx.toList()
-                                }
-                            }
-                            out
-                        }
-                    }
-                    // 参数区（对齐 Explorer So：根函数 / 深度 / 上限 + 主按钮「重新构建」）
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = drillRoot, onValueChange = { drillRoot = it }, singleLine = true,
-                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-                            shape = RoundedCornerShape(AppShape.sm),
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                            label = { Text(if (zh) "根函数" else "Root function", fontSize = AppText.label) },
-                            placeholder = { Text(if (zh) "函数名 或 0x 地址" else "name or 0x addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        )
-                        OutlinedTextField(
-                            value = drillDepth, onValueChange = { drillDepth = it.filter { c -> c.isDigit() }.take(2) }, singleLine = true,
-                            modifier = Modifier.width(74.dp).heightIn(min = 46.dp),
-                            shape = RoundedCornerShape(AppShape.sm),
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                            label = { Text(if (zh) "深度" else "Depth", fontSize = AppText.label) },
-                        )
-                        OutlinedTextField(
-                            value = drillMax, onValueChange = { drillMax = it.filter { c -> c.isDigit() }.take(4) }, singleLine = true,
-                            modifier = Modifier.width(84.dp).heightIn(min = 46.dp),
-                            shape = RoundedCornerShape(AppShape.sm),
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                            label = { Text(if (zh) "上限" else "Max", fontSize = AppText.label) },
-                        )
-                    }
-                    // 分层画布模型（对标 XRefDagModel.drill：BFS 逐层 + TopN + 总数上限 + 回边）
-                    val drillDensity = LocalDensity.current.density
-                    val drillDag = remember(names, edges, drillRoot, drillDepth, drillMax, drillRan, cs.primary, drillDensity) {
-                        if (!drillRan) null
-                        else buildDrillDag(
-                            names, edges, drillRoot,
-                            drillDepth.toIntOrNull()?.coerceIn(1, 8) ?: 3,
-                            drillMax.toIntOrNull()?.coerceIn(10, 2000) ?: 120,
-                            cs.primary, drillDensity,
-                        )
-                    }
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(if (zh) "候选根函数" else "Roots", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-                        FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            val cands = remember(names, edges) {
-                                val ind = HashMap<String, Int>()
-                                edges.forEach { (_, t) -> ind[t] = (ind[t] ?: 0) + 1 }
-                                buildList {
-                                    if (names.any { it == "JNI_OnLoad" }) add("JNI_OnLoad")
-                                    if (tools.selectedFunctionName.isNotBlank()) add(tools.selectedFunctionName)
-                                    names.filter { (ind[it] ?: 0) == 0 }.take(8).forEach { add(it) }
-                                }.distinct().take(10)
-                            }
-                            cands.forEach { r -> TabChip(r.take(22), selected = drillRoot == r) { drillRoot = r; drillRan = true } }
-                        }
-                        Button(
-                            onClick = { drillRan = true },
-                            shape = RoundedCornerShape(AppShape.sm),
-                            colors = ButtonDefaults.buttonColors(containerColor = cs.primary),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                        ) {
-                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.size(5.dp))
-                            Text(if (zh) "重新构建" else "Rebuild", fontSize = AppText.label)
-                        }
-                    }
-                    if (levels.isNotEmpty()) {
-                        Spacer(Modifier.size(6.dp))
-                        SmallAction(if (zh) "复制调用树" else "Copy tree", onClick = {
-                            val sb = StringBuilder()
-                            levels.forEach { (lvl, list) -> sb.append("$lvl (${list.size})\n"); list.forEach { sb.append("  $it\n") } }
-                            copyToClipboard(context, sb.toString().trimEnd(), zh)
-                        })
-                    }
-                    Spacer(Modifier.size(8.dp))
-                    when {
-                        !drillRan -> AnalysisEmptyState(
-                            title = if (zh) "根下钻" else "Root drill",
-                            hint = if (zh) "从根节点出发逐层展开它调用的函数，快速摸清主流程。" else "Expand callees from a root level by level.",
-                            primaryLabel = if (zh) "从 JNI_OnLoad 开始" else "From JNI_OnLoad",
-                            onPrimary = { drillRoot = "JNI_OnLoad"; drillRan = true },
-                        )
-                        levels.isEmpty() || levels.all { it.second.isEmpty() } -> AnalysisEmptyState(
-                            title = if (zh) "无调用关系" else "No calls",
-                            hint = if (zh) "该根节点没有出边（可能是叶子函数，或尚未分析出调用关系）。可点「刷新」重跑全量分析再试。" else "The root has no outgoing edges (leaf, or calls not analyzed yet).",
-                            primaryLabel = if (zh) "刷新重分析" else "Re-analyze", onPrimary = onRefresh,
-                        )
-                        else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            MonoLine(
-                                if (zh) "根下钻 $drillRoot ｜ 深度 $drillDepth ｜ 当前显示 ${drillDag?.nodes?.size ?: 1} / 上限 $drillMax 节点"
-                                else "drill $drillRoot | depth $drillDepth | ${drillDag?.nodes?.size ?: 1} nodes",
-                                cs.primary, AppText.bodyStrong,
-                            )
-                            XRefDagCanvas(
-                                nodes = drillDag?.nodes ?: emptyList(),
-                                edges = drillDag?.edges ?: emptyList(),
-                                back = drillDag?.back ?: emptySet(),
-                                zh = zh,
-                                modifier = Modifier.fillMaxWidth().weight(1f),
-                                onTap = { i -> drillDag?.nodes?.getOrNull(i)?.let { copyToClipboard(context, it.label, zh) } },
-                            )
-                        }
-                    }
-                }
-                xTab == "ego" -> Column(Modifier.fillMaxSize()) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(if (zh) "方向" else "Dir", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-                        TabChip(if (zh) "我调用的" else "Callees", selected = egoDir == "callees") { egoDir = "callees" }
-                        TabChip(if (zh) "调用者" else "Callers", selected = egoDir == "callers") { egoDir = "callers" }
-                        TabChip(if (zh) "双向" else "Both", selected = egoDir == "both") { egoDir = "both" }
-                    }
-                    Spacer(Modifier.size(6.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = egoRoot, onValueChange = { egoRoot = it }, singleLine = true,
-                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
-                            shape = RoundedCornerShape(AppShape.sm),
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                            label = { Text(if (zh) "中心函数" else "Center function", fontSize = AppText.label) },
-                            placeholder = { Text(if (zh) "函数名 或 0x 地址（留空取首个入口）" else "name or 0x addr", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        )
-                        OutlinedTextField(
-                            value = egoDepth, onValueChange = { egoDepth = it.filter { c -> c.isDigit() }.take(1) }, singleLine = true,
-                            modifier = Modifier.width(74.dp).heightIn(min = 46.dp),
-                            shape = RoundedCornerShape(AppShape.sm),
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
-                            label = { Text(if (zh) "深度" else "Depth", fontSize = AppText.label) },
-                        )
-                        Button(
-                            onClick = { egoRan = true },
-                            shape = RoundedCornerShape(AppShape.sm),
-                            colors = ButtonDefaults.buttonColors(containerColor = cs.primary),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                        ) {
-                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.size(5.dp))
-                            Text(if (zh) "重新构建" else "Rebuild", fontSize = AppText.label)
-                        }
-                    }
-                    Spacer(Modifier.size(6.dp))
-                    val egoSub = remember(names, edges, egoRoot, egoDepth, egoRan, egoDir) {
-                        if (!egoRan) emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
-                        else buildEgoSubgraph(nodes, edges, egoRoot, egoDepth.toIntOrNull()?.coerceIn(1, 5) ?: 1, 200, egoDir)
-                    }
-                    when {
-                        !egoRan -> AnalysisEmptyState(
-                            title = if (zh) "邻域视图" else "Neighborhood",
-                            hint = if (zh) "以某个函数为中心，按方向展开它的调用关系（对标 Exbin XRefEgoModel）。" else "Center on a function; expand by direction.",
-                            primaryLabel = if (zh) "从 JNI_OnLoad 开始" else "From JNI_OnLoad",
-                            onPrimary = { egoRoot = "JNI_OnLoad"; egoRan = true },
-                        )
-                        egoSub.first.isEmpty() -> AnalysisEmptyState(
-                            title = if (zh) "无邻域" else "No neighborhood",
-                            hint = if (zh) "该中心函数没有找到调用关系。" else "No call relations found for the center.",
-                            primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
-                        )
-                        else -> {
-                            val tc = remember(egoSub) { classifyCallEdges(egoSub.first.size, egoSub.second) }
-                            MonoLine(
-                                if (zh) "邻域 · 中心 ${egoSub.first.firstOrNull()?.first ?: egoRoot} · ${egoSub.first.size} 节点 · ${egoSub.second.size} 边 · 树边 ${tc.first.size} · 交叉边 ${tc.second.size}"
-                                else "ego · ${egoSub.first.size} nodes · ${egoSub.second.size} edges · tree ${tc.first.size} · cross ${tc.second.size}",
-                                cs.onSurfaceVariant, AppText.label,
-                            )
-                            Spacer(Modifier.size(6.dp))
-                            CallGraphCanvas(egoSub.first, egoSub.second, "TB", query, zh, "curve", Modifier.fillMaxWidth().weight(1f))
-                        }
-                    }
-                }
-                xTab == "scc" -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val sccs = remember(names, edges) {
-                        if (names.isEmpty()) emptyList() else tarjanScc(names, edges).sortedByDescending { it.size }
-                    }
-                    // SCC → DAG 分层画布模型（对标 XRefScc.collapse + XRefDagView：超级节点 tertiary 色，枢纽 Top5 高亮）
-                    val sccDensity = LocalDensity.current.density
-                    val sccDag = remember(names, edges, cs.tertiary, cs.primary, sccDensity) {
-                        buildSccDag(names, edges, cs.tertiary, cs.primary, sccDensity)
-                    }
-                    val cyclic = sccs.filter { it.size > 1 }
-                    MonoLine(
-                        if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · SCC ${sccs.size} 个 · 环状簇 ${cyclic.size} 个 · 枢纽高亮（入度 Top5）"
-                        else "Global xref · ${edges.size} edges · ${sccs.size} SCCs · hubs (in-degree Top5)",
-                        cs.onSurfaceVariant, AppText.label,
+                showList -> if (listRows.isEmpty()) {
+                    AnalysisEmptyState(
+                        title = if (zh) "无匹配项" else "No match",
+                        hint = if (zh) "换个关键字再试" else "Try another keyword",
                     )
-                    KeyValueCard(zh, listOf(
-                        (if (zh) "强连通分量" else "SCCs") to "${sccs.size}",
-                        (if (zh) "环状簇(>1)" else "cyclic (>1)") to "${cyclic.size}",
-                        (if (zh) "最大簇" else "largest") to "${sccs.firstOrNull()?.size ?: 0}",
-                    ))
-                    if (indegTop.isNotEmpty()) {
-                        Text(if (zh) "枢纽（入度 Top5）" else "Hubs (indegree Top5)", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
-                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            indegTop.forEach { (name, c) -> TypeBadge("$name  ×$c", cs.primary) }
-                        }
-                    }
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        if (sccDag == null || sccDag.nodes.isEmpty()) {
-                            AnalysisEmptyState(
-                                title = if (zh) "暂无分层数据" else "No layered data",
-                                hint = if (zh) "尚未分析出函数调用关系，可先点「刷新」重跑全量分析" else "No call relations yet; run full analysis first",
-                                primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
-                            )
-                        } else {
-                            XRefDagCanvas(
-                                nodes = sccDag.nodes,
-                                edges = sccDag.edges,
-                                back = emptySet(),
+                } else {
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 10.dp)) {
+                        items(listRows, key = { it }) { nm ->
+                            XrefListRow(
+                                name = nm,
+                                addr = addrOf[nm] ?: "",
+                                out = outCnt[nm] ?: 0,
+                                indeg = inCnt[nm] ?: 0,
                                 zh = zh,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                    }
-                    if (cyclic.isEmpty()) {
-                        AnalysisEmptyState(
-                            title = if (zh) "无环状调用簇" else "No cyclic clusters",
-                            hint = if (zh) "所有函数的调用关系无环（DAG），可直接按调用顺序阅读。" else "The call graph is acyclic (DAG).",
-                        )
-                    } else {
-                        Text(if (zh) "环状簇（互相调用，建议整体理解）" else "Cyclic clusters", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
-                        Column(
-                            Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())
-                                .clip(RoundedCornerShape(AppShape.md))
-                                .background(cs.surfaceContainerHigh)
-                                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            cyclic.take(60).forEachIndexed { idx, comp ->
-                                Column(Modifier.fillMaxWidth().clickable { copyToClipboard(context, comp.joinToString("\n"), zh) }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        TypeBadge("#$idx · ${comp.size}", cs.tertiary)
-                                        MonoLine(if (zh) "点按复制该簇" else "tap to copy", cs.onSurfaceVariant, AppText.label)
-                                    }
-                                    comp.take(12).forEach { nm -> MonoLine(nm, cs.onSurface, AppText.label) }
-                                    if (comp.size > 12) MonoLine(if (zh) "… 共 ${comp.size} 个" else "… ${comp.size} total", cs.onSurfaceVariant, AppText.label)
-                                }
+                            ) {
+                                drillRoot = nm
+                                xTab = "drill"
+                                query = ""
                             }
                         }
                     }
                 }
-                else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val d = LocalDensity.current
-                    val df = d.density
-                    SmallAction(if (zh) "导出 PNG（调用图画布）" else "PNG") {
-                        val sub = buildCallSubgraph(nodes, edges, "full", "", 2, 200)
-                        val lay = layoutCallGraph(sub.first, sub.second, "TB", df)
-                        val path = exportDrawToPng(
-                            context = context,
-                            fileName = "xref_graph_${System.currentTimeMillis()}.png",
-                            widthPx = (lay.width + 60f).toInt(),
-                            heightPx = (lay.height + 60f).toInt(),
-                            density = d,
-                        ) { drawCgScene(lay, cs, df, 1f, Offset.Zero, this.size, -1, "", "TB", "curve") }
-                        savedMsg = if (path != null) (if (zh) "已导出：$path" else "saved: $path") else (if (zh) "导出失败" else "export failed")
+                xTab == "drill" -> {
+                    val lay = drillDag
+                    if (lay == null || lay.nodes.isEmpty()) {
+                        AnalysisEmptyState(
+                            title = if (zh) "暂无分层数据" else "No layered data",
+                            hint = if (zh) "该根节点没有可展开的调用关系" else "this root has no outgoing calls",
+                        )
+                    } else {
+                        XRefDagCanvas(
+                            nodes = lay.nodes, edges = lay.edges, back = lay.back, zh = zh,
+                            modifier = Modifier.fillMaxSize(),
+                            onTap = { i ->
+                                val n = lay.nodes.getOrNull(i)
+                                if (n != null) { drillRoot = n.label; savedMsg = "" }
+                            },
+                            onLongPress = { i -> lay.nodes.getOrNull(i)?.let { openDetail(it.label) } },
+                        )
                     }
-                    SmallAction(if (zh) "导出 JSON（完整数据）" else "JSON") {
+                }
+                else -> {
+                    val lay = sccDag
+                    XRefDagCanvas(
+                        nodes = lay?.nodes ?: emptyList(),
+                        edges = lay?.edges ?: emptyList(),
+                        back = emptySet(),
+                        zh = zh,
+                        modifier = Modifier.fillMaxSize(),
+                        onTap = { i ->
+                            val n = lay?.nodes?.getOrNull(i)
+                            if (n != null) {
+                                val mem = n.members
+                                if (mem != null && mem.size > 1) sccMembers = mem
+                                else { drillRoot = n.label; xTab = "drill" }
+                            }
+                        },
+                        onLongPress = { i ->
+                            lay?.nodes?.getOrNull(i)?.let { n ->
+                                val target = n.members?.firstOrNull() ?: n.label
+                                openDetail(target)
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        if (savedMsg.isNotBlank()) {
+            Text(
+                savedMsg,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.primary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+
+    // ── 导出（对齐 Exbin showExportMenu 的三项 BottomSheet）──
+    if (exportSheet) {
+        ChoiceDialog(
+            title = if (zh) "导出" else "Export",
+            options = listOf(
+                if (zh) "导出 PNG（当前画布）" else "PNG (canvas)",
+                if (zh) "导出 JSON（完整数据）" else "JSON (all)",
+                if (zh) "导出 CSV（完整数据）" else "CSV (all)",
+            ),
+            onPick = { idx ->
+                savedMsg = when (idx) {
+                    0 -> {
+                        val lay = if (xTab == "scc") sccDag else drillDag
+                        if (lay == null || lay.nodes.isEmpty()) {
+                            if (zh) "请先切到「根下钻」或「SCC 鸟瞰」模式" else "switch to drill / SCC first"
+                        } else {
+                            val path = exportDrawToPng(
+                                context = context,
+                                fileName = "xref_${System.currentTimeMillis()}.png",
+                                widthPx = (lay.width + 160f).toInt(),
+                                heightPx = (lay.height + 160f).toInt(),
+                                density = dens,
+                            ) { drawDagScene(lay, cs, df, 1f, Offset.Zero, this.size, -1) }
+                            if (path != null) (if (zh) "已导出：$path" else "saved: $path")
+                            else (if (zh) "导出失败" else "export failed")
+                        }
+                    }
+                    1 -> {
                         val o = JSONObject()
                         o.put("nodes", JSONArray(nodes.map { it.toString() }))
                         o.put("edges", JSONArray(edges.map { JSONObject().put("from", it.first).put("to", it.second) }))
                         val f = java.io.File(exportsDir(context), "xref_${System.currentTimeMillis()}.json")
                         val r = runCatching { f.writeText(o.toString(2)) }
-                        savedMsg = if (r.isSuccess) (if (zh) "已导出：${f.absolutePath}" else "saved: ${f.absolutePath}") else (if (zh) "导出失败" else "export failed")
+                        if (r.isSuccess) (if (zh) "已导出：${f.absolutePath}" else "saved: ${f.absolutePath}")
+                        else (if (zh) "导出失败" else "export failed")
                     }
-                    SmallAction(if (zh) "导出 CSV（完整数据）" else "CSV") {
+                    else -> {
                         fun esc(v: String) = "\"" + v.replace("\"", "\"\"") + "\""
                         val sb = StringBuilder("from,to\n")
                         edges.forEach { sb.append(esc(it.first)).append(',').append(esc(it.second)).append('\n') }
                         val f = java.io.File(exportsDir(context), "xref_${System.currentTimeMillis()}.csv")
                         val r = runCatching { f.writeText(sb.toString()) }
-                        savedMsg = if (r.isSuccess) (if (zh) "已导出：${f.absolutePath}" else "saved: ${f.absolutePath}") else (if (zh) "导出失败" else "export failed")
+                        if (r.isSuccess) (if (zh) "已导出：${f.absolutePath}" else "saved: ${f.absolutePath}")
+                        else (if (zh) "导出失败" else "export failed")
                     }
-                    MonoLine(if (zh) "导出目录：${exportsDir(context).absolutePath}" else exportsDir(context).absolutePath, cs.onSurfaceVariant, AppText.label)
-                    if (savedMsg.isNotBlank()) MonoLine(savedMsg, cs.primary, AppText.label)
                 }
-            }
-        }
+            },
+            onDismiss = { exportSheet = false },
+        )
+    }
+
+    // ── SCC 成员表（对齐 Exbin showSccMembers：点头部可跳到该成员的根下钻）──
+    sccMembers?.let { mem ->
+        SccMembersDialog(
+            members = mem,
+            zh = zh,
+            onPick = { name -> drillRoot = name; xTab = "drill"; query = ""; sccMembers = null },
+            onDismiss = { sccMembers = null },
+        )
     }
 }
-/** agCj 输出既可能是 {nodes,edges} 也可能是 [{name,imports|out}] 数组。 */
+
+/** 入口候选（对齐 Explorer So GlobalXRefFragment.computeRoots）。 */
+private fun xrefRoots(names: List<String>, edges: List<Pair<String, String>>): List<String> {
+    if (names.isEmpty()) return emptyList()
+    val order = names.withIndex().associate { (i, n) -> n to i }
+    val indeg = HashMap<String, Int>()
+    names.forEach { indeg[it] = 0 }
+    edges.forEach { (f, t) ->
+        if (f != t && indeg.containsKey(f) && indeg.containsKey(t)) indeg[t] = (indeg[t] ?: 0) + 1
+    }
+    val out = ArrayList<String>()
+    names.filter { it == "entry0" || it.startsWith("entry") }.forEach { out.add(it) }
+    names.filter { it.contains("JNI_OnLoad") }.forEach { if (it !in out) out.add(it) }
+    names.filter { (indeg[it] ?: 0) == 0 && it !in out }
+        .sortedBy { order[it] ?: Int.MAX_VALUE }
+        .forEach { out.add(it) }
+    return out
+}
+
+/**
+ * 交叉引用列表行（完全对齐 Explorer So XRefListAdapter.getView）：
+ * 卡片 surfaceContainer + 圆角 16dp + 内边距 14/10；首行 名称（14sp 粗体，中段省略）+ 地址（11sp 等宽）；
+ * 次行「调用 N · 被调 M」（12sp）。
+ */
+@Composable
+private fun XrefListRow(
+    name: String,
+    addr: String,
+    out: Int,
+    indeg: Int,
+    zh: Boolean,
+    onPick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(cs.surfaceContainer)
+            .clickable { onPick() }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = cs.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (addr.isNotBlank()) {
+                Text(
+                    addr,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+        Text(
+            if (zh) "调用 $out · 被调 $indeg" else "$out out · $indeg in",
+            style = MaterialTheme.typography.bodySmall,
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+        )
+    }
+}
+
+/** SCC 成员表（对齐 Exbin showSccMembers 的 BottomSheet）。 */
+@Composable
+private fun SccMembersDialog(
+    members: List<String>,
+    zh: Boolean,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (zh) "SCC 组件 ${members.size} 个函数（互相递归）：" else "SCC component (${members.size} functions)",
+                style = MaterialTheme.typography.bodyMedium,
+                fontSize = AppText.bodyStrong,
+            )
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+            ) {
+                members.forEach { m ->
+                    Text(
+                        m,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        fontSize = AppText.body,
+                        color = cs.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(AppShape.xs))
+                            .clickable { onPick(m) }
+                            .padding(horizontal = 6.dp, vertical = 7.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(if (zh) "关闭" else "Close") }
+        },
+    )
+}
+
 private fun parseCallGraph(items: List<JSONObject>): Pair<List<JSONObject>, List<Pair<String, String>>> {
     if (items.isEmpty()) return emptyList<JSONObject>() to emptyList<Pair<String, String>>()
     // 形式一：单个对象含 nodes/edges
@@ -9422,8 +9445,18 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
 
 // ══════════ 全局交叉引用 · 分层画布（对齐 Explorer So XRefDagView / XRefDagModel / XRefScc） ══════════
 
-/** 分层节点：圆角 8dp + surfaceContainer 底 + 类型色描边/文字（13sp），高 32dp，宽 clamp(72dp..240dp, 文本+18dp)。 */
-private class DagNode(val label: String, val depth: Int, val color: Color, val highlight: Boolean) {
+/**
+ * 分层节点：圆角 8dp + surfaceContainer 底 + 类型色描边/文字（13sp），高 32dp，
+ * 宽 clamp(72dp, 屏宽 60%, 文本+18dp)（对齐 Explorer So XRefDagView.drawNode）。
+ * members != null 表示 SCC 超级节点（点按弹出成员表）。
+ */
+private class DagNode(
+    val label: String,
+    val depth: Int,
+    val color: Color,
+    val highlight: Boolean,
+    val members: List<String>? = null,
+) {
     var x = 0f
     var y = 0f
     var w = 0f
@@ -9441,6 +9474,8 @@ private class DagLayout(
     val back: Set<Int>,
     val width: Float,
     val height: Float,
+    /** 因超出上限被省略的边数（对齐 XRefDagModel.omitted，显示在状态行）。 */
+    val omitted: Int = 0,
 )
 
 /** middleEllipsis（对齐 XRefEgoModel.middleEllipsis，18 字）。 */
@@ -9453,8 +9488,9 @@ private fun layoutDagGraph(
     edges: List<Pair<Int, Int>>,
     back: Set<Int>,
     density: Float,
+    maxNodeW: Float,
 ): DagLayout {
-    if (nodes.isEmpty()) return DagLayout(nodes, edges, back, 0f, 0f)
+    if (nodes.isEmpty()) return DagLayout(nodes, edges, back, 0f, 0f, 0)
     val paint = android.graphics.Paint().apply {
         isAntiAlias = true
         typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
@@ -9462,7 +9498,7 @@ private fun layoutDagGraph(
     }
     val gapX = 150f * density
     val gapY = 72f * density
-    val maxW = 240f * density
+    val maxW = maxNodeW
     val byDepth = LinkedHashMap<Int, MutableList<Int>>()
     nodes.forEachIndexed { i, n -> byDepth.getOrPut(n.depth) { ArrayList() }.add(i) }
     var maxX = 0f
@@ -9481,7 +9517,7 @@ private fun layoutDagGraph(
     val cx = maxX / 2f
     val cy = maxY / 2f
     nodes.forEach { it.x -= cx; it.y -= cy }
-    return DagLayout(nodes, edges, back, maxX, maxY)
+    return DagLayout(nodes, edges, back, maxX, maxY, 0)
 }
 
 /** 边端点裁剪到节点矩形边界（对齐 XRefDagView.edgePoint）。 */
@@ -9520,7 +9556,7 @@ private fun DrawScope.drawDagScene(
             var ox = -(by - ay)
             var oy = bx - ax
             val ol = kotlin.math.sqrt(ox * ox + oy * oy)
-            if (ol < 1f) { ox = 0f; oy = -36f * density }
+            if (ol < 1f) { ox = 0f; oy = -60f * density }
             val cxx = mx + ox / ol * 36f * density
             val cyy = my + oy / ol * 36f * density
             val p = Path().apply { moveTo(ax, ay); quadraticBezierTo(cxx, cyy, bx, by) }
@@ -9577,7 +9613,7 @@ private fun DrawScope.drawDagScene(
 }
 
 /**
- * 分层画布（根下钻 / SCC 鸟瞰 共用，对齐 Explorer So XRefDagView）：
+ * 分层画布（根下钻 / SCC 鸟瞰 共用，完全对齐 Explorer So XRefDagView）：
  * 节点圆角 8dp / surfaceContainer 底 / 类型色描边与文字，回边 primary 虚线曲线，
  * 缩放 0.5–4（双击适配），scale<0.42 降级为圆点，空态「暂无分层数据」。
  */
@@ -9589,15 +9625,24 @@ private fun XRefDagCanvas(
     zh: Boolean,
     modifier: Modifier = Modifier,
     onTap: (Int) -> Unit = {},
+    onLongPress: (Int) -> Unit = {},
 ) {
     val density = LocalDensity.current.density
     val cs = MaterialTheme.colorScheme
-    val layout = remember(nodes, edges, back, density) { layoutDagGraph(nodes, edges, back, density) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    val layout = remember(nodes, edges, back, density, viewport) {
+        layoutDagGraph(
+            nodes, edges, back, density,
+            if (viewport.width > 0) viewport.width * 0.6f else 240f * density,
+        )
+    }
     var scale by remember(layout) { mutableStateOf(1f) }
     var pan by remember(layout) { mutableStateOf(Offset.Zero) }
-    var viewport by remember { mutableStateOf(IntSize.Zero) }
     var selected by remember(layout) { mutableStateOf(-1) }
     var fitted by remember(layout) { mutableStateOf(false) }
+    // 手势回调里要读到最新 pan/scale（rememberUpdatedState 必须用 .value 访问）
+    val panNow = rememberUpdatedState(pan)
+    val scaleNow = rememberUpdatedState(scale)
 
     fun fit() {
         if (viewport.width <= 0 || viewport.height <= 0 || layout.nodes.isEmpty()) return
@@ -9618,6 +9663,17 @@ private fun XRefDagCanvas(
             viewport.height / 2f - (minY + maxY) / 2f * scale,
         )
     }
+
+    fun hitAt(pos: Offset): Int {
+        val sc = scaleNow.value
+        if (sc <= 0f) return -1
+        val wx = (pos.x - viewport.width / 2f - panNow.value.x) / sc
+        val wy = (pos.y - viewport.height / 2f - panNow.value.y) / sc
+        return layout.nodes.indexOfFirst {
+            kotlin.math.abs(wx - it.x) <= it.w / 2f && kotlin.math.abs(wy - it.y) <= it.h / 2f
+        }
+    }
+
     LaunchedEffect(layout, viewport) {
         if (!fitted && viewport.width > 0 && layout.nodes.isNotEmpty()) { fit(); fitted = true }
     }
@@ -9627,12 +9683,14 @@ private fun XRefDagCanvas(
             .background(cs.surface)
             .onSizeChanged { viewport = it }
             .pointerInput(layout) {
-                detectTapGestures(onDoubleTap = { fit() }) { pos ->
-                    val wx = (pos.x - viewport.width / 2f - pan.x) / scale
-                    val wy = (pos.y - viewport.height / 2f - pan.y) / scale
-                    val hit = layout.nodes.indexOfFirst {
-                        kotlin.math.abs(wx - it.x) <= it.w / 2f && kotlin.math.abs(wy - it.y) <= it.h / 2f
-                    }
+                detectTapGestures(
+                    onDoubleTap = { fit() },
+                    onLongPress = { pos ->
+                        val hit = hitAt(pos)
+                        if (hit >= 0) { selected = hit; onLongPress(hit) }
+                    },
+                ) { pos ->
+                    val hit = hitAt(pos)
                     selected = hit
                     if (hit >= 0) onTap(hit)
                 }
@@ -9674,15 +9732,20 @@ private fun XRefDagCanvas(
     }
 }
 
-/** 根下钻：BFS 逐层（每节点 TopN 12 个被调，总数上限），指向已访问节点的边计回边。 */
+/**
+ * 根下钻：从根出发 OUTGOING BFS，每层每节点 TopN 个被调、总数上限，
+ * 指向已访问节点的边计回边（对齐 Explorer So XRefDagModel.buildTree → XRefEgoModel）。
+ */
 private fun buildDrillDag(
     names: List<String>,
     edges: List<Pair<String, String>>,
     rootQ: String,
     depth: Int,
     cap: Int,
+    topN: Int,
     color: Color,
     density: Float,
+    maxNodeW: Float,
 ): DagLayout? {
     if (names.isEmpty()) return null
     val start = names.firstOrNull { it == rootQ }
@@ -9699,13 +9762,16 @@ private fun buildDrillDag(
     val edgeList = ArrayList<Pair<Int, Int>>()
     val seen = HashSet<String>()
     val backSet = HashSet<Int>()
+    var omitted = 0
     var frontier = listOf(start)
     var d = 0
     while (frontier.isNotEmpty() && d < depth && nodes.size < cap) {
         val next = ArrayList<String>()
         frontier.forEach { u ->
             val ui = indexOf[u] ?: return@forEach
-            out[u].orEmpty().filter { it != u }.sorted().take(12).forEach { v ->
+            val outs = out[u].orEmpty().filter { it != u }.sorted()
+            omitted += maxOf(0, outs.size - topN)
+            outs.take(topN).forEach { v ->
                 val vi = indexOf[v]
                 if (vi != null) {
                     if (seen.add("$ui|$vi")) { backSet += edgeList.size; edgeList += ui to vi }
@@ -9713,22 +9779,30 @@ private fun buildDrillDag(
                     val ni = intern(v, d + 1, false)
                     if (seen.add("$ui|$ni")) edgeList += ui to ni
                     next += v
+                } else {
+                    omitted++
                 }
             }
         }
         frontier = next.distinct()
         d++
     }
-    return layoutDagGraph(nodes, edgeList, backSet, density)
+    val lay = layoutDagGraph(nodes, edgeList, backSet, density, maxNodeW)
+    return DagLayout(lay.nodes, lay.edges, lay.back, lay.width, lay.height, omitted)
 }
 
-/** SCC 鸟瞰：强连通折叠成超级节点（N 个函数）→ DAG 最长路分层，入度 Top5 为枢纽高亮。 */
+/**
+ * SCC 鸟瞰：Kosaraju 折叠强连通为超级节点（title = 首名 + " (N 个函数)"，tertiary 色），
+ * DAG 去重边 → Kahn 最长路分层，入度 Top5（且 >0）为枢纽高亮（对齐 XRefScc + buildScc）。
+ * 无环时每个函数各成单成员组件，照样出节点（Exbin 不会隐藏画布）。
+ */
 private fun buildSccDag(
     names: List<String>,
     edges: List<Pair<String, String>>,
     tertiaryColor: Color,
     primaryColor: Color,
     density: Float,
+    maxNodeW: Float,
 ): DagLayout? {
     if (names.isEmpty()) return null
     val sccs = tarjanScc(names, edges)
@@ -9761,9 +9835,12 @@ private fun buildSccDag(
     val nodes = sccs.mapIndexed { i, c ->
         val head = c.firstOrNull().orEmpty().ifBlank { "0x0" }
         val label = if (c.size > 1) "$head (" + c.size + " 个函数)" else head
-        DagNode(label, depthArr[i], if (c.size > 1) tertiaryColor else primaryColor, i in hubs)
+        DagNode(
+            label, depthArr[i], if (c.size > 1) tertiaryColor else primaryColor, i in hubs,
+            if (c.size > 1) c.sorted() else null,
+        )
     }
-    return layoutDagGraph(nodes, dagEdges.toList(), emptySet(), density)
+    return layoutDagGraph(nodes, dagEdges.toList(), emptySet(), density, maxNodeW)
 }
 
 /** 调用图 → CFG 画布 JSON（GlobalCfgView extends CfgCanvasView：复用 CFG 画布渲染）。 */

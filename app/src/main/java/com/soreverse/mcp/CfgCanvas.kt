@@ -1308,12 +1308,16 @@ private fun DrawScope.drawCfgMinimap(
         val t = cy + min(y0, y1) * s
         val r = cx + max(x0, x1) * s
         val b = cy + max(y0, y1) * s
-        drawRect(
-            colors.primary.copy(alpha = 0.95f),
-            topLeft = Offset(l, t),
-            size = Size((r - l).coerceAtLeast(1f), (b - t).coerceAtLeast(1f)),
-            style = Stroke(1.2f),
-        )
+        // 视口已覆盖整幅图（内容比视口还小）时不必画导航框，否则小地图会变成一整块主色矩形
+        val coversAll = (r - l) >= size.width - 8f && (b - t) >= size.height - 8f
+        if (!coversAll) {
+            drawRect(
+                colors.primary.copy(alpha = 0.85f),
+                topLeft = Offset(l, t),
+                size = Size((r - l).coerceAtLeast(1f), (b - t).coerceAtLeast(1f)),
+                style = Stroke(1.2f),
+            )
+        }
     }
 }
 
@@ -1711,7 +1715,8 @@ internal fun CfgCanvas(
             }
 
             // 右下角：迷你导航图（对标 Exbin CfgMinimap「显示小地图」）
-            if (showMinimap && effective.boxes.any { !it.isDummy }) {
+            // 小地图仅在「值得导航」时显示：≥2 个真实节点（单节点时只是一堆红点+满图视口框，像一块空白红矩形）
+            if (showMinimap && effective.boxes.count { !it.isDummy } >= 2) {
                 Surface(
                     shape = RoundedCornerShape(AppShape.xs),
                     color = colors.surfaceContainerHigh.copy(alpha = 0.88f),

@@ -2084,6 +2084,10 @@ private data class AnalysisRow(
     val enc: String = "",
     val sec: String = "",
     val len: Int = -1,
+    /** 副标题（Exbin item_detail 的 tv_subtitle：签名 / 节区 / N bytes）。 */
+    val sub: String = "",
+    /** 右侧来源 chip（Exbin item_detail 的 tv_type：Symbol / LinearSweep）。 */
+    val badge: String = "",
 )
 
 private val analysisNavItems = listOf(
@@ -3361,6 +3365,72 @@ private fun parseFunctions(json: String?): List<FnItem> {
     return out
 }
 
+/**
+ * 常见函数签名表（对齐 Explorer So FuncListAdapter.KNOWN_SIGS 的裁剪版）：
+ * 命中时函数行显示完整签名，并据此推导返回类型 chip。
+ */
+private val funcKnownSigs: Map<String, String> = linkedMapOf(
+    "JNI_OnLoad" to "jint JNI_OnLoad(JavaVM* vm, void* reserved)",
+    "JNI_OnUnload" to "void JNI_OnUnload(JavaVM* vm, void* reserved)",
+    "malloc" to "void* malloc(size_t size)",
+    "calloc" to "void* calloc(size_t n, size_t size)",
+    "realloc" to "void* realloc(void* ptr, size_t size)",
+    "free" to "void free(void* ptr)",
+    "memcpy" to "void* memcpy(void* dst, const void* src, size_t n)",
+    "memmove" to "void* memmove(void* dst, const void* src, size_t n)",
+    "memset" to "void* memset(void* dst, int c, size_t n)",
+    "memcmp" to "int memcmp(const void* a, const void* b, size_t n)",
+    "strlen" to "size_t strlen(const char* s)",
+    "strcmp" to "int strcmp(const char* a, const char* b)",
+    "strncmp" to "int strncmp(const char* a, const char* b, size_t n)",
+    "strcpy" to "char* strcpy(char* dst, const char* src)",
+    "strncpy" to "char* strncpy(char* dst, const char* src, size_t n)",
+    "strstr" to "char* strstr(const char* h, const char* n)",
+    "atoi" to "int atoi(const char* s)",
+    "abs" to "int abs(int n)",
+    "abort" to "void abort(void)",
+    "exit" to "void exit(int code)",
+    "printf" to "int printf(const char* fmt, ...)",
+    "snprintf" to "int snprintf(char* buf, size_t n, const char* fmt, ...)",
+    "pthread_create" to "int pthread_create(pthread_t* t, const void* attr, void* (*fn)(void*), void* arg)",
+    "pthread_join" to "int pthread_join(pthread_t t, void** ret)",
+    "dlopen" to "void* dlopen(const char* path, int mode)",
+    "dlsym" to "void* dlsym(void* handle, const char* sym)",
+    "dlclose" to "int dlclose(void* handle)",
+    "__stack_chk_fail" to "void __stack_chk_fail(void)",
+    "__android_log_print" to "int __android_log_print(int prio, const char* tag, const char* fmt, ...)",
+)
+
+/** 命中常见签名表则返回签名文本（否则 null；函数名可能带 sym.imp. / sym. 前缀）。 */
+private fun funcKnownSig(name: String): String? {
+    val bare = name.substringAfterLast('.')
+    return funcKnownSigs[name] ?: funcKnownSigs[bare]
+}
+
+/** 返回类型 chip（对齐 Exbin extractRetTypeChip：v/i/l/b/c/s/f/d/P/R 或首字母小写；无签名时 '?'）。 */
+private fun funcRetChip(name: String, sig: String?): String {
+    if (sig.isNullOrBlank()) return "?"
+    val paren = sig.indexOf('(')
+    val before = if (paren > 0) sig.substring(0, paren).trim() else ""
+    val retType = before.substringBeforeLast(' ').trim()
+    if (retType.isEmpty()) return "v"
+    return when (retType) {
+        "void" -> "v"
+        "int", "jint" -> "i"
+        "long", "jlong" -> "l"
+        "bool", "jboolean" -> "b"
+        "char", "jchar" -> "c"
+        "short", "jshort" -> "s"
+        "float", "jfloat" -> "f"
+        "double", "jdouble" -> "d"
+        else -> when {
+            retType.contains("*") -> "P"
+            retType.contains("&") -> "R"
+            else -> retType.first().lowercaseChar().toString()
+        }
+    }
+}
+
 /** 十六进制地址 → Long（排序用；解析不了按 0）。 */
 private fun hexVal(s: String): Long = runCatching {
     val v = s.trim()
@@ -3390,10 +3460,17 @@ private fun FunctionsView(
     var sortBy by remember { mutableStateOf("addr") }
     var asc by remember { mutableStateOf(true) }
     var sortMenu by remember { mutableStateOf(false) }
+    // 子页签：0=全部 / 1=符号表（排除 sub_*）/ 2=线性扫描（仅 sub_*）
+    var subTab by remember { mutableStateOf(0) }
 
-    val shown = remember(all, query, sortBy, asc) {
-        val fl = if (query.isBlank()) all
-        else all.filter { it.name.contains(query, true) || it.addr.contains(query, true) }
+    val shown = remember(all, query, sortBy, asc, subTab) {
+        val byTab = when (subTab) {
+            1 -> all.filter { !it.name.startsWith("sub_") }
+            2 -> all.filter { it.name.startsWith("sub_") }
+            else -> all
+        }
+        val fl = if (query.isBlank()) byTab
+        else byTab.filter { it.name.contains(query, true) || it.addr.contains(query, true) }
         val sorted = when (sortBy) {
             "name" -> fl.sortedBy { it.name.lowercase() }
             "size" -> fl.sortedBy { it.size }
@@ -3407,6 +3484,33 @@ private fun FunctionsView(
     }
 
     Column(Modifier.fillMaxSize()) {
+        // 子页签（对齐 Exbin FuncListTabFragment：TabLayout tabMode=fixed，全部 / 符号表 / 线性扫描）
+        TabRow(
+            selectedTabIndex = subTab,
+            containerColor = cs.surface,
+            contentColor = cs.primary,
+            divider = { GroupDivider() },
+        ) {
+            listOf(
+                if (zh) "全部" else "All",
+                if (zh) "符号表" else "Symtab",
+                if (zh) "线性扫描" else "Linear",
+            ).forEachIndexed { i, label ->
+                Tab(
+                    selected = subTab == i,
+                    onClick = { subTab = i },
+                    text = {
+                        Text(
+                            label,
+                            fontSize = AppText.bodyStrong,
+                            fontWeight = if (subTab == i) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (subTab == i) cs.primary else cs.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    },
+                )
+            }
+        }
         // 工具栏行（对齐 fragment_func_tab：marginH 12 / marginTop 8 / marginBottom 4）
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
@@ -3466,6 +3570,27 @@ private fun FunctionsView(
                 Icon(Icons.Filled.Save, contentDescription = if (zh) "导出函数列表" else "export list", tint = cs.primary)
             }
         }
+        // 状态行（tv_status：paddingH 14 / paddingTop 4，labelSmall 主色；仅筛选/排序非默认时显示）
+        if (subTab != 0 || sortBy != "addr" || !asc) {
+            Text(
+                (when (subTab) {
+                    1 -> if (zh) "符号表" else "symtab"
+                    2 -> if (zh) "线性扫描" else "linear sweep"
+                    else -> if (zh) "全部" else "all"
+                }) + "  ·  " + (if (zh) "按" else "by ") +
+                    (when (sortBy) {
+                        "name" -> if (zh) "名称" else "name"
+                        "size" -> if (zh) "大小" else "size"
+                        else -> if (zh) "地址" else "addr"
+                    }) + (if (asc) " ↑" else " ↓"),
+                modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         // 计数行（tv_count：paddingH 14 / paddingTop 2 / paddingBottom 6，labelSmall）
         Text(
             if (zh) "${shown.size} 个函数" else "${shown.size} functions",
@@ -3502,17 +3627,15 @@ private fun FunctionsView(
                 )
                 else -> AnalysisCardList(
                     rows = shown.map { r ->
+                        val sig = funcKnownSig(r.name)
                         AnalysisRow(
                             key = r.addr + "|" + r.name,
                             title = r.name,
-                            va = r.kind,
-                            meta = buildString {
-                                if (r.addr.isNotBlank()) append(r.addr)
-                                if (r.size >= 0L) {
-                                    if (isNotEmpty()) append(" · ")
-                                    append("${r.size} B")
-                                }
-                            }.ifBlank { "--" },
+                            va = funcRetChip(r.name, sig),
+                            sub = sig ?: (if (r.size >= 0L) (if (zh) "${r.size} 字节" else "${r.size} bytes") else ""),
+                            badge = r.kind.ifBlank { if (r.name.startsWith("sub_")) "LinearSweep" else "Symbol" },
+                            meta = (if (r.addr.isNotBlank()) r.addr else "0x0") +
+                                (if (r.size >= 0L) "  ·  ${r.size} B" else ""),
                             text = r.addr,
                         )
                     },
@@ -4913,6 +5036,29 @@ private fun AnalysisCardList(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
+                    )
+                    // 右侧来源 chip（Exbin tv_type：Symbol / LinearSweep）
+                    if (row.badge.isNotBlank()) {
+                        Text(
+                            row.badge,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = AppText.label,
+                            fontWeight = FontWeight.SemiBold,
+                            color = cs.primary,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
+                }
+                if (row.sub.isNotBlank()) {
+                    Text(
+                        row.sub,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = AppText.label,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
                     )
                 }
                 if (row.meta.isNotBlank()) {

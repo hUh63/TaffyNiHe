@@ -3001,6 +3001,30 @@ private fun AnalysisMenuHeader(label: String) {
     )
 }
 
+/** ⋮ 菜单「控制流画布」用的标签。 */
+private fun cfgContentLabel(zh: Boolean, mode: String): String = when (mode) {
+    "asm" -> if (zh) "汇编块" else "ASM blocks"
+    "pseudo" -> if (zh) "伪C块" else "PseudoC blocks"
+    else -> if (zh) "摘要块" else "Summary blocks"
+}
+
+private fun cfgLayoutLabel(mode: String): String = when (mode) {
+    "layered" -> "Layered"
+    "dagre" -> "Dagre"
+    "grid" -> "Grid"
+    "force" -> "Force"
+    else -> "ELK"
+}
+
+/** 布局引擎循环：ELK → 分层 → Dagre → 网格 → 力导向 → ELK。 */
+private fun nextCfgLayout(cur: String): String = when (cur) {
+    "elk" -> "layered"
+    "layered" -> "dagre"
+    "dagre" -> "grid"
+    "grid" -> "force"
+    else -> "elk"
+}
+
 /** 菜单项（图标 + 名称）。 */
 @Composable
 private fun AnalysisMenuItem(label: String, icon: ImageVector, onClick: () -> Unit) {
@@ -3306,6 +3330,44 @@ private fun AnalysisAppBar(
                 AnalysisMenuItem(if (zh) "对象树" else "Object tree", Icons.Filled.ListAlt) { menu = false; onOpenTree() }
                 AnalysisMenuItem(if (zh) "输出结果" else "Results", Icons.Filled.Terminal) { menu = false; onOpenOutput() }
                 AnalysisMenuItem(if (zh) "当前任务" else "Task", Icons.Filled.FolderOpen) { menu = false; onOpenTask() }
+                // ── 控制流画布显示（画布本身只留右下角工具条 + 左下角小地图，显示项收进这里）──
+                AnalysisMenuHeader(if (zh) "控制流画布" else "CFG canvas")
+                AnalysisMenuItem(
+                    (if (zh) "块内容：" else "Blocks: ") + cfgContentLabel(zh, tools.cfgUi.contentMode),
+                    Icons.Filled.Code,
+                ) {
+                    menu = false
+                    tools.cfgUi.contentMode = when (tools.cfgUi.contentMode) {
+                        "summary" -> "asm"
+                        "asm" -> "pseudo"
+                        else -> "summary"
+                    }
+                }
+                AnalysisMenuItem(bgStyleLabel(zh, tools.cfgUi.bgStyle), Icons.Filled.Transform) {
+                    menu = false; tools.cfgUi.bgStyle = nextBgStyle(tools.cfgUi.bgStyle)
+                }
+                AnalysisMenuItem(routeStyleLabel(zh, tools.cfgUi.routing), Icons.Filled.CompareArrows) {
+                    menu = false; tools.cfgUi.routing = nextRouting(tools.cfgUi.routing)
+                }
+                AnalysisMenuItem(
+                    (if (zh) "布局引擎：" else "Layout: ") + cfgLayoutLabel(tools.cfgUi.layoutMode),
+                    Icons.Filled.Sort,
+                ) {
+                    menu = false; tools.cfgUi.layoutMode = nextCfgLayout(tools.cfgUi.layoutMode)
+                }
+                AnalysisMenuItem(
+                    (if (zh) "拖动节点：" else "Drag: ") + (if (tools.cfgUi.dragNode) (if (zh) "开" else "on") else (if (zh) "关" else "off")),
+                    Icons.Filled.SwapHoriz,
+                ) {
+                    menu = false; tools.cfgUi.dragNode = !tools.cfgUi.dragNode
+                }
+                AnalysisMenuItem(
+                    (if (zh) "小地图：" else "Minimap: ") + (if (tools.cfgUi.minimap) (if (zh) "开" else "on") else (if (zh) "关" else "off")),
+                    Icons.Filled.MyLocation,
+                ) {
+                    menu = false; tools.cfgUi.minimap = !tools.cfgUi.minimap
+                }
+                AnalysisMenuItem(if (zh) "重新生成控制流图" else "Rebuild CFG", Icons.Filled.Refresh) { menu = false; onRefresh() }
                 // ── Explorer So 没有、塔菲自有的分析页（Exbin 没有的分析页不单列，只在此入口）──
                 AnalysisMenuHeader(if (zh) "塔菲工具" else "Taffy tools")
                 analysisOverflowViews.forEach { key ->
@@ -4565,9 +4627,8 @@ private fun CfgView(
     onGoFunctions: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    // 默认用 ELK Layered + 正交边路由（交叉更少）；仍可在布局条切回「分层/Dagre/网格/力导向」。
-    var cfgLayout by remember { mutableStateOf("elk") }
-    var cfgContent by remember { mutableStateOf("summary") }
+    // 布局引擎（默认 ELK）与块内容由 tools.cfgUi 提供（分析页 ⋮ 菜单「控制流画布」切换）；
+    // 画布本身只保留右下角工具条 + 左下角小地图（完全对齐 Exbin CfgCanvasView）。
     var cfgInsns by remember { mutableStateOf<Map<Long, List<String>>>(emptyMap()) }
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
@@ -4579,11 +4640,11 @@ private fun CfgView(
     var focusAddr by remember { mutableStateOf("") }
     var focusTok by remember { mutableStateOf(0) }
     // 「汇编块」模式：按需取当前函数的块级反汇编（pdfj），供画布在块内展示指令。
-    LaunchedEffect(cfgContent, tools.cfgJson, target, ws) {
-        if (cfgContent == "summary" || ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
+    LaunchedEffect(tools.cfgUi.contentMode, tools.cfgJson, target, ws) {
+        if (tools.cfgUi.contentMode == "summary" || ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
         val m = withContext(Dispatchers.IO) {
             runCatching {
-                when (cfgContent) {
+                when (tools.cfgUi.contentMode) {
                     "pseudo" -> {
                         // 优先：r2dec 精确块映射（对标 Exbin BlockPseudoCProvider.convertWithBlockMap）
                         val engP = EngineProvider.get(context)
@@ -4716,18 +4777,12 @@ private fun CfgView(
                     json = tools.cfgJson,
                     zh = zh,
                     modifier = Modifier.fillMaxSize(),
-                    layoutMode = cfgLayout,
-                    contentMode = cfgContent,
+                    ui = tools.cfgUi,
                     blockLines = cfgInsns,
                     fnLabel = fnLabel,
                     highlightTexts = if (focusAddr.isBlank()) emptySet() else setOf(focusAddr),
                     focusText = focusAddr,
                     focusToken = focusTok,
-                    onLayoutChange = { cfgLayout = it },
-                    onContentChange = { cfgContent = it },
-                    onRebuild = { loadCfg(context, tools, zh, scope, target) },
-                    onEntry = { useEntryPoint() },
-                    onPickFunction = onGoFunctions,
                 )
             }
         }
@@ -7972,7 +8027,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     hint = if (zh) "rizin 未返回全局调用图。可先跑一次全量分析（aaaa）。" else "rizin returned no call graph. Run full analysis first.",
                     primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
                 )
-                else -> CallGraphGraphPane(nodes, edges, "", zh)
+                else -> CallGraphGraphPane(nodes, edges, "", zh, tools.cfgUi)
             }
         }
     }
@@ -11753,6 +11808,7 @@ private fun CallGraphGraphPane(
     edges: List<Pair<String, String>>,
     findQ: String,
     zh: Boolean,
+    ui: CfgDisplayState,
 ) {
     val cs = MaterialTheme.colorScheme
     var mode by remember { mutableStateOf("hot") }
@@ -12003,8 +12059,7 @@ private fun CallGraphGraphPane(
                     json = callGraphCfgJson(subPair.first, subPair.second, zh),
                     zh = zh,
                     modifier = Modifier.fillMaxSize(),
-                    layoutMode = "elk",
-                    contentMode = "summary",
+                    ui = ui,
                     fnLabel = if (zh) "全局调用图" else "Call graph",
                     highlightTexts = matchNames,
                     focusText = focusName,

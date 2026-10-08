@@ -18,8 +18,9 @@
 //   - 节点按角色分层描边 + 左侧色条：入口块(无前驱=绿) / 返回块(无后继=青) / 循环头(有回边指向=紫)
 //     / 普通块(描边色)；选中态高亮 + 加粗描边。
 //   - 背景细点阵网格（随缩放淡出）；缩放很小时隐藏块内文字只留色块。
-//   - 交互：双指缩放 / 单指拖拽平移 / 点击选中 / 适应屏幕 / 缩放到 100% / 定位入口块；
-//     下方信息条显示选中块的地址范围与后继列表（jump→ / fail→ 目标地址）。
+//   - 悬浮控件完全对齐 Exbin CfgCanvasView：右下角 5 个 48dp 工具按钮（+ / − / ⟳ 适应 / 边样式 / ⬇ 导出 PNG），
+//     左下角 140×100dp 小地图；点击块在画布内弹出块详情（地址范围 + 后继列表，对标 drawBlockPopup）。
+//     布局引擎 / 块内容 / 背景 / 边路由 / 拖动节点 / 小地图开关由 CfgDisplayState 提供（宿主持有，从分析页 ⋮ 菜单切换）。
 package com.soreverse.mcp
 
 import android.graphics.Paint
@@ -47,6 +48,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,12 +66,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -85,6 +89,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -1005,25 +1011,6 @@ private fun fitText(paint: Paint, text: String, maxWidth: Float): String {
     return ""
 }
 
-@Composable
-private fun CfgChip(text: String, tint: Color, active: Boolean = false, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(AppShape.xs),
-        color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.80f),
-    ) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            color = if (active) MaterialTheme.colorScheme.primary else tint,
-            maxLines = 1,
-        )
-    }
-}
-
 // ───────────────────────── 背景 / 边路径 / 拖动 / 小地图 ─────────────────────────
 
 /** 解析 rizin pdfj（函数反汇编 JSON）→ 块入口地址 → 指令行列表。 */
@@ -1075,7 +1062,7 @@ internal fun parsePseudoBlocks(text: String): Map<Long, List<String>> {
     return m
 }
 
-private fun nextBgStyle(cur: String): String = when (cur) {
+internal fun nextBgStyle(cur: String): String = when (cur) {
     "grid" -> "cobweb"
     "cobweb" -> "honeycomb"
     "honeycomb" -> "radar"
@@ -1083,13 +1070,13 @@ private fun nextBgStyle(cur: String): String = when (cur) {
     else -> "grid"
 }
 
-private fun nextRouting(cur: String): String = when (cur) {
+internal fun nextRouting(cur: String): String = when (cur) {
     "ortho" -> "polyline"
     "polyline" -> "spline"
     else -> "ortho"
 }
 
-private fun bgStyleLabel(zh: Boolean, s: String): String = when (s) {
+internal fun bgStyleLabel(zh: Boolean, s: String): String = when (s) {
     "none" -> if (zh) "背景:无" else "BG:None"
     "cobweb" -> if (zh) "背景:蛛网" else "BG:Web"
     "honeycomb" -> if (zh) "背景:蜂窝" else "BG:Honeycomb"
@@ -1097,7 +1084,7 @@ private fun bgStyleLabel(zh: Boolean, s: String): String = when (s) {
     else -> if (zh) "背景:网格" else "BG:Grid"
 }
 
-private fun routeStyleLabel(zh: Boolean, s: String): String = when (s) {
+internal fun routeStyleLabel(zh: Boolean, s: String): String = when (s) {
     "polyline" -> if (zh) "边:折线" else "Edge:Poly"
     "spline" -> if (zh) "边:样条" else "Edge:Spline"
     else -> if (zh) "边:正交" else "Edge:Ortho"
@@ -1289,15 +1276,16 @@ private fun DrawScope.drawCfgMinimap(
     if (s <= 0f) return
     val cx = size.width / 2f
     val cy = size.height / 2f
-    val nodeColor = colors.primary.copy(alpha = 0.55f)
+    // 节点：入口块用暖黄（primary 与 #FFCA28 混合），其余 onSurfaceVariant（对标 Exbin CfgMinimap）
+    val entryColor = lerp(colors.primary, Color(0xFF, 0xCA, 0x28), 0.4f)
+    val nodeColor = colors.onSurfaceVariant
     layout.boxes.forEach { b ->
         if (b.isDummy) return@forEach
-        drawRoundRect(
-            nodeColor,
-            topLeft = Offset(cx + b.left * s, cy + b.top * s),
-            size = Size((b.w * s).coerceAtLeast(1.5f), (b.h * s).coerceAtLeast(1.5f)),
-            cornerRadius = CornerRadius(1f),
-        )
+        val l = cx + b.left * s
+        val t = cy + b.top * s
+        val w = (b.w * s).coerceAtLeast(2f)
+        val h = (b.h * s).coerceAtLeast(2f)
+        drawRect(if (b.index == layout.entryIndex) entryColor else nodeColor, topLeft = Offset(l, t), size = Size(w, h))
     }
     if (viewport.width > 0 && viewport.height > 0 && scale > 0f) {
         val x0 = (0f - (viewport.width / 2f + pan.x)) / scale
@@ -1311,12 +1299,10 @@ private fun DrawScope.drawCfgMinimap(
         // 视口已覆盖整幅图（内容比视口还小）时不必画导航框，否则小地图会变成一整块主色矩形
         val coversAll = (r - l) >= size.width - 8f && (b - t) >= size.height - 8f
         if (!coversAll) {
-            drawRect(
-                colors.primary.copy(alpha = 0.85f),
-                topLeft = Offset(l, t),
-                size = Size((r - l).coerceAtLeast(1f), (b - t).coerceAtLeast(1f)),
-                style = Stroke(1.2f),
-            )
+            // 对标 Exbin：视口 = primary 20% 填充 + primary 描边 1.5dp
+            val vp = Size((r - l).coerceAtLeast(1f), (b - t).coerceAtLeast(1f))
+            drawRect(colors.primary.copy(alpha = 0.20f), topLeft = Offset(l, t), size = vp)
+            drawRect(colors.primary, topLeft = Offset(l, t), size = vp, style = Stroke(1.5f))
         }
     }
 }
@@ -1324,97 +1310,70 @@ private fun DrawScope.drawCfgMinimap(
 // ───────────────────────── 组合视图 ─────────────────────────
 
 /**
- * CFG 图形画布。json 为 rzCfg 原始 JSON；空/非法 JSON 时显示「无 CFG 数据」而不是崩溃。
+ * CFG 画布的显示参数。对标 Exbin 把「布局引擎 / 块内容 / 背景形状 / 边样式 / 拖动 / 小地图」
+ * 放进设置项的做法：塔菲把这些收进分析页 ⋮ 菜单（画布本身只保留右下角工具条 + 左下角小地图）。
  */
-/** CFG 节点列表（对标 Exbin CfgNodeListFragment）：搜索节点地址/指令，点击选中。 */
+internal class CfgDisplayState {
+    /** 布局引擎：layered / dagre / elk / grid / force */
+    var layoutMode by mutableStateOf("elk")
+    /** 块内容：summary / asm / pseudo */
+    var contentMode by mutableStateOf("summary")
+    /** 背景样式：grid / cobweb / honeycomb / radar / none */
+    var bgStyle by mutableStateOf("grid")
+    /** 边路由：ortho / polyline / spline */
+    var routing by mutableStateOf("ortho")
+    /** 单指拖动节点（对标 Exbin KEY_FLOWCHART_DRAG） */
+    var dragNode by mutableStateOf(false)
+    /** 左下角小地图（对标 Exbin isFlowchartMiniMapEnabled） */
+    var minimap by mutableStateOf(true)
+}
+
+/** 边样式按钮的图标（对标 Exbin CfgCanvasView.edgeStyleIcon）。 */
+private fun edgeStyleIcon(routing: String): String = when (routing) {
+    "polyline" -> "\u2571"   // ╱
+    "spline" -> "\u2312"     // ⌒
+    else -> "\u2514"          // └ 正交
+}
+
+/** Exbin CfgCanvasView 右下角工具按钮：48dp 方块、圆角 12dp、1dp 12% onSurface 描边、3dp 阴影。 */
 @Composable
-private fun NodeListOverlay(
-    modifier: Modifier = Modifier,
-    graph: CfgGraph,
-    zh: Boolean,
-    colors: androidx.compose.material3.ColorScheme,
-    onPick: (Int) -> Unit,
-) {
-    var q by remember { mutableStateOf("") }
-    val all = remember(graph) { graph.blocks }
-    val rows = remember(all, q) {
-        if (q.isBlank()) all else all.filter { it.addrText.contains(q, true) || it.summary.contains(q, true) }
-    }
-    Surface(
-        shape = RoundedCornerShape(AppShape.sm),
-        color = colors.surfaceContainerHigh.copy(alpha = 0.97f),
-        border = BorderStroke(1.dp, colors.outlineVariant),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        modifier = modifier,
+private fun CfgToolButton(glyph: String, iconSp: Float, primaryMix: Float? = null, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(12.dp)
+    val bg = if (primaryMix != null) lerp(cs.surfaceVariant, cs.primary, primaryMix) else cs.surfaceVariant
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .shadow(3.dp, shape)
+            .clip(shape)
+            .background(bg)
+            .border(BorderStroke(1.dp, cs.onSurface.copy(alpha = 0.12f)), shape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(Modifier.fillMaxSize().padding(8.dp)) {
-            OutlinedTextField(
-                value = q, onValueChange = { q = it }, singleLine = true,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                shape = RoundedCornerShape(AppShape.sm),
-                label = { Text(if (zh) "\u641c\u7d22\u8282\u70b9\u5730\u5740\u3001\u6307\u4ee4\u2026" else "search addr / insn\u2026", fontSize = AppText.label) },
-            )
-            Spacer(Modifier.size(6.dp))
-            Text(
-                if (zh) "\u8282\u70b9\u5217\u8868 \u00b7 " + rows.size + " / " + all.size + " \u5757" else "nodes " + rows.size + " / " + all.size,
-                style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = colors.onSurfaceVariant,
-            )
-            Spacer(Modifier.size(6.dp))
-            Column(
-                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                rows.forEach { b ->
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(AppShape.xs))
-                            .background(colors.surfaceContainerLow)
-                            .border(BorderStroke(1.dp, colors.outlineVariant), RoundedCornerShape(AppShape.xs))
-                            .clickable { onPick(b.index) }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            b.addrText + (if (b.endText.isNotBlank()) " \u2026 " + b.endText else ""),
-                            style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace,
-                            color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                        if (b.summary.isNotBlank()) {
-                            Text(
-                                b.summary, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
-                                color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        Text(glyph, fontSize = iconSp.sp, fontWeight = FontWeight.Bold, color = cs.onSurface)
     }
 }
 
+/**
+ * CFG 图形画布。json 为 rzCfg 原始 JSON；空/非法 JSON 时显示「无 CFG 数据」而不是崩溃。
+ */
 @Composable
 internal fun CfgCanvas(
     json: String,
     zh: Boolean,
     modifier: Modifier = Modifier,
-    layoutMode: String = "layered",
-    contentMode: String = "summary",
+    ui: CfgDisplayState = remember { CfgDisplayState() },
     blockLines: Map<Long, List<String>> = emptyMap(),
     fnLabel: String = "",
-    onLayoutChange: (String) -> Unit = {},
-    onContentChange: (String) -> Unit = {},
-    onRebuild: () -> Unit = {},
-    onEntry: () -> Unit = {},
     highlightTexts: Set<String> = emptySet(),
     focusText: String = "",
     focusToken: Int = 0,
-    onPickFunction: () -> Unit = {},
 ) {
     val density = LocalDensity.current.density
     val baseGraph = remember(json) { parseCfgGraph(json) }
     // 块内容模式：summary=首行摘要；asm=块内显示该块完整指令（对标 Exbin BLOCK_CONTENT_ASM）。
-    val asmBlocks = contentMode != "summary" && blockLines.isNotEmpty()
+    val asmBlocks = ui.contentMode != "summary" && blockLines.isNotEmpty()
     val maxLines = if (asmBlocks) ASM_BLOCK_MAX_LINES else 2
     val graph = remember(baseGraph, asmBlocks, blockLines) {
         if (!asmBlocks) baseGraph else baseGraph.copy(
@@ -1424,8 +1383,8 @@ internal fun CfgCanvas(
             },
         )
     }
-    val layout = remember(graph, density, layoutMode, maxLines) {
-        when (layoutMode) {
+    val layout = remember(graph, density, ui.layoutMode, maxLines) {
+        when (ui.layoutMode) {
             "grid" -> layoutCfgGrid(graph, density, maxLines)
             "force" -> layoutCfgForce(graph, density, maxLines)
             "dagre" -> layoutCfgGraphDagre(graph, density, maxLines)
@@ -1446,20 +1405,12 @@ internal fun CfgCanvas(
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     var selected by remember(graph) { mutableStateOf(-1) }
     var fitted by remember(graph) { mutableStateOf(false) }
-    // 大图自动进入简化视图（只画块骨架），也可手动切换。
-    var simpleView by remember(graph) { mutableStateOf(graph.blocks.size > 260) }
-    // 背景形状（对标 Exbin BG_NONE/GRID/COBWEB/HONEYCOMB/RADAR）。
-    var bgStyle by remember { mutableStateOf("grid") }
-    // 边路由风格（对标 Exbin「三种边路由风格」：正交 / 折线 / 样条）。
-    var routing by remember { mutableStateOf("ortho") }
-    // 单指拖动调整节点位置（对标 Exbin KEY_FLOWCHART_DRAG）。
-    var dragMode by remember { mutableStateOf(false) }
+    // 大图自动进入简化视图（只画块骨架）：块数 > 260 时只画骨架，保证大图流畅。
+    val simpleView = graph.blocks.size > 260
+    // 单指拖动节点后的位置偏移。
     var dragOffsets by remember(graph) { mutableStateOf<Map<Int, Offset>>(emptyMap()) }
-    // 右下角迷你导航图（对标 Exbin CfgMinimap「显示小地图」）。
-    var showMinimap by remember { mutableStateOf(true) }
-    // 控制面板是否展开（收起后只留一行标题，避免与画布重叠）。
-    var panelOpen by remember { mutableStateOf(true) }
-    var showNodeList by remember { mutableStateOf(false) }
+    // 点击块后弹出的块详情锚点（画布坐标；null = 无弹层）。
+    var popupAt by remember(graph) { mutableStateOf<Offset?>(null) }
 
     val ctx = LocalContext.current
     val densityObj = LocalDensity.current
@@ -1468,16 +1419,10 @@ internal fun CfgCanvas(
     val scaleS = rememberUpdatedState(scale)
     val panS = rememberUpdatedState(pan)
     val viewportS = rememberUpdatedState(viewport)
-    val dragModeS = rememberUpdatedState(dragMode)
+    val dragModeS = rememberUpdatedState(ui.dragNode)
     val effectiveS = rememberUpdatedState(effective)
 
     val colors = MaterialTheme.colorScheme
-    val jumpColor = colors.primary
-    val failColor = AppPalette.orange
-    val backColor = AppPalette.pink
-    val entryColor = AppPalette.green
-    val loopColor = AppPalette.purple
-    val returnColor = AppPalette.teal
 
     fun applyFit() {
         if (viewport.width <= 0 || viewport.height <= 0) return
@@ -1488,24 +1433,18 @@ internal fun CfgCanvas(
         }
         val w = layout.width.coerceAtLeast(1f) + 80f
         val h = layout.height.coerceAtLeast(1f) + 80f
-        // 顶部为悬浮控制面板预留安全区（收起时只留标题行），避免节点被面板压住。
-        val topInset = with(densityObj) { (if (panelOpen) 128.dp else 44.dp).toPx() }
-        val availH = (viewport.height - topInset).coerceAtLeast(80f)
-        scale = min(viewport.width / w, availH / h).coerceIn(0.12f, 2.5f)
-        pan = Offset(0f, topInset / 2f)
-    }
-
-    fun zoomReset() {
-        scale = 1f
+        // 对标 Exbin CfgCanvasView.resetView()：fitAll + 40px 内边距、居中显示（画布无悬浮面板，无需预留安全区）。
+        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.12f, 2.5f)
         pan = Offset.Zero
-        fitted = true
     }
 
-    fun focusEntry() {
-        val box = layout.boxes.firstOrNull { it.index == layout.entryIndex } ?: return
+    /** 以视口中心为锚点缩放（对标 Exbin CfgCanvasView.zoomAtCenter）。 */
+    fun zoomCenter(factor: Float) {
         if (viewport.width <= 0 || viewport.height <= 0) return
-        pan = Offset(-box.cx * scale, -box.cy * scale)
-        selected = box.index
+        val ns = (scale * factor).coerceIn(0.12f, 6f)
+        if (ns == scale) return
+        pan = pan * (ns / scale)
+        scale = ns
     }
 
     LaunchedEffect(layout, viewport) {
@@ -1532,8 +1471,8 @@ internal fun CfgCanvas(
                 .background(colors.surfaceContainerLow)
                 .border(BorderStroke(1.dp, colors.outlineVariant), shape)
                 .onSizeChanged { viewport = it }
-                .pointerInput(layout, dragMode) {
-                    if (!dragMode) return@pointerInput
+                .pointerInput(layout, ui.dragNode) {
+                    if (!ui.dragNode) return@pointerInput
                     var curIdx = -1
                     detectDragGestures(
                         onDragStart = { pos ->
@@ -1567,7 +1506,9 @@ internal fun CfgCanvas(
                         val originY = viewport.height / 2f + pan.y
                         val wx = (pos.x - originX) / scale
                         val wy = (pos.y - originY) / scale
-                        selected = effective.boxes.lastOrNull { it.contains(wx, wy) }?.index ?: -1
+                        val hit = effective.boxes.lastOrNull { it.contains(wx, wy) }?.index ?: -1
+                        selected = hit
+                        popupAt = if (hit >= 0) Offset(pos.x, pos.y) else null
                     }
                 }
                 .pointerInput(Unit) {
@@ -1578,7 +1519,7 @@ internal fun CfgCanvas(
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                drawCfgScene(effective, colors, density, scale, pan, size, simpleView, selected, bgStyle, routing, highlightTexts)
+                drawCfgScene(effective, colors, density, scale, pan, size, simpleView, selected, ui.bgStyle, ui.routing, highlightTexts)
             }
 
             if (layout.boxes.isEmpty()) {
@@ -1606,134 +1547,130 @@ internal fun CfgCanvas(
                 }
             }
 
-            // 左上角：唯一控制面板 —— 把原先分散的「外层悬浮面板 / 左上统计条 / 右上工具条」
-            // 合并到一处，收起后只留一行标题，彻底消除彼此重叠。
-            Surface(
-                shape = RoundedCornerShape(AppShape.md),
-                color = colors.surfaceContainerHigh.copy(alpha = 0.94f),
-                border = BorderStroke(1.dp, colors.outlineVariant),
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-                modifier = Modifier.align(Alignment.TopStart).padding(6.dp).fillMaxWidth(0.985f),
-            ) {
-                Column(
-                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
+            // ── 点击块的浮层（对标 Exbin CfgCanvasView.drawBlockPopup：块详情画在画布内）──
+            val selBlock = if (selected >= 0) graph.blocks.getOrNull(selected) else null
+            val popupAnchor = popupAt
+            if (selBlock != null && popupAnchor != null) {
+                val popupW = 272.dp
+                val popupWPx = with(densityObj) { popupW.toPx() }
+                val px = (popupAnchor.x + 12f).coerceIn(8f, (viewport.width - popupWPx - 8f).coerceAtLeast(8f))
+                val py = (popupAnchor.y + 12f).coerceIn(8f, (viewport.height - 170f).coerceAtLeast(8f))
+                val succ = graph.edges.filter { it.from == selBlock.index }
+                Surface(
+                    shape = RoundedCornerShape(AppShape.sm),
+                    color = colors.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, colors.outlineVariant),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 3.dp,
+                    modifier = Modifier.offset { IntOffset(px.toInt(), py.toInt()) }.width(popupW),
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures { panelOpen = !panelOpen } },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    Column(
+                        Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
-                        Text(if (panelOpen) "\u25be" else "\u25b8", color = colors.primary, fontSize = AppText.bodyStrong)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                selBlock.addrText + (if (selBlock.endText.isNotBlank()) " \u2026 " + selBlock.endText else ""),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontFamily = FontFamily.Monospace,
+                                color = colors.onSurface,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                "\u2715",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(AppShape.xs))
+                                    .clickable { popupAt = null; selected = -1 }
+                                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                            )
+                        }
+                        if (selBlock.summary.isNotBlank()) {
+                            Text(
+                                selBlock.summary,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = AppText.label,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         Text(
-                            if (fnLabel.isBlank()) (if (zh) "\u63a7\u5236\u6d41\u56fe" else "Control Flow Graph") else fnLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = AppText.label,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = colors.primary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            "${graph.blocks.size} \u5757 \u00b7 ${graph.edges.size} \u8fb9 \u00b7 ${(scale * 100).toInt()}%",
+                            if (succ.isEmpty()) {
+                                if (zh) "后继：无（汇聚/返回块）" else "successors: none"
+                            } else {
+                                (if (zh) "后继：" else "successors: ") + succ.joinToString("  ") { e ->
+                                    val addr = graph.blocks.getOrNull(e.to)?.addrText ?: "#" + e.to
+                                    when (e.kind) {
+                                        "fail" -> "fail\u2192" + addr
+                                        "edge" -> "\u2192" + addr
+                                        else -> "jump\u2192" + addr
+                                    }
+                                }
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             fontSize = AppText.label,
                             color = colors.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    if (panelOpen) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            verticalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            CfgChip(if (zh) "\u91cd\u65b0\u751f\u6210" else "Rebuild", colors.primary) { onRebuild() }
-                            CfgChip(if (zh) "\u5165\u53e3\u70b9" else "Entry", colors.onSurfaceVariant) { onEntry() }
-                            CfgChip(if (zh) "\u5206\u5c42" else "Layered", colors.onSurfaceVariant, layoutMode == "layered") { onLayoutChange("layered") }
-                            CfgChip("Dagre", colors.onSurfaceVariant, layoutMode == "dagre") { onLayoutChange("dagre") }
-                            CfgChip("ELK", colors.onSurfaceVariant, layoutMode == "elk") { onLayoutChange("elk") }
-                            CfgChip(if (zh) "\u7f51\u683c\u5e03\u5c40" else "Grid-L", colors.onSurfaceVariant, layoutMode == "grid") { onLayoutChange("grid") }
-                            CfgChip(if (zh) "\u529b\u5bfc\u5411" else "Force", colors.onSurfaceVariant, layoutMode == "force") { onLayoutChange("force") }
-                        }
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            verticalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            CfgChip(if (zh) "\u9002\u5e94\u5c4f\u5e55" else "Fit", colors.primary) { applyFit() }
-                            CfgChip("100%", colors.primary) { zoomReset() }
-                            CfgChip(if (zh) "\u5b9a\u4f4d\u5165\u53e3" else "Focus", entryColor) { focusEntry() }
-                            CfgChip(
-                                when (contentMode) {
-                                    "asm" -> if (zh) "\u6c47\u7f16\u5757" else "Asm"
-                                    "pseudo" -> if (zh) "\u4f2aC\u5757" else "PseudoC"
-                                    else -> if (zh) "\u6458\u8981\u5757" else "Summary"
-                                },
-                                colors.onSurfaceVariant,
-                                active = contentMode != "summary",
-                            ) {
-                                onContentChange(when (contentMode) {
-                                    "summary" -> "asm"
-                                    "asm" -> "pseudo"
-                                    else -> "summary"
-                                })
-                            }
-                            CfgChip(
-                                if (simpleView) (if (zh) "\u5b8c\u6574\u89c6\u56fe" else "Full") else (if (zh) "\u7b80\u5316\u89c6\u56fe" else "Simple"),
-                                colors.onSurfaceVariant,
-                            ) { simpleView = !simpleView }
-                            CfgChip(bgStyleLabel(zh, bgStyle), colors.onSurfaceVariant) { bgStyle = nextBgStyle(bgStyle) }
-                            CfgChip(routeStyleLabel(zh, routing), colors.onSurfaceVariant) { routing = nextRouting(routing) }
-                            CfgChip(if (zh) "\u62d6\u52a8\u8282\u70b9" else "Drag", colors.onSurfaceVariant, active = dragMode) { dragMode = !dragMode }
-                            CfgChip(if (zh) "\u5c0f\u5730\u56fe" else "Minimap", colors.onSurfaceVariant, active = showMinimap) { showMinimap = !showMinimap }
-                            CfgChip(if (zh) "\u8282\u70b9\u5217\u8868" else "NodeList", colors.onSurfaceVariant, active = showNodeList) { showNodeList = !showNodeList }
-                            if (dragOffsets.isNotEmpty()) {
-                                CfgChip(if (zh) "\u590d\u4f4d" else "Reset", failColor) { dragOffsets = emptyMap() }
-                            }
-                            CfgChip(if (zh) "\u5bfc\u51fa PNG" else "PNG", colors.primary) {
-                                val w = (layout.width + 80f).coerceAtLeast(320f)
-                                val h = (layout.height + 80f).coerceAtLeast(240f)
-                                val p = exportDrawToPng(
-                                    context = ctx,
-                                    fileName = "cfg_" + System.currentTimeMillis() + ".png",
-                                    widthPx = w.toInt(),
-                                    heightPx = h.toInt(),
-                                    density = densityObj,
-                                ) {
-                                    drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, bgStyle, routing, emptySet())
-                                }
-                                Toast.makeText(
-                                    ctx,
-                                    if (p != null) (if (zh) "\u5df2\u5bfc\u51fa\uff1a$p" else "saved: $p") else (if (zh) "\u5bfc\u51fa\u5931\u8d25" else "export failed"),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                            CfgChip(if (zh) "\u6362\u51fd\u6570" else "Functions", colors.onSurfaceVariant) { onPickFunction() }
-                        }
                     }
                 }
             }
 
-            // 右下角：迷你导航图（对标 Exbin CfgMinimap「显示小地图」）
-            // 小地图仅在「值得导航」时显示：≥2 个真实节点（单节点时只是一堆红点+满图视口框，像一块空白红矩形）
-            if (showMinimap && effective.boxes.count { !it.isDummy } >= 2) {
+            // ── 右下角工具条（完全对齐 Exbin CfgCanvasView.drawZoomButtons：5 个 48dp 按钮，间距 12dp，边距 16dp）──
+            Column(
+                Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CfgToolButton("+", 22f) { zoomCenter(1.25f) }
+                CfgToolButton("\u2212", 22f) { zoomCenter(0.80f) }
+                CfgToolButton("\u27F3", 22f) { applyFit(); fitted = true }
+                CfgToolButton(edgeStyleIcon(ui.routing), 15.4f, 0.12f) { ui.routing = nextRouting(ui.routing) }
+                CfgToolButton("\u2B07", 17.6f, 0.08f) {
+                    val w = (layout.width + 80f).coerceAtLeast(320f)
+                    val h = (layout.height + 80f).coerceAtLeast(240f)
+                    val p = exportDrawToPng(
+                        context = ctx,
+                        fileName = "cfg_" + System.currentTimeMillis() + ".png",
+                        widthPx = w.toInt(),
+                        heightPx = h.toInt(),
+                        density = densityObj,
+                    ) {
+                        drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, ui.bgStyle, ui.routing, emptySet())
+                    }
+                    Toast.makeText(
+                        ctx,
+                        if (p != null) (if (zh) "已导出：$p" else "saved: $p") else (if (zh) "导出失败" else "export failed"),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+
+            // ── 左下角小地图（完全对齐 Exbin CfgMinimap：140x100dp、圆角 8dp、边距 12dp）──
+            // 仅在「值得导航」时显示：≥2 个真实节点（单节点时只是一块色块 + 满图视口框）
+            if (ui.minimap && effective.boxes.count { !it.isDummy } >= 2) {
                 Surface(
-                    shape = RoundedCornerShape(AppShape.xs),
-                    color = colors.surfaceContainerHigh.copy(alpha = 0.88f),
-                    border = BorderStroke(1.dp, colors.outlineVariant),
+                    shape = RoundedCornerShape(8.dp),
+                    color = lerp(colors.surface, colors.surfaceVariant, 0.3f).copy(alpha = 0.86f),
+                    border = BorderStroke(1.dp, colors.outline),
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .size(118.dp, 84.dp)
-                        .clip(RoundedCornerShape(AppShape.xs))
+                        .align(Alignment.BottomStart)
+                        .padding(start = 12.dp, bottom = 12.dp)
+                        .size(140.dp, 100.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .pointerInput(effective, scale, pan, viewport) {
                             detectTapGestures { pos ->
                                 val sz = size
                                 val gw = effectiveS.value.width.coerceAtLeast(1f)
                                 val gh = effectiveS.value.height.coerceAtLeast(1f)
-                                val s = min((sz.width - 6f) / gw, (sz.height - 6f) / gh)
+                                val s = min((sz.width - 4f) / gw, (sz.height - 4f) / gh)
                                 if (s > 0f) {
                                     val wx = (pos.x - sz.width / 2f) / s
                                     val wy = (pos.y - sz.height / 2f) / s
@@ -1747,71 +1684,9 @@ internal fun CfgCanvas(
                     }
                 }
             }
-
-            if (showNodeList) {
-                NodeListOverlay(
-                    modifier = Modifier.align(Alignment.Center).padding(10.dp).fillMaxWidth(0.94f).fillMaxHeight(0.82f),
-                    graph = graph, zh = zh, colors = colors,
-                ) { pick -> selected = pick; showNodeList = false }
-            }
-
-        }
-
-        Spacer(Modifier.size(6.dp))
-
-        // ── 下方信息条：选中块的地址范围 + 后继列表 ──
-        Surface(
-            shape = RoundedCornerShape(AppShape.sm),
-            color = colors.surfaceVariant.copy(alpha = 0.45f),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            val block = if (selected >= 0) graph.blocks.getOrNull(selected) else null
-            val succ = if (selected >= 0) graph.edges.filter { it.from == selected } else emptyList()
-            Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
-                if (block == null) {
-                    Text(
-                        if (zh) "点击节点查看块详情 · 双指缩放 / 单指拖拽平移" else "Tap a node for details · pinch to zoom / drag to pan",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        "${if (zh) "块" else "block"} #${block.index}  ${block.addrText}" +
-                            if (block.endText.isNotBlank()) " … ${block.endText}" else "",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onSurface,
-                    )
-                    if (block.summary.isNotBlank()) {
-                        Text(
-                            block.summary,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        if (succ.isEmpty()) {
-                            if (zh) "后继：无（汇聚/返回块）" else "successors: none"
-                        } else {
-                            (if (zh) "后继：" else "successors: ") + succ.joinToString("  ") { e ->
-                                val target = graph.blocks.getOrNull(e.to)
-                                val addr = target?.addrText ?: "#${e.to}"
-                                when (e.kind) {
-                                    "fail" -> "fail→$addr"
-                                    "edge" -> "→$addr"
-                                    else -> "jump→$addr"
-                                }
-                            }
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                    )
-                }
-            }
         }
     }
 }
-
 
 /**
  * CFG 场景绘制（Composable 画布与 PNG 导出共用同一套绘制，保证导出与所见一致）。

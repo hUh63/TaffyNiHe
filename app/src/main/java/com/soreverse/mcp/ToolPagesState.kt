@@ -156,6 +156,14 @@ class ToolPagesState {
     /** CFG 是否正在查询。 */
     var cfgLoading by mutableStateOf(false)
 
+    // ---- 分析页 CFG 画布显示参数 ----
+    /**
+     * CFG 画布的显示参数（布局引擎 / 块内容 / 背景 / 边路由 / 拖动节点 / 小地图）。
+     * 对标 Exbin 把 CFG 显示项放进设置；塔菲画布只保留右下角工具条 + 左下角小地图，
+     * 这些开关收进分析页 ⋮ 菜单「控制流画布」。
+     */
+    val cfgUi = CfgDisplayState()
+
     /** 写入一个列表视图缓存。 */
     fun cacheView(key: String, json: String) {
         viewCache = viewCache + (key to json)

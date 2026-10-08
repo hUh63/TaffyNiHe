@@ -162,7 +162,7 @@ class ToolPagesState {
      * 对标 Exbin 把 CFG 显示项放进设置；塔菲画布只保留右下角工具条 + 左下角小地图，
      * 这些开关收进分析页 ⋮ 菜单「控制流画布」。
      */
-    val cfgUi = CfgDisplayState()
+    internal val cfgUi = CfgDisplayState()
 
     /** 写入一个列表视图缓存。 */
     fun cacheView(key: String, json: String) {

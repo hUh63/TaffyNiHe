@@ -4015,7 +4015,7 @@ private fun FuncDetailView(
                     onPrimary = onGoFunctions,
                 )
             } else when (tab) {
-                "cfg" -> CfgView(tools, zh, context, onGoFunctions, embedded = true)
+                "cfg" -> CfgView(tools, zh, context, onGoFunctions)
                 "pseudo" -> PseudoView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
                 "xrefs" -> FuncXRefView(tools, zh, context, onRefresh)
                 else -> DisasmView(tools, zh, context, onRefresh, onGoFunctions, embedded = true)
@@ -4465,16 +4465,19 @@ private fun splitPseudoBlocks(body: List<String>, firstLine: Map<Long, Int>): Ma
     return m
 }
 
+/**
+ * 控制流页（完全对齐 Explorer So `ControlFlowTabFragment` / `CfgGraphFragment` / `CfgNodeListFragment`）：
+ * 二级 TabLayout（MODE_FIXED + tabGravity=FILL，两个等分页签「图形化 / 节点列表」）+
+ * 全屏内容：图形化 = 整屏 CFG 画布；节点列表 = 可搜索/可排序的缩进树（点行 → 切图形化并高亮该块）。
+ */
 @Composable
 private fun CfgView(
     tools: ToolPagesState,
     zh: Boolean,
     context: android.content.Context,
     onGoFunctions: () -> Unit,
-    embedded: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
-    val density = androidx.compose.ui.platform.LocalDensity.current
     // 默认用 ELK Layered + 正交边路由（交叉更少）；仍可在布局条切回「分层/Dagre/网格/力导向」。
     var cfgLayout by remember { mutableStateOf("elk") }
     var cfgContent by remember { mutableStateOf("summary") }
@@ -4482,6 +4485,12 @@ private fun CfgView(
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    // 二级页签 + 列表态
+    var cwTab by remember { mutableStateOf("graph") }
+    var listQuery by remember { mutableStateOf("") }
+    var sortMode by remember { mutableStateOf(0) }
+    var focusAddr by remember { mutableStateOf("") }
+    var focusTok by remember { mutableStateOf(0) }
     // 「汇编块」模式：按需取当前函数的块级反汇编（pdfj），供画布在块内展示指令。
     LaunchedEffect(cfgContent, tools.cfgJson, target, ws) {
         if (cfgContent == "summary" || ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
@@ -4536,95 +4545,360 @@ private fun CfgView(
         }
     }
 
-    // 块 / 边数量（状态条用），直接复用 CfgCanvas 的解析。
-    val cfgCounts = remember(tools.cfgJson) {
-        runCatching { val g = parseCfgGraph(tools.cfgJson); g.blocks.size to g.edges.size }.getOrDefault(0 to 0)
+    val graph = remember(tools.cfgJson) {
+        if (tools.cfgJson.isBlank()) null else runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
     }
-    // 蓝图页：控制流图独占整页，操作条悬浮其上（不占布局高度）。
-    // 函数详情「控制流」页签（embedded）按 fragment_control_flow_tab.xml 加 状态条 + 底部提示条。
-    // 刻意不提供任何「文本 / 原始 JSON」出口——CFG 只以图形呈现；
-    // 出错与为空时都用页内覆盖态说明，不跳到别处。
+    val treeRows = remember(graph) { buildCfgTree(graph) }
+
     Column(Modifier.fillMaxSize()) {
-        if (embedded) CfgStatusBar(cfgCounts.first, cfgCounts.second, zh)
-        Box(Modifier.weight(1f).fillMaxSize()) {
-        when {
-            ws.isBlank() -> AnalysisEmptyState(
-                title = if (zh) "未打开工作区" else "No workspace",
-                hint = if (zh) "点顶部「选文件」按钮选择文件" else "Open the ≡ rail (top-left) to pick a file",
-            )
-            target.isBlank() -> AnalysisEmptyState(
-                title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
-                hint = if (zh) "控制流图以选中函数的入口地址为目标；也可以直接点「入口点」自动定位"
-                    else "CFG targets the selected function entry; or tap Entry",
-                primaryLabel = if (zh) "去函数列表" else "Function list",
-                onPrimary = onGoFunctions,
-                secondaryLabel = if (zh) "入口点" else "Entry",
-                onSecondary = { useEntryPoint() },
-            )
-            tools.cfgLoading -> AnalysisLoading()
-            tools.cfgJson.isBlank() -> AnalysisEmptyState(
-                title = if (zh) "尚未生成控制流图" else "No CFG yet",
-                hint = if (zh) "点「重新生成」为当前函数生成控制流图" else "Tap Rebuild to generate a CFG for the current function",
-                primaryLabel = if (zh) "重新生成" else "Rebuild",
-                onPrimary = { loadCfg(context, tools, zh, scope, target) },
-            )
-            !hasGraph -> AnalysisEmptyState(
-                title = if (zh) "无法生成控制流图" else "CFG unavailable",
-                hint = err.ifBlank { if (zh) "引擎未返回可用的基本块数据" else "No usable basic blocks were returned" },
-                primaryLabel = if (zh) "入口点" else "Entry",
-                onPrimary = { useEntryPoint() },
-                secondaryLabel = if (zh) "重试" else "Retry",
-                onSecondary = { loadCfg(context, tools, zh, scope, target) },
-            )
-            else -> CfgCanvas(
-                json = tools.cfgJson,
-                zh = zh,
-                modifier = Modifier.fillMaxSize(),
-                layoutMode = cfgLayout,
-                contentMode = cfgContent,
-                blockLines = cfgInsns,
-                fnLabel = fnLabel,
-                onLayoutChange = { cfgLayout = it },
-                onContentChange = { cfgContent = it },
-                onRebuild = { loadCfg(context, tools, zh, scope, target) },
-                onEntry = { useEntryPoint() },
-                onPickFunction = onGoFunctions,
-            )
+        // ── 二级页签（TabLayout fixed + fill：两个等分页签）──
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TabRow(
+                selectedTabIndex = if (cwTab == "list") 1 else 0,
+                modifier = Modifier.weight(1f),
+                containerColor = cs.surface,
+                contentColor = cs.primary,
+                divider = {},
+            ) {
+                listOf(
+                    "graph" to (if (zh) "图形化" else "Graph"),
+                    "list" to (if (zh) "节点列表" else "Nodes"),
+                ).forEach { (k, l) ->
+                    Tab(
+                        selected = cwTab == k,
+                        onClick = { cwTab = k },
+                        text = {
+                            Text(
+                                l,
+                                fontSize = AppText.bodyStrong,
+                                fontWeight = if (cwTab == k) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (cwTab == k) cs.primary else cs.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        },
+                    )
+                }
+            }
         }
+        GroupDivider()
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "未打开工作区" else "No workspace",
+                    hint = if (zh) "点顶部「选文件」按钮选择文件" else "Pick a file from the top bar",
+                )
+                target.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
+                    hint = if (zh) "控制流图以选中函数的入口地址为目标；也可以直接点「入口点」自动定位"
+                        else "CFG targets the selected function entry; or tap Entry",
+                    primaryLabel = if (zh) "去函数列表" else "Function list",
+                    onPrimary = onGoFunctions,
+                    secondaryLabel = if (zh) "入口点" else "Entry",
+                    onSecondary = { useEntryPoint() },
+                )
+                tools.cfgLoading -> AnalysisLoading()
+                tools.cfgJson.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "尚未生成控制流图" else "No CFG yet",
+                    hint = if (zh) "点「重新生成」为当前函数生成控制流图" else "Tap Rebuild to generate a CFG for the current function",
+                    primaryLabel = if (zh) "重新生成" else "Rebuild",
+                    onPrimary = { loadCfg(context, tools, zh, scope, target) },
+                )
+                !hasGraph -> AnalysisEmptyState(
+                    title = if (zh) "无法生成控制流图" else "CFG unavailable",
+                    hint = err.ifBlank { if (zh) "引擎未返回可用的基本块数据" else "No usable basic blocks were returned" },
+                    primaryLabel = if (zh) "入口点" else "Entry",
+                    onPrimary = { useEntryPoint() },
+                    secondaryLabel = if (zh) "重试" else "Retry",
+                    onSecondary = { loadCfg(context, tools, zh, scope, target) },
+                )
+                cwTab == "list" -> CfgNodeListView(
+                    graph = graph,
+                    insns = cfgInsns,
+                    query = listQuery,
+                    onQuery = { listQuery = it },
+                    sortMode = sortMode,
+                    onSort = { sortMode = it },
+                    zh = zh,
+                    onPickBlock = { addr ->
+                        focusAddr = addr
+                        focusTok++
+                        cwTab = "graph"
+                    },
+                )
+                else -> CfgCanvas(
+                    json = tools.cfgJson,
+                    zh = zh,
+                    modifier = Modifier.fillMaxSize(),
+                    layoutMode = cfgLayout,
+                    contentMode = cfgContent,
+                    blockLines = cfgInsns,
+                    fnLabel = fnLabel,
+                    highlightTexts = if (focusAddr.isBlank()) emptySet() else setOf(focusAddr),
+                    focusText = focusAddr,
+                    focusToken = focusTok,
+                    onLayoutChange = { cfgLayout = it },
+                    onContentChange = { cfgContent = it },
+                    onRebuild = { loadCfg(context, tools, zh, scope, target) },
+                    onEntry = { useEntryPoint() },
+                    onPickFunction = onGoFunctions,
+                )
+            }
         }
-        if (embedded) CfgHintBar(zh)
     }
 }
 
-/** Explorer So 控制流页签顶部状态条（padding 10dp / bg surfaceVariant / 等宽 12sp）。 */
-@Composable
-private fun CfgStatusBar(blocks: Int, edges: Int, zh: Boolean) {
-    val cs = MaterialTheme.colorScheme
-    Surface(color = cs.surfaceVariant) {
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                (if (zh) "控制流" else "Control flow") + "  ·  " + blocks + (if (zh) " 块" else " blocks") +
-                    "  ·  " + edges + (if (zh) " 边" else " edges"),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-                color = cs.onSurfaceVariant,
-                maxLines = 1,
-            )
+// ── 控制流「节点列表」：树行模型（对齐 Exbin CfgNodeListFragment.buildTreeNodes） ──
+
+/** 一个 CFG 树行：depth 缩进、kids 子节点下标、ref 是否已访问过的引用边、entry 是否入口。 */
+private class CfgTreeRow(
+    val index: Int,
+    val depth: Int,
+    val kids: List<Int>,
+    val ref: Boolean,
+    val entry: Boolean,
+)
+
+/**
+ * 从 CFG 图构建树（对齐 Exbin）：从入口 BFS，子边排序 TRUE_BRANCH < FALSE_BRANCH < 其它，
+ * 已访问节点作为引用边（ref）；BFS 后把未被访问的块按地址序补为 depth=0 根。
+ */
+private fun buildCfgTree(graph: CfgGraph?): List<CfgTreeRow> {
+    if (graph == null || graph.blocks.isEmpty()) return emptyList()
+    val n = graph.blocks.size
+    val rank = { e: CfgEdge -> if (e.kind == "jump") 0 else if (e.kind == "fail") 1 else 2 }
+    val sortedKids = Array(n) { i ->
+        graph.edges.filter { it.from == i && it.to in 0 until n && it.to != i }
+            .sortedBy { rank(it) }
+            .map { it.to }
+            .distinct()
+    }
+    val rows = ArrayList<CfgTreeRow>(n)
+    val depth = IntArray(n) { -1 }
+    val visited = BooleanArray(n)
+    val inTree = BooleanArray(n)
+    val ref = BooleanArray(n)
+    val queue = ArrayDeque<Int>()
+    val rootIdx = 0
+    visited[rootIdx] = true
+    inTree[rootIdx] = true
+    depth[rootIdx] = 0
+    queue.add(rootIdx)
+    while (queue.isNotEmpty()) {
+        val u = queue.removeFirst()
+        sortedKids[u].forEach { v ->
+            if (!visited[v]) {
+                visited[v] = true
+                inTree[v] = true
+                depth[v] = depth[u] + 1
+                queue.add(v)
+            } else {
+                ref[v] = true
+            }
         }
     }
-}
-
-/** Explorer So 控制流页签底部提示条（padding 8dp / 居中 / 11sp / bg surfaceVariant）。 */
-@Composable
-private fun CfgHintBar(zh: Boolean) {
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
-        Text(
-            if (zh) "双指缩放 · 单指拖动 · 双击重置" else "pinch zoom · drag · double-tap reset",
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp,
+    for (i in 0 until n) {
+        if (!inTree[i]) { inTree[i] = true; depth[i] = 0 }
+    }
+    for (i in 0 until n) {
+        rows.add(
+            CfgTreeRow(
+                index = i,
+                depth = if (depth[i] < 0) 0 else depth[i],
+                kids = sortedKids[i].filter { inTree[it] },
+                ref = ref[i],
+                entry = i == rootIdx,
+            ),
         )
     }
+    return rows
+}
+
+/**
+ * 控制流「节点列表」页（完全对齐 Exbin CfgNodeListFragment）：
+ * 搜索框（hint「搜索节点地址、指令…」）+ 排序（树序/地址升序/地址降序/指令数升序/指令数降序）+
+ * 缩进树行（toggle ▼/▶/●、标题 loc_xxxx [Entry]/(ref)、副标题「N 条指令 | mnemonic opStr」）。
+ */
+@Composable
+private fun CfgNodeListView(
+    graph: CfgGraph?,
+    insns: Map<Long, List<String>>,
+    query: String,
+    onQuery: (String) -> Unit,
+    sortMode: Int,
+    onSort: (Int) -> Unit,
+    zh: Boolean,
+    onPickBlock: (String) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val rows = remember(graph) { buildCfgTree(graph) }
+    val blocks = graph?.blocks ?: emptyList()
+    val collapsed = remember(graph) { mutableStateOf(setOf<Int>()) }
+    val visible = remember(rows, collapsed.value, query, sortMode) {
+        val q = query.trim().lowercase()
+        if (sortMode != 0) {
+            val base = blocks.mapNotNull { b -> rows.firstOrNull { it.index == b.index } }
+            val sorted = when (sortMode) {
+                1 -> base.sortedBy { blocks[it.index].addrValue }
+                2 -> base.sortedByDescending { blocks[it.index].addrValue }
+                3 -> base.sortedBy { insns[blocks[it.index].addrValue]?.size ?: 0 }
+                else -> base.sortedByDescending { insns[blocks[it.index].addrValue]?.size ?: 0 }
+            }
+            if (q.isEmpty()) sorted else sorted.filter { m ->
+                val b = blocks[m.index]
+                b.addrText.lowercase().contains(q) || b.summary.lowercase().contains(q)
+            }
+        } else {
+            // 树序：按 depth 依次展开，折叠节点的子树隐藏
+            val out = ArrayList<CfgTreeRow>()
+            val hidden = HashSet<Int>()
+            rows.forEach { r ->
+                if (r.index in hidden) return@forEach
+                if (q.isEmpty() || rowMatches(r, blocks, insns, q)) out.add(r)
+                if (r.index in collapsed.value) r.kids.forEach { hidden.add(it) }
+            }
+            out
+        }
+    }
+    fun blockTitle(b: CfgBlock, r: CfgTreeRow?): String {
+        var s = "loc_" + java.lang.Long.toHexString(b.addrValue)
+        if (r?.entry == true) s += if (zh) " [Entry]" else " [Entry]"
+        if (r?.ref == true) s += " (ref)"
+        return s
+    }
+    fun insnOf(b: CfgBlock): Pair<Int, String> {
+        val list = insns[b.addrValue].orEmpty()
+        if (list.isNotEmpty()) {
+            val head = list.first().trim()
+            val parts = head.split(Regex("\\s+"), limit = 3)
+            val text = if (parts.size >= 2) parts[0] + " " + parts[1] else head
+            return list.size to text
+        }
+        val lines = b.summary.split("\n").filter { it.isNotBlank() }
+        val head = lines.firstOrNull().orEmpty().trim()
+        val parts = head.split(Regex("\\s+"), limit = 3)
+        val text = if (parts.size >= 2) parts[0] + " " + parts[1] else head
+        return lines.size to text
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // 搜索 + 排序（Exbin：toolbar padding 16/12/16/8，hint「搜索节点地址、指令…」+ Spinner）
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant) },
+                trailingIcon = {
+                    if (query.isNotBlank()) {
+                        IconButton(onClick = { onQuery("") }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
+                        }
+                    }
+                },
+                placeholder = {
+                    Text(
+                        if (zh) "搜索节点地址、指令…" else "search node addr / insn",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+            )
+        }
+        FlowRow(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                if (zh) "树序" else "tree",
+                if (zh) "地址升序" else "addr+",
+                if (zh) "地址降序" else "addr-",
+                if (zh) "指令数升序" else "insn+",
+                if (zh) "指令数降序" else "insn-",
+            ).forEachIndexed { i, label -> TabChip(label, selected = sortMode == i) { onSort(i) } }
+        }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                blocks.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无节点" else "No nodes",
+                    hint = if (zh) "先生成控制流图" else "build a CFG first",
+                )
+                visible.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无匹配项" else "No match",
+                    hint = if (zh) "换个关键字再试" else "Try another keyword",
+                )
+                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
+                    items(visible, key = { it.index }) { r ->
+                        val b = blocks.getOrNull(r.index) ?: return@items
+                        val leaf = r.kids.isEmpty()
+                        val collapsedNow = r.index in collapsed.value
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .widthIn(min = 360.dp)
+                                .clickable {
+                                    if (!leaf) {
+                                        collapsed.value = if (collapsedNow) collapsed.value - r.index
+                                        else collapsed.value + r.index
+                                    }
+                                    onPickBlock(b.addrText)
+                                }
+                                .padding(
+                                    start = (16 + minOf(r.depth, 8) * 16).dp,
+                                    end = 16.dp, top = 12.dp, bottom = 12.dp,
+                                ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                if (leaf) "●" else if (collapsedNow) "▶" else "▼",
+                                fontSize = 16.sp,
+                                color = if (leaf) cs.onSurfaceVariant else cs.primary,
+                                modifier = Modifier.padding(end = 12.dp),
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    blockTitle(b, r),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                    fontWeight = FontWeight.Normal,
+                                    color = when {
+                                        r.ref -> cs.error
+                                        r.entry -> cs.primary
+                                        else -> cs.onSurface
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                val (cnt, head) = insnOf(b)
+                                Text(
+                                    "$cnt " + (if (zh) "条指令" else "insns") + (if (head.isBlank()) "" else " | $head"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = AppText.label,
+                                    color = cs.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 树序搜索时判断某行是否命中（地址 / 指令 / 摘要）。 */
+private fun rowMatches(r: CfgTreeRow, blocks: List<CfgBlock>, insns: Map<Long, List<String>>, q: String): Boolean {
+    val b = blocks.getOrNull(r.index) ?: return false
+    if (b.addrText.lowercase().contains(q) || b.summary.lowercase().contains(q)) return true
+    return insns[b.addrValue].orEmpty().any { it.lowercase().contains(q) }
 }
 
 // ───────────────────────── 列表视图（字符串 / 符号 / 导入 / 段节） ─────────────────────────

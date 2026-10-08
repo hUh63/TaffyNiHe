@@ -1,3 +1,32 @@
+# TaffyNiHe v1.3.86（函数列表 / 交叉引用 / 控制流 / 汇编 / 伪C 五页逐项对齐 Explorer So）
+
+把上次没抄齐的分析页逐项补齐，并修掉 SCC 鸟瞰的空白画布。
+
+## 🧩 本次
+**① 函数列表页 = Explorer So `FuncListTabFragment`**
+- 新增三个**固定等分子页签**：**全部 / 符号表 / 线性扫描**（符号表 = 排除 `sub_*`，线性扫描 = 仅 `sub_*`）。
+- 每行补上：**返回类型 chip**（左侧 `primaryContainer` 胶囊，如 `i / v / P`）+ **来源 chip**（右侧 `Symbol` / `LinearSweep`）+ **签名副标题**（内置常见函数签名表：JNI_OnLoad / malloc / memcpy / dlopen / pthread_create …；未知则回退「N 字节」）+ 元信息 `0x…  ·  N B`（与 Exbin 同样的两空格格式）。
+- 新增 `tv_status` 状态行（仅在筛选 / 排序非默认时以主色显示，如「符号表 · 按大小 ↓」）。
+
+**② 交叉引用页 = Explorer So `GlobalXRefFragment`（修 SCC 鸟瞰空白画布）**
+- 页面结构改为 Exbin 原样：**四页签（入口概览 / 根下钻 / SCC 鸟瞰 / 导出）+ 搜索行（搜索函数名 / 地址…＋「重置」）+ 一行状态文案 + 单一内容区**；删掉自加的统计卡、枢纽 chip 行、根函数/深度/上限参数区。
+- **SCC 鸟瞰不再被空态挤没**：画布恒占满内容区，无环时每个函数各成单成员组件照样出节点（Exbin 行为）；状态行显示「完整数据 N 条 · SCC M 个 · 枢纽高亮（入度 Top5）」。
+- 入口概览 = **入口候选列表**（入口点 → JNI_OnLoad → 入度 0），行样式对齐 `XRefListAdapter`（卡片 16dp 圆角 / `surfaceContainer`，名称 14sp 粗体 + 地址 11sp 等宽 + 「调用 N · 被调 M」）。
+- 点节点：函数 → 重新下钻；**SCC 超级节点 → 成员表**（「SCC 组件 N 个函数（互相递归）」）；**长按 → 直接进函数详情**；「导出」→ PNG（当前画布）/ JSON / CSV。
+
+**③ 控制流页 = Explorer So `ControlFlowTabFragment`**
+- 结构改为 Exbin 原样：**两个等分页签「图形化 / 节点列表」**（`tabMode=fixed` + `tabGravity=fill`），各自全屏。
+- 图形化 = 整屏 CFG 画布（**删掉自加的状态条与提示条**）。
+- 节点列表 = 搜索（「搜索节点地址、指令…」）+ 排序（树序 / 地址升序 / 地址降序 / 指令数升序 / 指令数降序）+ **缩进树行**（toggle `▼/▶/●`、标题 `loc_xxxx[Entry]/ (ref)` 等宽、副标题「N 条指令 | 助记符 操作数」，最小宽 360dp）；**点行 → 切回图形化并高亮该块**。
+
+**④ 汇编页 = Explorer So `fragment_asm_code_tab.xml`**
+- 删掉塔菲特有操作行（「更多指令 +400」「重新加载」「语义注解」），计数行改为 Exbin 的「**N 条指令**」（语义注解默认开启，与 Exbin 一致）。
+
+**⑤ 伪C 页 = Explorer So `fragment_pseudo_c.xml`**
+- 删掉塔菲特有引擎切换行（Exbin 本页没有引擎控件，引擎来自全局设置）。
+- meta 行改为「**伪 C  ·  引擎  ·  N 行  ·  起始-结束**」，右侧「复制全部 / 导出」+ 加载转圈。
+
+---
 # TaffyNiHe v1.3.85（分析页图形化 + 导航完全复刻 Explorer So）
 
 本轮两件事：把「根下钻 / SCC 鸟瞰 / 调用图」的图形化换成 Explorer So 的分层画布与 CFG 画布；把分析页侧栏与工具分类完全对齐 Explorer So 的 SoDetailActivity。
@@ -326,6 +355,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

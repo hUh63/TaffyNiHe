@@ -47,6 +47,34 @@ internal object ExbinSignature {
                 .put("confidence", res.overallConfidence ?: JSONObject.NULL)
                 .put("notes", res.notes ?: JSONObject.NULL)
                 .put("demangled", res.demangled)
+                .put(
+                    "paramInfos",
+                    JSONArray().also { arr ->
+                        res.paramInfos?.forEach { pi ->
+                            arr.put(
+                                JSONObject()
+                                    .put("reg", pi.reg)
+                                    .put("index", pi.index)
+                                    .put("type", pi.type)
+                                    .put("detail", pi.detail)
+                                    .put("confidence", pi.confidence),
+                            )
+                        }
+                    },
+                )
+                .put(
+                    "locals",
+                    JSONArray().also { arr ->
+                        res.localVars?.forEach { lv ->
+                            arr.put(
+                                JSONObject()
+                                    .put("spOffset", lv.spOffset)
+                                    .put("accessCount", lv.accessCount)
+                                    .put("size", lv.size),
+                            )
+                        }
+                    },
+                )
                 .put("localVarCount", res.localVars?.size ?: 0)
                 .put("stringRefCount", res.stringRefs?.size ?: 0)
                 .put("engine", "exbin-fsa")
@@ -57,3 +85,4 @@ internal object ExbinSignature {
         }.getOrNull()
     }
 }
+

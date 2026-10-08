@@ -3519,6 +3519,42 @@ private fun FunctionsView(
     }
 
     val all = remember(tools.viewCache[cacheKey]) { parseFunctions(tools.viewCache[cacheKey]) }
+
+    // Exbin 式批量签名还原（对标 FunctionSignatureAnalyzer.batchRestoreSignaturesAsync）：
+    // 函数列表首次就绪后，后台逐个还原前 40 个函数的签名（Exbin FSA：JNI 特判 + 寄存器
+    // read-before-write 反汇编分析），结果缓存进 tools.sigCache，行副标题直接显示签名。
+    LaunchedEffect(ws, all.isNotEmpty()) {
+        if (ws.isBlank() || all.isEmpty() || tools.sigRestoreWs == ws) return@LaunchedEffect
+        val targets = all.take(40)
+        tools.sigRestoreWs = ws
+        tools.sigRestoreDone = 0
+        tools.sigRestoreTotal = targets.size
+        val acc = HashMap<String, String>(tools.sigCache)
+        withContext(Dispatchers.IO) {
+            targets.forEachIndexed { i, r ->
+                val res = runCatching {
+                    callMcpTool(
+                        context, "taffy_so_func_sig",
+                        JSONObject().put("workspaceId", ws).put("locator", r.addr.ifBlank { r.name }),
+                    )
+                }.getOrNull()
+                val row = res?.optJSONArray("signatures")?.optJSONObject(0)
+                val sig = row?.optString("signature").orEmpty().ifBlank {
+                    val rt = row?.optString("returnType").orEmpty()
+                    if (retIsReal(rt)) rt + " " + r.name + "()" else ""
+                }
+                if (sig.isNotBlank()) {
+                    acc[r.name] = sig
+                    if (r.addr.isNotBlank()) acc[r.addr] = sig
+                }
+                withContext(Dispatchers.Main) {
+                    tools.sigRestoreDone = i + 1
+                    tools.sigCache = acc.toMap()
+                }
+            }
+        }
+        tools.sigRestoreTotal = 0
+    }
     val query = tools.functionQuery
     var sortBy by remember { mutableStateOf("addr") }
     var asc by remember { mutableStateOf(true) }
@@ -3656,7 +3692,14 @@ private fun FunctionsView(
         }
         // 计数行（tv_count：paddingH 14 / paddingTop 2 / paddingBottom 6，labelSmall）
         Text(
-            if (zh) "${shown.size} 个函数" else "${shown.size} functions",
+            (if (zh) "${shown.size} 个函数" else "${shown.size} functions") +
+                (if (tools.sigRestoreTotal > 0) {
+                    if (zh) "  ·  还原签名 ${tools.sigRestoreDone}/${tools.sigRestoreTotal}"
+                    else "  ·  restoring signatures ${tools.sigRestoreDone}/${tools.sigRestoreTotal}"
+                } else "") +
+                (if (tools.sigRestoreTotal == 0 && tools.sigCache.isNotEmpty()) {
+                    if (zh) "  ·  已还原 ${tools.sigCache.size} 条签名" else "  ·  ${tools.sigCache.size} signatures"
+                } else ""),
             modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 6.dp),
             style = MaterialTheme.typography.labelSmall,
             fontSize = AppText.label,
@@ -3690,7 +3733,7 @@ private fun FunctionsView(
                 )
                 else -> AnalysisCardList(
                     rows = shown.map { r ->
-                        val sig = funcKnownSig(r.name)
+                        val sig = tools.sigCache[r.name] ?: tools.sigCache[r.addr] ?: funcKnownSig(r.name)
                         AnalysisRow(
                             key = r.addr + "|" + r.name,
                             title = r.name,
@@ -4149,16 +4192,29 @@ private fun FuncDetailView(
                     modifier = Modifier.size(20.dp),
                 )
             }
-            Text(
-                fn.ifBlank { if (zh) "未选择函数" else "No function" },
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                color = if (fn.isBlank()) cs.primary else cs.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    fn.ifBlank { if (zh) "未选择函数" else "No function" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (fn.isBlank()) cs.primary else cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // 还原签名（Exbin FuncDetailActivity：工具栏标题即为函数签名）
+                val fnSig = tools.sigCache[fn] ?: tools.sigCache[va]
+                if (!fnSig.isNullOrBlank()) {
+                    Text(
+                        fnSig,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        fontSize = AppText.label,
+                        color = cs.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             if (va.isNotBlank()) {
                 Text(
                     va,
@@ -8365,8 +8421,8 @@ private fun FuncSigView(tools: ToolPagesState, zh: Boolean, context: android.con
             error.isNotBlank() && sigs.isEmpty() -> AnalysisErrorBanner(error)
             sigs.isEmpty() -> AnalysisEmptyState(
                 title = if (zh) "函数签名还原" else "Signature recovery",
-                hint = if (zh) "还原函数的参数列表（基于 rizin 的 afvj 局部变量/参数寄存器启发式）。留空函数名可批量还原前 N 个函数。"
-                    else "Recover argument lists heuristically from rizin afvj. Leave the name blank to batch the first N functions.",
+                hint = if (zh) "优先走 Exbin FunctionSignatureAnalyzer（JNI 特判 + 寄存器 read-before-write 反汇编，输出返回类型/参数类型/参数寄存器/局部变量/置信度），不可用时降级为 rizin afvj 启发式。留空函数名可批量还原前 N 个函数。"
+                    else "Uses Exbin FunctionSignatureAnalyzer first (JNI special-casing + register read-before-write disassembly, reporting return type / param types / param registers / locals / confidence), falling back to rizin afvj heuristics. Leave the name blank to batch the first N functions.",
                 primaryLabel = if (zh) "批量还原" else "Batch", onPrimary = { locator = ""; go() },
             )
             else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -8376,7 +8432,13 @@ private fun FuncSigView(tools: ToolPagesState, zh: Boolean, context: android.con
     }
 }
 
+/** returnType 是否是真实类型（非 unknown/? 占位）。 */
+private fun retIsReal(rt: String): Boolean =
+    rt.isNotBlank() && !rt.equals("unknown", true) && rt != "?" && rt != "void"
+
 private fun sigLine(s: JSONObject, zh: Boolean): String {
+    val sig = s.optString("signature")
+    if (sig.isNotBlank()) return sig
     val args = s.optJSONArray("args") ?: JSONArray()
     val params = (0 until args.length()).joinToString(", ") { i ->
         val a = args.optJSONObject(i) ?: return@joinToString ""
@@ -8422,7 +8484,31 @@ private fun SigCard(s: JSONObject, zh: Boolean, context: android.content.Context
             }
         }
         if (locals.length() > 0) {
-            MonoLine(if (zh) "局部变量 ${locals.length()} 个" else "${locals.length()} locals", cs.onSurfaceVariant, AppText.label)
+            GroupDivider()
+            Text(if (zh) "局部变量" else "locals", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            for (i in 0 until locals.length()) {
+                val lv = locals.optJSONObject(i) ?: continue
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MonoLine("sp" + (if (lv.optInt("spOffset") < 0) "" else "+") + lv.optInt("spOffset"), cs.primary, AppText.label)
+                    MonoLine("\u00d7" + lv.optInt("accessCount"), cs.onSurfaceVariant, AppText.label)
+                    MonoLine(lv.optInt("size").toString() + "B", cs.onSurfaceVariant, AppText.label)
+                    Text("", modifier = Modifier.weight(1f))
+                }
+            }
+        }
+        val minA = s.optInt("minArgs", -1)
+        val maxA = s.optInt("maxArgs", -1)
+        val engineTag = s.optString("engine")
+        if (minA >= 0 && maxA >= 0) {
+            MonoLine(
+                (if (zh) "参数区间 " else "args ") + "[$minA, $maxA]" + (if (engineTag.isNotBlank()) "  \u00b7  " + engineTag else ""),
+                cs.onSurfaceVariant,
+                AppText.label,
+            )
+        }
+        val notes = s.optString("notes")
+        if (notes.isNotBlank()) {
+            MonoLine(notes.replace('\n', ' '), cs.onSurfaceVariant.copy(alpha = 0.8f), AppText.label)
         }
         val note = s.optString("typeConfidenceNote")
         if (note.isNotBlank()) MonoLine(note, cs.onSurfaceVariant.copy(alpha = 0.8f), AppText.label)

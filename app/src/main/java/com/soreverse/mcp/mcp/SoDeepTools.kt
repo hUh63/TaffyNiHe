@@ -690,9 +690,27 @@ object SoDeepTools {
                 // ── Exbin FunctionSignatureAnalyzer 路径（移植自 Exbin；含 JNI 特判与结构化结果）──
                 val fsa = engine.exbinSignature(ws, nm, va)
                 if (fsa != null) {
+                    // 统一参数模型：两路（FSA / rizin afvj）都用 args[{name,type,reg,detail,confidence}]，UI 共用
+                    val ptypes = fsa.optJSONArray("paramTypes") ?: JSONArray()
+                    val pregs = fsa.optJSONArray("paramRegs") ?: JSONArray()
+                    val pinfos = fsa.optJSONArray("paramInfos") ?: JSONArray()
+                    val uargs = JSONArray()
+                    for (i in 0 until ptypes.length()) {
+                        val pi = pinfos.optJSONObject(i)
+                        uargs.put(
+                            JSONObject()
+                                .put("name", pregs.optString(i, "").ifBlank { "arg" + (i + 1) })
+                                .put("type", pi?.optString("type").orEmpty().ifBlank { ptypes.optString(i, "?") })
+                                .put("reg", pregs.optString(i, ""))
+                                .put("detail", pi?.optString("detail").orEmpty())
+                                .put("confidence", pi?.optString("confidence").orEmpty()),
+                        )
+                    }
                     out.put(
                         fsa.put("function", nm)
-                            .put("addr", if (va > 0) "0x" + java.lang.Long.toHexString(va) else ""),
+                            .put("addr", if (va > 0) "0x" + java.lang.Long.toHexString(va) else "")
+                            .put("args", uargs)
+                            .put("argCount", uargs.length()),
                     )
                     continue
                 }
@@ -961,4 +979,5 @@ object SoDeepTools {
 
     val ALL: List<ToolHandler> = listOf(soVtable, soDemangle, soFuncSig, soJniReg, soPseudocBatch)
 }
+
 

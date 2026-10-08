@@ -164,6 +164,15 @@ class ToolPagesState {
      */
     internal val cfgUi = CfgDisplayState()
 
+    // ---- 函数签名还原（Exbin FunctionSignatureAnalyzer）----
+    /** 还原结果缓存：key = 函数名 或 地址 → 签名文本（函数列表 / 函数详情共用）。 */
+    var sigCache by mutableStateOf<Map<String, String>>(emptyMap())
+    /** 已批量还原过的工作区 id（同一工作区只自动跑一次）。 */
+    var sigRestoreWs by mutableStateOf("")
+    /** 批量还原进度：已完成 / 总数（total = 0 表示空闲）。 */
+    var sigRestoreDone by mutableStateOf(0)
+    var sigRestoreTotal by mutableStateOf(0)
+
     /** 写入一个列表视图缓存。 */
     fun cacheView(key: String, json: String) {
         viewCache = viewCache + (key to json)

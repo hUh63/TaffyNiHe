@@ -3351,7 +3351,7 @@ private fun AnalysisAppBar(
                 }
                 AnalysisMenuItem(
                     (if (zh) "布局引擎：" else "Layout: ") + cfgLayoutLabel(tools.cfgUi.layoutMode),
-                    Icons.Filled.Sort,
+                    Icons.AutoMirrored.Filled.Sort,
                 ) {
                     menu = false; tools.cfgUi.layoutMode = nextCfgLayout(tools.cfgUi.layoutMode)
                 }

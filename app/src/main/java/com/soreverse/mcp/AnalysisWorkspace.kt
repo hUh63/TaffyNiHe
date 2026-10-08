@@ -4037,7 +4037,6 @@ private fun DisasmView(
     embedded: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
-    val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
     val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
     val key = "disasm|$ws|$target|${tools.disasmAnnotate}"
@@ -4094,36 +4093,9 @@ private fun DisasmView(
                 }
             }
         }
-        // 操作行（塔菲特有：更多指令 / 重新加载 / 语义注解）
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(
-                label = if (zh) "更多指令 +400" else "More +400",
-                enabled = ws.isNotBlank() && target.isNotBlank() && tools.disasmLimit < 4000,
-                loading = tools.viewLoading == key,
-                onClick = {
-                    tools.disasmLimit = (tools.disasmLimit + 400).coerceAtMost(4000)
-                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, tools.disasmLimit) }
-                },
-            )
-            SmallAction(if (zh) "重新加载" else "Reload", onClick = onRefresh)
-            SmallAction(
-                label = if (zh) "语义注解" else "Annotate",
-                active = tools.disasmAnnotate,
-                onClick = {
-                    tools.disasmAnnotate = !tools.disasmAnnotate
-                    scope.launch { fetchDisasm(context, tools, zh, ws, target, key, tools.disasmLimit) }
-                },
-            )
-        }
-        // 计数行（tv_count：padding 12dp / labelSmall / onSurfaceVariant）
+        // 计数行（tv_count：padding 12dp / labelSmall / onSurfaceVariant；Exbin 文案 = 「N 条指令」）
         Text(
-            (if (zh) "反汇编 · " else "asm · ") + count + (if (zh) " 条" else " insns") +
-                (if (query.isNotBlank()) " · " + (if (zh) "匹配" else "match") + " ${shown.size}" else "") +
-                (if (addr.isNotBlank()) " · $addr · ${tools.disasmLimit}" else ""),
+            "${shown.size} " + (if (zh) "条指令" else "insns"),
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             style = MaterialTheme.typography.labelSmall,
             fontSize = AppText.label,
@@ -4170,7 +4142,7 @@ private fun DisasmView(
         } else if (lines.isEmpty()) {
             AnalysisEmptyState(
                 title = if (zh) "无指令输出" else "No instructions",
-                hint = if (zh) "该地址可能不是可执行代码，换个函数或点「重新加载」" else "Address may not be executable code",
+                hint = if (zh) "该地址可能不是可执行代码，换个函数再试" else "Address may not be executable code",
                 primaryLabel = if (zh) "函数列表" else "Function list",
                 onPrimary = onGoFunctions,
             )
@@ -4308,23 +4280,6 @@ private fun PseudoView(
     val gutterW = (lines.size.toString().length.coerceAtLeast(2) * 9 + 20).dp
 
     Column(Modifier.fillMaxSize()) {
-        // 操作行（塔菲特有：重新生成 / 函数列表 / 引擎切换）
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallAction(
-                label = if (zh) "重新生成" else "Re-run",
-                enabled = ws.isNotBlank() && target.isNotBlank(),
-                loading = tools.viewLoading == key,
-                onClick = onRefresh,
-            )
-            SmallAction(if (zh) "函数列表" else "Functions", onClick = onGoFunctions)
-            listOf("auto" to "Auto", "ghidra" to "Ghidra", "native" to "Native", "java" to "Java").forEach { (k, l) ->
-                SmallAction(l, active = engineMode == k) { engineMode = k }
-            }
-        }
         if (ws.isBlank() || target.isBlank()) {
             AnalysisEmptyState(
                 title = if (zh) "请先在函数列表里选择一个函数" else "Pick a function first",
@@ -4349,7 +4304,8 @@ private fun PseudoView(
                 Modifier.fillMaxWidth().background(cs.surfaceVariant).padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val metaParts = ArrayList<String>(5)
+                val metaParts = ArrayList<String>(6)
+                metaParts.add(if (zh) "伪 C" else "Pseudo-C")
                 if (usedEngine.isNotBlank()) metaParts.add(usedEngine)
                 metaParts.add(if (zh) "${lines.size} 行" else "${lines.size} lines")
                 bounds?.let { b ->
@@ -4368,7 +4324,7 @@ private fun PseudoView(
                     if (ps.isNotEmpty()) metaParts.add(ps.joinToString(" · "))
                 }
                 Text(
-                    metaParts.joinToString(" · "),
+                    metaParts.joinToString("  ·  "),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = AppText.label,
@@ -4376,6 +4332,13 @@ private fun PseudoView(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (tools.viewLoading == key) {
+                    CircularProgressIndicator(
+                        Modifier.padding(start = 6.dp).size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = cs.primary,
+                    )
+                }
                 TonalMiniButton(if (zh) "复制全部" else "Copy", Modifier.padding(start = 8.dp)) {
                     copyToClipboard(context, pseudo, zh)
                 }

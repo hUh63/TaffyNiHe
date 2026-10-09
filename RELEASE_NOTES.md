@@ -1,3 +1,16 @@
+# TaffyNiHe v1.3.89（调用图画布补上 Exbin 的「布局方向 TB/LR」按钮）
+
+## 补上 Exbin GlobalCfg 画布右上角的布局方向按钮（`fragment_global_cfg.xml` `btnRankDir`）
+上一版把 CFG 画布本体对齐到 Exbin 后，还差 GlobalCfg（调用图）画布右上角那颗 44dp 的布局方向按钮，本版补齐：
+
+- **按钮**：调用图画布**右上角**、44dp、`top|end` + 12dp 边距、1dp outline 描边、surfaceContainerHigh 底、居中的方向图标；
+  点击在 **TB ↔ LR** 之间切换并 Toast「布局方向: TB/LR」——行为与 Exbin 的 `btnRankDir` 一致。
+- **真正生效**：`CfgDisplayState.rankDir` 一路透传到布局引擎 —— ELK Layered 用 `CoreOptions.DIRECTION`（DOWN / RIGHT），
+  Dagre 用 `rankdir`；切换后重新布局，节点/边/小地图同步更新。
+- ⋮ 菜单「控制流画布」也加了「布局方向」项（在控制流页也能切；Exbin 只有调用图页那颗按钮）。
+- 底层的 `ExbinElk.layout` 之前把 `Direction.DOWN` 写死，本版改成可传 `direction`（DOWN / RIGHT），顺带让其它布局调用也能选方向。
+
+---
 # TaffyNiHe v1.3.88（分析页 CFG 画布悬浮控件对齐 Exbin + 函数签名还原）
 
 ## 1. CFG 画布悬浮控件完全对齐 Exbin CfgCanvasView
@@ -381,6 +394,7 @@ Explorer So 的做法完全不同：**参数用带标题的输入框**，**动�
 # TaffyNiHe v1.3.66
 
 - 分析页导航重构（域 → 工具 → 模式三级）、6 项缺陷修复。
+
 
 
 

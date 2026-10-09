@@ -3759,18 +3759,193 @@ private fun FunctionsView(
 
 // ───────────────────────── 搜索 ─────────────────────────
 
-private val searchScopes = listOf(
-    "functions" to ("函数" to "Fns"),
-    "symbols" to ("符号" to "Sym"),
-    "strings" to ("字符串" to "Str"),
-    "imports" to ("导入" to "Imp"),
-    "sections" to ("节区" to "Sec"),
-    "relocs" to ("重定位" to "Rel"),
-    "dynamic" to ("动态" to "Dyn"),
-    "entries" to ("入口点" to "Ent"),
+
+// ───────────────────────── 搜索页（完全对齐 Explorer So `SearchTabFragment`）─────────────────────────
+//
+// Exbin 语义：标题「功能」→ 功能条（发起新搜索 / 在当前结果中搜索 / 撤销搜索 / 清除搜索）
+// → 搜索结果标题「搜索结果 ("q") — N 个」→ 结果卡片（签名 / 元信息 / 展开提示）；
+// 「发起新搜索」弹出搜索窗体（搜索内容 + 搜索类型 + 搜索方式 + 区分大小写 / 正则表达式）。
+
+/** Exbin `SearchTabFragment.SEARCH_TYPES`。 */
+private val exbinSearchTypesZh = listOf("代码", "符号名", "立即数", "类名", "引用字符串", "引用常量", "引用全局变量", "引用函数")
+private val exbinSearchTypesEn = listOf("Code", "Symbol", "Immediate", "Class", "String ref", "Const ref", "Global var", "Function ref")
+
+/** Exbin `SearchTabFragment.SEARCH_METHODS`（每种搜索类型对应的搜索方式）。 */
+private val exbinSearchMethodsZh = listOf(
+    listOf("地址", "指令"),                                    // 0 代码
+    listOf("函数地址", "函数名", "函数参数", "函数返回类型"),     // 1 符号名
+    listOf("数值"),                                            // 2 立即数
+    listOf("类名文本"),                                        // 3 类名
+    listOf("字符串地址", "字符串内容"),                          // 4 引用字符串
+    listOf("常量值", "常量地址"),                               // 5 引用常量
+    listOf("变量地址", "变量名"),                               // 6 引用全局变量
+    listOf("函数地址", "函数名", "函数参数", "函数返回类型"),     // 7 引用函数
+)
+private val exbinSearchMethodsEn = listOf(
+    listOf("Address", "Instruction"),
+    listOf("Fn address", "Fn name", "Fn params", "Fn return"),
+    listOf("Number"),
+    listOf("Class text"),
+    listOf("Str address", "Str content"),
+    listOf("Const value", "Const address"),
+    listOf("Var address", "Var name"),
+    listOf("Fn address", "Fn name", "Fn params", "Fn return"),
 )
 
-/** 全库搜索：输入框 + 范围切换 + 结果表格（地址/内容两列，按范围自适应列名）。 */
+/**
+ * 搜索类型 / 方式 → 引擎数据源。
+ * @return (引擎 view, 匹配字段)；null = 引擎没有该数据源（UI 会明确说明，绝不伪造结果）
+ */
+private fun exbinSearchSource(typeIdx: Int, methodIdx: Int): Pair<String, String>? = when (typeIdx) {
+    0 -> null                                    // 代码：地址 → 直接跳汇编；指令 → 无数据源
+    1, 7 -> when (methodIdx) {                   // 符号名 / 引用函数
+        0 -> "functions" to "addr"
+        1 -> "functions" to "name"
+        2 -> "functions" to "params"
+        else -> "functions" to "return"
+    }
+    2 -> null                                    // 立即数
+    3 -> "symbols" to "name"                     // 类名
+    4 -> if (methodIdx == 0) "strings" to "addr" else "strings" to "content"
+    5 -> if (methodIdx == 1) "data" to "addr" else null   // 引用常量（常量值无数据源）
+    6 -> if (methodIdx == 0) "symbols" to "addr" else "symbols" to "name"
+    else -> null
+}
+
+/** Exbin 结果过滤（auto / 地址 / 名称 / 内容 / 参数 / 返回类型）。 */
+private fun exbinFilterRows(
+    rows: List<AnalysisRow>, q: String, caseSensitive: Boolean, useRegex: Boolean,
+    field: String = "auto", sigCache: Map<String, String> = emptyMap(),
+): List<AnalysisRow> {
+    if (q.isBlank()) return emptyList()
+    val re = if (useRegex) runCatching {
+        Regex(q, if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE))
+    }.getOrNull() else null
+    if (useRegex && re == null) return emptyList()
+    fun hit(v: String): Boolean = when {
+        useRegex -> re!!.containsMatchIn(v)
+        caseSensitive -> v.contains(q)
+        else -> v.contains(q, true)
+    }
+    val out = rows.filter { r ->
+        when (field) {
+            "addr" -> hit(r.text) || hit(r.meta)
+            "name" -> hit(r.title)
+            "content" -> hit(r.title) || hit(r.sub)
+            "params" -> hit(sigCache[r.title] ?: sigCache[r.text] ?: "")
+            "return" -> hit((sigCache[r.title] ?: sigCache[r.text] ?: "").substringBefore(' '))
+            else -> hit(r.title) || hit(r.text) || hit(r.sub) || hit(r.meta)
+        }
+    }
+    return out.take(400)
+}
+
+/** Exbin 功能条按钮（`createFunctionButton`）：13sp / 全宽 / padding 16×11 / 圆角 8dp；主按钮 primaryContainer。 */
+@Composable
+private fun ExbinFunctionButton(label: String, primary: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        Modifier.fillMaxWidth().padding(bottom = 4.dp).clip(shape)
+            .background(if (primary) cs.primaryContainer else cs.surfaceContainer)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            color = when {
+                !enabled -> cs.onSurfaceVariant.copy(alpha = 0.45f)
+                primary -> cs.onPrimaryContainer
+                else -> cs.onSurfaceVariant
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Exbin 下拉字段（OutlinedBox 形态，点击弹选项；标签由外部单独一行给出）。 */
+@Composable
+private fun ExbinDropdownField(value: String, options: List<String>, onPick: (Int) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            trailingIcon = {
+                Icon(Icons.Filled.KeyboardArrowDown, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant)
+            },
+        )
+        Box(Modifier.matchParentSize().clickable { open = true })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEachIndexed { i, o ->
+                DropdownMenuItem(text = { Text(o, fontSize = AppText.body) }, onClick = { open = false; onPick(i) })
+            }
+        }
+    }
+}
+
+/** Exbin 复选框行（CheckBox 形态：☑ / ☐ + 14sp onSurface）。 */
+@Composable
+private fun ExbinCheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(if (checked) "\u2611" else "\u2610", fontSize = 16.sp, color = if (checked) cs.primary else cs.outline)
+        Text(label, fontSize = 14.sp, color = cs.onSurface)
+    }
+}
+
+/** Exbin 结果卡片（`createResultCard`）：surfaceContainer / 圆角 8dp / padding 14×10。 */
+@Composable
+private fun ExbinResultCard(
+    title: String,
+    meta: String,
+    hint: String,
+    hintColor: Color,
+    mono: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+            .background(cs.surfaceContainer)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Text(
+            title,
+            fontSize = 12.sp,
+            fontFamily = if (mono) FontFamily.Monospace else null,
+            color = cs.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (meta.isNotBlank()) {
+            Text(
+                meta, fontSize = 10.sp, color = cs.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (hint.isNotBlank()) {
+            Text(
+                hint, fontSize = 11.sp, color = hintColor,
+                modifier = Modifier.padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @Composable
 private fun SearchView(
     tools: ToolPagesState,
@@ -3780,123 +3955,218 @@ private fun SearchView(
 ) {
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
-    val scope = tools.searchScope
-    val query = tools.searchQuery
-    var regexOn by remember { mutableStateOf(false) }
-    var caseOn by remember { mutableStateOf(false) }
-    val cacheKey = if (regexOn) "search|$ws|$scope|__all__" else "search|$ws|$scope|$query"
+    val scope = rememberCoroutineScope()
+    var typeIdx by remember { mutableStateOf(1) }
+    var methodIdx by remember { mutableStateOf(1) }
+    var formQuery by remember { mutableStateOf("") }
+    var caseSensitive by remember { mutableStateOf(false) }
+    var useRegex by remember { mutableStateOf(false) }
+    var dialogOpen by remember { mutableStateOf(false) }
+    var dialogInResults by remember { mutableStateOf(false) }
+    var lastQuery by remember { mutableStateOf("") }
+    var header by remember { mutableStateOf("") }
+    var rows by remember { mutableStateOf<List<AnalysisRow>>(emptyList()) }
+    var undoStack by remember { mutableStateOf<List<Pair<String, List<AnalysisRow>>>>(emptyList()) }
+    var notice by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
 
-    LaunchedEffect(cacheKey, tools.reloadTick) {
-        if (query.isNotBlank()) {
-            if (regexOn) loadListCache(context, tools, scope, ws, cacheKey, 3000, "")
-            else loadListCache(context, tools, scope, ws, cacheKey, 120, query)
+    fun runSearch(inResults: Boolean) {
+        val q = formQuery.trim()
+        undoStack = undoStack + (lastQuery to rows)
+        lastQuery = q
+        notice = ""
+        if (q.isBlank()) {
+            rows = emptyList(); header = ""
+            return
         }
-    }
-
-    val rawRows = remember(tools.viewCache[cacheKey]) { rowsOf(tools.viewCache[cacheKey], scope) }
-    val regexErr = remember(query, regexOn, caseOn) {
-        if (!regexOn || query.isBlank()) ""
-        else runCatching { Regex(query, if (caseOn) emptySet() else setOf(RegexOption.IGNORE_CASE)); "" }
-            .getOrElse { it.message ?: "regex error" }
-    }
-    val rows = remember(rawRows, query, regexOn, caseOn, regexErr) {
-        when {
-            query.isBlank() -> emptyList()
-            regexOn -> {
-                if (regexErr.isNotBlank()) emptyList()
-                else {
-                    val re = runCatching { Regex(query, if (caseOn) emptySet() else setOf(RegexOption.IGNORE_CASE)) }.getOrNull()
-                    if (re == null) emptyList() else rawRows.filter { re.containsMatchIn(it.title) || re.containsMatchIn(it.text) }
-                }
+        if (inResults) {
+            val sel = exbinFilterRows(rows, q, caseSensitive, useRegex)
+            rows = sel
+            header = if (zh) "搜索结果（在当前结果中 \"$q\"）— ${sel.size} 个"
+            else "search results (in results \"$q\") — ${sel.size}"
+            if (sel.isEmpty()) notice = if (zh) "当前结果里没有匹配项" else "no match in current results"
+            return
+        }
+        // 代码 · 地址：直接跳到汇编（Exbin 的「代码」类型 + 「地址」方式）
+        if (typeIdx == 0 && methodIdx == 0) {
+            rows = emptyList(); header = ""
+            val hex = q.removePrefix("0x").removePrefix("0X")
+            val va = runCatching { hex.toLong(16) }.getOrNull()
+            if (va != null) {
+                notice = if (zh) "已在汇编视图打开 0x${hex.lowercase()}" else "opened 0x${hex.lowercase()} in disasm"
+                onSelect("", "0x" + hex.lowercase())
+            } else {
+                notice = if (zh) "地址格式无效（示例：0x1234）" else "invalid address (e.g. 0x1234)"
             }
-            caseOn -> rawRows.filter { it.title.contains(query) || it.text.contains(query) }
-            else -> rawRows
+            return
+        }
+        val src = exbinSearchSource(typeIdx, methodIdx)
+        if (src == null) {
+            rows = emptyList()
+            header = if (zh) "搜索结果 (\"$q\") — 0 个" else "search results (\"$q\") — 0"
+            notice = if (zh) "该搜索类型 / 方式引擎暂无数据源（可用：符号名、类名、引用字符串、引用常量·常量地址、引用全局变量、引用函数）"
+            else "no data source for this type/method in the engine"
+            return
+        }
+        busy = true
+        header = if (zh) "搜索中…" else "searching…"
+        scope.launch {
+            val json = withContext(Dispatchers.IO) {
+                runCatching { rawListCall(context, ws, src.first, "", 3000) }.getOrNull()
+            }
+            val base = rowsOf(json?.toString(), src.first)
+            val sel = exbinFilterRows(base, q, caseSensitive, useRegex, src.second, tools.sigCache)
+            rows = sel
+            header = if (zh) "搜索结果 (\"$q\") — ${sel.size} 个" else "search results (\"$q\") — ${sel.size}"
+            if (sel.isEmpty()) notice = if (zh) "没有匹配结果" else "no matches"
+            busy = false
         }
     }
-    val secondCol = when (scope) {
-        "strings" -> if (zh) "内容" else "VALUE"
-        "imports" -> if (zh) "名称" else "NAME"
-        else -> if (zh) "名称" else "NAME"
+
+    // 「快速跳转」（⋮ → 快速跳转）带来的预置查询：进入即按函数名搜索（对齐 Exbin setPendingQuery / searchByName）
+    LaunchedEffect(ws) {
+        val pending = tools.searchQuery
+        if (pending.isNotBlank() && lastQuery.isBlank()) {
+            tools.searchQuery = ""
+            formQuery = pending
+            typeIdx = 1
+            methodIdx = 1
+            runSearch(false)
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { tools.searchQuery = it },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
-            placeholder = {
-                Text(
-                    if (zh) "在函数 / 符号 / 字符串 / 导入里搜索" else "search across functions / symbols / strings / imports",
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                    color = cs.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-            trailingIcon = {
-                if (query.isNotBlank()) {
-                    IconButton(onClick = { tools.searchQuery = "" }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
-                    }
-                }
-            },
+        Text(
+            if (zh) "功能" else "Actions",
+            fontSize = 13.sp,
+            color = cs.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
         )
-        Spacer(Modifier.size(6.dp))
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            searchScopes.forEach { (key, labels) ->
-                val active = key == scope
-                SmallAction(if (zh) labels.first else labels.second, active = active) { tools.searchScope = key }
+        Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+            ExbinFunctionButton(if (zh) "发起新搜索" else "New search", primary = true, enabled = ws.isNotBlank()) {
+                formQuery = lastQuery
+                dialogInResults = false
+                dialogOpen = true
             }
-            SmallAction(".*", active = regexOn) { regexOn = !regexOn }
-            SmallAction("Aa", active = caseOn) { caseOn = !caseOn }
-            if (rows.isNotEmpty()) {
-                Text(
-                    if (zh) "${rows.size} 条" else "${rows.size} hits",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = AppText.label,
-                    color = cs.onSurfaceVariant,
-                )
+            ExbinFunctionButton(if (zh) "在当前结果中搜索" else "Search in results", enabled = rows.isNotEmpty()) {
+                if (rows.isEmpty()) {
+                    Toast.makeText(context, if (zh) "没有当前结果，请先发起新搜索" else "no current results, run a new search first", Toast.LENGTH_SHORT).show()
+                } else {
+                    formQuery = ""
+                    dialogInResults = true
+                    dialogOpen = true
+                }
+            }
+            ExbinFunctionButton(if (zh) "撤销搜索" else "Undo search", enabled = undoStack.isNotEmpty()) {
+                val last = undoStack.lastOrNull()
+                undoStack = undoStack.dropLast(1)
+                if (last != null) {
+                    rows = last.second
+                    lastQuery = last.first
+                    header = if (last.first.isBlank()) ""
+                    else if (zh) "搜索结果 (\"${last.first}\") — ${last.second.size}"
+                    else "results \"${last.first}\" — ${last.second.size}"
+                    notice = ""
+                }
+            }
+            ExbinFunctionButton(if (zh) "清除搜索" else "Clear search", enabled = lastQuery.isNotBlank() || rows.isNotEmpty()) {
+                rows = emptyList(); lastQuery = ""; header = ""; undoStack = emptyList(); notice = ""
             }
         }
-        Spacer(Modifier.size(6.dp))
+        if (header.isNotBlank()) {
+            Text(
+                header,
+                fontSize = 12.sp,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 ws.isBlank() -> AnalysisEmptyState(
                     title = if (zh) "未打开工作区" else "No workspace",
                     hint = if (zh) "点顶部「选文件」按钮选择文件" else "Open the ≡ rail (top-left) to pick a file",
                 )
-                query.isBlank() -> AnalysisEmptyState(
-                    title = if (zh) "输入关键字开始搜索" else "Type a keyword to search",
-                    hint = if (zh) "范围：${analysisViewLabel(scope, zh)}" else "Scope: ${analysisViewLabel(scope, zh)}",
+                busy && rows.isEmpty() -> AnalysisLoading()
+                rows.isEmpty() && notice.isNotBlank() -> AnalysisEmptyState(
+                    title = notice,
+                    hint = if (zh) "换个搜索类型 / 方式，或点「发起新搜索」" else "try another type/method, or New search",
                 )
-                tools.viewLoading == cacheKey && rows.isEmpty() -> AnalysisLoading()
-                rows.isEmpty() -> {
-                    val err = if (regexErr.isNotBlank()) (if (zh) "正则表达式错误：$regexErr" else "regex error: $regexErr")
-                        else errMessageOf(tools.viewCache[cacheKey])
-                    if (err.isNotBlank()) AnalysisErrorBanner(err)
-                    else AnalysisEmptyState(
-                        title = if (zh) "无匹配结果" else "No results",
-                        hint = if (zh) "换个关键字或切换范围" else "Try another keyword or scope",
-                    )
+                rows.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "还没有搜索结果" else "No results yet",
+                    hint = if (zh) "点「发起新搜索」：搜索类型（代码 / 符号名 / 立即数 / 类名 / 引用字符串 / 引用常量 / 引用全局变量 / 引用函数）+ 搜索方式，可叠加区分大小写 / 正则表达式。"
+                        else "Tap New search: pick a type (code / symbol / immediate / class / string / const / global / function) plus a method, with case-sensitivity and regex options.",
+                )
+                else -> LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(rows, key = { it.key }) { r ->
+                        ExbinResultCard(
+                            title = r.title,
+                            meta = listOf(r.text, r.meta).filter { it.isNotBlank() }.joinToString("  ·  "),
+                            hint = r.sub.ifBlank { r.badge },
+                            hintColor = cs.primary,
+                        ) { onSelect(r.title, r.text) }
+                    }
                 }
-                else -> AnalysisCardList(
-                    rows = remember(rows) { rows.map { r -> if (r.title.isBlank()) r.copy(title = r.text) else r } },
-                    icon = analysisViewIcon(scope),
-                    onPick = { row ->
-                        if (scope == "functions") onSelect(row.title, row.va)
-                        else copyToClipboard(context, row.text.ifBlank { row.title }, zh)
-                    },
-                )
             }
         }
+    }
+
+    // 搜索窗体（对齐 Exbin `showSearchDialog`：搜索内容 + 搜索类型 + 搜索方式 + 两个复选框）
+    if (dialogOpen) {
+        AlertDialog(
+            onDismissRequest = { dialogOpen = false },
+            title = {
+                Text(
+                    if (dialogInResults) (if (zh) "在当前结果中搜索" else "Search in results")
+                    else (if (zh) "搜索" else "Search"),
+                    fontSize = AppText.title,
+                )
+            },
+            text = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = formQuery,
+                        onValueChange = { formQuery = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                        shape = RoundedCornerShape(AppShape.sm),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                        label = {
+                            Text(
+                                if (dialogInResults) (if (zh) "在当前结果中搜索" else "in results")
+                                else (if (zh) "搜索内容" else "query"),
+                                fontSize = AppText.label,
+                            )
+                        },
+                    )
+                    if (!dialogInResults) {
+                        Text(if (zh) "搜索类型" else "Type", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                        val types = if (zh) exbinSearchTypesZh else exbinSearchTypesEn
+                        ExbinDropdownField(types.getOrElse(typeIdx) { types.first() }, types) {
+                            typeIdx = it
+                            methodIdx = 0
+                        }
+                        Text(if (zh) "搜索方式" else "Method", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                        val methods = if (zh) exbinSearchMethodsZh[typeIdx] else exbinSearchMethodsEn[typeIdx]
+                        ExbinDropdownField(methods.getOrElse(methodIdx) { methods.first() }, methods) { methodIdx = it }
+                    }
+                    ExbinCheckRow(if (zh) "区分大小写" else "Case sensitive", caseSensitive) { caseSensitive = it }
+                    ExbinCheckRow(if (zh) "正则表达式" else "Regex", useRegex) { useRegex = it }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { dialogOpen = false; runSearch(dialogInResults) }) { Text(if (zh) "确定" else "OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialogOpen = false }) { Text(if (zh) "取消" else "Cancel") }
+            },
+        )
     }
 }
 
@@ -7864,7 +8134,30 @@ private fun MonoLine(text: String, color: Color = MaterialTheme.colorScheme.onSu
     )
 }
 
-// ───────────────────────── 1. 虚表（C++ vtable / RTTI） ─────────────────────────
+// ───────────────────────── 1. 虚表（C++ vtable / RTTI；完全对齐 Explorer So `VtableSearchFragment`） ─────────────────────────
+
+/** Exbin 虚表来源标签（RTTI·重定位 / RTTI·回退 / 符号扫描 / DWARF / 启发式）。 */
+private fun vtableSourceLabel(o: JSONObject, zh: Boolean): String {
+    val raw = o.optString("source").ifBlank { o.optString("scanMethod") }
+    return when {
+        raw == "reloc" -> if (zh) "RTTI·重定位" else "RTTI reloc"
+        raw == "rodata" -> if (zh) "RTTI·回退" else "RTTI rodata"
+        raw == "symbol" -> if (zh) "符号扫描" else "symbol scan"
+        raw == "dwarf" -> "DWARF"
+        raw.isNotBlank() -> raw
+        o.optString("typeinfoAddr").isNotBlank() -> "RTTI"
+        o.optString("className").startsWith("_ZT") -> if (zh) "RTTI·符号" else "RTTI sym"
+        o.optString("confidence").isNotBlank() -> if (zh) "启发式" else "heuristic"
+        else -> if (zh) "启发式" else "heuristic"
+    }
+}
+
+/** 来源标签配色（对齐 Exbin：DWARF → primary，重定位 → tertiary，其它 → onSurfaceVariant）。 */
+private fun vtableSourceColor(label: String, cs: androidx.compose.material3.ColorScheme): Color = when {
+    label.contains("DWARF") -> cs.primary
+    label.contains("RTTI") -> cs.tertiary
+    else -> cs.onSurfaceVariant
+}
 
 @Composable
 private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
@@ -7875,9 +8168,11 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
     var data by remember(ws, tick) { mutableStateOf<JSONObject?>(null) }
     var loading by remember(ws, tick) { mutableStateOf(false) }
     var error by remember(ws, tick) { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
+    var lastQuery by remember { mutableStateOf("") }
+    var dialogOpen by remember { mutableStateOf(false) }
+    var formQuery by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(setOf<String>()) }
-    var header by remember { mutableStateOf("") }
+    var generatedHeader by remember { mutableStateOf("") }
     var exporting by remember { mutableStateOf(false) }
 
     LaunchedEffect(ws, tick) {
@@ -7897,126 +8192,210 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
         val a = data?.optJSONArray("vtables") ?: JSONArray()
         (0 until a.length()).mapNotNull { a.optJSONObject(it) }
     }
-    val shown = remember(all, query) {
-        if (query.isBlank()) all else all.filter {
-            it.optString("className").contains(query, true) || it.optString("vtableAddr").contains(query, true)
+    val shown = remember(all, lastQuery) {
+        if (lastQuery.isBlank()) all
+        else all.filter {
+            it.optString("className").contains(lastQuery, true) || it.optString("vtableAddr").contains(lastQuery, true)
+        }
+    }
+    // 扫描方式行（对齐 Exbin「扫描方式: RTTI·重定位(N) 符号扫描(M) …」；无条目时「未发现虚表」）
+    val scanLine = remember(all, zh) {
+        if (all.isEmpty()) (if (zh) "扫描方式: 未发现虚表" else "scan: no vtables found")
+        else {
+            val grouped = all.map { vtableSourceLabel(it, zh) }.groupingBy { it }.eachCount()
+            (if (zh) "扫描方式: " else "scan: ") + grouped.entries.joinToString(" ") { (k, v) -> "$k($v)" }
         }
     }
 
     Column(Modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        Text(
+            if (zh) "虚表搜索" else "Vtable search",
+            fontSize = 13.sp,
+            color = cs.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
+        )
+        Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+            ExbinFunctionButton(if (zh) "发起新搜索" else "New search", primary = true, enabled = all.isNotEmpty()) {
+                formQuery = lastQuery
+                dialogOpen = true
+            }
+            ExbinFunctionButton(if (zh) "显示全部虚表" else "Show all vtables", enabled = lastQuery.isNotBlank()) {
+                lastQuery = ""
+                expanded = emptySet()
+            }
+            ExbinFunctionButton(if (zh) "清除搜索" else "Clear search", enabled = lastQuery.isNotBlank() || expanded.isNotEmpty()) {
+                lastQuery = ""
+                expanded = emptySet()
+                generatedHeader = ""
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
-            SmallAction(
-                if (zh) "生成头文件" else "Header",
-                enabled = all.isNotEmpty(), loading = exporting,
-                onClick = {
-                    scope.launch {
-                        exporting = true
-                        val r = callMcpTool(context, "taffy_so_vtable",
-                            JSONObject().put("workspaceId", ws).put("action", "export")
-                                .put("className", query).put("limit", 100))
-                        exporting = false
-                        header = r?.optString("header").orEmpty()
-                        if (header.isBlank()) header = if (zh) "// 未生成内容（无虚表或引擎无输出）" else "// nothing generated"
-                    }
-                },
+            Text(
+                scanLine,
+                fontSize = 11.sp,
+                color = cs.tertiary,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
+            // 塔菲自有：生成头文件 / 复制全部（Exbin 无此按钮，收成小字动作，不占功能条）
             if (all.isNotEmpty()) {
-                SmallAction(if (zh) "复制全部" else "Copy all", onClick = {
-                    val sb = StringBuilder()
-                    all.forEach { v ->
-                        sb.append(v.optString("className")).append("  @ ").append(v.optString("vtableAddr"))
-                            .append("  slots=").append(v.optInt("slotCount")).append('\n')
-                        v.optJSONArray("slots")?.let { s ->
-                            for (i in 0 until s.length()) {
-                                val o = s.optJSONObject(i) ?: continue
-                                sb.append("    #").append(o.optInt("index")).append(' ').append(o.optString("name"))
-                                    .append("  ").append(o.optString("addr")).append('\n')
+                Text(
+                    if (exporting) (if (zh) "生成中…" else "generating…") else (if (zh) "生成头文件" else "Header"),
+                    fontSize = 11.sp,
+                    color = cs.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                        .clickable(enabled = !exporting) {
+                            scope.launch {
+                                exporting = true
+                                val r = callMcpTool(context, "taffy_so_vtable",
+                                    JSONObject().put("workspaceId", ws).put("action", "export")
+                                        .put("className", lastQuery).put("limit", 100))
+                                exporting = false
+                                generatedHeader = r?.optString("header").orEmpty()
+                                if (generatedHeader.isBlank()) {
+                                    generatedHeader = if (zh) "// 未生成内容（无虚表或引擎无输出）" else "// nothing generated"
+                                }
                             }
                         }
-                    }
-                    copyToClipboard(context, sb.toString().trimEnd(), zh)
-                })
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
                 Text(
-                    if (zh) "${all.size} 个虚表" else "${all.size} vtables",
-                    style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant,
+                    if (zh) "复制全部" else "Copy all",
+                    fontSize = 11.sp,
+                    color = cs.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            val sb = StringBuilder()
+                            all.forEach { v ->
+                                sb.append(v.optString("className")).append("  @ ").append(v.optString("vtableAddr"))
+                                    .append("  slots=").append(v.optInt("slotCount")).append('\n')
+                                v.optJSONArray("slots")?.let { sl ->
+                                    for (i in 0 until sl.length()) {
+                                        val o = sl.optJSONObject(i) ?: continue
+                                        sb.append("    #").append(o.optInt("index")).append(' ').append(o.optString("name"))
+                                            .append("  ").append(o.optString("addr")).append('\n')
+                                    }
+                                }
+                            }
+                            copyToClipboard(context, sb.toString().trimEnd(), zh)
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
         }
-        Spacer(Modifier.size(6.dp))
-        OutlinedTextField(
-            value = query, onValueChange = { query = it }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-            shape = RoundedCornerShape(AppShape.sm),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-            leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant) },
-            placeholder = { Text(if (zh) "搜索虚表（按类名 / 地址）" else "search vtables (class / addr)", style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label), color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            trailingIcon = {
-                if (query.isNotBlank()) {
-                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, null, modifier = Modifier.size(15.dp), tint = cs.onSurfaceVariant)
-                    }
-                }
-            },
-        )
-        Spacer(Modifier.size(8.dp))
-        when {
-            loading && data == null -> AnalysisLoading()
-            error.isNotBlank() -> AnalysisErrorBanner(error)
-            all.isEmpty() -> AnalysisEmptyState(
-                title = if (zh) "未发现虚表" else "No vtables",
-                hint = if (zh) "该 SO 可能未使用 C++ 虚函数，或 RTTI 已被 strip / 编译时关闭（-fno-rtti）。底层为 rizin avj。"
-                    else "No C++ vtables/RTTI found (stripped or -fno-rtti). Backed by rizin avj.",
-                primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
+        if (lastQuery.isNotBlank()) {
+            Text(
+                if (zh) "搜索结果 (\"$lastQuery\") — ${shown.size} 个" else "search results (\"$lastQuery\") — ${shown.size}",
+                fontSize = 12.sp,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (header.isNotBlank()) {
-                    ToolResultBlock(if (zh) "生成的 vtable 头文件" else "Generated vtable header", header, zh = zh,
-                        onCopy = { copyToClipboard(context, header, zh) })
-                }
-                shown.forEach { v ->
-                    val cls = v.optString("className").ifBlank { "(未命名类)" }
-                    val vAddr = v.optString("vtableAddr")
-                    val slots = v.optJSONArray("slots") ?: JSONArray()
-                    val key = vAddr.ifBlank { cls }
-                    val isOpen = key in expanded
-                    Column(
-                        Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(AppShape.md))
-                            .background(cs.surfaceContainerHigh)
-                            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        Row(Modifier.fillMaxWidth().clickable { expanded = if (isOpen) expanded - key else expanded + key },
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(if (isOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                                null, tint = cs.onSurfaceVariant, modifier = Modifier.size(15.dp))
-                            Text(cls, style = MaterialTheme.typography.bodySmall, fontSize = AppText.bodyStrong,
-                                fontWeight = FontWeight.SemiBold, color = cs.onSurface, modifier = Modifier.weight(1f),
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            TypeBadge("${slots.length()}", cs.primary)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                loading && data == null -> AnalysisLoading()
+                error.isNotBlank() -> AnalysisErrorBanner(error)
+                all.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "未发现虚表" else "No vtables",
+                    hint = if (zh) "该 SO 可能未使用 C++ 虚函数，或 RTTI 已被 strip / 编译时关闭（-fno-rtti）。底层为 rizin avj + 重定位启发式。"
+                        else "No C++ vtables/RTTI found — the SO may be plain C, stripped, or built with -fno-rtti.",
+                )
+                shown.isEmpty() -> AnalysisEmptyState(
+                    title = if (zh) "无匹配虚表" else "No match",
+                    hint = if (zh) "换个类名 / 地址，或点「显示全部虚表」" else "try another class/address, or Show all",
+                )
+                else -> LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (generatedHeader.isNotBlank()) {
+                        item {
+                            ToolResultBlock(
+                                if (zh) "生成的 vtable 头文件" else "Generated vtable header",
+                                generatedHeader, zh = zh,
+                                onCopy = { copyToClipboard(context, generatedHeader, zh) },
+                            )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MonoLine("vtable $vAddr", cs.onSurfaceVariant, AppText.label)
-                            if (v.optString("typeinfoAddr").isNotBlank()) MonoLine("rtti ${v.optString("typeinfoAddr")}", cs.onSurfaceVariant, AppText.label)
-                            if (v.optString("confidence").isNotBlank()) MonoLine("conf ${v.optString("confidence")}", cs.onSurfaceVariant, AppText.label)
-                        }
-                        if (isOpen) {
-                            GroupDivider()
-                            for (i in 0 until slots.length()) {
-                                val s = slots.optJSONObject(i) ?: continue
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    MonoLine("#${s.optInt("index")}", cs.onSurfaceVariant, AppText.label, )
-                                    MonoLine(s.optString("addr"), cs.primary, AppText.label)
-                                    Text(s.optString("name").ifBlank { "slot_${s.optInt("index")}" },
-                                        style = MaterialTheme.typography.bodySmall, fontSize = AppText.label,
-                                        color = cs.onSurface, modifier = Modifier.weight(1f), maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis)
+                    }
+                    items(shown, key = { it.optString("vtableAddr").ifBlank { it.optString("className") } }) { v ->
+                        val cls = v.optString("className").ifBlank { if (zh) "(未命名类)" else "(unnamed class)" }
+                        val vAddr = v.optString("vtableAddr")
+                        val slots = v.optJSONArray("slots") ?: JSONArray()
+                        val srcLabel = vtableSourceLabel(v, zh)
+                        val key = vAddr.ifBlank { cls }
+                        val isOpen = key in expanded
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                                .background(cs.surfaceContainer)
+                                .clickable { expanded = if (isOpen) expanded - key else expanded + key }
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                        ) {
+                            Text(
+                                cls,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = cs.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                (if (vAddr.isBlank()) "—" else vAddr) + "  ·  " + srcLabel + "  ·  " +
+                                    (if (zh) "${slots.length()} 个虚函数" else "${slots.length()} virtuals"),
+                                fontSize = 10.sp,
+                                color = vtableSourceColor(srcLabel, cs),
+                                modifier = Modifier.padding(top = 2.dp),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (v.optString("typeinfoAddr").isNotBlank() || v.optString("confidence").isNotBlank()) {
+                                Text(
+                                    listOf(
+                                        if (v.optString("typeinfoAddr").isNotBlank()) "rtti " + v.optString("typeinfoAddr") else "",
+                                        if (v.optString("confidence").isNotBlank()) "conf " + v.optString("confidence") else "",
+                                    ).filter { it.isNotBlank() }.joinToString("  ·  "),
+                                    fontSize = 10.sp,
+                                    color = cs.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (slots.length() > 0) {
+                                Text(
+                                    if (isOpen) (if (zh) "收起虚函数" else "collapse")
+                                    else (if (zh) "展开 ${slots.length()} 个虚函数" else "expand ${slots.length()} virtuals"),
+                                    fontSize = 11.sp,
+                                    color = cs.primary,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
+                            }
+                            if (isOpen) {
+                                Spacer(Modifier.size(4.dp))
+                                GroupDivider()
+                                for (i in 0 until slots.length()) {
+                                    val o = slots.optJSONObject(i) ?: continue
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            "#" + o.optInt("index"),
+                                            fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            o.optString("name").ifBlank { o.optString("addr") },
+                                            fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = cs.onSurface,
+                                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            o.optString("addr"),
+                                            fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -8024,6 +8403,34 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                 }
             }
         }
+    }
+
+    if (dialogOpen) {
+        AlertDialog(
+            onDismissRequest = { dialogOpen = false },
+            title = { Text(if (zh) "搜索虚表" else "Search vtables", fontSize = AppText.title) },
+            text = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = formQuery,
+                        onValueChange = { formQuery = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                        shape = RoundedCornerShape(AppShape.sm),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
+                        label = { Text(if (zh) "类名 / 地址" else "class / address", fontSize = AppText.label) },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { dialogOpen = false; lastQuery = formQuery.trim(); expanded = emptySet() }) {
+                    Text(if (zh) "确定" else "OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialogOpen = false }) { Text(if (zh) "取消" else "Cancel") }
+            },
+        )
     }
 }
 
@@ -8049,7 +8456,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                 var raw = ""
                 var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
                 // rizin 0.9.x：图命令 agC/agf 是「格式参数」型（须 `agC json`），j 后缀模式会失败。
-                for (c in listOf("agC json", "aac; agC json", "agc json", "agCj")) {
+                for (c in listOf("aa; aac; agC json", "aac; agC json", "agC json", "agc json", "agCj")) {
                     raw = rzText(eng.rzCommand(ws, "", c))
                     g = parseRizinGraph(raw)
                     if (g.first.isNotEmpty()) break
@@ -8969,6 +9376,8 @@ private fun GlobalXRefView(
     var exportSheet by remember { mutableStateOf(false) }
     var sccMembers by remember { mutableStateOf<List<String>?>(null) }
     var savedMsg by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var deepLoading by remember(ws, tick) { mutableStateOf(false) }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -8981,7 +9390,7 @@ private fun GlobalXRefView(
                 // rizin 0.9.x：图命令 agC/agf 是「格式参数」型（须 `agC json` / `agC j`），
                 // 不是 j 后缀模式型 —— `agCj` 会被当非法格式而失败（全局调用图恒空→降级函数清单）。
                 // rzCommand 已预跑全量分析，故直接 agC json；再退回 aac 前置 / 小写 agc / 旧写法。
-                for (c in listOf("agC json", "aac; agC json", "agc json", "agCj")) {
+                for (c in listOf("aa; aac; agC json", "aac; agC json", "agC json", "agc json", "agCj")) {
                     raw = rzText(eng.rzCommand(ws, "", c))
                     g = parseRizinGraph(raw)
                     if (g.first.isNotEmpty()) break
@@ -9030,8 +9439,13 @@ private fun GlobalXRefView(
         if (effRoot.isBlank()) null
         else buildDrillDag(names, edges, effRoot, 5, 1500, 12, cs.primary, df, 240f * df)
     }
-    val sccDag = remember(names, edges, cs.tertiary, cs.primary, df) {
-        buildSccDag(names, edges, cs.tertiary, cs.primary, df, 240f * df)
+    // 完整分析：对「全部函数 + 全部调用边」做一次 Tarjan，DAG 与统计共用同一份结果
+    val sccs = remember(names, edges) { if (names.isEmpty()) emptyList() else tarjanScc(names, edges) }
+    val sccStats = remember(sccs) {
+        Triple(sccs.size, sccs.count { it.size > 1 }, sccs.maxOfOrNull { it.size } ?: 0)
+    }
+    val sccDag = remember(sccs, edges, cs.tertiary, cs.primary, df) {
+        buildSccDag(sccs, edges, cs.tertiary, cs.primary, df, 240f * df)
     }
     val hits = remember(nodes, query) {
         val q = query.trim().lowercase()
@@ -9045,17 +9459,40 @@ private fun GlobalXRefView(
     val listRows: List<String> = if (query.isBlank()) roots else hits
     val showList = query.isNotBlank() || xTab == "overview"
     val omitted = drillDag?.omitted ?: 0
+    // 调用关系为空（函数却有多个）说明分析没跑到调用关系 —— 明确提示并指向「完整分析」
+    val partialHint = if (edges.isEmpty() && names.size > 1)
+        (if (zh) " · 调用关系为空，点「完整分析」重跑 aaaa" else " · no call edges; tap Full analysis (aaaa)")
+    else ""
     val status = when {
         xTab == "scc" ->
-            if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · SCC ${sccDag?.nodes?.size ?: 0} 个 · 枢纽高亮（入度 Top5）"
-            else "Global xref · ${edges.size} edges · ${sccDag?.nodes?.size ?: 0} SCCs · hubs (in-degree Top5)"
+            (if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 全部函数 ${names.size} · SCC ${sccStats.first} 个（非平凡环 ${sccStats.second} 个 · 最大 ${sccStats.third} 个函数）· 枢纽高亮（入度 Top5）"
+            else "Global xref · ${edges.size} edges · ${names.size} fns · ${sccStats.first} SCCs (${sccStats.second} nontrivial, max ${sccStats.third}) · hubs (in-degree Top5)") + partialHint
         xTab == "drill" ->
             (if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 当前显示 ${drillDag?.nodes?.size ?: 0} 节点 · 根下钻 $effRoot"
             else "Global xref · ${edges.size} edges · ${drillDag?.nodes?.size ?: 0} nodes · drill $effRoot") +
                 (if (omitted > 0) (if (zh) " · 省略 $omitted 条" else " · omitted $omitted") else "")
         else ->
-            if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 入口 ${roots.size} 个 · 全部函数 ${names.size}"
-            else "Global xref · ${edges.size} edges · ${roots.size} entries · ${names.size} fns"
+            (if (zh) "全局交叉引用 · 完整数据 ${edges.size} 条 · 入口 ${roots.size} 个 · 全部函数 ${names.size}"
+            else "Global xref · ${edges.size} edges · ${roots.size} entries · ${names.size} fns") + partialHint
+    }
+
+    /** 完整分析：跑 rizin `aaaa`（全量分析）后重建全局调用图，保证 SCC / 交叉引用基于完整调用关系。 */
+    fun runFullAnalysis() {
+        if (ws.isBlank() || deepLoading) return
+        scope.launch {
+            deepLoading = true
+            savedMsg = if (zh) "完整分析中（aaaa）…" else "running full analysis (aaaa)…"
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    rzText(eng.rzCommand(ws, "", "aaaa"))
+                }
+            }
+            deepLoading = false
+            savedMsg = if (zh) "完整分析完成，正在重建调用图" else "full analysis done, rebuilding graph"
+            tools.clearViewCaches()
+            tools.reloadTick = tools.reloadTick + 1
+        }
     }
 
     /** 打开函数详情（对齐 Exbin openFuncDetail）；import 类节点只复制名字。 */
@@ -9086,6 +9523,11 @@ private fun GlobalXRefView(
             ).forEach { (k, l) ->
                 TabChip(l, selected = xTab == k && query.isBlank()) { xTab = k; query = "" }
             }
+            TabChip(
+                if (deepLoading) (if (zh) "分析中…" else "analyzing…")
+                else (if (zh) "完整分析" else "Full analysis"),
+                selected = false,
+            ) { runFullAnalysis() }
             TabChip(if (zh) "导出" else "Export", selected = false) { exportSheet = true }
         }
         // ── 搜索行（EditText + 重置，对齐 Exbin searchRow padding 8/4/8/4）──
@@ -10028,17 +10470,35 @@ private fun layoutDagGraph(
     val gapX = 150f * density
     val gapY = 72f * density
     val maxW = maxNodeW
+    nodes.forEach { n ->
+        n.w = maxOf(72f * density, minOf(maxW, paint.measureText(dagMiddleEllipsis(n.label, 18)) + 18f * density))
+    }
     val byDepth = LinkedHashMap<Int, MutableList<Int>>()
     nodes.forEachIndexed { i, n -> byDepth.getOrPut(n.depth) { ArrayList() }.add(i) }
     var maxX = 0f
     var maxY = 0f
-    byDepth.keys.sorted().forEach { d ->
-        val col = byDepth[d]!!.sortedBy { nodes[it].label }
-        col.forEachIndexed { row, i ->
+    // 组件很多（大图）时改用紧凑网格：按 depth 排序后列优先填充，列数由 sqrt 决定，
+    // 使整体宽高比接近 4:3；否则单个 depth 列塞上千个节点会拉出十几万 dp 的高度，
+    // 缩小到 0.5 也只看得到一角 —— 这正是「SCC 鸟瞰看起来分析不完整」的根因。
+    val useGrid = nodes.size > 240
+    if (!useGrid) {
+        byDepth.keys.sorted().forEach { d ->
+            val col = byDepth[d]!!.sortedBy { nodes[it].label }
+            col.forEachIndexed { row, i ->
+                val n = nodes[i]
+                n.x = d * gapX
+                n.y = row * gapY
+                if (n.x > maxX) maxX = n.x
+                if (n.y > maxY) maxY = n.y
+            }
+        }
+    } else {
+        val rows = max(1, kotlin.math.ceil(kotlin.math.sqrt(nodes.size * 1.35f)).toInt())
+        val ordered = byDepth.keys.sorted().flatMap { d -> byDepth[d]!!.sortedBy { nodes[it].label } }
+        ordered.forEachIndexed { rank, i ->
             val n = nodes[i]
-            n.w = maxOf(72f * density, minOf(maxW, paint.measureText(dagMiddleEllipsis(n.label, 18)) + 18f * density))
-            n.x = d * gapX
-            n.y = row * gapY
+            n.x = (rank / rows) * gapX
+            n.y = (rank % rows) * gapY
             if (n.x > maxX) maxX = n.x
             if (n.y > maxY) maxY = n.y
         }
@@ -10144,7 +10604,8 @@ private fun DrawScope.drawDagScene(
 /**
  * 分层画布（根下钻 / SCC 鸟瞰 共用，完全对齐 Explorer So XRefDagView）：
  * 节点圆角 8dp / surfaceContainer 底 / 类型色描边与文字，回边 primary 虚线曲线，
- * 缩放 0.5–4（双击适配），scale<0.42 降级为圆点，空态「暂无分层数据」。
+ * 缩放 0.02–8（双击适配；下探到 0.02 保证几千个组件的整幅图也能一次完整显示），
+ * scale<0.42 自动降级为圆点（半径 9/6dp，屏幕空间固定，缩小后仍可见），空态「暂无分层数据」。
  */
 @Composable
 private fun XRefDagCanvas(
@@ -10186,7 +10647,7 @@ private fun XRefDagCanvas(
         scale = minOf(
             (viewport.width - 32f * density) / w,
             (viewport.height - 32f * density) / h,
-        ).coerceIn(0.5f, 3f)
+        ).coerceIn(0.02f, 3f)
         pan = Offset(
             viewport.width / 2f - (minX + maxX) / 2f * scale,
             viewport.height / 2f - (minY + maxY) / 2f * scale,
@@ -10226,7 +10687,7 @@ private fun XRefDagCanvas(
             }
             .pointerInput(Unit) {
                 detectTransformGestures { _, p, z, _ ->
-                    scale = (scale * z).coerceIn(0.5f, 4f)
+                    scale = (scale * z).coerceIn(0.02f, 8f)
                     pan += p
                 }
             },
@@ -10326,15 +10787,13 @@ private fun buildDrillDag(
  * 无环时每个函数各成单成员组件，照样出节点（Exbin 不会隐藏画布）。
  */
 private fun buildSccDag(
-    names: List<String>,
+    sccs: List<List<String>>,
     edges: List<Pair<String, String>>,
     tertiaryColor: Color,
     primaryColor: Color,
     density: Float,
     maxNodeW: Float,
 ): DagLayout? {
-    if (names.isEmpty()) return null
-    val sccs = tarjanScc(names, edges)
     if (sccs.isEmpty()) return null
     val compOf = HashMap<String, Int>()
     sccs.forEachIndexed { i, c -> c.forEach { compOf[it] = i } }

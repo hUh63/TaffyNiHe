@@ -11886,14 +11886,6 @@ private fun StatChip(text: String) {
 }
 
 /**
- * 调用图（逐项对齐 Explorer So `fragment_global_cfg.xml`）：
- * 头部卡（marginH 10 / marginTop 6，corner 16，stroke 1 outlineVariant，bg surfaceContainer，内 padding H12 T10 B8）
- * 内含搜索行（圆角 12dp / 13.5sp）、匹配计数（11sp）、模式分段（36dp / paddingH 16 / 12sp）+ 选项折叠
- * 统计行（marginH 12 / T6 / B4，chip 间距 6dp，来源 10.5sp marginStart 10）
- * 画布卡（weight 1 / marginH 10 / marginBottom 10，corner 16，bg surfaceContainerHigh）+ 右下角布局方向按钮 44x44。
- */
-@Composable
-/**
  * Exbin GlobalCfg 画布右上角的「布局方向 TB/LR」按钮（fragment_global_cfg.xml `btnRankDir`：
  * 44dp、layout_gravity=top|end、12dp 边距、OutlinedButton 风格、点击后重新布局并 Toast 提示）。
  */
@@ -11928,6 +11920,14 @@ private fun CfgRankDirButton(ui: CfgDisplayState, zh: Boolean, modifier: Modifie
     }
 }
 
+/**
+ * 调用图（逐项对齐 Explorer So `fragment_global_cfg.xml`）：
+ * 头部卡（marginH 10 / marginTop 6，corner 16，stroke 1 outlineVariant，bg surfaceContainer，内 padding H12 T10 B8）
+ * 内含搜索行（圆角 12dp / 13.5sp）、匹配计数（11sp）、模式分段（36dp / paddingH 16 / 12sp）+ 选项折叠
+ * 统计行（marginH 12 / T6 / B4，chip 间距 6dp，来源 10.5sp marginStart 10）
+ * 画布卡（weight 1 / marginH 10 / marginBottom 10，corner 16，bg surfaceContainerHigh）+ 右上角布局方向按钮 44x44（fragment_global_cfg.xml `btnRankDir`）。
+ */
+@Composable
 private fun CallGraphGraphPane(
     nodes: List<JSONObject>,
     edges: List<Pair<String, String>>,

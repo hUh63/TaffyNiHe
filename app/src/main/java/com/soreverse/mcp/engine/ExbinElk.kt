@@ -57,6 +57,7 @@ internal object ExbinElk {
      * @param nodesep     同层节点间距
      * @param ranksep     层间距
      * @param edgeRouting "orthogonal" | "polyline" | "splines"
+     * @param direction   "DOWN"（TB，默认）| "RIGHT"（LR）
      * @return (节点中心坐标+层号, 边折线点集) ；失败返回 null（调用方回退）
      */
     fun layout(
@@ -66,6 +67,7 @@ internal object ExbinElk {
         nodesep: Double = 60.0,
         ranksep: Double = 80.0,
         edgeRouting: String = "orthogonal",
+        direction: String = "DOWN",
     ): Pair<Map<String, ExbinDagre.NodeOut>, Map<String, List<Pair<Float, Float>>>>? {
         if (ids.isEmpty()) return null
         return runCatching {
@@ -102,7 +104,11 @@ internal object ExbinElk {
 
             // ── 布局参数（对齐 Exbin ElkLayoutEngine 的取值）──
             root.setProperty(CoreOptions.ALGORITHM, "org.eclipse.elk.layered")
-            root.setProperty(CoreOptions.DIRECTION, Direction.DOWN)
+            // 布局方向（对标 Exbin GlobalCfgView.layoutGraph：rankdir TB → DOWN，LR → RIGHT）
+            root.setProperty(
+                CoreOptions.DIRECTION,
+                if (direction.equals("RIGHT", true) || direction.equals("LR", true)) Direction.RIGHT else Direction.DOWN,
+            )
             root.setProperty(
                 CoreOptions.EDGE_ROUTING,
                 when (edgeRouting) {
@@ -171,3 +177,4 @@ internal object ExbinElk {
         }.getOrNull()
     }
 }
+

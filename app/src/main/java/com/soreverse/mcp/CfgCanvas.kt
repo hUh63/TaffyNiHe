@@ -784,6 +784,7 @@ internal fun layoutCfgGraphDagre(
     density: Float,
     maxLines: Int = 2,
     backend: String = "dagre",
+    rankDir: String = "TB",
 ): CfgLayoutResult {
     val n = graph.blocks.size
     if (n == 0 || density <= 0f) {
@@ -839,9 +840,12 @@ internal fun layoutCfgGraphDagre(
     }
 
     val laid = if (backend == "elk") {
-        ExbinElk.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), "orthogonal")
+        ExbinElk.layout(
+            ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), "orthogonal",
+            if (rankDir.equals("LR", true)) "RIGHT" else "DOWN",
+        )
     } else {
-        ExbinDagre.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), "TB")
+        ExbinDagre.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), rankDir)
     } ?: return layoutCfgGraph(graph, density, maxLines)
     val nodesMap = laid.first
     val routesMap = laid.second
@@ -1327,6 +1331,8 @@ internal class CfgDisplayState {
     var dragNode by mutableStateOf(false)
     /** 左下角小地图（对标 Exbin isFlowchartMiniMapEnabled） */
     var minimap by mutableStateOf(true)
+    /** 布局方向 TB / LR（对标 Exbin GlobalCfg 画布右上角的 btnRankDir） */
+    var rankDir by mutableStateOf("TB")
 }
 
 /** 边样式按钮的图标（对标 Exbin CfgCanvasView.edgeStyleIcon）。 */
@@ -1384,12 +1390,12 @@ internal fun CfgCanvas(
             },
         )
     }
-    val layout = remember(graph, density, ui.layoutMode, maxLines) {
+    val layout = remember(graph, density, ui.layoutMode, ui.rankDir, maxLines) {
         when (ui.layoutMode) {
             "grid" -> layoutCfgGrid(graph, density, maxLines)
             "force" -> layoutCfgForce(graph, density, maxLines)
-            "dagre" -> layoutCfgGraphDagre(graph, density, maxLines)
-            "elk" -> layoutCfgGraphDagre(graph, density, maxLines, "elk")
+            "dagre" -> layoutCfgGraphDagre(graph, density, maxLines, "dagre", ui.rankDir)
+            "elk" -> layoutCfgGraphDagre(graph, density, maxLines, "elk", ui.rankDir)
             else -> layoutCfgGraph(graph, density, maxLines)
         }
     }

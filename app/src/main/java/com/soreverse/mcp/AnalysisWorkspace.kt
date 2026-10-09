@@ -3343,7 +3343,11 @@ private fun AnalysisAppBar(
                         else -> "summary"
                     }
                 }
-                AnalysisMenuItem(bgStyleLabel(zh, tools.cfgUi.bgStyle), Icons.Filled.Transform) {
+                AnalysisMenuItem((if (zh) "布局方向：" else "Direction: ") + tools.cfgUi.rankDir, Icons.Filled.SwapHoriz) {
+                    menu = false
+                    tools.cfgUi.rankDir = if (tools.cfgUi.rankDir.equals("TB", true)) "LR" else "TB"
+                }
+                AnalysisMenuItem(bgStyleLabel(zh, tools.cfgUi.bgStyle), Icons.Filled.Storage) {
                     menu = false; tools.cfgUi.bgStyle = nextBgStyle(tools.cfgUi.bgStyle)
                 }
                 AnalysisMenuItem(routeStyleLabel(zh, tools.cfgUi.routing), Icons.Filled.CompareArrows) {
@@ -3357,7 +3361,7 @@ private fun AnalysisAppBar(
                 }
                 AnalysisMenuItem(
                     (if (zh) "拖动节点：" else "Drag: ") + (if (tools.cfgUi.dragNode) (if (zh) "开" else "on") else (if (zh) "关" else "off")),
-                    Icons.Filled.SwapHoriz,
+                    Icons.Filled.Transform,
                 ) {
                     menu = false; tools.cfgUi.dragNode = !tools.cfgUi.dragNode
                 }
@@ -11889,6 +11893,41 @@ private fun StatChip(text: String) {
  * 画布卡（weight 1 / marginH 10 / marginBottom 10，corner 16，bg surfaceContainerHigh）+ 右下角布局方向按钮 44x44。
  */
 @Composable
+/**
+ * Exbin GlobalCfg 画布右上角的「布局方向 TB/LR」按钮（fragment_global_cfg.xml `btnRankDir`：
+ * 44dp、layout_gravity=top|end、12dp 边距、OutlinedButton 风格、点击后重新布局并 Toast 提示）。
+ */
+@Composable
+private fun CfgRankDirButton(ui: CfgDisplayState, zh: Boolean, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(AppShape.sm)
+    val context = LocalContext.current
+    Box(
+        modifier = modifier
+            .padding(end = 12.dp, top = 12.dp)
+            .size(44.dp)
+            .clip(shape)
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outline), shape)
+            .clickable {
+                ui.rankDir = if (ui.rankDir.equals("TB", true)) "LR" else "TB"
+                Toast.makeText(
+                    context,
+                    (if (zh) "布局方向: " else "layout direction: ") + ui.rankDir,
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.SwapHoriz,
+            contentDescription = if (zh) "切换布局方向 (TB/LR)" else "toggle layout direction (TB/LR)",
+            tint = cs.primary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
 private fun CallGraphGraphPane(
     nodes: List<JSONObject>,
     edges: List<Pair<String, String>>,
@@ -12151,6 +12190,8 @@ private fun CallGraphGraphPane(
                     focusText = focusName,
                     focusToken = focusToken,
                 )
+                // Exbin fragment_global_cfg.xml 的 btnRankDir（布局方向 TB/LR）
+                CfgRankDirButton(ui, zh, Modifier.align(Alignment.TopEnd))
             }
         }
     }

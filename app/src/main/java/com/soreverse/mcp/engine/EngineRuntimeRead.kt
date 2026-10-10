@@ -698,8 +698,11 @@ internal fun EngineRuntime.cleanDisasmLines(text: String, limit: Int): List<Stri
         .map { it.trimEnd() }
         .filter { it.isNotBlank() }
         .map { line ->
-            val mixed = Regex("""^(0x[0-9a-fA-F]+:)\s+(?:[0-9a-fA-F]{2}\s+){4,}(.+)$""").find(line.trim())
-            if (mixed != null) "${mixed.groupValues[1]} ${mixed.groupValues[2].trim()}" else line.trim()
+            // 形如 "0x16c8: ff 83 02 d1    sub sp, sp, #0xa0" —— 保留地址与机器码
+            // （此前把机器码整段丢弃，导致汇编视图 addr/bytes 两列全空、指令被挤到最右侧），
+            // 仅把地址后多余空白收敛为单空格，保留机器码与指令之间的多空格分隔。
+            val mixed = Regex("""^(0x[0-9a-fA-F]+:)\s+(.*\S)\s*$""").find(line.trim())
+            if (mixed != null) "${mixed.groupValues[1]} ${mixed.groupValues[2]}" else line.trim()
         }
         .filterNot { it.matches(Regex("""^[0-9a-fA-F]{4,}\s+[0-9a-fA-F]{2}(\s+[0-9a-fA-F]{2}){3,}.*""")) }
         .take(limit)

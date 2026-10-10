@@ -2102,7 +2102,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("strings", "字符串", "Str", Icons.Filled.DataObject),
     AnalysisNavItem("symbols", "符号", "Sym", Icons.Filled.ListAlt),
     AnalysisNavItem("imports", "导入", "Imp", Icons.Filled.Link),
-    AnalysisNavItem("sections", "段节", "Sec", Icons.Filled.Inventory2),
+    AnalysisNavItem("sections", "节区", "Sec", Icons.Filled.Inventory2),
     AnalysisNavItem("elfhdr", "ELF头", "ELF", Icons.Filled.Info),
     AnalysisNavItem("segments", "程序段", "Seg", Icons.Filled.Inventory2),
     AnalysisNavItem("relocs", "重定位", "Rel", Icons.Filled.Link),
@@ -4176,19 +4176,22 @@ private fun SearchView(
 private fun splitDisasmLine(line: String): Triple<String, String, String> {
     val trimmed = line.trimStart()
     if (trimmed.isEmpty()) return Triple("", "", "")
-    val m = Regex("^(0x[0-9a-fA-F]+)\\s+(.*)$").find(trimmed)
-    if (m == null) return Triple("", "", trimmed)
+    // 兼容两种写法：
+    //   0x16c8: ff 83 02 d1    sub sp, sp, #0xa0   （原生 rizin 文本：地址后带冒号，机器码与指令之间为多个空格）
+    //   0x16c8  sub sp, sp, #0xa0                  （无机器码）
+    val m = Regex("^(0x[0-9a-fA-F]+):?\\s+(.*)$").find(trimmed) ?: return Triple("", "", trimmed)
     val addrOut = m.groupValues[1]
-    var rest = m.groupValues[2]
-    // 机器码：形如 "e0030091" 或 "e0 03 00 91"（≥2 个字节才认为是指令编码，避免把 1 字节误吸）
-    val bytesRe = Regex("^([0-9a-fA-F]{2}(?:\\s+[0-9a-fA-F]{2})*)\\s+(.*)$")
-    val joined = Regex("^([0-9a-fA-F]{6,})\\s+(.*)$").find(rest)
-    if (joined != null && joined.groupValues[1].length % 2 == 0) {
-        return Triple(addrOut, joined.groupValues[1].chunked(2).joinToString(" "), joined.groupValues[2])
-    }
-    val bm = bytesRe.find(rest)
-    if (bm != null && bm.groupValues[1].split(Regex("\\s+")).size >= 2) {
-        return Triple(addrOut, bm.groupValues[1], bm.groupValues[2])
+    val rest = m.groupValues[2]
+    // 机器码与指令之间由 2+ 个空格分隔（native 输出 4 个空格）
+    val gap = Regex("\\s{2,}").find(rest)
+    if (gap != null) {
+        val head = rest.substring(0, gap.range.first).trim()
+        val tail = rest.substring(gap.range.last + 1).trim()
+        val hexTok = Regex("^[0-9a-fA-F]{2}(?:\\s*[0-9a-fA-F]{2})*$")
+        if (head.isNotEmpty() && tail.isNotEmpty() && hexTok.matches(head)) {
+            val bytes = if (head.contains(' ')) head else head.chunked(2).joinToString(" ")
+            return Triple(addrOut, bytes.lowercase(), tail)
+        }
     }
     return Triple(addrOut, "", rest)
 }
@@ -5128,6 +5131,8 @@ private class CfgTreeRow(
     val kids: List<Int>,
     val ref: Boolean,
     val entry: Boolean,
+    /** 父块到本块的边类型标签（Exbin：true / false / next），根为 null。 */
+    val edgeLabel: String? = null,
 )
 
 /**
@@ -5138,17 +5143,16 @@ private fun buildCfgTree(graph: CfgGraph?): List<CfgTreeRow> {
     if (graph == null || graph.blocks.isEmpty()) return emptyList()
     val n = graph.blocks.size
     val rank = { e: CfgEdge -> if (e.kind == "jump") 0 else if (e.kind == "fail") 1 else 2 }
+    val outEdges = Array(n) { i -> graph.edges.filter { it.from == i && it.to in 0 until n && it.to != i } }
     val sortedKids = Array(n) { i ->
-        graph.edges.filter { it.from == i && it.to in 0 until n && it.to != i }
-            .sortedBy { rank(it) }
-            .map { it.to }
-            .distinct()
+        outEdges[i].sortedBy { rank(it) }.map { it.to }.distinct()
     }
     val rows = ArrayList<CfgTreeRow>(n)
     val depth = IntArray(n) { -1 }
     val visited = BooleanArray(n)
     val inTree = BooleanArray(n)
     val ref = BooleanArray(n)
+    val edgeLabel = arrayOfNulls<String>(n)
     val queue = ArrayDeque<Int>()
     val rootIdx = 0
     visited[rootIdx] = true
@@ -5157,11 +5161,24 @@ private fun buildCfgTree(graph: CfgGraph?): List<CfgTreeRow> {
     queue.add(rootIdx)
     while (queue.isNotEmpty()) {
         val u = queue.removeFirst()
+        // Exbin：只有「真·条件分支」（jump 与 fail 指向不同目标）才标 true/false，否则标 next
+        val jumpTo = outEdges[u].firstOrNull { it.kind == "jump" }?.to
+        val failTo = outEdges[u].firstOrNull { it.kind == "fail" }?.to
+        val conditional = jumpTo != null && failTo != null && jumpTo != failTo
         sortedKids[u].forEach { v ->
+            val k = outEdges[u].firstOrNull { it.to == v && it.kind == "jump" }?.kind
+                ?: outEdges[u].firstOrNull { it.to == v }?.kind ?: "edge"
+            val lbl = when {
+                !conditional -> "next"
+                k == "jump" -> "true"
+                k == "fail" -> "false"
+                else -> "next"
+            }
             if (!visited[v]) {
                 visited[v] = true
                 inTree[v] = true
                 depth[v] = depth[u] + 1
+                edgeLabel[v] = lbl
                 queue.add(v)
             } else {
                 ref[v] = true
@@ -5179,6 +5196,7 @@ private fun buildCfgTree(graph: CfgGraph?): List<CfgTreeRow> {
                 kids = sortedKids[i].filter { inTree[it] },
                 ref = ref[i],
                 entry = i == rootIdx,
+                edgeLabel = edgeLabel[i],
             ),
         )
     }
@@ -5235,6 +5253,7 @@ private fun CfgNodeListView(
         var s = "loc_" + java.lang.Long.toHexString(b.addrValue)
         if (r?.entry == true) s += if (zh) " [Entry]" else " [Entry]"
         if (r?.ref == true) s += " (ref)"
+        if (r?.edgeLabel != null) s += " — " + r.edgeLabel
         return s
     }
     fun insnOf(b: CfgBlock): Pair<Int, String> {
@@ -5283,19 +5302,8 @@ private fun CfgNodeListView(
                     )
                 },
             )
-        }
-        FlowRow(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            listOf(
-                if (zh) "树序" else "tree",
-                if (zh) "地址升序" else "addr+",
-                if (zh) "地址降序" else "addr-",
-                if (zh) "指令数升序" else "insn+",
-                if (zh) "指令数降序" else "insn-",
-            ).forEachIndexed { i, label -> TabChip(label, selected = sortMode == i) { onSort(i) } }
+            // Exbin CfgNodeListFragment：排序是「树序 ▼」下拉 Spinner，不是一排 chip
+            SortDropdown(sortMode, onSort, zh)
         }
         Spacer(Modifier.size(6.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -5366,6 +5374,30 @@ private fun CfgNodeListView(
     }
 }
 
+/** 控制流「节点列表」排序下拉（对齐 Exbin CfgNodeListFragment 的 sortSpinner）。 */
+@Composable
+private fun SortDropdown(sortMode: Int, onSort: (Int) -> Unit, zh: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val labels = if (zh) listOf("树序", "地址升序", "地址降序", "指令数升序", "指令数降序")
+    else listOf("tree", "addr+", "addr-", "insn+", "insn-")
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.clickable { open = true }.padding(start = 10.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(labels.getOrElse(sortMode) { labels[0] }, style = MaterialTheme.typography.bodyMedium, color = cs.primary, maxLines = 1)
+            Icon(Icons.Filled.KeyboardArrowDown, null, tint = cs.primary, modifier = Modifier.size(18.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            labels.forEachIndexed { i, l ->
+                DropdownMenuItem(text = { Text(l, fontSize = AppText.body) }, onClick = { onSort(i); open = false })
+            }
+        }
+    }
+}
+
 /** 树序搜索时判断某行是否命中（地址 / 指令 / 摘要）。 */
 private fun rowMatches(r: CfgTreeRow, blocks: List<CfgBlock>, insns: Map<Long, List<String>>, q: String): Boolean {
     val b = blocks.getOrNull(r.index) ?: return false
@@ -5373,7 +5405,7 @@ private fun rowMatches(r: CfgTreeRow, blocks: List<CfgBlock>, insns: Map<Long, L
     return insns[b.addrValue].orEmpty().any { it.lowercase().contains(q) }
 }
 
-// ───────────────────────── 列表视图（字符串 / 符号 / 导入 / 段节） ─────────────────────────
+// ───────────────────────── 列表视图（字符串 / 符号 / 导入 / 节区） ─────────────────────────
 
 /** 卡片列表（结构类视图共用：图标 + 标题 + 地址/元信息 + 类型 chip）。 */
 @Composable
@@ -5469,7 +5501,7 @@ private fun analysisListTitle(view: String, zh: Boolean): String = when (view) {
     "strings" -> if (zh) "字符串" else "Strings"
     "symbols" -> if (zh) "符号" else "Symbols"
     "imports" -> if (zh) "导入" else "Imports"
-    "sections" -> if (zh) "段节" else "Sections"
+    "sections" -> if (zh) "节区" else "Sections"
     "segments" -> if (zh) "程序段" else "Segments"
     "relocs" -> if (zh) "重定位" else "Relocations"
     "dynamic" -> if (zh) "动态段" else "Dynamic"
@@ -5487,7 +5519,7 @@ private fun analysisListHint(view: String, zh: Boolean): String = when (view) {
     "strings" -> if (zh) "搜索字符串内容" else "search string content"
     "symbols" -> if (zh) "搜索符号（按名称 / 地址）" else "search symbols (name / addr)"
     "imports" -> if (zh) "搜索导入（按名称 / 库）" else "search imports (name / lib)"
-    "sections" -> if (zh) "搜索段节（按名称）" else "search sections (name)"
+    "sections" -> if (zh) "搜索节区（按名称）" else "search sections (name)"
     "segments" -> if (zh) "搜索程序段（按名称 / 类型）" else "search segments (name / type)"
     "relocs" -> if (zh) "搜索重定位（按符号 / 地址）" else "search relocations (symbol / addr)"
     "dynamic" -> if (zh) "搜索动态项（按名称 / 值）" else "search dynamic entries (name / value)"
@@ -5778,7 +5810,7 @@ private fun ImportsView(
     )
 }
 
-/** 段节：名称 | 地址 | 大小 | 权限徽标。 */
+/** 节区：名称 | 地址 | 大小 | 权限徽标。 */
 @Composable
 private fun SectionsView(
     tools: ToolPagesState,
@@ -8494,7 +8526,17 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                     hint = if (zh) "rizin 未返回全局调用图。可先跑一次全量分析（aaaa）。" else "rizin returned no call graph. Run full analysis first.",
                     primaryLabel = if (zh) "重新分析" else "Re-analyze", onPrimary = onRefresh,
                 )
-                else -> CallGraphGraphPane(nodes, edges, "", zh, tools.cfgUi)
+                else -> CallGraphGraphPane(
+                    nodes = nodes, edges = edges, findQ = "", zh = zh, ui = tools.cfgUi,
+                    ws = ws, context = context,
+                    onOpenFunction = { nm, va ->
+                        tools.selectedFunctionName = nm
+                        tools.selectedFunctionVa = va
+                        tools.decompileTarget = nm
+                        tools.disasmAddr = va.ifBlank { nm }
+                        tools.analysisView = "funcdetail"
+                    },
+                )
             }
         }
     }
@@ -11896,10 +11938,14 @@ private fun classifyCallEdges(n: Int, edges: List<Pair<Int, Int>>): Pair<HashSet
 }
 
 /** 按模式（hot/root/full）过滤出子图；节点索引化。 */
+/** 调用图模式多选：切换某个模式的选中态（至少保留一个模式）。 */
+private fun toggleCallMode(modes: Set<String>, m: String): Set<String> =
+    if (m in modes) { if (modes.size <= 1) modes else modes - m } else modes + m
+
 private fun buildCallSubgraph(
     nodes: List<JSONObject>,
     edges: List<Pair<String, String>>,
-    mode: String,
+    modes: Set<String>,
     root: String,
     depth: Int,
     maxNodes: Int,
@@ -11922,24 +11968,27 @@ private fun buildCallSubgraph(
         inDeg[t] = (inDeg[t] ?: 0) + 1
     }
     fun deg(n: String): Int = (outAdj[n]?.size ?: 0) + (inDeg[n] ?: 0)
-    val selected: List<String> = when (mode) {
-        "root" -> {
-            val r = root.ifBlank { all.firstOrNull { (inDeg[it] ?: 0) == 0 } ?: all.firstOrNull() }.orEmpty()
-            if (r.isBlank()) emptyList() else {
-                val seen = LinkedHashSet<String>()
-                seen.add(r)
-                var frontier = listOf(r)
-                repeat(depth.coerceIn(1, 8)) {
-                    val next = ArrayList<String>()
-                    frontier.forEach { u -> outAdj[u]?.forEach { v -> if (seen.add(v)) next.add(v) } }
-                    frontier = next
-                }
-                seen.toList()
+    // Exbin GlobalCfgFragment：模式支持多选（热点 / 根展开 / 完整），取并集；
+    // 完整模式上限放宽（对齐 Exbin fullCap），其余模式上限 400。
+    val cap = if ("full" in modes) maxNodes.coerceIn(10, 800) else maxNodes.coerceIn(10, 400)
+    val selectedSet = LinkedHashSet<String>()
+    if ("full" in modes) selectedSet.addAll(all.take(cap))
+    if ("hot" in modes) all.sortedByDescending { deg(it) }.take(cap).forEach { selectedSet.add(it) }
+    if ("root" in modes) {
+        val r = root.ifBlank { all.firstOrNull { (inDeg[it] ?: 0) == 0 } ?: all.firstOrNull() }.orEmpty()
+        if (r.isNotBlank()) {
+            val seen = LinkedHashSet<String>()
+            seen.add(r)
+            var frontier = listOf(r)
+            repeat(depth.coerceIn(1, 8)) {
+                val next = ArrayList<String>()
+                frontier.forEach { u -> outAdj[u]?.forEach { v -> if (seen.add(v)) next.add(v) } }
+                frontier = next
             }
+            selectedSet.addAll(seen)
         }
-        "hot" -> all.sortedByDescending { deg(it) }.take(maxNodes.coerceIn(10, 400))
-        else -> all.take(maxNodes.coerceIn(10, 400))
     }
+    val selected: List<String> = if (selectedSet.isEmpty()) all.take(cap) else selectedSet.toList().take(cap)
     val idx = HashMap<String, Int>(selected.size * 2)
     selected.forEachIndexed { i, n -> idx[n] = i }
     val sub = selected.map { it to (addrOf[it] ?: "") }
@@ -12393,18 +12442,25 @@ private fun CallGraphGraphPane(
     findQ: String,
     zh: Boolean,
     ui: CfgDisplayState,
+    ws: String,
+    context: android.content.Context,
+    onOpenFunction: ((String, String) -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
-    var mode by remember { mutableStateOf("hot") }
+    var modes by remember { mutableStateOf(setOf("hot")) }
     var depthText by remember { mutableStateOf("2") }
     var maxText by remember { mutableStateOf("120") }
     var root by remember { mutableStateOf("") }
     var rebuild by remember { mutableStateOf(0) }
     var optionsOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf(findQ) }
+    // 节点点击 → 该函数的基本块级 CFG 弹窗（对齐 Exbin GlobalCfgFragment.showCfgPopup）
+    var cfgPopup by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var cfgPopupJson by remember { mutableStateOf("") }
+    var popupLoading by remember { mutableStateOf(false) }
 
     val depth = depthText.toIntOrNull()?.coerceIn(1, 8) ?: 2
-    val maxN = maxText.toIntOrNull()?.coerceIn(10, 400) ?: 120
+    val maxN = maxText.toIntOrNull()?.coerceIn(10, 800) ?: 120
     val rootCandidates = remember(nodes, edges) {
         val indeg = HashMap<String, Int>()
         edges.forEach { (_, t) -> indeg[t] = (indeg[t] ?: 0) + 1 }
@@ -12412,8 +12468,8 @@ private fun CallGraphGraphPane(
             .filter { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
             .take(40)
     }
-    val subPair = remember(nodes, edges, mode, root, depth, maxN, rebuild) {
-        buildCallSubgraph(nodes, edges, mode, root, depth, maxN)
+    val subPair = remember(nodes, edges, modes, root, depth, maxN, rebuild) {
+        buildCallSubgraph(nodes, edges, modes, root, depth, maxN)
     }
     var focusToken by remember { mutableStateOf(0) }
     var focusIndex by remember { mutableStateOf(-1) }
@@ -12455,6 +12511,18 @@ private fun CallGraphGraphPane(
         edges.forEach { (_, t) -> indeg[t] = (indeg[t] ?: 0) + 1 }
         nodes.map { it.optString("name").ifBlank { hexAddr(it.opt("offset") ?: it.opt("id")) } }
             .count { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
+    }
+
+    // 点击节点后按需拉取该函数的基本块级 CFG（懒加载，对齐 Exbin showCfgPopup）
+    LaunchedEffect(cfgPopup) {
+        val p = cfgPopup ?: return@LaunchedEffect
+        val va = p.second
+        if (va.isBlank() || ws.isBlank()) { cfgPopupJson = ""; return@LaunchedEffect }
+        popupLoading = true; cfgPopupJson = ""
+        cfgPopupJson = withContext(Dispatchers.IO) {
+            runCatching { EngineProvider.get(context).rzCfg(ws, "", va).toString() }.getOrDefault("")
+        }
+        popupLoading = false
     }
 
     Column(Modifier.fillMaxSize().background(cs.surface)) {
@@ -12512,11 +12580,11 @@ private fun CallGraphGraphPane(
                     Modifier.fillMaxWidth().padding(top = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SegButton(if (zh) "热点模式" else "Hotspot", mode == "hot") { mode = "hot" }
+                    SegButton(if (zh) "热点模式" else "Hotspot", "hot" in modes) { modes = toggleCallMode(modes, "hot") }
                     Spacer(Modifier.size(4.dp))
-                    SegButton(if (zh) "根展开" else "Rooted", mode == "root") { mode = "root" }
+                    SegButton(if (zh) "根展开" else "Rooted", "root" in modes) { modes = toggleCallMode(modes, "root") }
                     Spacer(Modifier.size(4.dp))
-                    SegButton(if (zh) "完整模式" else "Full", mode == "full") { mode = "full" }
+                    SegButton(if (zh) "完整模式" else "Full", "full" in modes) { modes = toggleCallMode(modes, "full") }
                     Spacer(Modifier.weight(1f))
                     Surface(
                         onClick = { optionsOpen = !optionsOpen },
@@ -12597,7 +12665,7 @@ private fun CallGraphGraphPane(
                         }
                     }
                 }
-                if (mode == "root" && rootCandidates.isNotEmpty()) {
+                if ("root" in modes && rootCandidates.isNotEmpty()) {
                     FlowRow(
                         Modifier.fillMaxWidth().padding(top = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -12648,9 +12716,64 @@ private fun CallGraphGraphPane(
                     highlightTexts = matchNames,
                     focusText = focusName,
                     focusToken = focusToken,
+                    onNodeClick = { _, name ->
+                        val va = subPair.first.firstOrNull { it.first == name }?.second.orEmpty()
+                        cfgPopup = name to va
+                    },
                 )
                 // Exbin fragment_global_cfg.xml 的 btnRankDir（布局方向 TB/LR）
                 CfgRankDirButton(ui, zh, Modifier.align(Alignment.TopEnd))
+            }
+        }
+        // ── 节点点击弹层：该函数的基本块级 CFG（对齐 Exbin GlobalCfgFragment.showCfgPopup）──
+        cfgPopup?.let { popupFn ->
+            val pname = popupFn.first
+            val pva = popupFn.second
+            Dialog(onDismissRequest = { cfgPopup = null }) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = cs.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, cs.outlineVariant),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text(
+                            (pname.ifBlank { pva }) + "  ·  " + (if (zh) "基本块级 CFG" else "basic-block CFG"),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = cs.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (pva.isNotBlank()) MonoLine(pname + "  @  " + pva, cs.onSurfaceVariant, AppText.label)
+                        Spacer(Modifier.size(8.dp))
+                        Box(Modifier.fillMaxWidth().height(420.dp)) {
+                            when {
+                                popupLoading -> AnalysisLoading()
+                                cfgPopupJson.isBlank() -> AnalysisEmptyState(
+                                    title = if (zh) "无控制流数据" else "No CFG",
+                                    hint = if (zh) "该函数可能尚未反汇编，可先跑完整分析再试" else "not disassembled yet; run full analysis",
+                                    primaryLabel = if (zh) "关闭" else "Close",
+                                    onPrimary = { cfgPopup = null },
+                                )
+                                else -> CfgCanvas(
+                                    json = cfgPopupJson,
+                                    zh = zh,
+                                    modifier = Modifier.fillMaxSize(),
+                                    ui = remember { CfgDisplayState() },
+                                    fnLabel = pname,
+                                )
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { cfgPopup = null }) { Text(if (zh) "关闭" else "Close") }
+                            if (onOpenFunction != null && pname.isNotBlank()) {
+                                TextButton(onClick = { cfgPopup = null; onOpenFunction.invoke(pname, pva) }) {
+                                    Text(if (zh) "打开详情" else "Open detail")
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

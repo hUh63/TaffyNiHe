@@ -1376,6 +1376,11 @@ internal fun CfgCanvas(
     highlightTexts: Set<String> = emptySet(),
     focusText: String = "",
     focusToken: Int = 0,
+    /**
+     * 节点点击回调（index, addrText）。非空时改为「回调外部处理」（如调用图：点击函数节点弹出该函数的
+     * 基本块级 CFG 弹窗），不再在画布内弹「块详情」小浮层。
+     */
+    onNodeClick: ((index: Int, addrText: String) -> Unit)? = null,
 ) {
     val density = LocalDensity.current.density
     val baseGraph = remember(json) { parseCfgGraph(json) }
@@ -1513,9 +1518,15 @@ internal fun CfgCanvas(
                         val originY = viewport.height / 2f + pan.y
                         val wx = (pos.x - originX) / scale
                         val wy = (pos.y - originY) / scale
-                        val hit = effective.boxes.lastOrNull { it.contains(wx, wy) }?.index ?: -1
+                        val hitBox = effective.boxes.lastOrNull { it.contains(wx, wy) }
+                        val hit = hitBox?.index ?: -1
                         selected = hit
-                        popupAt = if (hit >= 0) Offset(pos.x, pos.y) else null
+                        if (hit >= 0 && onNodeClick != null && hitBox != null) {
+                            popupAt = null
+                            onNodeClick.invoke(hit, hitBox.addrText)
+                        } else {
+                            popupAt = if (hit >= 0) Offset(pos.x, pos.y) else null
+                        }
                     }
                 }
                 .pointerInput(Unit) {

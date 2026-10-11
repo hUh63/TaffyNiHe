@@ -2,6 +2,7 @@ package com.soreverse.mcp.engine
 
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
+import com.soreverse.mcp.nativecore.NativeEngine
 import com.soreverse.mcp.parseCfgGraph
 import org.json.JSONArray
 import org.json.JSONObject
@@ -69,7 +70,8 @@ private fun deflatStateRegOf(
     disp: Int,
 ): String? {
     val votes = HashMap<String, Int>()
-    for ((idx, list) in bounds.withIndex()) {
+    for ((idx, triple) in bounds.withIndex()) {
+        val list = triple.third
         if (idx == disp || list.isEmpty()) continue
         if (deflatStateOf(list) == null) continue
         for (ins in list.asReversed()) {

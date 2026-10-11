@@ -68,8 +68,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -138,6 +141,34 @@ private const val ELK_MAX_EDGES = 400
 /** 异步布局未就绪时的空占位（保证下游 `layout.xxx` 访问安全）。 */
 private val EMPTY_CFG_LAYOUT = CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
 
+/**
+ * 解析 / 布局结果缓存（LRU，UI 线程读 + 后台线程写，故全部访问加锁）。
+ *
+ * 调用图在「热点 ↔ 完整」之间来回切时，同一份 JSON 会反复出现：没有缓存时每次切换都要
+ * 重新解析 JSON（几 MB）+ 重跑布局（1500 节点可达数秒），而旧布局任务又无法及时退出、
+ * 一直占着 Dispatchers.Default —— 表现为「第一次切完整不卡、第二次切就卡住」。
+ * 有了缓存，第二次切完整模式直接命中：0 解析、0 布局。
+ */
+private const val CFG_CACHE_MAX = 6
+private val cfgParseCache = LinkedHashMap<String, CfgGraph>(4, 0.75f, true)
+private val cfgLayoutCache = object : LinkedHashMap<String, CfgLayoutResult>(4, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CfgLayoutResult>?): Boolean =
+        size > CFG_CACHE_MAX
+}
+
+private fun cfgParseCached(json: String): CfgGraph {
+    synchronized(cfgParseCache) { cfgParseCache[json]?.let { return it } }
+    val g = runCatching { parseCfgGraph(json) }.getOrElse { CfgGraph("", "", emptyList(), emptyList()) }
+    synchronized(cfgParseCache) { cfgParseCache[json] = g }
+    return g
+}
+
+private fun cfgLayoutCacheGet(key: String): CfgLayoutResult? = synchronized(cfgLayoutCache) { cfgLayoutCache[key] }
+
+private fun cfgLayoutCachePut(key: String, v: CfgLayoutResult) {
+    synchronized(cfgLayoutCache) { cfgLayoutCache[key] = v }
+}
+
 /** 画布缩放下限：整幅大图也必须能一次看全（对齐 XRefDagView 的做法）。 */
 private const val CFG_MIN_SCALE = 0.02f
 private const val CFG_MAX_SCALE = 6f
@@ -156,8 +187,14 @@ private fun transposeToLr(r: CfgLayoutResult): CfgLayoutResult = CfgLayoutResult
 )
 
 /** 自研线性分层布局（O(n+e)，恒为 TB），按 rankDir 决定是否转置 —— 大图闸门与 layoutMode 兜底共用。 */
-private fun fastCfgLayout(graph: CfgGraph, density: Float, maxLines: Int, rankDir: String): CfgLayoutResult {
-    val r = layoutCfgGraph(graph, density, maxLines)
+private fun fastCfgLayout(
+    graph: CfgGraph,
+    density: Float,
+    maxLines: Int,
+    rankDir: String,
+    cancelled: () -> Boolean = { false },
+): CfgLayoutResult {
+    val r = layoutCfgGraph(graph, density, maxLines, cancelled)
     return if (rankDir.equals("LR", true)) transposeToLr(r) else r
 }
 
@@ -398,7 +435,12 @@ private fun wrapSummary(text: String, paint: Paint, avail: Float, maxLines: Int)
  * 分层 → 层内定序（median+barycenter 多轮迭代）→ 端口分配 → x 坐标收敛 → 边路由。
  * 空图 / 非法输入返回空布局；块数超过阈值自动关闭虚拟节点并降低迭代轮数。
  */
-internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2): CfgLayoutResult {
+internal fun layoutCfgGraph(
+    graph: CfgGraph,
+    density: Float,
+    maxLines: Int = 2,
+    cancelled: () -> Boolean = { false },
+): CfgLayoutResult {
     val n = graph.blocks.size
     if (n == 0 || density <= 0f) {
         return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
@@ -424,6 +466,7 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
     val heights = FloatArray(n)
     val summaries = arrayOfNulls<List<String>>(n)
     for (i in 0 until n) {
+        if (i and 63 == 0 && cancelled()) throw CancellationException("cfg layout cancelled")
         val b = graph.blocks[i]
         val addrW = paintAddr.measureText(b.addrText)
         val sumW = paintSum.measureText(b.summary)
@@ -580,6 +623,7 @@ internal fun layoutCfgGraph(graph: CfgGraph, density: Float, maxLines: Int = 2):
     }
 
     repeat(iterations) {
+        if (cancelled()) throw CancellationException("cfg layout cancelled")
         for (li in 1 until layers.size) orderLayer(layers[li], positionsOf(layers[li - 1]), true)
         for (li in layers.size - 2 downTo 0) orderLayer(layers[li], positionsOf(layers[li + 1]), false)
     }
@@ -826,6 +870,7 @@ internal fun layoutCfgGraphDagre(
     maxLines: Int = 2,
     backend: String = "dagre",
     rankDir: String = "TB",
+    cancelled: () -> Boolean = { false },
 ): CfgLayoutResult {
     val n = graph.blocks.size
     if (n == 0 || density <= 0f) {
@@ -833,7 +878,7 @@ internal fun layoutCfgGraphDagre(
     }
     // ── 规模闸门：大图 / 稠密图不让 ELK 上（它会把 UI 线程卡死几十秒），直接走自研分层布局 ──
     if (backend == "elk" && (n > ELK_MAX_NODES || graph.edges.size > ELK_MAX_EDGES)) {
-        return fastCfgLayout(graph, density, maxLines, rankDir)
+        return fastCfgLayout(graph, density, maxLines, rankDir, cancelled)
     }
 
     val padX = PAD_X_DP * density
@@ -854,6 +899,7 @@ internal fun layoutCfgGraphDagre(
     val heights = FloatArray(n)
     val summaries = arrayOfNulls<List<String>>(n)
     for (i in 0 until n) {
+        if (i and 63 == 0 && cancelled()) throw CancellationException("cfg layout cancelled")
         val b = graph.blocks[i]
         val addrW = paintAddr.measureText(b.addrText)
         val sumW = paintSum.measureText(b.summary)
@@ -891,7 +937,7 @@ internal fun layoutCfgGraphDagre(
         )
     } else {
         ExbinDagre.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), rankDir)
-    } ?: return fastCfgLayout(graph, density, maxLines, rankDir)
+    } ?: return fastCfgLayout(graph, density, maxLines, rankDir, cancelled)
     val nodesMap = laid.first
     val routesMap = laid.second
 
@@ -907,7 +953,7 @@ internal fun layoutCfgGraphDagre(
         minY = min(minY, nd.y - heights[i] / 2f)
         maxY = max(maxY, nd.y + heights[i] / 2f)
     }
-    if (minX > maxX) return fastCfgLayout(graph, density, maxLines, rankDir)
+    if (minX > maxX) return fastCfgLayout(graph, density, maxLines, rankDir, cancelled)
     val cx0 = (minX + maxX) / 2f
     val cy0 = (minY + maxY) / 2f
 
@@ -1277,8 +1323,10 @@ private fun DrawScope.drawCfgBackground(
             drawLine(soft, Offset(c.x, 0f), Offset(c.x, viewportSize.height), strokeWidth = 1f)
         }
         else -> {
+            // 屏幕空间最小间距 16px：否则中大图（scale 中等）会每帧画 1~2 万个圆点，
+            // 手势直接被压死 —— 与「切完整模式后图控制不了」叠加。
             val step = 42f * density * sc
-            if (step >= 10f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
+            if (step >= 16f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
                 val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
                 val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
                 var gx = ((originX % step) + step) % step
@@ -1480,7 +1528,7 @@ internal fun CfgCanvas(
     showRankDir: Boolean = false,
 ) {
     val density = LocalDensity.current.density
-    val baseGraph = remember(json) { parseCfgGraph(json) }
+    val baseGraph = remember(json) { cfgParseCached(json) }
     // 块内容模式：summary=首行摘要；asm=块内显示该块完整指令（对标 Exbin BLOCK_CONTENT_ASM）。
     val asmBlocks = ui.contentMode != "summary" && blockLines.isNotEmpty()
     val maxLines = if (asmBlocks) ASM_BLOCK_MAX_LINES else 2
@@ -1493,27 +1541,53 @@ internal fun CfgCanvas(
         )
     }
     // 布局在后台线程算（ELK 大图可达几十秒；原先在 composition 里同步跑会把 UI 线程卡死 → 手势全部失灵）。
-    var layout by remember { mutableStateOf(EMPTY_CFG_LAYOUT) }
-    var layoutReady by remember { mutableStateOf(false) }
-    LaunchedEffect(graph, density, ui.layoutMode, ui.rankDir, maxLines) {
+    // 布局键：引擎 / 方向 / 块行数（随 asmBlocks 变）+ JSON 内容指纹。切回已算过的模式时它完全一致。
+    val layoutKey = "${ui.layoutMode}|${ui.rankDir}|$maxLines|${json.length}:${json.hashCode()}"
+    // 布局代次：只有最新一代的结果才允许写回状态（切换模式后旧任务完成时必须丢弃）。
+    val layoutGen = remember { AtomicInteger(0) }
+    // 切模式时状态**同步**重置为该模式的缓存值（命中则立即可用，不再闪一帧加载态、也不残留上一个模式的图）。
+    val layoutCached = cfgLayoutCacheGet(layoutKey)
+    var layout by remember(layoutKey, graph) { mutableStateOf(layoutCached ?: EMPTY_CFG_LAYOUT) }
+    var layoutReady by remember(layoutKey, graph) { mutableStateOf(layoutCached != null) }
+    LaunchedEffect(layoutKey, graph) {
+        val cached = cfgLayoutCacheGet(layoutKey)
+        if (cached != null) {
+            layout = cached
+            layoutReady = true
+            return@LaunchedEffect
+        }
+        val gen = layoutGen.incrementAndGet()
         val g = graph
         val d = density
         val mode = ui.layoutMode
         val rd = ui.rankDir
         val ml = maxLines
         layoutReady = false
-        layout = withContext(Dispatchers.Default) {
-            runCatching {
+        val res = try {
+            withContext(Dispatchers.Default) {
+                // 协作式取消：布局是纯计算（无挂起点），必须自己检查 Job 状态才会及时退出，
+                // 否则切走后旧的大图布局仍占着线程跑完，堆积就是「第二次切卡住」的另一半原因。
+                val job = kotlin.coroutines.coroutineContext[Job]
+                val cancelled = { job != null && !job.isActive }
                 when (mode) {
                     "grid" -> layoutCfgGrid(g, d, ml)
                     "force" -> layoutCfgForce(g, d, ml)
-                    "dagre" -> layoutCfgGraphDagre(g, d, ml, "dagre", rd)
-                    "elk" -> layoutCfgGraphDagre(g, d, ml, "elk", rd)
-                    else -> fastCfgLayout(g, d, ml, rd)
+                    "dagre" -> layoutCfgGraphDagre(g, d, ml, "dagre", rd, cancelled)
+                    "elk" -> layoutCfgGraphDagre(g, d, ml, "elk", rd, cancelled)
+                    else -> fastCfgLayout(g, d, ml, rd, cancelled)
                 }
-            }.getOrDefault(EMPTY_CFG_LAYOUT)
+            }
+        } catch (e: CancellationException) {
+            // 取消不是错误：绝不写回状态（旧实现用 runCatching 会吞掉取消，把 layout 置空 → 白屏）。
+            throw e
+        } catch (e: Throwable) {
+            EMPTY_CFG_LAYOUT
         }
-        layoutReady = true
+        if (gen == layoutGen.get()) {
+            layout = res
+            layoutReady = true
+            cfgLayoutCachePut(layoutKey, res)
+        }
     }
     // rzCfg 返回 err JSON 时给出结构化提示，而不是只显示「空图」。
     val errHint = remember(json) {
@@ -2218,4 +2292,5 @@ internal fun layoutCfgForce(graph: CfgGraph, density: Float, maxLines: Int = 2):
         returnIndices = emptySet(),
     )
 }
+
 

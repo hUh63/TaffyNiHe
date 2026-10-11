@@ -11644,6 +11644,19 @@ private fun buildSccDag(
 }
 
 /** 调用图 → CFG 画布 JSON（GlobalCfgView extends CfgCanvasView：复用 CFG 画布渲染）。 */
+/** 调用图 → CFG JSON 的 LRU 缓存（按 模式/根/深度/上限/规模 作键；UI 线程拼接大 JSON 很贵）。 */
+private const val CALLGRAPH_JSON_CACHE_MAX = 6
+private val callGraphJsonCache = object : LinkedHashMap<String, String>(4, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+        size > CALLGRAPH_JSON_CACHE_MAX
+}
+
+private fun callGraphJsonCacheGet(key: String): String? = synchronized(callGraphJsonCache) { callGraphJsonCache[key] }
+
+private fun callGraphJsonCachePut(key: String, v: String) {
+    synchronized(callGraphJsonCache) { callGraphJsonCache[key] = v }
+}
+
 private fun callGraphCfgJson(
     sub: List<Pair<String, String>>,
     subEdges: List<Pair<Int, Int>>,
@@ -13219,9 +13232,15 @@ private fun CallGraphGraphPane(
     val subPair = remember(nodes, edges, graphMode, root, depth, maxN, rebuild) {
         buildCallSubgraph(nodes, edges, graphMode, root, depth, maxN)
     }
-    // 调用图 → CFG 画布 JSON：必须缓存（大图下每次重组都重新拼字符串会让手势直接卡死）
-    val cfgJson = remember(subPair, zh, fnSizes) {
-        callGraphCfgJson(subPair.first, subPair.second, zh, fnSizes)
+    // 调用图 → CFG 画布 JSON：必须缓存（大图下每次重组都重新拼字符串会让手势直接卡死）。
+    // 再叠一层 LRU：热点 ↔ 完整来回切时同一模式会反复出现，命中即不再重拼（1442 行级的 JSON 拼接在 UI 线程）。
+    val cfgJsonKey = "$graphMode|$root|$depth|$maxN|$rebuild|${subPair.first.size}|${subPair.second.size}|${fnSizes.size}"
+    val cfgJson = remember(cfgJsonKey) {
+        callGraphJsonCacheGet(cfgJsonKey) ?: run {
+            val txt = callGraphCfgJson(subPair.first, subPair.second, zh, fnSizes)
+            callGraphJsonCachePut(cfgJsonKey, txt)
+            txt
+        }
     }
     var focusToken by remember { mutableStateOf(0) }
     var focusIndex by remember { mutableStateOf(-1) }
@@ -13536,3 +13555,4 @@ private fun CallGraphGraphPane(
         }
     }
 }
+

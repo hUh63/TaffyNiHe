@@ -142,8 +142,8 @@ internal object OllvmDeFlat {
      * 重编码前不必再校验 opcode —— 调用方用 decodeTerminator 得到 kind，kind 即代表原文 opcode 已核对过。
      */
     internal fun encodeBranch(kind: DeFlatKind, insnAddr: Long, target: Long): ByteArray? = when (kind) {
-        DeFlatKind.ARM64_B -> encodeArm64(0x14000000, insnAddr, target)
-        DeFlatKind.ARM64_BL -> encodeArm64(0x94000000, insnAddr, target)
+        DeFlatKind.ARM64_B -> encodeArm64(0x14000000.toInt(), insnAddr, target)
+        DeFlatKind.ARM64_BL -> encodeArm64(0x94000000.toInt(), insnAddr, target)
         DeFlatKind.ARM32_B -> encodeArm32(insnAddr, target)
         DeFlatKind.X86_JMP_REL32 -> encodeX86Rel32(insnAddr, target)
         DeFlatKind.X86_JMP_REL8 -> encodeX86Rel8(insnAddr, target)
@@ -157,11 +157,13 @@ internal object OllvmDeFlat {
                 if (bytes.size < 4) return null
                 val w = leInt(bytes, 0)
                 val op = w and 0xFC000000.toInt()
-                if (op == 0x14000000 || op == 0x94000000) {
+                val bOp = 0x14000000
+                val blOp = 0x94000000.toInt()
+                if (op == bOp || op == blOp) {
                     val imm26 = w and 0x03FFFFFF
                     val raw = (imm26.toLong() shl 2)
                     val signed = if ((imm26 and 0x02000000) != 0) raw - (1L shl 28) else raw
-                    val kind = if (op == 0x14000000) DeFlatKind.ARM64_B else DeFlatKind.ARM64_BL
+                    val kind = if (op == bOp) DeFlatKind.ARM64_B else DeFlatKind.ARM64_BL
                     return DeFlatTerminator(addr, bytes.copyOf(4), kind, addr + signed)
                 }
                 return null

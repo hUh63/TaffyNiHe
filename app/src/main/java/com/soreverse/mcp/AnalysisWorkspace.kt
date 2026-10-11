@@ -4283,6 +4283,7 @@ private fun FuncXRefView(
     var loading by remember(loc, tick) { mutableStateOf(false) }
     var dir by remember { mutableStateOf("both") }
     var depth by remember { mutableStateOf(1) }
+    var showCross by remember { mutableStateOf(true) }
 
     LaunchedEffect(loc, ws, tick) {
         if (ws.isBlank() || loc.isBlank()) return@LaunchedEffect
@@ -4403,7 +4404,8 @@ private fun FuncXRefView(
                         SmallAction("−", enabled = depth > 1) { depth-- }
                         SmallAction(if (zh) "深度 $depth" else "depth $depth", active = true) {}
                         SmallAction("+", enabled = depth < 5) { depth++ }
-                        SmallAction(if (zh) "重置" else "Reset") { depth = 1; dir = "both" }
+                        SmallAction(if (zh) "重置" else "Reset") { depth = 1; dir = "both"; showCross = true }
+                        TabChip(if (zh) "交叉边" else "Cross", selected = showCross) { showCross = !showCross }
                     }
                     Spacer(Modifier.size(6.dp))
                     val sub = remember(gNodes, gEdges, loc, depth, dir) {
@@ -4419,12 +4421,12 @@ private fun FuncXRefView(
                     } else {
                         val tc = remember(sub) { classifyCallEdges(sub.first.size, sub.second) }
                         MonoLine(
-                            if (zh) "邻域 · ${sub.first.size} 节点 · ${sub.second.size} 边 · 树边 ${tc.first.size} · 交叉边 ${tc.second.size}"
-                            else "ego · ${sub.first.size} nodes · ${sub.second.size} edges · tree ${tc.first.size} · cross ${tc.second.size}",
+                            if (zh) "邻域 · ${sub.first.size} 节点 · ${sub.second.size} 边 · 树边 ${tc.first.size} · 交叉边 ${tc.second.size} · 显示 ${if (showCross) "全部" else "仅树边"}"
+                            else "ego · ${sub.first.size} nodes · ${sub.second.size} edges · tree ${tc.first.size} · cross ${tc.second.size} · ${if (showCross) "all" else "tree only"}",
                             cs.onSurfaceVariant, AppText.label,
                         )
                         Spacer(Modifier.size(6.dp))
-                        CallGraphCanvas(sub.first, sub.second, "TB", query, zh, "curve", Modifier.fillMaxWidth().weight(1f))
+                        CallGraphCanvas(sub.first, if (showCross) sub.second else tc.first, "TB", query, zh, "curve", Modifier.fillMaxWidth().weight(1f))
                     }
                 }
                 curRows.isEmpty() -> AnalysisEmptyState(
@@ -10433,7 +10435,7 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
     val ws = tools.sharedWorkspaceId
     val tick = tools.reloadTick
     val cs = MaterialTheme.colorScheme
-    var action by remember { mutableStateOf("all") }
+    var action by remember { mutableStateOf("constants") }
     var data by remember(ws, tick, action) { mutableStateOf<JSONObject?>(null) }
     var loading by remember(ws, tick, action) { mutableStateOf(false) }
     var error by remember(ws, tick, action) { mutableStateOf("") }
@@ -10469,7 +10471,7 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
 
     Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(
-            selectedTabIndex = listOf("all", "constants", "globals").indexOf(action).coerceAtLeast(0),
+            selectedTabIndex = listOf("constants", "globals").indexOf(action).coerceAtLeast(0),
             edgePadding = 8.dp,
             containerColor = cs.surface,
             contentColor = cs.primary,
@@ -10477,7 +10479,6 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
             modifier = Modifier.fillMaxWidth(),
         ) {
             listOf(
-                "all" to (if (zh) "全部" else "All"),
                 "constants" to (if (zh) "常量" else "Constants"),
                 "globals" to (if (zh) "全局变量" else "Globals"),
             ).forEach { (k, l) ->

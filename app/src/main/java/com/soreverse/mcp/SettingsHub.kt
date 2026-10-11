@@ -175,17 +175,20 @@ internal fun SettingsHub(
                 var settingsQuery by remember { mutableStateOf("") }
                 SettingsSearchField(t, settingsQuery) { settingsQuery = it }
                 if (settingsQuery.isBlank()) {
-                    SettingsGroup(if (t.zh) "服务与连接" else "Service & connection") {
-                        SettingsNavRow(t, SettingsDest.ServiceConfig, onDest); GroupDivider()
+                    // ── 对齐 Explorer So SettingsFragment 的分组：外观 / AI·MCP / 权限 / 调试 / 关于 ──
+                    SettingsGroup(if (t.zh) "外观" else "Appearance") {
+                        SettingsNavRow(t, SettingsDest.Appearance, onDest)
+                    }
+                    SettingsGroup(if (t.zh) "AI · MCP" else "AI · MCP") {
                         SettingsNavRow(t, SettingsDest.ApkBridge, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Tunnel, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.AiDeep, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.ServiceConfig, onDest); GroupDivider()
+                        SettingsNavRow(t, SettingsDest.Tunnel, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Probe, onDest)
                     }
                     SettingsGroup(if (t.zh) "分析与动态" else "Analysis & dynamic") {
                         SettingsNavRow(t, SettingsDest.Rizin, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Edbg, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.LogcatViewer, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Capture, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Sandbox, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Workflow, onDest); GroupDivider()
@@ -209,13 +212,15 @@ internal fun SettingsHub(
                         SettingsNavRow(t, SettingsDest.Workspace, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Extensions, onDest)
                     }
-                    SettingsGroup(if (t.zh) "外观与保活" else "Appearance & keep-alive") {
-                        SettingsNavRow(t, SettingsDest.Appearance, onDest); GroupDivider()
+                    SettingsGroup(if (t.zh) "权限与保活" else "Permissions & keep-alive") {
+                        SettingsNavRow(t, SettingsDest.Permissions, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.KeepAlive, onDest)
                     }
-                    SettingsGroup(if (t.zh) "诊断与关于" else "Diagnostics & about") {
+                    SettingsGroup(if (t.zh) "调试" else "Debug") {
+                        SettingsNavRow(t, SettingsDest.LogcatViewer, onDest)
+                    }
+                    SettingsGroup(if (t.zh) "关于" else "About") {
                         SettingsNavRow(t, SettingsDest.ToolStats, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Permissions, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Updates, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.BackupRestore, onDest); GroupDivider()
                         SettingsNavRow(t, SettingsDest.Help, onDest); GroupDivider()

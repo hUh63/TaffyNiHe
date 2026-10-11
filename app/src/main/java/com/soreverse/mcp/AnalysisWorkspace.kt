@@ -3179,8 +3179,9 @@ private fun ElfMetaView(
         )
         Spacer(Modifier.size(6.dp))
         MonoLine(
-            (if (zh) "ELF 元数据 · 共 " else "ELF metadata · ") + "${rows.size}" + (if (zh) " 项" else " items") +
-                (if (query.isNotBlank()) " · " + (if (zh) "匹配 " else "match ") + shown.size else ""),
+            // 对齐 Exbin HeaderTabFragment：未过滤「ELF 文件头」，过滤后「ELF 文件头 · n / m」
+            if (query.isBlank()) (if (zh) "ELF 文件头" else "ELF header")
+            else (if (zh) "ELF 文件头 · " else "ELF header · ") + shown.size + " / " + rows.size,
             cs.onSurfaceVariant, AppText.label,
         )
         Spacer(Modifier.size(6.dp))

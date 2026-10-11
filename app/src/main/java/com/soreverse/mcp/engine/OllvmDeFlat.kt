@@ -72,6 +72,24 @@ internal class DeFlatInsn(
     val disasm: String,
 )
 
+/** 跳表（switch）分发器规格：状态值经表得到真实目标。 */
+internal class DeFlatTableSpec(
+    val tableVa: Long,
+    val entrySize: Int,
+    val signed: Boolean,
+    val relative: Boolean,
+    val indexBase: Long,
+    val count: Int,
+)
+
+/** 去平坦化后的 CFG 形状（供对比图使用）。 */
+internal class DeFlatGraph(
+    val keptBlocks: Int,
+    val removed: Int,
+    val edges: List<Pair<Int, Int>>,
+    val added: List<Pair<Int, Int>>,
+)
+
 internal object OllvmDeFlat {
 
     // ───────────────────────── 指令编解码 ─────────────────────────
@@ -329,5 +347,161 @@ internal object OllvmDeFlat {
             }
         }
         return map
+    }
+
+    // ───────────────────────── 跳表（switch）分发器 ─────────────────────────
+
+    private fun hexOrDec(t: String): Long {
+        val s = t.removePrefix("#").trim()
+        return if (s.startsWith("0x", true)) s.substring(2).toLongOrNull(16) ?: 0L else s.toLongOrNull() ?: 0L
+    }
+
+    private fun firstHex(d: String): Long? {
+        val m = Regex("0x[0-9a-fA-F]+").find(d) ?: return null
+        return m.value.substring(2).toLongOrNull(16)
+    }
+
+    private fun loadEntrySize(mn: String, disasm: String): Int = when (mn) {
+        "ldrb", "ldurb" -> 1
+        "ldrh", "ldurh", "ldrsh", "ldursh", "movzx" -> 2
+        "ldrsw", "ldursw", "movsxd", "movsx" -> 4
+        else -> if (Regex("\\bw\\d+\\s*,").containsMatchIn(disasm)) 4 else 8
+    }
+
+    /**
+     * 从分发器指令里识别「跳表」规格：arm64 用 adrp+add 得到表基址 + 带缩放索引的 ldr；
+     * x86 用 lea rX,[rip+off] 得到表基址 + [reg+reg*N]。识别不出返回 null。
+     *
+     * 只负责「识别形态」，**不做正确性保证**：真目标集合由 validateTableTargets 用分发器出边校验。
+     */
+    internal fun detectTableSpec(insns: List<DeFlatInsn>): DeFlatTableSpec? {
+        var tableVa: Long? = null
+        var entrySize = 0
+        var scale = 0
+        var signed = false
+        var adrpReg: String? = null
+        var adrpVal = 0L
+        for (ins in insns) {
+            val d = ins.disasm
+            if (d.isBlank()) continue
+            val mn = d.substringBefore(' ').lowercase()
+            when (mn) {
+                "adrp" -> {
+                    val m = Regex("^adrp\\s+(\\w+)\\s*,\\s*#?(0x[0-9a-fA-F]+)").find(d)
+                    if (m != null) {
+                        adrpReg = m.groupValues[1]
+                        adrpVal = m.groupValues[2].substring(2).toLongOrNull(16) ?: 0L
+                    }
+                }
+                "add" -> {
+                    val m = Regex("^add\\s+(\\w+)\\s*,\\s*(\\w+)\\s*,\\s*#(0x[0-9a-fA-F]+|\\d+)").find(d)
+                    if (m != null && adrpReg != null && m.groupValues[1] == adrpReg && m.groupValues[2] == adrpReg) {
+                        tableVa = adrpVal + hexOrDec(m.groupValues[3])
+                    }
+                }
+                "lea" -> {
+                    val rip = Regex("\\[\\s*rip\\s*\\+\\s*(0x[0-9a-fA-F]+|\\d+)\\s*\\]").find(d)
+                    tableVa = if (rip != null) ins.offset + ins.size + hexOrDec(rip.groupValues[1]) else firstHex(d)
+                }
+                "ldr", "ldrb", "ldrh", "ldrsw", "ldrsh", "ldur" -> {
+                    val m = Regex("\\[\\s*\\w+\\s*,\\s*\\w+\\s*,\\s*lsl\\s*#(\\d+)\\s*\\]").find(d)
+                    if (m != null) {
+                        scale = 1 shl (m.groupValues[1].toIntOrNull() ?: 0)
+                        entrySize = loadEntrySize(mn, d)
+                        signed = mn == "ldrsw" || mn == "ldrsh"
+                    } else if (Regex("\\[\\s*\\w+\\s*,\\s*\\w+\\s*\\]").containsMatchIn(d)) {
+                        scale = 1
+                        entrySize = loadEntrySize(mn, d)
+                        signed = mn == "ldrsw" || mn == "ldrsh"
+                    }
+                }
+                "movsxd", "movsx", "movzx", "mov" -> {
+                    val m = Regex("\\[\\s*(\\w+)\\s*\\+\\s*(\\w+)\\s*\\*\\s*(\\d+)\\s*\\]").find(d)
+                    if (m != null) {
+                        scale = m.groupValues[3].toIntOrNull() ?: 0
+                        entrySize = loadEntrySize(mn, d)
+                        signed = mn == "movsxd" || mn == "movsx"
+                    }
+                }
+                "jmp" -> {
+                    val m = Regex("\\[\\s*(\\w+)\\s*\\*\\s*(\\d+)\\s*\\+\\s*(0x[0-9a-fA-F]+)\\s*\\]").find(d)
+                    if (m != null) {
+                        scale = m.groupValues[2].toIntOrNull() ?: 0
+                        entrySize = 8
+                        tableVa = m.groupValues[3].substring(2).toLongOrNull(16)
+                    }
+                }
+            }
+        }
+        val base = tableVa ?: return null
+        if (entrySize <= 0) entrySize = 8
+        // 缩放与项宽一致（scale == entrySize）说明索引是「第 i 项」；否则按比例归一。
+        val relative = signed
+        return DeFlatTableSpec(base, entrySize, signed, relative, 0L, -1)
+    }
+
+    private fun readLe(b: ByteArray, off: Int, size: Int, signed: Boolean): Long {
+        var v = 0L
+        for (k in 0 until size) v = v or ((b[off + k].toLong() and 0xFF) shl (8 * k))
+        if (signed && size < 8) {
+            val signBit = 1L shl (8 * size - 1)
+            if ((v and signBit) != 0L) v -= (1L shl (8 * size))
+        }
+        return v
+    }
+
+    /** 读表：map[状态值] = 目标 VA。count<=0 时按字节长度取满。假设 状态值 == 表索引（OLLVM 默认）。 */
+    internal fun decodeJumpTable(bytes: ByteArray, spec: DeFlatTableSpec, count: Int): Map<Long, Long> {
+        val out = LinkedHashMap<Long, Long>()
+        val n = if (count > 0) count else bytes.size / spec.entrySize.coerceAtLeast(1)
+        for (i in 0 until n) {
+            val off = i * spec.entrySize
+            if (off + spec.entrySize > bytes.size) break
+            val v = readLe(bytes, off, spec.entrySize, spec.signed)
+            val target = if (spec.relative) spec.tableVa + v else v
+            out[spec.indexBase + i.toLong()] = target
+        }
+        return out
+    }
+
+    /**
+     * 用「分发器出边目标集合」校验解出的表映射：解出的目标必须基本落在该集合内
+     * （允许多至 1 个 default / 越界项）。不满足则返回空表——宁可不写也不写错。
+     */
+    internal fun validateTableTargets(decoded: Map<Long, Long>, outTargets: Set<Long>): Map<Long, Long> {
+        if (decoded.size < 2 || outTargets.isEmpty()) return emptyMap()
+        val ok = decoded.filterValues { it in outTargets }
+        if (ok.size < 2) return emptyMap()
+        if (decoded.size - ok.size > 1) return emptyMap()
+        return ok
+    }
+
+    // ───────────────────────── 去平坦化后的 CFG 形状（对比图） ─────────────────────────
+
+    /**
+     * 计算去平坦化后的 CFG：删掉分发器，把「b -> dispatcher」边换成「b -> 真实后继 T」。
+     * @param retarget 块 index -> 新目标块 index（仅来自 safe 补丁）
+     */
+    internal fun deFlattenGraph(
+        blockCount: Int,
+        edges: List<Pair<Int, Int>>,
+        dispatcher: Int,
+        retarget: Map<Int, Int>,
+    ): DeFlatGraph {
+        val out = ArrayList<Pair<Int, Int>>()
+        val added = ArrayList<Pair<Int, Int>>()
+        val seen = HashSet<String>()
+        fun add(f: Int, t: Int) {
+            if (f == dispatcher || t == dispatcher) return
+            if (seen.add("$f>$t")) out.add(f to t)
+        }
+        for ((f, t) in edges) add(f, t)
+        for ((f, t) in retarget) {
+            if (f == dispatcher) continue
+            val before = out.size
+            add(f, t)
+            if (out.size > before) added.add(f to t)
+        }
+        return DeFlatGraph((blockCount - 1).coerceAtLeast(0), dispatcher, out, added)
     }
 }

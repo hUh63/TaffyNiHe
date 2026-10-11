@@ -5116,6 +5116,45 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                                     }
                                 }
                             }
+                            val afterBlocksN = o.optJSONObject("afterCfg")?.optJSONArray("basicBlocks")?.length() ?: 0
+                            if (afterBlocksN > 1) {
+                                val cmp = o.optJSONObject("compare")
+                                Spacer(Modifier.size(8.dp))
+                                if (cmp != null) {
+                                    MonoLine(
+                                        (if (zh) "对比：块 " else "compare: blocks ") + cmp.optInt("beforeBlocks") + " \u2192 " + cmp.optInt("afterBlocks") +
+                                            (if (zh) " · 边 " else " · edges ") + cmp.optInt("beforeEdges") + " \u2192 " + cmp.optInt("afterEdges"),
+                                        cs.primary, AppText.label,
+                                    )
+                                }
+                                Text(
+                                    if (zh) "原控制流" else "before",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = AppText.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.onSurfaceVariant,
+                                )
+                                Box(
+                                    Modifier.fillMaxWidth().height(230.dp)
+                                        .clip(RoundedCornerShape(AppShape.md)).background(cs.surfaceContainerHigh),
+                                ) {
+                                    CfgCanvas(json = tools.cfgJson, zh = zh, modifier = Modifier.fillMaxSize())
+                                }
+                                Spacer(Modifier.size(6.dp))
+                                Text(
+                                    if (zh) "去平坦化后（分发器已移除）" else "after (dispatcher removed)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = AppText.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.onSurfaceVariant,
+                                )
+                                Box(
+                                    Modifier.fillMaxWidth().height(230.dp)
+                                        .clip(RoundedCornerShape(AppShape.md)).background(cs.surfaceContainerHigh),
+                                ) {
+                                    CfgCanvas(json = o.optJSONObject("afterCfg")?.toString().orEmpty(), zh = zh, modifier = Modifier.fillMaxSize())
+                                }
+                            }
                         }
                     }
                 }

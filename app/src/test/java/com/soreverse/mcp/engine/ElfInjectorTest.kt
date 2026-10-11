@@ -88,8 +88,9 @@ class ElfInjectorTest {
             val readelf = run(listOf("readelf", "-lW", "b.so"), dir)
             val reCount = Regex("R E").findAll(readelf).count()
             assertTrue("readelf 应显示至少 2 个 R E 段（原 .text + 新段），实际=$reCount\n$readelf", reCount >= 2)
-            assertTrue("新段 VA 应出现在程序头里: 0x${java.lang.Long.toHexString(res.codeVa)}\n$readelf",
-                readelf.contains("0x" + java.lang.Long.toHexString(res.codeVa)))
+            val hexVa = java.lang.Long.toHexString(res.codeVa).lowercase()
+            val vaFound = Regex("0x0*" + hexVa + "(?![0-9a-fA-F])", RegexOption.IGNORE_CASE).containsMatchIn(readelf)
+            assertTrue("新段 VA 应出现在程序头里: 0x$hexVa\n$readelf", vaFound)
 
             // dlopen 真执行
             File(dir, "h.c").writeText(

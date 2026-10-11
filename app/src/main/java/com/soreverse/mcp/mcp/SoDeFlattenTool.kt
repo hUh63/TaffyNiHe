@@ -31,7 +31,7 @@ object SoDeFlattenTool {
     private val tool: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "taffy_so_deflatten",
-            "【去平坦化(OLLVM)】检测控制流平坦化并生成/应用「出口跳转重定向」补丁：把每个真实块末尾跳回分发器的跳转，等长改写为直接跳到真实后继，从而消掉分发器。仅处理「出口指向分发器 + 状态可识别 + 分发器解析出唯一目标 + 可等长编码」的块，其余如实标注原因不写。dryRun 默认 true（只出计划）；dryRun=false 经编辑内核 editHexVa 等长写入（带快照/undo），返回 editSessionId 供后续重新分析。分发器支持 cmp 链与跳表(switch)两类；跳表解出的映射默认只读展示（需 allowTable=true 才写入）。返回 compare（前后块/边数）与 afterCfg（去平坦化后的 CFG JSON）供对比图使用。",
+            "【去平坦化(OLLVM)】检测控制流平坦化并生成/应用「出口跳转重定向」补丁：把每个真实块末尾跳回分发器的跳转，等长改写为直接跳到真实后继，从而消掉分发器。仅处理「出口指向分发器 + 状态可识别 + 分发器解析出唯一目标 + 可等长编码」的块，其余如实标注原因不写。dryRun 默认 true（只出计划）；dryRun=false 经编辑内核 editHexVa 等长写入（带快照/undo），返回 editSessionId 供后续重新分析。分发器支持 cmp 链与跳表(switch)两类；跳表解出的映射默认只读展示（需 allowTable=true 才写入）。返回 compare（前后块/边数）与 afterCfg（去平坦化后的 CFG JSON）供对比图使用。action=scan 时批量扫描前 maxFunctions 个函数，汇总哪些被平坦化、各能重定向多少处。",
             "De-flatten OLLVM control-flow flattening: retarget each block's tail jump (to the dispatcher) directly to its real successor (equal-length rewrite). Only blocks with a resolvable single successor and encodable branch are patched; everything else is reported, never written. Supports cmp-chain and jump-table dispatchers; jump-table-derived mappings are report-only unless allowTable=true. dryRun defaults to true (plan only); dryRun=false applies via the edit kernel (snapshot/undo). Returns compare (before/after block & edge counts) and afterCfg (de-flattened CFG JSON) for the comparison view.",
             "edit", ToolClass.EXTRA, heavy = true,
         ) {
@@ -43,6 +43,8 @@ object SoDeFlattenTool {
                 "maxInsns" str "每个函数最多反汇编的指令数（默认 3000）"
                 "allowTable" str "true=允许写入跳表(switch)解出的重定向（默认 false，仅展示）"
                 "dryRun" str "true=只返回计划（默认 true）"
+                "action" str "analyze=单函数分析(默认) / scan=批量扫描"
+                "maxFunctions" str "action=scan 时扫描的函数数（默认 20）"
             })
         }
 
@@ -53,6 +55,10 @@ object SoDeFlattenTool {
             if (locator.isBlank()) return err("INVALID_ARGUMENT", "locator 必填")
 
             val eng = EngineProvider.get(ctx.context)
+            if (args.str("action", "analyze") == "scan") {
+                return eng.deflatScan(ws, args.str("editSessionId"),
+                    args.str("maxFunctions").toIntOrNull()?.coerceIn(1, 200) ?: 20)
+            }
             val arch = args.str("arch")
             val maxInsns = args.str("maxInsns").toIntOrNull()?.coerceIn(64, 20000) ?: 3000
             val allowTable = args.str("allowTable", "false").toBoolean()

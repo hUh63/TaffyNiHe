@@ -4939,6 +4939,7 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
     }
     val rep = remember(graph) { graph?.let { analyzeFlattening(it) } }
     var deFlatJson by remember { mutableStateOf("") }
+    var scanJson by remember { mutableStateOf("") }
     var deFlatBusy by remember { mutableStateOf(false) }
     val deFlatObj = remember(deFlatJson) { runCatching { JSONObject(deFlatJson) }.getOrNull() }
 
@@ -5048,6 +5049,55 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                                 deFlatJson = rr?.toString()
                                     ?: errJson(if (zh) "去平坦化写入无响应" else "de-flatten apply: no response")
                                 deFlatBusy = false
+                            }
+                        }
+                        SmallAction(if (zh) "扫描整个 SO" else "Scan SO", loading = deFlatBusy) {
+                            scope.launch {
+                                deFlatBusy = true
+                                scanJson = ""
+                                val rr = callMcpTool(context, "taffy_so_deflatten", JSONObject()
+                                    .put("workspaceId", ws)
+                                    .put("action", "scan")
+                                    .put("maxFunctions", "20"))
+                                scanJson = rr?.toString()
+                                    ?: errJson(if (zh) "去平坦化扫描无响应" else "de-flatten scan: no response")
+                                deFlatBusy = false
+                            }
+                        }
+                    }
+                    if (scanJson.isNotBlank()) {
+                        val so = runCatching { JSONObject(scanJson) }.getOrNull()
+                        val se = if (so == null) (if (zh) "扫描结果无法解析" else "scan result unparsable") else errMessageOf(scanJson)
+                        if (se.isNotBlank()) {
+                            MonoLine(se, cs.error, AppText.label)
+                        } else if (so != null) {
+                            val arr = so.optJSONArray("functions") ?: JSONArray()
+                            MonoLine(
+                                (if (zh) "扫描 " else "scanned ") + so.optInt("scanned") +
+                                    (if (zh) " 个函数 · 平坦化 " else " fns · flattened ") + so.optInt("flattened") +
+                                    (if (zh) " · 可重定向 " else " · patchable ") + so.optInt("patchableTotal"),
+                                cs.primary, AppText.label,
+                            )
+                            for (i in 0 until arr.length()) {
+                                val f = arr.optJSONObject(i) ?: continue
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm)).background(cs.surfaceContainerHigh)
+                                        .clickable {
+                                            val fva = f.optString("va")
+                                            if (fva.isNotBlank()) {
+                                                tools.selectedFunctionVa = fva
+                                                loadCfg(context, tools, zh, scope, fva)
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    MonoLine(f.optString("name"), cs.onSurface, AppText.bodyStrong)
+                                    MonoLine(f.optString("va"), cs.onSurfaceVariant, AppText.label)
+                                    TypeBadge(f.optString("dispatchMode"), cs.tertiary)
+                                    MonoLine(if (zh) "可重定向 " + f.optInt("patchable") else "patchable " + f.optInt("patchable"), cs.onSurfaceVariant, AppText.label)
+                                }
                             }
                         }
                     }

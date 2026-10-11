@@ -168,7 +168,7 @@ class OllvmDeFlatTest {
 
     @Test
     fun apply_patches_writes_in_place() {
-        val base = ByteArray(16) { it.toByte() }
+        val base = ByteArray(16)
         val out = OllvmDeFlat.applyPatches(base, listOf(4 to byteArrayOf(0xAA.toByte(), 0xBB.toByte())))
         assertEquals(0xAA.toByte(), out[4])
         assertEquals(0xBB.toByte(), out[5])

@@ -67,8 +67,8 @@ object SoDeFlattenTool {
     private val tool: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "taffy_so_deflatten",
-            "【去平坦化(OLLVM)】检测控制流平坦化并生成/应用「出口跳转重定向」补丁：把每个真实块末尾跳回分发器的跳转，等长改写为直接跳到真实后继，从而消掉分发器。仅处理「出口指向分发器 + 状态可识别 + 分发器解析出唯一目标 + 可等长编码」的块，其余如实标注原因不写。dryRun 默认 true（只出计划）；dryRun=false 经编辑内核 editHexVa 等长写入（带快照/undo），返回 editSessionId 供后续重新分析。",
-            "De-flatten OLLVM control-flow flattening: retarget each block's tail jump (to the dispatcher) directly to its real successor (equal-length rewrite). Only blocks with a resolvable single successor and encodable branch are patched; everything else is reported, never written. dryRun defaults to true (plan only); dryRun=false applies via the edit kernel (snapshot/undo).",
+            "【去平坦化(OLLVM)】检测控制流平坦化并生成/应用「出口跳转重定向」补丁：把每个真实块末尾跳回分发器的跳转，等长改写为直接跳到真实后继，从而消掉分发器。仅处理「出口指向分发器 + 状态可识别 + 分发器解析出唯一目标 + 可等长编码」的块，其余如实标注原因不写。dryRun 默认 true（只出计划）；dryRun=false 经编辑内核 editHexVa 等长写入（带快照/undo），返回 editSessionId 供后续重新分析。分发器支持 cmp 链与跳表(switch)两类；跳表解出的映射默认只读展示（需 allowTable=true 才写入）。",
+            "De-flatten OLLVM control-flow flattening: retarget each block's tail jump (to the dispatcher) directly to its real successor (equal-length rewrite). Only blocks with a resolvable single successor and encodable branch are patched; everything else is reported, never written. Supports cmp-chain and jump-table dispatchers; jump-table-derived mappings are report-only unless allowTable=true. dryRun defaults to true (plan only); dryRun=false applies via the edit kernel (snapshot/undo).",
             "edit", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
@@ -77,6 +77,7 @@ object SoDeFlattenTool {
                 "locator" str "目标函数：符号名或 0xVA（必填）"
                 "arch" str "架构 arm64/arm32/x86/x86_64（留空按 ELF e_machine 推断）"
                 "maxInsns" str "每个函数最多反汇编的指令数（默认 3000）"
+                "allowTable" str "true=允许写入跳表(switch)解出的重定向（默认 false，仅展示）"
                 "dryRun" str "true=只返回计划（默认 true）"
             })
         }
@@ -150,21 +151,63 @@ object SoDeFlattenTool {
                 dBlocks.add(DeFlatBlock(i, s, e, term, st))
             }
             val dispInsns = bounds.getOrNull(disp)?.third ?: emptyList()
-            val stateToTarget = OllvmDeFlat.decodeCmpChainDispatcher(dispInsns)
+            var stateToTarget = OllvmDeFlat.decodeCmpChainDispatcher(dispInsns)
+            var dispatchMode = if (stateToTarget.isNotEmpty()) "cmp-chain" else "none"
+            var tableDerived = false
+
+            // 4b) cmp 链解析不到 → 尝试跳表（switch）：解表 + 用分发器出边集合校验
+            if (stateToTarget.isEmpty()) {
+                val outTargets = g.edges.filter { it.from == disp && it.to != disp }
+                    .mapNotNull { g.blocks.getOrNull(it.to)?.addrValue?.takeIf { v -> v >= 0 } }
+                    .toSet()
+                val spec = OllvmDeFlat.detectTableSpec(dispInsns)
+                if (spec != null && outTargets.size >= 2) {
+                    val count = outTargets.size + 1
+                    val tableBytes = readMem(eng, ws, sid, spec.tableVa, count * spec.entrySize)
+                    if (tableBytes != null && tableBytes.isNotEmpty()) {
+                        val decoded = OllvmDeFlat.decodeJumpTable(tableBytes, spec, count)
+                        val valid = OllvmDeFlat.validateTableTargets(decoded, outTargets)
+                        if (valid.isNotEmpty()) {
+                            stateToTarget = valid
+                            dispatchMode = "jump-table"
+                            tableDerived = true
+                        }
+                    }
+                }
+            }
 
             // 5) 规划
+            val allowTable = args.str("allowTable", "false").toBoolean()
+            val forceUnsafeTable = tableDerived && !allowTable
             val patches = OllvmDeFlat.plan(dBlocks, dispVa, stateToTarget, arch)
-            val safeP = patches.filter { it.safe }
-            val unsafeP = patches.filter { !it.safe }
+            val safeP = if (forceUnsafeTable) emptyList() else patches.filter { it.safe }
+            val unsafeP = if (forceUnsafeTable) patches else patches.filter { !it.safe }
 
-            fun patchJson(p: DeFlatPatch): JSONObject = JSONObject()
+            // 5b) 去平坦化后的 CFG 形状（供对比图/报告）
+            val addrToIndex = HashMap<Long, Int>()
+            for (i in 0 until n) {
+                val v = g.blocks[i].addrValue
+                if (v >= 0) addrToIndex[v] = i
+            }
+            val retarget = HashMap<Int, Int>()
+            for (p in safeP) addrToIndex[p.newTarget]?.let { t -> retarget[p.blockIndex] = t }
+            val dg = OllvmDeFlat.deFlattenGraph(n, g.edges.map { it.from to it.to }, disp, retarget)
+            val compare = JSONObject()
+                .put("beforeBlocks", n)
+                .put("afterBlocks", dg.keptBlocks)
+                .put("beforeEdges", g.edges.size)
+                .put("afterEdges", dg.edges.size)
+                .put("removedBlock", dg.removed)
+                .put("added", JSONArray(dg.added.map { JSONArray().put(it.first).put(it.second) }))
+
+            fun patchJson(p: DeFlatPatch, forceUnsafe: Boolean = false): JSONObject = JSONObject()
                 .put("block", p.blockIndex)
                 .put("insn", hex(p.insnAddr))
                 .put("oldTarget", hex(p.oldTarget))
                 .put("newTarget", hex(p.newTarget))
                 .put("kind", p.kind.name)
-                .put("safe", p.safe)
-                .put("reason", p.reason)
+                .put("safe", p.safe && !forceUnsafe)
+                .put("reason", if (forceUnsafe && p.safe) p.reason + "（跳表解出，需 allowTable=true 才写入）" else p.reason)
                 .put("oldHex", p.oldBytes.joinToString("") { "%02x".format(it) })
                 .put("newHex", p.newBytes.joinToString("") { "%02x".format(it) })
 
@@ -176,10 +219,13 @@ object SoDeFlattenTool {
                 .put("blockCount", n)
                 .put("instructionCount", insns.size)
                 .put("dispatcherStates", stateToTarget.size)
+                .put("dispatchMode", dispatchMode)
+                .put("tableDerived", tableDerived)
                 .put("patchable", safeP.size)
                 .put("unpatchable", unsafeP.size)
+                .put("compare", compare)
                 .put("patches", JSONArray(safeP.map { patchJson(it) }))
-                .put("skipped", JSONArray(unsafeP.map { patchJson(it) }))
+                .put("skipped", JSONArray(unsafeP.map { patchJson(it, forceUnsafeTable) }))
 
             if (dryRun || safeP.isEmpty()) return ok(planJson.put("dryRun", true))
 
@@ -206,6 +252,31 @@ object SoDeFlattenTool {
                 .put("appliedPatches", applied)
                 .put("hint", "已写入编辑会话；用该 editSessionId 重新查询 CFG / 伪 C 即看去平坦化结果，确认后 build 落盘。"))
         }
+    }
+
+    /** 读内存/文件字节（rizin p8，失败退回 pxj 字节数组）。null 表示读不到。 */
+    private fun readMem(
+        eng: com.soreverse.mcp.engine.NativeSoEngine,
+        ws: String,
+        sid: String,
+        va: Long,
+        len: Int,
+    ): ByteArray? {
+        if (len <= 0) return null
+        val r = runCatching { eng.rzCommand(ws, sid, "p8 $len @ " + hex(va), false) }.getOrNull() ?: return null
+        if (r.optJSONObject("error") == null) {
+            val hexs = r.optString("text").replace(Regex("[^0-9a-fA-F]"), "")
+            if (hexs.length >= 2) {
+                val cut = hexs.length - (hexs.length % 2)
+                return runCatching {
+                    hexs.substring(0, cut).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                }.getOrNull()
+            }
+        }
+        val r2 = runCatching { eng.rzCommand(ws, sid, "pxj $len @ " + hex(va), false) }.getOrNull() ?: return null
+        val arr = runCatching { org.json.JSONArray(r2.optString("text").trim()) }.getOrNull() ?: return null
+        if (arr.length() == 0) return null
+        return ByteArray(arr.length()) { arr.optInt(it, 0).toByte() }
     }
 
     val ALL = listOf(tool)

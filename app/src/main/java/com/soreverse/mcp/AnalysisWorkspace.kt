@@ -331,6 +331,7 @@ internal fun AnalysisWorkspace(
             state = state,
             tools = tools,
             zh = zh,
+            context = androidx.compose.ui.platform.LocalContext.current,
             view = view,
             onOpenDrawer = { railOpen = !railOpen },
             onOpenView = { tools.analysisView = it },
@@ -3275,6 +3276,7 @@ private fun AnalysisAppBar(
     state: WorkspaceState,
     tools: ToolPagesState,
     zh: Boolean,
+    context: android.content.Context,
     view: String,
     onOpenDrawer: () -> Unit,
     onOpenView: (String) -> Unit,
@@ -3384,6 +3386,10 @@ private fun AnalysisAppBar(
                     menu = false; tools.cfgUi.minimap = !tools.cfgUi.minimap
                 }
                 AnalysisMenuItem(if (zh) "重新生成控制流图" else "Rebuild CFG", Icons.Filled.Refresh) { menu = false; onRefresh() }
+                AnalysisMenuItem(if (zh) "导出 CFG JSON" else "Export CFG JSON", Icons.Filled.Save) {
+                    menu = false
+                    if (tools.cfgJson.isNotBlank()) copyToClipboard(context, tools.cfgJson, zh)
+                }
                 // ── Explorer So 没有、塔菲自有的分析页（Exbin 没有的分析页不单列，只在此入口）──
                 AnalysisMenuHeader(if (zh) "塔菲工具" else "Taffy tools")
                 analysisOverflowViews.forEach { key ->
@@ -4540,6 +4546,10 @@ private fun FuncDetailView(
                     DropdownMenuItem(
                         text = { Text(if (zh) "文本编辑模式" else "Text edit mode", fontSize = AppText.body) },
                         onClick = { menu = false; tools.analysisView = "asm" },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (zh) "编辑函数签名" else "Edit signature", fontSize = AppText.body) },
+                        onClick = { menu = false; tools.analysisView = "funcsig" },
                     )
                     DropdownMenuItem(
                         text = { Text(if (zh) "重新加载" else "Reload", fontSize = AppText.body) },

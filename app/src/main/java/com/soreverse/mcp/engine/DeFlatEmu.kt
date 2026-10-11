@@ -43,6 +43,8 @@ internal class DeFlatEmu(
         if (r.isEmpty()) return r
         if (r == "wsp") return "sp"
         if (r == "wzr") return "xzr"
+        // arm64：wN 与 xN 共用同一物理寄存器
+        if (r.length in 2..3 && r[0] == 'w' && r.substring(1).toIntOrNull() != null) return "x" + r.substring(1)
         val x86 = mapOf(
             "eax" to "rax", "ebx" to "rbx", "ecx" to "rcx", "edx" to "rdx",
             "esi" to "rsi", "edi" to "rdi", "ebp" to "rbp", "esp" to "rsp",
@@ -222,25 +224,36 @@ internal class DeFlatEmu(
                     pc = next
                 }
                 mn == "add" || mn == "sub" -> {
-                    if (ops.size < 3) return fail("add/sub 操作数不足")
-                    val a = if (isRegToken(ops[1])) read(ops[1]) else immOf(ops[1]) ?: return fail("add/sub 源")
-                    var b = if (ops[2].equals("sp", true)) {
-                        read("sp")
-                    } else if (isRegToken(ops[2])) {
-                        read(ops[2])
+                    // arm64：add xD, xN, xM/#imm[, lsl #k]；x86：add r, r/#imm（两操作数，目标即第一源）
+                    if (ops.size < 2) return fail("add/sub 操作数不足")
+                    val dst = ops[0]
+                    val a: Long
+                    val bRaw: Long
+                    var shiftKind = ""
+                    var shift = 0
+                    if (ops.size == 2) {
+                        a = read(dst)
+                        bRaw = if (isRegToken(ops[1])) read(ops[1]) else immOf(ops[1]) ?: return fail("add/sub 源")
                     } else {
-                        immOf(ops[2]) ?: return fail("add/sub 第二源")
-                    }
-                    val shiftOp = ops.getOrNull(3)?.lowercase().orEmpty()
-                    if (shiftOp == "lsl" || shiftOp == "lsr" || shiftOp == "asr") {
-                        val sh = immOf(ops.getOrNull(4) ?: "") ?: 0L
-                        b = when (shiftOp) {
-                            "lsl" -> b shl sh.toInt()
-                            "lsr" -> b ushr sh.toInt()
-                            else -> b shr sh.toInt()
+                        a = if (ops[1].equals("sp", true)) read("sp")
+                        else if (isRegToken(ops[1])) read(ops[1])
+                        else immOf(ops[1]) ?: return fail("add/sub 源")
+                        bRaw = if (ops[2].equals("sp", true)) read("sp")
+                        else if (isRegToken(ops[2])) read(ops[2])
+                        else immOf(ops[2]) ?: return fail("add/sub 第二源")
+                        val shOp = ops.getOrNull(3)?.lowercase().orEmpty()
+                        if (shOp == "lsl" || shOp == "lsr" || shOp == "asr") {
+                            shiftKind = shOp
+                            shift = (immOf(ops.getOrNull(4) ?: "") ?: 0L).toInt()
                         }
                     }
-                    write(ops[0], if (mn == "add") a + b else a - b)
+                    val b = when (shiftKind) {
+                        "lsl" -> bRaw shl shift
+                        "lsr" -> bRaw ushr shift
+                        "asr" -> bRaw shr shift
+                        else -> bRaw
+                    }
+                    write(dst, if (mn == "add") a + b else a - b)
                     pc = next
                 }
                 mn == "cmp" || mn == "cmn" -> {

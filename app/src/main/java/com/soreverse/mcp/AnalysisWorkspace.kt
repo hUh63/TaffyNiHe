@@ -8728,6 +8728,36 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
         }
     }
 
+    fun readPointer() {
+        val a = addr.trim()
+        if (a.isBlank() || ws.isBlank()) return
+        scope.launch {
+            val txt = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    val cands = if (a.startsWith("0x", true)) listOf(a) else listOf(a, "0x$a")
+                    var v = -1L
+                    for (cand in cands) {
+                        val bytes = parsePxBytes(eng.rzCommand(ws, "", "s $cand; pxj 8"))
+                        if (!bytes.isNullOrEmpty()) {
+                            var acc = 0L
+                            for (i in 0 until minOf(bytes.size, 8)) acc = acc or ((bytes[i].toLong() and 0xffL) shl (8 * i))
+                            v = acc
+                            break
+                        }
+                    }
+                    if (v <= 0L) "" else {
+                        val hv = "0x" + java.lang.Long.toHexString(v)
+                        val sec = sectionOf(eng.rzCommand(ws, "", "iSj"), hv)
+                        if (zh) "指针 → $hv" + (if (sec.isNotBlank()) "（$sec）" else "")
+                        else "ptr → $hv" + (if (sec.isNotBlank()) " ($sec)" else "")
+                    }
+                }.getOrDefault("")
+            }
+            info = txt.ifBlank { if (zh) "该地址未读到有效指针" else "no valid pointer" }
+        }
+    }
+
     fun step(d: Int) {
         val cur = addrOf(addr.trim())
         val page = if (mode == "code") 0x200L else 0x100L
@@ -8738,10 +8768,32 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
     if (ws.isBlank()) return NeedWorkspace(zh)
 
     Column(Modifier.fillMaxSize()) {
+        // 地址输入（对齐 Explorer So AddressViewer 的 [←|地址输入|前往|→] 条）
+        OutlinedTextField(
+            value = addr,
+            onValueChange = { addr = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(AppShape.sm),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+            leadingIcon = { Icon(Icons.Filled.MyLocation, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
+            placeholder = {
+                Text(
+                    if (zh) "输入虚拟地址，如 0x1234" else "enter VA, e.g. 0x1234",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
+                    color = cs.onSurfaceVariant,
+                )
+            },
+        )
+        Spacer(Modifier.size(6.dp))
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "前往" else "Go", enabled = addr.isNotBlank()) { load() }
+            SmallAction("←") { step(-1) }
+            SmallAction("→") { step(1) }
             SmallAction(if (zh) "代码模式" else "Code", active = mode == "code") { mode = "code"; load() }
             SmallAction(if (zh) "数据模式" else "Data", active = mode == "data") { mode = "data"; load() }
             SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank()) { addr = tools.selectedFunctionVa; load() }
+            SmallAction(if (zh) "指针解读" else "Pointer", enabled = addr.isNotBlank()) { readPointer() }
             SmallAction(if (zh) "复制" else "Copy", enabled = lines.isNotEmpty()) {
                 val sb = StringBuilder()
                 lines.forEach { o -> sb.append(if (mode == "code") "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("disasm")}" else "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("ascii")}").append('\n') }

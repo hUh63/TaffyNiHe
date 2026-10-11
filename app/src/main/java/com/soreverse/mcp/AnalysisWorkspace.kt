@@ -4466,6 +4466,7 @@ private fun FuncDetailView(
     val fn = tools.selectedFunctionName
     val va = tools.selectedFunctionVa
     var tab by remember { mutableStateOf("disasm") }
+    var menu by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         // MaterialToolbar：高 56dp（?attr/actionBarSize）/ navigationIcon 返回 / 标题等宽字体
@@ -4512,6 +4513,37 @@ private fun FuncDetailView(
                     color = cs.onSurfaceVariant,
                     maxLines = 1,
                 )
+            }
+            // ⋮ 菜单（对齐 Exbin FuncDetailActivity：复制全部汇编 / 复制伪 C / 文本编辑 / 重新加载）
+            Box {
+                IconButton(onClick = { menu = true }, modifier = Modifier.size(44.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = if (zh) "更多" else "More", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (zh) "复制全部汇编" else "Copy all asm", fontSize = AppText.body) },
+                        onClick = {
+                            menu = false
+                            val txt = runCatching { JSONObject(tools.disasmJson).optJSONObject("textWindow")?.optString("text").orEmpty() }.getOrDefault("")
+                            if (txt.isNotBlank()) copyToClipboard(context, txt, zh)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (zh) "复制伪 C" else "Copy pseudo-C", fontSize = AppText.body) },
+                        onClick = {
+                            menu = false
+                            if (tools.decompileResult.isNotBlank()) copyToClipboard(context, tools.decompileResult, zh)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (zh) "文本编辑模式" else "Text edit mode", fontSize = AppText.body) },
+                        onClick = { menu = false; tools.analysisView = "asm" },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (zh) "重新加载" else "Reload", fontSize = AppText.body) },
+                        onClick = { menu = false; onRefresh() },
+                    )
+                }
             }
         }
         // TabLayout（tabMode=fixed）：4 个页签等分，指示器 = colorPrimary

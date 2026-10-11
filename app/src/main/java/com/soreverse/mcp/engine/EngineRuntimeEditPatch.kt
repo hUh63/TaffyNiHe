@@ -103,6 +103,67 @@ internal fun EngineRuntime.editHex(workspaceId: String, editSessionId: String, l
         }
     }
 
+
+/**
+ * 按**绝对文件偏移**做等长写入（不限定节区）—— 供 ELF 结构级改写使用。
+ *
+ * 与 editHex 的唯一区别：不做节区归属校验（ELF 头 / 程序头表 / 节区头表不属于任何节区）。
+ * 用于注入流程里更新 e_phoff / e_phnum / e_shoff / e_shnum 等头部字段。
+ * 走完整补丁体系（快照 / undo / redo / check / build），undo 与 editHex 一致。
+ */
+internal fun EngineRuntime.editHexAt(workspaceId: String, editSessionId: String, edits: JSONArray, dryRun: Boolean = false): JSONObject = guarded {
+    val session = workspaces[workspaceId]?.edits?.get(editSessionId) ?: return@guarded err("EDIT_SESSION_NOT_FOUND", "Edit session not found")
+    synchronized(session.lock) {
+        val settings = SettingsStore(context)
+        val maxPatch = settings.maxPatchBytes
+        val previews = JSONArray()
+        val pending = mutableListOf<Pair<Int, ByteArray>>()
+        for (i in 0 until edits.length()) {
+            val edit = edits.getJSONObject(i)
+            val rawHex = edit.optString("newHex").ifBlank { edit.optString("hex") }.trim()
+            val cleaned = rawHex.replace(" ", "").replace("\t", "").replace("\n", "").replace(",", "")
+            if (cleaned.isEmpty() || cleaned.length % 2 != 0 || !cleaned.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
+                return@guarded err("INVALID_HEX", "newHex must be even-length hex digits, got: $rawHex", "edits[$i].newHex", rawHex)
+            }
+            val patch = cleaned.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            if (patch.isEmpty()) return@guarded err("INVALID_ARGUMENT", "decoded patch is empty at index $i", "edits[$i].newHex", rawHex)
+            if (patch.size > maxPatch) return@guarded err("PATCH_TOO_LARGE", "Patch size ${patch.size} exceeds maxPatchBytes $maxPatch", "edits[$i].newHex", patch.size)
+            val off = edit.optInt("fileOffset", edit.optInt("byteOffset", edit.optInt("offset", Int.MIN_VALUE)))
+            if (off == Int.MIN_VALUE || off < 0) return@guarded err("INVALID_ARGUMENT", "Missing/invalid fileOffset for edit #$i", "edits[$i].fileOffset", null)
+            if (off + patch.size > session.data.size) {
+                return@guarded err("OFFSET_OUT_OF_RANGE", "Hex edit range [${hex(off.toLong())}, +${patch.size}) exceeds file bytes (${session.data.size})", "edits[$i].fileOffset", off)
+            }
+            val old = session.data.copyOfRange(off, off + patch.size)
+            if (dryRun) {
+                previews.put(JSONObject()
+                    .put("index", i).put("fileOffset", hex(off.toLong()))
+                    .put("oldHex", PatchByteUtils.hexBytes(old))
+                    .put("newHex", PatchByteUtils.hexBytes(patch))
+                    .put("length", patch.size))
+            }
+            pending += off to patch
+        }
+        if (dryRun) {
+            return@guarded ok(JSONObject().put("dryRun", true).put("preview", previews).put("previewCount", previews.length()).put("targetVersion", sha256(session.data)))
+        }
+        val nextData = session.data.copyOf()
+        val nextPatches = pending.map { (off, patch) ->
+            val old = nextData.copyOfRange(off, off + patch.size)
+            val record = PatchRecord(System.currentTimeMillis(), "hexAt", "file:0x${java.lang.Long.toHexString(off.toLong())}", off, PatchByteUtils.hexBytes(old), PatchByteUtils.hexBytes(patch))
+            System.arraycopy(patch, 0, nextData, off, patch.size)
+            record
+        }
+        if (nextPatches.isNotEmpty()) maybeAutoSnapshot(session, "hexAt", settings)
+        System.arraycopy(nextData, 0, session.data, 0, session.data.size)
+        if (nextPatches.isNotEmpty()) session.undone.clear()
+        session.patches += nextPatches
+        if (nextPatches.isNotEmpty()) { session.revision++; pageStore.clear(); searchCache.clear() }
+        val res = JSONObject().put("newTargetVersion", sha256(session.data)).put("editCount", session.revision).put("patchCount", session.patches.size).put("applied", pending.size)
+        maybeAutoPersist(workspaceId, session, settings)?.let { res.put("autoPersist", it) }
+        ok(res)
+    }
+}
+
 internal fun EngineRuntime.editHexVa(workspaceId: String, editSessionId: String, va: Long, patch: ByteArray, dryRun: Boolean = false): JSONObject = guarded {
         val session = workspaces[workspaceId]?.edits?.get(editSessionId) ?: return@guarded err("EDIT_SESSION_NOT_FOUND", "Edit session not found")
         // 安全修复: 加锁防止并发请求交叉修改同一编辑会话。

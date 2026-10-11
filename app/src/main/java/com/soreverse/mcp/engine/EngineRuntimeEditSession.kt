@@ -246,6 +246,13 @@ internal fun EngineRuntime.editAppend(
     }
 }
 
+
+/** 读取当前编辑会话字节（供 ElfInjector 等结构级改写使用）。 */
+internal fun EngineRuntime.editSessionBytes(workspaceId: String, editSessionId: String): ByteArray? {
+    val session = workspaces[workspaceId]?.edits?.get(editSessionId) ?: return null
+    return synchronized(session.lock) { session.data.copyOf() }
+}
+
 internal fun EngineRuntime.editReset(workspaceId: String, editSessionId: String): JSONObject = guarded {
     val ws = workspaces[workspaceId] ?: return@guarded err("WORKSPACE_NOT_FOUND", "Workspace not found")
     val session = ws.edits[editSessionId] ?: return@guarded err("EDIT_SESSION_NOT_FOUND", "Edit session not found")

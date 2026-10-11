@@ -1165,6 +1165,8 @@ object ToolCatalog {
         *ManifestEditTools.ALL.toTypedArray(),
         // 塔菲逆核: Native指令/字符串补丁(CAS乐观锁)+APK统一搜索(分页游标)
         *NativePatchTools.ALL.toTypedArray(),
+        // 塔菲逆核: SO 代码注入(变长: 追加 PT_LOAD(R+X)+新节区+入口 trampoline, 走编辑内核, 全 ABI)
+        *SoInjectTool.ALL.toTypedArray(),
         // 设置页「MCP 工具」分组：APK 签名密钥管理 + 临时工作区管理
         *McpToolsConfig.ALL.toTypedArray(),
         // 塔菲逆核: 反调试/反注入/环境检测特征扫描(动态分析前置体检)

@@ -1333,6 +1333,16 @@ internal class CfgDisplayState {
     var minimap by mutableStateOf(true)
     /** 布局方向 TB / LR（对标 Exbin GlobalCfg 画布右上角的 btnRankDir） */
     var rankDir by mutableStateOf("TB")
+    /** 反汇编分析：引用字符串（对标 Exbin SettingsPrefs.KEY_ENABLE_STRING_REF） */
+    var stringRef by mutableStateOf(true)
+    /** 反汇编分析：解析函数名 bl 目标（对标 Exbin KEY_ENABLE_FUNC_NAME） */
+    var funcName by mutableStateOf(true)
+    /** 首页卡片闪动（对标 Exbin KEY_HOME_CARD_BLINK） */
+    var homeBlink by mutableStateOf(true)
+    /** 签名还原 IR 增强（对标 Exbin KEY_SIG_IR_ENHANCE） */
+    var sigIrEnhance by mutableStateOf(true)
+    /** 反编译引擎：r2dec+ / native / ghidra（对标 Exbin KEY_DECOMP_ENGINE） */
+    var decompEngine by mutableStateOf("r2dec+")
 }
 
 /** 边样式按钮的图标（对标 Exbin CfgCanvasView.edgeStyleIcon）。 */

@@ -264,6 +264,9 @@ internal fun AnalysisWorkspace(
     val zh = t.zh
     val tools = state.tools
 
+    // 载入「分析设置」（反汇编分析 / 流程图设置，对齐 Explorer So SettingsPrefs）
+    LaunchedEffect(Unit) { AnalysisPrefs.load(context, tools) }
+
     // ── 弹层状态 ──
     var showToolPicker by remember { mutableStateOf(false) }
     var showTree by remember { mutableStateOf(false) }
@@ -378,6 +381,8 @@ internal fun AnalysisWorkspace(
                             onRefresh = refreshAll,
                             onGoFunctions = { tools.analysisView = "functions" },
                         )
+
+                        "settings" -> AnalysisSettingsView(tools, zh, context)
 
                         "cfg" -> CfgView(
                             tools = tools, zh = zh, context = context,
@@ -2898,7 +2903,7 @@ private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
  * 塔菲沿用同一范式：Exbin 没有的分析页（加固 / 脱壳 / 导出 / Flutter / AI / 转码 …）只在 ⋮ 菜单出现，
  * 侧栏与主页页签保持与 Exbin 一一对应。
  */
-private val analysisRailItems = listOf("home", "search", "vtable", "callgraph", "xrefs", "back")
+private val analysisRailItems = listOf("home", "search", "vtable", "callgraph", "xrefs", "settings", "back")
 
 /**
  * 左侧导航栏：对齐 Explorer So 的 NavigationRailView
@@ -12774,6 +12779,11 @@ private fun CallGraphGraphPane(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+         }
             }
         }
     }

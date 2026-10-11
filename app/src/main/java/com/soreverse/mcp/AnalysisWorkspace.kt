@@ -9528,8 +9528,11 @@ private fun GlobalXRefView(
     val sccStats = remember(sccs) {
         Triple(sccs.size, sccs.count { it.size > 1 }, sccs.maxOfOrNull { it.size } ?: 0)
     }
-    val sccDag = remember(sccs, edges, cs.tertiary, cs.primary, df) {
-        buildSccDag(sccs, edges, cs.tertiary, cs.primary, df, 240f * df)
+    // SCC 鸟瞰模式切换（「完整数据 / 仅循环」）——对齐用户要求，Exbin 状态行口径为「完整数据」
+    var sccOnlyCycles by remember { mutableStateOf(false) }
+    val sccsShown = remember(sccs, sccOnlyCycles) { if (sccOnlyCycles) sccs.filter { it.size > 1 } else sccs }
+    val sccDag = remember(sccsShown, edges, cs.tertiary, cs.primary, df) {
+        buildSccDag(sccsShown, edges, cs.tertiary, cs.primary, df, 240f * df)
     }
     val hits = remember(nodes, query) {
         val q = query.trim().lowercase()
@@ -9726,27 +9729,45 @@ private fun GlobalXRefView(
                 }
                 else -> {
                     val lay = sccDag
-                    XRefDagCanvas(
-                        nodes = lay?.nodes ?: emptyList(),
-                        edges = lay?.edges ?: emptyList(),
-                        back = emptySet(),
-                        zh = zh,
-                        modifier = Modifier.fillMaxSize(),
-                        onTap = { i ->
-                            val n = lay?.nodes?.getOrNull(i)
-                            if (n != null) {
-                                val mem = n.members
-                                if (mem != null && mem.size > 1) sccMembers = mem
-                                else { drillRoot = n.label; xTab = "drill" }
-                            }
-                        },
-                        onLongPress = { i ->
-                            lay?.nodes?.getOrNull(i)?.let { n ->
-                                val target = n.members?.firstOrNull() ?: n.label
-                                openDetail(target)
-                            }
-                        },
-                    )
+                    Column(Modifier.fillMaxSize()) {
+                        // SCC 鸟瞰模式切换：完整数据 / 仅循环
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            SegButton(if (zh) "完整数据" else "Full", !sccOnlyCycles) { sccOnlyCycles = false }
+                            SegButton(if (zh) "仅循环" else "Cycles", sccOnlyCycles) { sccOnlyCycles = true }
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                if (zh) "SCC ${sccsShown.size} 个" else "SCCs ${sccsShown.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = AppText.label,
+                                color = cs.onSurfaceVariant,
+                            )
+                        }
+                        XRefDagCanvas(
+                            nodes = lay?.nodes ?: emptyList(),
+                            edges = lay?.edges ?: emptyList(),
+                            back = emptySet(),
+                            zh = zh,
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            onTap = { i ->
+                                val n = lay?.nodes?.getOrNull(i)
+                                if (n != null) {
+                                    val mem = n.members
+                                    if (mem != null && mem.size > 1) sccMembers = mem
+                                    else { drillRoot = n.label; xTab = "drill" }
+                                }
+                            },
+                            onLongPress = { i ->
+                                lay?.nodes?.getOrNull(i)?.let { n ->
+                                    val target = n.members?.firstOrNull() ?: n.label
+                                    openDetail(target)
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }

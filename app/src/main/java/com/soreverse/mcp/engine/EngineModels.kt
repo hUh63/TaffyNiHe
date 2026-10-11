@@ -37,7 +37,8 @@ internal data class DisasmCursorState(
 
 data class EditSession(
     val id: String,
-    val data: ByteArray,
+    // 变长支持: 允许替换引用(append/truncate 会重新分配)。所有读取都必须走该属性, 勿缓存旧数组。
+    var data: ByteArray,
     var revision: Int = 0,
     val patches: MutableList<PatchRecord> = mutableListOf(),
     val snapshots: MutableList<Snapshot> = mutableListOf(),

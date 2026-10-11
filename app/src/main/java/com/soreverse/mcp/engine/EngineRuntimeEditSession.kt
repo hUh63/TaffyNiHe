@@ -51,7 +51,8 @@ internal fun EngineRuntime.editRollback(workspaceId: String, editSessionId: Stri
         val snap = session.snapshots[idx]
         val before = sha256(session.data)
         val keptPatches = session.patches.take(snap.patchCount)
-        System.arraycopy(snap.dataCopy, 0, session.data, 0, session.data.size)
+        // 变长支持: 快照长度可能与当前不同, 直接替换引用。
+        session.data = snap.dataCopy.copyOf()
         session.revision = snap.revision
         session.patches.clear()
         session.patches += keptPatches
@@ -102,6 +103,18 @@ internal fun EngineRuntime.editUndo(workspaceId: String, editSessionId: String, 
         val undone = JSONArray()
         repeat(n) {
             val p = session.patches.removeAt(session.patches.lastIndex)
+            // 变长支持: append 补丁的撤销 = 截断回追加前的长度。
+            if (p.kind == "append") {
+                if (p.fileOffset == session.data.size) {
+                    session.data = session.data.copyOf(p.fileOffset)
+                    session.undone += p
+                    undone.put(PatchByteUtils.patchJson(p))
+                } else {
+                    session.patches.add(p)
+                    return@guarded err("UNDO_FAILED", "Cannot undo append patch: not the topmost region (fileOffset ${p.fileOffset}, size ${session.data.size})", "fileOffset", p.fileOffset)
+                }
+                return@repeat
+            }
             val oldBytes = p.oldHex.split(' ').filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
             // 安全修复: 当 arraycopy 条件不满足时返回错误而非静默跳过。
             // 原实现即使数据未恢复也将 patch 移到 undone 列表并返回成功，
@@ -136,6 +149,19 @@ internal fun EngineRuntime.editRedo(workspaceId: String, editSessionId: String, 
         val redone = JSONArray()
         repeat(n) {
             val p = session.undone.removeAt(session.undone.lastIndex)
+            // 变长支持: append 补丁的重做 = 在当前末尾重新追加。
+            if (p.kind == "append") {
+                if (session.data.size == p.fileOffset) {
+                    val add = p.newHex.split(' ').filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
+                    session.data = session.data + add
+                    session.patches += p
+                    redone.put(PatchByteUtils.patchJson(p))
+                } else {
+                    session.undone.add(p)
+                    return@guarded err("REDO_FAILED", "Cannot redo append patch: current size ${session.data.size} != fileOffset ${p.fileOffset}", "fileOffset", p.fileOffset)
+                }
+                return@repeat
+            }
             val newBytes = p.newHex.split(' ').filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
             // 安全修复: 当 arraycopy 条件不满足时返回错误而非静默跳过。
             if (newBytes.isEmpty() || p.fileOffset !in 0..(session.data.size - newBytes.size)) {
@@ -159,6 +185,67 @@ internal fun EngineRuntime.editRedo(workspaceId: String, editSessionId: String, 
     }
 }
 
+
+/**
+ * 追加写入(变长支持): 只在**文件末尾**追加字节, 已有内容与所有节区偏移一个字节都不动。
+ *
+ * 这是"代码注入 / 去平坦化展开"的安全通道 —— 不重排任何已有节区(重排等价于写链接器,
+ * 且会破坏 APK v2/v3 签名)。走完整补丁体系: 快照 / undo / redo / check / build。
+ * 追加后的产物由后续批次负责挂新节区 + 扩 PT_LOAD + 重签名。
+ */
+internal fun EngineRuntime.editAppend(
+    workspaceId: String,
+    editSessionId: String,
+    newHex: String,
+    dryRun: Boolean = false,
+): JSONObject = guarded {
+    val ws = workspaces[workspaceId] ?: return@guarded err("WORKSPACE_NOT_FOUND", "Workspace not found")
+    val session = ws.edits[editSessionId] ?: return@guarded err("EDIT_SESSION_NOT_FOUND", "Edit session not found")
+    val cleaned = newHex.replace("\\s+".toRegex(), "")
+    if (cleaned.isEmpty() || cleaned.length % 2 != 0 || !cleaned.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
+        return@guarded err("INVALID_HEX", "newHex must be even-length hex digits, got: $newHex", "newHex", newHex)
+    }
+    val payload = cleaned.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    val settings = SettingsStore(context)
+    if (payload.size > settings.maxPatchBytes) {
+        return@guarded err("PATCH_TOO_LARGE", "Append size ${payload.size} exceeds maxPatchBytes ${settings.maxPatchBytes}", "size", payload.size)
+    }
+    synchronized(session.lock) {
+        val off = session.data.size
+        val before = off.toLong()
+        val after = before + payload.size
+        if (dryRun) {
+            return@guarded ok(JSONObject()
+                .put("dryRun", true).put("action", "append")
+                .put("fileOffset", hex(before))
+                .put("appendLength", payload.size)
+                .put("sizeBefore", before).put("sizeAfter", after))
+        }
+        maybeAutoSnapshot(session, "append", settings)
+        session.data = session.data + payload
+        session.patches += PatchRecord(
+            System.currentTimeMillis(), "append",
+            "append:0x${java.lang.Long.toHexString(before)}",
+            off, "", PatchByteUtils.hexBytes(payload), "",
+        )
+        session.undone.clear()
+        session.revision += 1
+        pageStore.clear()
+        searchCache.clear()
+        val persist = maybeAutoPersist(workspaceId, session, settings)
+        ok(JSONObject()
+            .put("action", "append")
+            .put("fileOffset", hex(before))
+            .put("appendLength", payload.size)
+            .put("sizeBefore", before)
+            .put("sizeAfter", session.data.size.toLong())
+            .put("variableLength", true)
+            .put("newTargetVersion", sha256(session.data))
+            .put("patchCount", session.patches.size)
+            .put("autoPersistPath", persist?.optString("autoPersistPath") ?: ""))
+    }
+}
+
 internal fun EngineRuntime.editReset(workspaceId: String, editSessionId: String): JSONObject = guarded {
     val ws = workspaces[workspaceId] ?: return@guarded err("WORKSPACE_NOT_FOUND", "Workspace not found")
     val session = ws.edits[editSessionId] ?: return@guarded err("EDIT_SESSION_NOT_FOUND", "Edit session not found")
@@ -167,7 +254,8 @@ internal fun EngineRuntime.editReset(workspaceId: String, editSessionId: String)
         val beforePatches = session.patches.size
         val beforeUndone = session.undone.size
         val beforeSnapshots = session.snapshots.size
-        System.arraycopy(ws.data, 0, session.data, 0, session.data.size)
+        // 变长支持: 原文件长度可能小于当前会话(append 过), 直接替换引用。
+        session.data = ws.data.copyOf()
         session.patches.clear()
         session.undone.clear()
         session.snapshots.clear()
@@ -260,6 +348,16 @@ internal fun EngineRuntime.editCheck(workspaceId: String, editSessionId: String)
             while (i < ws.data.size && i < session.data.size && ws.data[i] != session.data[i]) i++
             diffRanges.put(JSONObject().put("fileOffset", hex(start.toLong())).put("length", i - start))
         }
+        // 变长支持: 尾部长度差(append/truncate) —— 旧实现只比到 min(size), 会漏报。
+        if (diffRanges.length() < 500 && ws.data.size != session.data.size) {
+            val tailStart = minOf(ws.data.size, session.data.size)
+            diffRanges.put(JSONObject()
+                .put("fileOffset", hex(tailStart.toLong()))
+                .put("length", kotlin.math.abs(session.data.size - ws.data.size))
+                .put("resize", if (session.data.size > ws.data.size) "append" else "truncate")
+                .put("sizeBefore", ws.data.size)
+                .put("sizeAfter", session.data.size))
+        }
         val effective = diffRanges.length()
         if (settings.editCheckDeep && claimed > 0 && effective == 0) warnings.put(JSONObject().put("code", "NO_EFFECTIVE_CHANGES").put("message", "Session claims $claimed patch(es) but zero effective byte ranges differ from the original SO"))
         if (settings.editCheckDeep && emptyPatches > 0) warnings.put(JSONObject().put("code", "EMPTY_PATCHES_SUMMARY").put("message", "$emptyPatches of $claimed patch(es) have empty newHex (no-op writes)").put("emptyPatchCount", emptyPatches))
@@ -273,6 +371,9 @@ internal fun EngineRuntime.editCheck(workspaceId: String, editSessionId: String)
             .put("emptyPatches", emptyPatches)
             .put("stalePatches", stalePatches)
             .put("diffRangeCount", effective)
+            .put("sizeBefore", ws.data.size)
+            .put("sizeAfter", session.data.size)
+            .put("variableLength", ws.data.size != session.data.size)
             .put("targetVersion", sha256(session.data)))
     }
 }

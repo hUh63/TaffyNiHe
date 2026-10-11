@@ -81,6 +81,7 @@ class NativeSoEngine(context: Context) {
     fun editHex(workspaceId: String, editSessionId: String, locator: String, edits: JSONArray, dryRun: Boolean = false): JSONObject = runtime.editHex(workspaceId, editSessionId, locator, edits, dryRun)
     fun editHexVa(workspaceId: String, editSessionId: String, va: Long, patch: ByteArray, dryRun: Boolean = false): JSONObject = runtime.editHexVa(workspaceId, editSessionId, va, patch, dryRun)
     fun editAsm(workspaceId: String, editSessionId: String, locator: String, edits: JSONArray, dryRun: Boolean = false): JSONObject = runtime.editAsm(workspaceId, editSessionId, locator, edits, dryRun)
+    fun editAppend(workspaceId: String, editSessionId: String, newHex: String, dryRun: Boolean = false): JSONObject = runtime.editAppend(workspaceId, editSessionId, newHex, dryRun)
     fun editSymbol(workspaceId: String, editSessionId: String, locator: String, edits: JSONArray, dryRun: Boolean = false): JSONObject = runtime.editSymbol(workspaceId, editSessionId, locator, edits, dryRun)
     fun editCheck(workspaceId: String, editSessionId: String): JSONObject = runtime.editCheck(workspaceId, editSessionId)
     fun build(workspaceId: String, editSessionId: String, outputName: String, conflictStrategy: String = "", writeReport: Boolean? = null, writeToWorkDir: Boolean? = null): JSONObject = runtime.build(workspaceId, editSessionId, outputName, conflictStrategy, writeReport, writeToWorkDir)

@@ -6669,6 +6669,43 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
         }
     }
 
+
+    /** 变长支持入口: 把当前编码结果追加到文件末尾(触发内核 append 编辑, 走快照/undo/redo)。 */
+    fun applyAppend() {
+        if (ws.isBlank()) { patchErr = if (zh) "需先打开工作区" else "open a workspace first"; return }
+        if (outHex.isBlank()) { patchErr = if (zh) "请先输入可编码的汇编" else "assemble something first"; return }
+        scope.launch {
+            patching = true
+            patchErr = ""; patchMsg = ""
+            var sid = sessionId
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    if (sid.isBlank()) {
+                        val eo = eng.editOpen(ws)
+                        sid = eo.optString("editSessionId")
+                            .ifBlank { eo.optJSONObject("data")?.optString("editSessionId").orEmpty() }
+                        if (sid.isNotBlank()) sessionId = sid
+                    }
+                    if (sid.isBlank()) return@runCatching JSONObject()
+                        .put("error", JSONObject().put("message", if (zh) "无法创建编辑会话" else "could not open edit session"))
+                    eng.editAppend(ws, sid, outHex)
+                }.getOrElse { JSONObject().put("error", JSONObject().put("message", it.message ?: "failed")) }
+            }
+            patching = false
+            val err = errMessageOf(r.toString())
+            if (err.isNotBlank()) {
+                patchErr = err
+            } else {
+                patchMsg = (if (zh) "已追加到文件末尾" else "appended to EOF") +
+                    " · +${r.optInt("appendLength", -1)}B · ${r.optInt("sizeBefore", -1)} → ${r.optInt("sizeAfter", -1)}" +
+                    (if (sid.isNotBlank()) "\nsession: $sid" else "")
+                tools.clearViewCaches()
+                tools.reloadTick = tools.reloadTick + 1
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(
             selectedTabIndex = asmArchs.indexOfFirst { it.first == arch }.coerceAtLeast(0),
@@ -6762,6 +6799,12 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
                 shape = RoundedCornerShape(AppShape.sm),
+            )
+            BigActionButton(
+                label = if (zh) "追加到文件末尾（变长）" else "Append to EOF (var-length)",
+                enabled = ws.isNotBlank() && outHex.isNotBlank(),
+                loading = patching,
+                onClick = { applyAppend() },
             )
             BigActionButton(
                 label = if (zh) "写入编辑会话" else "Apply",

@@ -14,7 +14,7 @@ import java.util.zip.ZipOutputStream
  * 塔菲逆核: APK zip 级条目替换。
  *
  * 不解包整个 APK，直接流式重写 zip 并替换单个条目（典型用途：把 patch 后的
- * lib/<abi>/*.so 回填进 APK）。旧 META-INF 签名（v1）会被丢弃 —— 因为 APK 内容
+ * lib/<abi>/ 下的 .so 回填进 APK）。旧 META-INF 签名（v1）会被丢弃 —— 因为 APK 内容
  * 变了，必须重新签名；v2/v3 签名块不在 zip 条目里，重写时天然被丢弃。
  *
  * 典型流程：

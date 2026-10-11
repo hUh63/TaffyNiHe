@@ -4214,6 +4214,17 @@ private fun splitDisasmLine(line: String): Triple<String, String, String> {
     return Triple(addrOut, "", rest)
 }
 
+// noreturn 启发式：调用这些目标后面的代码不会执行（对齐 Exbin 的 noreturn 灰化）。
+private val noReturnRe = Regex(
+    "(?:^|[^A-Za-z0-9_])(abort|_?exit|_Exit|__assert_fail|__assert2|__stack_chk_fail|__stack_chk_fail_local" +
+        "|__cxa_throw|__cxa_rethrow|__cxa_bad_cast|__cxa_bad_typeid|longjmp|siglongjmp|pthread_exit" +
+        "|__builtin_trap|android_set_abort_message|__fortify_fail|__android_log_assert|raise" +
+        "|_ZSt9terminatev|_ZSt20__throw_length_errorPKc)(?:@[A-Za-z0-9_.]+)?(?:\$|[^A-Za-z0-9_])"
+)
+
+/** 该指令是否调用 noreturn 目标（纯文本启发式，无需引擎支持）。 */
+private fun instrIsNoreturn(instr: String): Boolean = noReturnRe.containsMatchIn(instr)
+
 /** 指令文本按 token 分色（助记符 primary / 寄存器 tertiary / 立即数 secondary / 注释弱化）。 */
 private fun disasmInstrAnnotated(instr: String, cs: androidx.compose.material3.ColorScheme): AnnotatedString {
     val ci = instr.indexOf(';')
@@ -4631,6 +4642,8 @@ private fun DisasmView(
     val count = obj?.optInt("instructionCount", lines.size) ?: lines.size
     val parsed = remember(lines) { lines.map { splitDisasmLine(it) } }
     var query by remember { mutableStateOf("") }
+    var selecting by remember { mutableStateOf(false) }
+    var sel by remember { mutableStateOf(emptySet<Int>()) }
     val shown = remember(parsed, query) {
         if (query.isBlank()) parsed
         else parsed.filter { t ->
@@ -4669,13 +4682,42 @@ private fun DisasmView(
             }
         }
         // 计数行（tv_count：padding 12dp / labelSmall / onSurfaceVariant；Exbin 文案 = 「N 条指令」）
-        Text(
-            "${shown.size} " + (if (zh) "条指令" else "insns"),
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = AppText.label,
-            color = cs.onSurfaceVariant,
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "${shown.size} " + (if (zh) "条指令" else "insns"),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (shown.isNotEmpty()) {
+                SmallAction(
+                    if (selecting) (if (zh) "退出多选" else "Exit select") else (if (zh) "多选" else "Select"),
+                    active = selecting,
+                ) { selecting = !selecting; if (!selecting) sel = emptySet() }
+            }
+        }
+        if (selecting) {
+            FlowRow(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                SmallAction(if (zh) "全选" else "All") { sel = shown.indices.toSet() }
+                SmallAction(if (zh) "清除" else "Clear", enabled = sel.isNotEmpty()) { sel = emptySet() }
+                SmallAction(if (zh) "复制 ${sel.size}" else "Copy ${sel.size}", enabled = sel.isNotEmpty()) {
+                    val sb = StringBuilder()
+                    sel.sorted().forEach { i ->
+                        shown.getOrNull(i)?.let { t -> sb.append("${t.first}  ${t.second}  ${t.third}").append('\n') }
+                    }
+                    copyToClipboard(context, sb.toString().trimEnd(), zh)
+                }
+            }
+        }
         // 搜索框（til_search：OutlinedBox / marginH 12dp / marginBottom 8dp）
         OutlinedTextField(
             value = query,
@@ -4732,10 +4774,14 @@ private fun DisasmView(
                     Modifier.fillMaxHeight().verticalScroll(rememberScrollState())
                         .width(IntrinsicSize.Max).padding(bottom = 10.dp),
                 ) {
-                    shown.forEach { (a, bytes, instr) ->
+                    shown.forEachIndexed { idx, (a, bytes, instr) ->
                         // item_insn/AsmAdapter：内容内边距 10 / 6 / 12 / 6，addr 100dp、bytes 140dp、asm 自适应
+                        val nr = instrIsNoreturn(instr)
                         Row(
-                            Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                            Modifier
+                                .then(if (selecting) Modifier.clickable { sel = if (idx in sel) sel - idx else sel + idx } else Modifier)
+                                .then(if (idx in sel) Modifier.background(cs.primaryContainer) else Modifier)
+                                .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -4744,7 +4790,7 @@ private fun DisasmView(
                                 color = cs.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
-                                modifier = Modifier.width(100.dp).clickable { if (a.isNotBlank()) copyToClipboard(context, a, zh) },
+                                modifier = Modifier.width(100.dp).clickable { if (!selecting && a.isNotBlank()) copyToClipboard(context, a, zh) },
                             )
                             Text(
                                 bytes.ifBlank { " " },
@@ -4754,7 +4800,17 @@ private fun DisasmView(
                                 softWrap = false,
                                 modifier = Modifier.width(140.dp),
                             )
-                            Text(disasmInstrAnnotated(instr, cs), style = mono12, color = cs.onSurface, maxLines = 1, softWrap = false)
+                            Text(
+                                disasmInstrAnnotated(instr, cs),
+                                style = mono12,
+                                color = if (nr) cs.onSurfaceVariant.copy(alpha = 0.55f) else cs.onSurface,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                            if (nr) {
+                                Spacer(Modifier.size(6.dp))
+                                TypeBadge(if (zh) "不返回" else "noreturn", cs.tertiary)
+                            }
                         }
                     }
                 }

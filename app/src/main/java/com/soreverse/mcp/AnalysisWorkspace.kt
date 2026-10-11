@@ -4938,6 +4938,9 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
         if (tools.cfgJson.isBlank()) null else runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
     }
     val rep = remember(graph) { graph?.let { analyzeFlattening(it) } }
+    var deFlatJson by remember { mutableStateOf("") }
+    var deFlatBusy by remember { mutableStateOf(false) }
+    val deFlatObj = remember(deFlatJson) { runCatching { JSONObject(deFlatJson) }.getOrNull() }
 
     Column(Modifier.fillMaxSize()) {
         ToolPageHeader(
@@ -5016,6 +5019,105 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                         else "note: state value is only an approximation of execution order.",
                         cs.onSurfaceVariant, AppText.label,
                     )
+                    Spacer(Modifier.size(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SmallAction(if (zh) "生成去平坦化计划" else "Build plan", loading = deFlatBusy) {
+                            scope.launch {
+                                deFlatBusy = true
+                                deFlatJson = ""
+                                val rr = callMcpTool(context, "taffy_so_deflatten", JSONObject()
+                                    .put("workspaceId", ws)
+                                    .put("locator", target)
+                                    .put("dryRun", "true"))
+                                deFlatJson = rr?.toString()
+                                    ?: errJson(if (zh) "去平坦化工具无响应" else "de-flatten: no response")
+                                deFlatBusy = false
+                            }
+                        }
+                        val safeCount = deFlatObj?.optJSONArray("patches")?.length() ?: 0
+                        SmallAction(
+                            if (zh) "写入出口重定向（$safeCount）" else "Apply ($safeCount)",
+                            enabled = safeCount > 0 && !deFlatBusy,
+                        ) {
+                            scope.launch {
+                                deFlatBusy = true
+                                val rr = callMcpTool(context, "taffy_so_deflatten", JSONObject()
+                                    .put("workspaceId", ws)
+                                    .put("locator", target)
+                                    .put("dryRun", "false"))
+                                deFlatJson = rr?.toString()
+                                    ?: errJson(if (zh) "去平坦化写入无响应" else "de-flatten apply: no response")
+                                deFlatBusy = false
+                            }
+                        }
+                    }
+                    deFlatObj?.let { o ->
+                        val de = errMessageOf(o.toString())
+                        if (de.isNotBlank()) {
+                            MonoLine(de, cs.error, AppText.label)
+                        } else if (!o.optBoolean("flattened", false)) {
+                            MonoLine((if (zh) "未检测到平坦化：" else "not flattened: ") + o.optString("reason"), cs.onSurfaceVariant, AppText.label)
+                        } else {
+                            val applied = o.optInt("applied", -1)
+                            MonoLine(
+                                if (applied >= 0) {
+                                    (if (zh) "已写入 $applied 处出口重定向 · 编辑会话 " else "applied $applied · session ") + o.optString("editSessionId")
+                                } else {
+                                    (if (zh) "分发器 " else "dispatcher ") + o.optString("dispatcher") +
+                                        (if (zh) " · 可重定向 " else " · patchable ") + o.optInt("patchable") +
+                                        (if (zh) " · 不可用 " else " · skipped ") + o.optInt("unpatchable")
+                                },
+                                cs.primary, AppText.label,
+                            )
+                            val arr = o.optJSONArray("patches") ?: JSONArray()
+                            if (arr.length() > 0) {
+                                Text(
+                                    if (zh) "出口重定向（块 · 指令 · 分发器 → 真实后继）" else "retarget plan (block / insn / dispatcher -> successor)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = AppText.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.onSurfaceVariant,
+                                )
+                                for (i in 0 until arr.length()) {
+                                    val p = arr.optJSONObject(i) ?: continue
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm)).background(cs.surfaceContainerHigh)
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        TypeBadge("b" + p.optInt("block"), cs.secondary)
+                                        MonoLine(p.optString("insn").ifBlank { p.optString("oldTarget") }, cs.onSurfaceVariant, AppText.label)
+                                        MonoLine("→ " + p.optString("newTarget"), cs.primary, AppText.bodyStrong)
+                                        TypeBadge(p.optString("kind"), cs.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                            val skip = o.optJSONArray("skipped") ?: JSONArray()
+                            if (skip.length() > 0) {
+                                Text(
+                                    if (zh) "未处理（不在本页改写）" else "skipped (not rewritten)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = AppText.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.onSurfaceVariant,
+                                )
+                                for (i in 0 until skip.length()) {
+                                    val p = skip.optJSONObject(i) ?: continue
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm)).background(cs.surfaceContainer)
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        TypeBadge("b" + p.optInt("block"), cs.onSurfaceVariant)
+                                        MonoLine(p.optString("insn").ifBlank { p.optString("oldTarget") }, cs.onSurfaceVariant, AppText.label)
+                                        Text(p.optString("reason"), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

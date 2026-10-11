@@ -139,6 +139,25 @@ private val EMPTY_CFG_LAYOUT = CfgLayoutResult(emptyList(), emptyList(), 0f, 0f,
 private const val CFG_MIN_SCALE = 0.02f
 private const val CFG_MAX_SCALE = 6f
 
+/** 把 TB 布局整体转置成 LR（x/y 互换、宽高互换、路点互换）—— 自研分层布局只产出 TB。 */
+private fun transposeToLr(r: CfgLayoutResult): CfgLayoutResult = CfgLayoutResult(
+    boxes = r.boxes.map { b -> CfgNodeBox(b.index, b.cy, b.cx, b.h, b.w, b.addrText, b.lines) },
+    routes = r.routes.map { rt ->
+        CfgRoute(rt.from, rt.to, rt.kind, rt.isBack, rt.isSelf, rt.points.map { p -> Offset(p.y, p.x) })
+    },
+    width = r.height,
+    height = r.width,
+    entryIndex = r.entryIndex,
+    loopHeadIndices = r.loopHeadIndices,
+    returnIndices = r.returnIndices,
+)
+
+/** 自研线性分层布局（O(n+e)，恒为 TB），按 rankDir 决定是否转置 —— 大图闸门与 layoutMode 兜底共用。 */
+private fun fastCfgLayout(graph: CfgGraph, density: Float, maxLines: Int, rankDir: String): CfgLayoutResult {
+    val r = layoutCfgGraph(graph, density, maxLines)
+    return if (rankDir.equals("LR", true)) transposeToLr(r) else r
+}
+
 // ───────────────────────── 数据模型 ─────────────────────────
 
 /** 单个基本块（地址 / 范围 / 首行指令摘要）。 */
@@ -811,7 +830,7 @@ internal fun layoutCfgGraphDagre(
     }
     // ── 规模闸门：大图 / 稠密图不让 ELK 上（它会把 UI 线程卡死几十秒），直接走自研分层布局 ──
     if (backend == "elk" && (n > ELK_MAX_NODES || graph.edges.size > ELK_MAX_EDGES)) {
-        return layoutCfgGraph(graph, density, maxLines)
+        return fastCfgLayout(graph, density, maxLines, rankDir)
     }
 
     val padX = PAD_X_DP * density
@@ -869,7 +888,7 @@ internal fun layoutCfgGraphDagre(
         )
     } else {
         ExbinDagre.layout(ids, sizes, edges, nodesep.toDouble(), ranksep.toDouble(), rankDir)
-    } ?: return layoutCfgGraph(graph, density, maxLines)
+    } ?: return fastCfgLayout(graph, density, maxLines, rankDir)
     val nodesMap = laid.first
     val routesMap = laid.second
 
@@ -885,7 +904,7 @@ internal fun layoutCfgGraphDagre(
         minY = min(minY, nd.y - heights[i] / 2f)
         maxY = max(maxY, nd.y + heights[i] / 2f)
     }
-    if (minX > maxX) return layoutCfgGraph(graph, density, maxLines)
+    if (minX > maxX) return fastCfgLayout(graph, density, maxLines, rankDir)
     val cx0 = (minX + maxX) / 2f
     val cy0 = (minY + maxY) / 2f
 
@@ -1445,7 +1464,7 @@ internal fun CfgCanvas(
                     "force" -> layoutCfgForce(g, d, ml)
                     "dagre" -> layoutCfgGraphDagre(g, d, ml, "dagre", rd)
                     "elk" -> layoutCfgGraphDagre(g, d, ml, "elk", rd)
-                    else -> layoutCfgGraph(g, d, ml)
+                    else -> fastCfgLayout(g, d, ml, rd)
                 }
             }.getOrDefault(EMPTY_CFG_LAYOUT)
         }

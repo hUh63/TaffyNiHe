@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13122,13 +13123,13 @@ private fun StatChip(text: String) {
  * 44dp、layout_gravity=top|end、12dp 边距、OutlinedButton 风格、点击后重新布局并 Toast 提示）。
  */
 @Composable
-private fun CfgRankDirButton(ui: CfgDisplayState, zh: Boolean, modifier: Modifier = Modifier) {
+private fun CfgRankDirButton(ui: CfgDisplayState, zh: Boolean, modifier: Modifier = Modifier, atStart: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(AppShape.sm)
     val context = LocalContext.current
     Box(
         modifier = modifier
-            .padding(end = 12.dp, top = 12.dp)
+            .padding(start = if (atStart) 12.dp else 0.dp, end = if (atStart) 0.dp else 12.dp, top = 12.dp)
             .size(44.dp)
             .clip(shape)
             .background(cs.surfaceContainerHigh)
@@ -13441,7 +13442,7 @@ private fun CallGraphGraphPane(
             color = cs.surfaceContainerHigh,
             border = BorderStroke(1.dp, cs.outlineVariant),
         ) {
-            Box(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
                 // GlobalCfgView extends CfgCanvasView：全局调用图复用 CFG 画布（节点/边/迷你图/布局引擎）
                 CfgCanvas(
                     json = cfgJson,
@@ -13457,8 +13458,9 @@ private fun CallGraphGraphPane(
                         cfgPopup = name to va
                     },
                 )
-                // Exbin fragment_global_cfg.xml 的 btnRankDir（布局方向 TB/LR）
-                CfgRankDirButton(ui, zh, Modifier.align(Alignment.TopEnd))
+                // Exbin fragment_global_cfg.xml 的 btnRankDir（布局方向 TB/LR）—— 位于画布卡 top|end。
+                // 画布过矮时右下角工具条会顶上来，此时让位到左上角，避免 TB/LR 与缩放按钮重叠。
+                CfgRankDirButton(ui, zh, Modifier.align(if (maxHeight < 250.dp) Alignment.TopStart else Alignment.TopEnd), atStart = maxHeight < 250.dp)
             }
         }
         // ── 节点点击弹层：该函数的基本块级 CFG（对齐 Exbin GlobalCfgFragment.showCfgPopup）──

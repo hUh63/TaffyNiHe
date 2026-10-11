@@ -1725,33 +1725,61 @@ internal fun CfgCanvas(
                 }
             }
 
-            // ── 右下角工具条（完全对齐 Exbin CfgCanvasView.drawZoomButtons：5 个 48dp 按钮，间距 12dp，边距 16dp）──
-            Column(
-                Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                CfgToolButton("+", 22f) { zoomCenter(1.25f) }
-                CfgToolButton("\u2212", 22f) { zoomCenter(0.80f) }
-                CfgToolButton("\u27F3", 22f) { applyFit(); fitted = true }
-                CfgToolButton(edgeStyleIcon(ui.routing), 15.4f, 0.12f) { ui.routing = nextRouting(ui.routing) }
-                CfgToolButton("\u2B07", 17.6f, 0.08f) {
-                    val w = (layout.width + 80f).coerceAtLeast(320f)
-                    val h = (layout.height + 80f).coerceAtLeast(240f)
-                    val p = exportDrawToPng(
-                        context = ctx,
-                        fileName = "cfg_" + System.currentTimeMillis() + ".png",
-                        widthPx = w.toInt(),
-                        heightPx = h.toInt(),
-                        density = densityObj,
+            // ── 右下角工具条（对齐 Exbin CfgCanvasView.drawZoomButtons：5 个 48dp 按钮、间距 12dp、边距 16dp）──
+            // 竖排 5 个的总高 = 5*48 + 4*12 + 16 = 304dp；画布不够高时它会顶到画布顶部、与「布局方向」按钮
+            // 相撞（用户报告的 TB/LR 与缩放按钮重叠）。因此高度不足时自动降级为两列（总高 184dp），仍贴右下角。
+            val exportPng: () -> Unit = {
+                val w = (layout.width + 80f).coerceAtLeast(320f)
+                val h = (layout.height + 80f).coerceAtLeast(240f)
+                val p = exportDrawToPng(
+                    context = ctx,
+                    fileName = "cfg_" + System.currentTimeMillis() + ".png",
+                    widthPx = w.toInt(),
+                    heightPx = h.toInt(),
+                    density = densityObj,
+                ) {
+                    drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, ui.bgStyle, ui.routing, emptySet())
+                }
+                Toast.makeText(
+                    ctx,
+                    if (p != null) (if (zh) "已导出：$p" else "saved: $p") else (if (zh) "导出失败" else "export failed"),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            val canvasHeightDp = with(densityObj) { viewport.height.toDp().value }
+            if (canvasHeightDp < 304f) {
+                Row(
+                    Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        drawCfgScene(effective, colors, density, 1f, Offset.Zero, Size(w, h), false, -1, ui.bgStyle, ui.routing, emptySet())
+                        CfgToolButton("+", 22f) { zoomCenter(1.25f) }
+                        CfgToolButton("\u2212", 22f) { zoomCenter(0.80f) }
+                        CfgToolButton("\u27F3", 22f) { applyFit(); fitted = true }
                     }
-                    Toast.makeText(
-                        ctx,
-                        if (p != null) (if (zh) "已导出：$p" else "saved: $p") else (if (zh) "导出失败" else "export failed"),
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CfgToolButton(edgeStyleIcon(ui.routing), 15.4f, 0.12f) { ui.routing = nextRouting(ui.routing) }
+                        CfgToolButton("\u2B07", 17.6f, 0.08f) { exportPng() }
+                    }
+                }
+            } else {
+                Column(
+                    Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    CfgToolButton("+", 22f) { zoomCenter(1.25f) }
+                    CfgToolButton("\u2212", 22f) { zoomCenter(0.80f) }
+                    CfgToolButton("\u27F3", 22f) { applyFit(); fitted = true }
+                    CfgToolButton(edgeStyleIcon(ui.routing), 15.4f, 0.12f) { ui.routing = nextRouting(ui.routing) }
+                    CfgToolButton("\u2B07", 17.6f, 0.08f) { exportPng() }
                 }
             }
 

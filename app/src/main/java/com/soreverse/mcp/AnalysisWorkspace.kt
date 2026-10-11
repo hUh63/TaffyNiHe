@@ -4832,6 +4832,7 @@ private fun DisasmView(
                                 color = cs.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.width(100.dp).clickable { if (!selecting && a.isNotBlank()) copyToClipboard(context, a, zh) },
                             )
                             Text(
@@ -4840,6 +4841,7 @@ private fun DisasmView(
                                 color = cs.onSurfaceVariant,
                                 maxLines = 1,
                                 softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.width(140.dp),
                             )
                             Text(
@@ -4848,6 +4850,7 @@ private fun DisasmView(
                                 color = if (nr) cs.onSurfaceVariant.copy(alpha = 0.55f) else cs.onSurface,
                                 maxLines = 1,
                                 softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             if (nr) {
                                 Spacer(Modifier.size(6.dp))
@@ -5511,9 +5514,17 @@ private fun CfgView(
     var sortMode by remember { mutableStateOf(0) }
     var focusAddr by remember { mutableStateOf("") }
     var focusTok by remember { mutableStateOf(0) }
-    // 「汇编块」模式：按需取当前函数的块级反汇编（pdfj），供画布在块内展示指令。
+    // 进入「控制流」页（或切换函数）时，若当前 CFG 不属于本函数就自动重新生成 ——
+    // 否则会沿用上一位目标留下的 CFG（典型症状：函数详情 0x16c8 的控制流却显示别的块 loc_d30）。
+    LaunchedEffect(ws, target, tools.reloadTick) {
+        if (ws.isBlank() || target.isBlank()) return@LaunchedEffect
+        val same = tools.cfgTarget == target && tools.cfgJson.isNotBlank() && errMessageOf(tools.cfgJson).isBlank()
+        if (!same) loadCfg(context, tools, zh, scope, target)
+    }
+    // 块级指令（pdfj）：画布「汇编块」模式要用它，控制流「节点列表」的「N 条指令」也要用它
+    // —— 所以三种内容模式（summary/asm/pseudo）都要取，不能只在非 summary 时取（那样节点列表恒显 0 条指令）。
     LaunchedEffect(tools.cfgUi.contentMode, tools.cfgJson, target, ws) {
-        if (tools.cfgUi.contentMode == "summary" || ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
+        if (ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
         val m = withContext(Dispatchers.IO) {
             runCatching {
                 when (tools.cfgUi.contentMode) {
@@ -5539,7 +5550,7 @@ private fun CfgView(
                 }
             }.getOrNull() ?: emptyMap()
         }
-        if (m.isNotEmpty()) cfgInsns = m
+        cfgInsns = m
     }
     val err = errMessageOf(tools.cfgJson)
     val hasGraph = tools.cfgJson.isNotBlank() && err.isBlank()
@@ -11390,9 +11401,12 @@ private fun XRefDagCanvas(
             (viewport.width - 32f * density) / w,
             (viewport.height - 32f * density) / h,
         ).coerceIn(0.02f, 3f)
+        // drawDagScene / hitAt 的变换是 screen = world*scale + 视口中心 + pan（originX/originY），
+        // 因此「整图居中」只要 pan = -图中心*scale。此处原先多减了半个视口（按绝对偏移算的），
+        // 结果每次切换数据后整图都被推到右下角，必须手动拖回来。
         pan = Offset(
-            viewport.width / 2f - (minX + maxX) / 2f * scale,
-            viewport.height / 2f - (minY + maxY) / 2f * scale,
+            -(minX + maxX) / 2f * scale,
+            -(minY + maxY) / 2f * scale,
         )
     }
 
@@ -12645,15 +12659,11 @@ private fun classifyCallEdges(n: Int, edges: List<Pair<Int, Int>>): Pair<HashSet
     return tree to cross
 }
 
-/** 按模式（hot/root/full）过滤出子图；节点索引化。 */
-/** 调用图模式多选：切换某个模式的选中态（至少保留一个模式）。 */
-private fun toggleCallMode(modes: Set<String>, m: String): Set<String> =
-    if (m in modes) { if (modes.size <= 1) modes else modes - m } else modes + m
-
+/** 按模式（hot / root / full）过滤出子图；节点索引化。 */
 private fun buildCallSubgraph(
     nodes: List<JSONObject>,
     edges: List<Pair<String, String>>,
-    modes: Set<String>,
+    mode: String,
     root: String,
     depth: Int,
     maxNodes: Int,
@@ -12676,27 +12686,33 @@ private fun buildCallSubgraph(
         inDeg[t] = (inDeg[t] ?: 0) + 1
     }
     fun deg(n: String): Int = (outAdj[n]?.size ?: 0) + (inDeg[n] ?: 0)
-    // Exbin GlobalCfgFragment：模式支持多选（热点 / 根展开 / 完整），取并集；
-    // 完整模式上限放宽（对齐 Exbin fullCap），其余模式上限 400。
-    val cap = if ("full" in modes) maxNodes.coerceIn(10, 800) else maxNodes.coerceIn(10, 400)
-    val selectedSet = LinkedHashSet<String>()
-    if ("full" in modes) selectedSet.addAll(all.take(cap))
-    if ("hot" in modes) all.sortedByDescending { deg(it) }.take(cap).forEach { selectedSet.add(it) }
-    if ("root" in modes) {
-        val r = root.ifBlank { all.firstOrNull { (inDeg[it] ?: 0) == 0 } ?: all.firstOrNull() }.orEmpty()
-        if (r.isNotBlank()) {
-            val seen = LinkedHashSet<String>()
-            seen.add(r)
-            var frontier = listOf(r)
-            repeat(depth.coerceIn(1, 8)) {
-                val next = ArrayList<String>()
-                frontier.forEach { u -> outAdj[u]?.forEach { v -> if (seen.add(v)) next.add(v) } }
-                frontier = next
-            }
-            selectedSet.addAll(seen)
-        }
+    // 上限语义对齐 Exbin GlobalCfgFragment.readOptions()：完整模式默认全量展示（≤50000，仅作内存护栏，
+    // 用户显式填了 ≠120 的值时按其值护栏），热点 / 根展开默认 120、最大 2000。
+    // 模式是**单选互斥**（Exbin modeSeg singleSelection=true），此处只取当前模式，不做并集。
+    val cap = if (mode == "full") {
+        (if (maxNodes <= 120) 50000 else maxNodes).coerceIn(100, 50000)
+    } else {
+        maxNodes.coerceIn(10, 2000)
     }
-    val selected: List<String> = if (selectedSet.isEmpty()) all.take(cap) else selectedSet.toList().take(cap)
+    val picked: List<String> = when (mode) {
+        "full" -> all.take(cap)
+        "root" -> {
+            val r = root.ifBlank { all.firstOrNull { (inDeg[it] ?: 0) == 0 } ?: all.firstOrNull() }.orEmpty()
+            if (r.isBlank()) all.take(cap) else {
+                val seen = LinkedHashSet<String>()
+                seen.add(r)
+                var frontier = listOf(r)
+                repeat(depth.coerceIn(1, 8)) {
+                    val next = ArrayList<String>()
+                    frontier.forEach { u -> outAdj[u]?.forEach { v -> if (seen.add(v)) next.add(v) } }
+                    frontier = next
+                }
+                seen.toList()
+            }
+        }
+        else -> all.sortedByDescending { deg(it) }
+    }
+    val selected: List<String> = if (picked.size > cap) picked.take(cap) else picked
     val idx = HashMap<String, Int>(selected.size * 2)
     selected.forEachIndexed { i, n -> idx[n] = i }
     val sub = selected.map { it to (addrOf[it] ?: "") }
@@ -13156,7 +13172,8 @@ private fun CallGraphGraphPane(
     onOpenFunction: ((String, String) -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
-    var modes by remember { mutableStateOf(setOf("hot")) }
+    // 模式单选互斥（对齐 Exbin GlobalCfgFragment 的 MaterialButtonToggleGroup singleSelection=true）
+    var graphMode by remember { mutableStateOf("hot") }
     var depthText by remember { mutableStateOf("2") }
     var maxText by remember { mutableStateOf("120") }
     var root by remember { mutableStateOf("") }
@@ -13169,7 +13186,7 @@ private fun CallGraphGraphPane(
     var popupLoading by remember { mutableStateOf(false) }
 
     val depth = depthText.toIntOrNull()?.coerceIn(1, 8) ?: 2
-    val maxN = maxText.toIntOrNull()?.coerceIn(10, 800) ?: 120
+    val maxN = maxText.toIntOrNull()?.coerceIn(10, 50000) ?: 120
     val rootCandidates = remember(nodes, edges) {
         val indeg = HashMap<String, Int>()
         edges.forEach { (_, t) -> indeg[t] = (indeg[t] ?: 0) + 1 }
@@ -13177,8 +13194,12 @@ private fun CallGraphGraphPane(
             .filter { it.isNotBlank() && (indeg[it] ?: 0) == 0 }
             .take(40)
     }
-    val subPair = remember(nodes, edges, modes, root, depth, maxN, rebuild) {
-        buildCallSubgraph(nodes, edges, modes, root, depth, maxN)
+    val subPair = remember(nodes, edges, graphMode, root, depth, maxN, rebuild) {
+        buildCallSubgraph(nodes, edges, graphMode, root, depth, maxN)
+    }
+    // 调用图 → CFG 画布 JSON：必须缓存（大图下每次重组都重新拼字符串会让手势直接卡死）
+    val cfgJson = remember(subPair, zh, fnSizes) {
+        callGraphCfgJson(subPair.first, subPair.second, zh, fnSizes)
     }
     var focusToken by remember { mutableStateOf(0) }
     var focusIndex by remember { mutableStateOf(-1) }
@@ -13289,11 +13310,11 @@ private fun CallGraphGraphPane(
                     Modifier.fillMaxWidth().padding(top = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SegButton(if (zh) "热点模式" else "Hotspot", "hot" in modes) { modes = toggleCallMode(modes, "hot") }
+                    SegButton(if (zh) "热点模式" else "Hotspot", graphMode == "hot") { graphMode = "hot" }
                     Spacer(Modifier.size(4.dp))
-                    SegButton(if (zh) "根展开" else "Rooted", "root" in modes) { modes = toggleCallMode(modes, "root") }
+                    SegButton(if (zh) "根展开" else "Rooted", graphMode == "root") { graphMode = "root" }
                     Spacer(Modifier.size(4.dp))
-                    SegButton(if (zh) "完整模式" else "Full", "full" in modes) { modes = toggleCallMode(modes, "full") }
+                    SegButton(if (zh) "完整模式" else "Full", graphMode == "full") { graphMode = "full" }
                     Spacer(Modifier.weight(1f))
                     Surface(
                         onClick = { optionsOpen = !optionsOpen },
@@ -13320,6 +13341,8 @@ private fun CallGraphGraphPane(
                 // 选项面板（默认折叠）根函数 / 深度 / 上限 / 重新构建
                 if (optionsOpen) {
                     Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                        // 对齐 Exbin updateModeUi()：只有「根展开」模式显示根函数框
+                        if (graphMode == "root") {
                         OutlinedTextField(
                             value = root,
                             onValueChange = { root = it },
@@ -13338,6 +13361,9 @@ private fun CallGraphGraphPane(
                                 )
                             },
                         )
+                        }
+                        // 对齐 Exbin：完整模式隐藏「深度 / 上限」（它默认全量展示）
+                        if (graphMode != "full") {
                         Row(
                             Modifier.fillMaxWidth().padding(top = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -13353,13 +13379,14 @@ private fun CallGraphGraphPane(
                             )
                             OutlinedTextField(
                                 value = maxText,
-                                onValueChange = { maxText = it.filter { c -> c.isDigit() }.take(4) },
+                                onValueChange = { maxText = it.filter { c -> c.isDigit() }.take(5) },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                                 shape = RoundedCornerShape(AppShape.sm),
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                                 label = { Text(if (zh) "上限" else "Max", fontSize = AppText.label) },
                             )
+                        }
                         }
                         Button(
                             onClick = { rebuild++ },
@@ -13374,7 +13401,7 @@ private fun CallGraphGraphPane(
                         }
                     }
                 }
-                if ("root" in modes && rootCandidates.isNotEmpty()) {
+                if (graphMode == "root" && rootCandidates.isNotEmpty()) {
                     FlowRow(
                         Modifier.fillMaxWidth().padding(top = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -13417,7 +13444,7 @@ private fun CallGraphGraphPane(
             Box(Modifier.fillMaxSize()) {
                 // GlobalCfgView extends CfgCanvasView：全局调用图复用 CFG 画布（节点/边/迷你图/布局引擎）
                 CfgCanvas(
-                    json = callGraphCfgJson(subPair.first, subPair.second, zh, fnSizes),
+                    json = cfgJson,
                     zh = zh,
                     modifier = Modifier.fillMaxSize(),
                     ui = ui,

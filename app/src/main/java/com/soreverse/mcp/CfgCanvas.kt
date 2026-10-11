@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -64,6 +65,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -119,6 +122,22 @@ private const val LAYOUT_ITERATIONS_SMALL = 8
 private const val LAYOUT_ITERATIONS_LARGE = 2
 private const val TEXT_HIDE_SCALE = 0.42f
 private const val ASM_BLOCK_MAX_LINES = 6
+
+/**
+ * ELK（layered + 正交路由）的耗时随图规模**超线性**增长（实测：120 节点/200 边 ≈ 0.5s，
+ * 120/1500 ≈ 19s，300/800 ≈ 5s，800/2000 ≈ 86s），而它原先跑在 composition（UI 线程）上 ——
+ * 一旦超过阈值，整页会僵死（手势/按钮全部无响应，即「图控制不了」）。
+ * 因此超过闸门时直接回退自研线性分层布局（BFS 分层 + 轨道分配，O(n+e) 级）。
+ */
+private const val ELK_MAX_NODES = 150
+private const val ELK_MAX_EDGES = 400
+
+/** 异步布局未就绪时的空占位（保证下游 `layout.xxx` 访问安全）。 */
+private val EMPTY_CFG_LAYOUT = CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
+
+/** 画布缩放下限：整幅大图也必须能一次看全（对齐 XRefDagView 的做法）。 */
+private const val CFG_MIN_SCALE = 0.02f
+private const val CFG_MAX_SCALE = 6f
 
 // ───────────────────────── 数据模型 ─────────────────────────
 
@@ -790,6 +809,10 @@ internal fun layoutCfgGraphDagre(
     if (n == 0 || density <= 0f) {
         return CfgLayoutResult(emptyList(), emptyList(), 0f, 0f, -1, emptySet(), emptySet())
     }
+    // ── 规模闸门：大图 / 稠密图不让 ELK 上（它会把 UI 线程卡死几十秒），直接走自研分层布局 ──
+    if (backend == "elk" && (n > ELK_MAX_NODES || graph.edges.size > ELK_MAX_EDGES)) {
+        return layoutCfgGraph(graph, density, maxLines)
+    }
 
     val padX = PAD_X_DP * density
     val padY = PAD_Y_DP * density
@@ -1405,14 +1428,28 @@ internal fun CfgCanvas(
             },
         )
     }
-    val layout = remember(graph, density, ui.layoutMode, ui.rankDir, maxLines) {
-        when (ui.layoutMode) {
-            "grid" -> layoutCfgGrid(graph, density, maxLines)
-            "force" -> layoutCfgForce(graph, density, maxLines)
-            "dagre" -> layoutCfgGraphDagre(graph, density, maxLines, "dagre", ui.rankDir)
-            "elk" -> layoutCfgGraphDagre(graph, density, maxLines, "elk", ui.rankDir)
-            else -> layoutCfgGraph(graph, density, maxLines)
+    // 布局在后台线程算（ELK 大图可达几十秒；原先在 composition 里同步跑会把 UI 线程卡死 → 手势全部失灵）。
+    var layout by remember { mutableStateOf(EMPTY_CFG_LAYOUT) }
+    var layoutReady by remember { mutableStateOf(false) }
+    LaunchedEffect(graph, density, ui.layoutMode, ui.rankDir, maxLines) {
+        val g = graph
+        val d = density
+        val mode = ui.layoutMode
+        val rd = ui.rankDir
+        val ml = maxLines
+        layoutReady = false
+        layout = withContext(Dispatchers.Default) {
+            runCatching {
+                when (mode) {
+                    "grid" -> layoutCfgGrid(g, d, ml)
+                    "force" -> layoutCfgForce(g, d, ml)
+                    "dagre" -> layoutCfgGraphDagre(g, d, ml, "dagre", rd)
+                    "elk" -> layoutCfgGraphDagre(g, d, ml, "elk", rd)
+                    else -> layoutCfgGraph(g, d, ml)
+                }
+            }.getOrDefault(EMPTY_CFG_LAYOUT)
         }
+        layoutReady = true
     }
     // rzCfg 返回 err JSON 时给出结构化提示，而不是只显示「空图」。
     val errHint = remember(json) {
@@ -1456,21 +1493,21 @@ internal fun CfgCanvas(
         val w = layout.width.coerceAtLeast(1f) + 80f
         val h = layout.height.coerceAtLeast(1f) + 80f
         // 对标 Exbin CfgCanvasView.resetView()：fitAll + 40px 内边距、居中显示（画布无悬浮面板，无需预留安全区）。
-        scale = min(viewport.width / w, viewport.height / h).coerceIn(0.12f, 2.5f)
+        scale = min(viewport.width / w, viewport.height / h).coerceIn(CFG_MIN_SCALE, 2.5f)
         pan = Offset.Zero
     }
 
     /** 以视口中心为锚点缩放（对标 Exbin CfgCanvasView.zoomAtCenter）。 */
     fun zoomCenter(factor: Float) {
         if (viewport.width <= 0 || viewport.height <= 0) return
-        val ns = (scale * factor).coerceIn(0.12f, 6f)
+        val ns = (scale * factor).coerceIn(CFG_MIN_SCALE, CFG_MAX_SCALE)
         if (ns == scale) return
         pan = pan * (ns / scale)
         scale = ns
     }
 
-    LaunchedEffect(layout, viewport) {
-        if (!fitted && viewport.width > 0 && viewport.height > 0 && layout.boxes.isNotEmpty()) {
+    LaunchedEffect(layout, layoutReady, viewport) {
+        if (layoutReady && !fitted && viewport.width > 0 && viewport.height > 0 && layout.boxes.isNotEmpty()) {
             applyFit()
             fitted = true
         }
@@ -1541,7 +1578,7 @@ internal fun CfgCanvas(
                 }
                 .pointerInput(Unit) {
                     detectTransformGestures { _, panChange, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(0.12f, 6f)
+                        scale = (scale * zoom).coerceIn(CFG_MIN_SCALE, CFG_MAX_SCALE)
                         if (!dragModeS.value) pan += panChange
                     }
                 },
@@ -1550,7 +1587,27 @@ internal fun CfgCanvas(
                 drawCfgScene(effective, colors, density, scale, pan, size, simpleView, selected, ui.bgStyle, ui.routing, highlightTexts)
             }
 
-            if (layout.boxes.isEmpty()) {
+            // 布局在后台线程计算中（ELK 大图尤其慢）：显示加载态，而不是先闪一屏「空图」
+            if (!layoutReady && graph.blocks.isNotEmpty()) {
+                Box(
+                    Modifier.fillMaxSize().background(colors.surfaceContainerLow.copy(alpha = 0.62f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(26.dp), strokeWidth = 2.5.dp, color = colors.primary)
+                        Text(
+                            if (zh) "正在布局…" else "Laying out…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            if (layoutReady && layout.boxes.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1690,7 +1747,7 @@ internal fun CfgCanvas(
                     shadowElevation = 0.dp,
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(start = 12.dp, bottom = 12.dp)
+                        .padding(start = 16.dp, bottom = 16.dp)
                         .size(140.dp, 100.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .pointerInput(effective, scale, pan, viewport) {

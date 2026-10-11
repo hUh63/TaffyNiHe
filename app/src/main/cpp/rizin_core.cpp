@@ -693,11 +693,20 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDisassemble(
         }
         char addr[32];
         snprintf(addr, sizeof(addr), "0x%llx", (unsigned long long)((ut64)jaddr + off));
-        std::string bytesHex = hexBytes(buf.data() + off, code->len);
-        std::string line = std::string(addr) + ": " + bytesHex + "    " +
-                           (code->assembly ? code->assembly : "") + "\n";
+        // 只取第一条指令的汇编：个别架构插件会把多条指令拼进 code->assembly（含 '\n'），
+        // 整段写入会让「地址列/字节列/助记符列」在同一行里粘连、后续行丢失地址。
+        std::string asmText = code->assembly ? code->assembly : "";
+        size_t nl = asmText.find('\n');
+        if (nl != std::string::npos) asmText = asmText.substr(0, nl);
+        // 步长护栏：code->len 异常（<=0 或 >16）时按架构默认指令长度推进，避免逐条步进错位。
+        int step = (int)code->len;
+        if (step <= 0 || step > 16) {
+            step = (arch == "arm64" || arch == "mips") ? 4 : (arch == "arm32" ? (jthumb ? 2 : 4) : 1);
+        }
+        std::string bytesHex = hexBytes(buf.data() + off, (size_t)step);
+        std::string line = std::string(addr) + ": " + bytesHex + "    " + asmText + "\n";
         out += line;
-        off += code->len;
+        off += step;
         count++;
         rz_asm_code_free(code);
     }

@@ -694,19 +694,28 @@ internal fun EngineRuntime.pseudoDisasm(elf: ElfFile, sym: SymbolInfo, bytes: By
         return lines.joinToString("\n")
     }
 
-internal fun EngineRuntime.cleanDisasmLines(text: String, limit: Int): List<String> = text.lineSequence()
-        .map { it.trimEnd() }
-        .filter { it.isNotBlank() }
-        .map { line ->
-            // 形如 "0x16c8: ff 83 02 d1    sub sp, sp, #0xa0" —— 保留地址与机器码
-            // （此前把机器码整段丢弃，导致汇编视图 addr/bytes 两列全空、指令被挤到最右侧），
-            // 仅把地址后多余空白收敛为单空格，保留机器码与指令之间的多空格分隔。
-            val mixed = Regex("""^(0x[0-9a-fA-F]+:)\s+(.*\S)\s*$""").find(line.trim())
-            if (mixed != null) "${mixed.groupValues[1]} ${mixed.groupValues[2]}" else line.trim()
+internal fun EngineRuntime.cleanDisasmLines(text: String, limit: Int): List<String> {
+    // 先把「续行」并回上一行：native 若把一条指令的汇编拆成多行输出，否则会出现
+    // 「第 2 行起没有地址列/字节列」的错乱（续行不以 0x 开头）。
+    val merged = ArrayList<String>()
+    text.lineSequence().map { it.trimEnd() }.filter { it.isNotBlank() }.forEach { raw ->
+        val t = raw.trim()
+        if (merged.isNotEmpty() && !t.startsWith("0x")) {
+            merged[merged.size - 1] = merged.last() + " " + t
+        } else {
+            merged.add(t)
         }
+    }
+    return merged.map { line ->
+        // 形如 "0x16c8: ff 83 02 d1    sub sp, sp, #0xa0" —— 保留地址与机器码
+        // （此前把机器码整段丢弃，导致汇编视图 addr/bytes 两列全空、指令被挤到最右侧），
+        // 仅把地址后多余空白收敛为单空格，保留机器码与指令之间的多空格分隔。
+        val mixed = Regex("""^(0x[0-9a-fA-F]+:)\s+(.*\S)\s*$""").find(line)
+        if (mixed != null) "${mixed.groupValues[1]} ${mixed.groupValues[2]}" else line
+    }
         .filterNot { it.matches(Regex("""^[0-9a-fA-F]{4,}\s+[0-9a-fA-F]{2}(\s+[0-9a-fA-F]{2}){3,}.*""")) }
         .take(limit)
-        .toList()
+}
 
 internal fun EngineRuntime.annotateDisasmLines(hints: Map<Long, String>, lines: List<String>): List<String> {
         if (lines.isEmpty()) return lines

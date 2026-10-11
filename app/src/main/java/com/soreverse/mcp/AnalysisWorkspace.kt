@@ -12783,8 +12783,3 @@ private fun CallGraphGraphPane(
         }
     }
 }
-         }
-            }
-        }
-    }
-}

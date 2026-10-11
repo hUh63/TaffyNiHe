@@ -5119,6 +5119,15 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                                 },
                                 cs.primary, AppText.label,
                             )
+                            if (o.optInt("emuChecked", 0) > 0) {
+                                MonoLine(
+                                    (if (zh) "动态验证：核对 " else "verify: checked ") + o.optInt("emuChecked") +
+                                        (if (zh) " 个状态 · 不一致 " else " states · mismatch ") + o.optInt("emuMismatch") +
+                                        (if (o.optBoolean("verified", false)) (if (zh) " · 已验证" else " · verified") else (if (zh) " · 未验证" else " · unverified")),
+                                    if (o.optBoolean("verified", false)) cs.primary else cs.error,
+                                    AppText.label,
+                                )
+                            }
                             val arr = o.optJSONArray("patches") ?: JSONArray()
                             if (arr.length() > 0) {
                                 Text(
@@ -5140,6 +5149,30 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                                         MonoLine(p.optString("insn").ifBlank { p.optString("oldTarget") }, cs.onSurfaceVariant, AppText.label)
                                         MonoLine("→ " + p.optString("newTarget"), cs.primary, AppText.bodyStrong)
                                         TypeBadge(p.optString("kind"), cs.onSurfaceVariant)
+                                    }
+                                }
+                                Text(
+                                    if (zh) "指令级对比（改写处的 before / after）" else "per-instruction diff (before / after)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = AppText.label,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.onSurfaceVariant,
+                                )
+                                for (i in 0 until arr.length()) {
+                                    val p = arr.optJSONObject(i) ?: continue
+                                    Column(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm))
+                                            .background(cs.surfaceContainerHigh).padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
+                                        MonoLine(
+                                            "- " + p.optString("insn") + "  " + p.optString("beforeAsm").ifBlank { p.optString("oldHex") },
+                                            cs.error, AppText.label,
+                                        )
+                                        MonoLine(
+                                            "+ " + p.optString("insn") + "  " + p.optString("afterAsm").ifBlank { p.optString("newHex") },
+                                            cs.primary, AppText.label,
+                                        )
                                     }
                                 }
                             }

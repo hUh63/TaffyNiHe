@@ -63,7 +63,35 @@ private fun EngineRuntime.deflatReadMem(workspaceId: String, editSessionId: Stri
     return ByteArray(arr.length()) { arr.optInt(it, 0).toByte() }
 }
 
-private fun deflatPatchJson(p: DeFlatPatch, forceUnsafe: Boolean): JSONObject = JSONObject()
+/** 从各块「写状态」的指令里投票选出分发器读的状态寄存器。 */
+private fun deflatStateRegOf(
+    bounds: List<Triple<Long, Long, ArrayList<DeFlatInsn>>>,
+    disp: Int,
+): String? {
+    val votes = HashMap<String, Int>()
+    for ((idx, list) in bounds.withIndex()) {
+        if (idx == disp || list.isEmpty()) continue
+        if (deflatStateOf(list) == null) continue
+        for (ins in list.asReversed()) {
+            val d = ins.disasm
+            if (d.isBlank()) continue
+            val mn = d.substringBefore(' ').lowercase()
+            if (mn !in DEFLAT_STATE_MNEMONICS) continue
+            if (OllvmDeFlat.lastImmediate(d) == null) continue
+            val dst = d.substringAfter(' ', "").split(',').firstOrNull()?.trim().orEmpty()
+            if (dst.isNotEmpty()) votes[dst] = (votes[dst] ?: 0) + 1
+            break
+        }
+    }
+    return votes.maxByOrNull { it.value }?.key
+}
+
+/** 反汇编一段字节（用于指令级 diff 的 before/after 文本）。 */
+private fun deflatDisasmOne(bytes: ByteArray, arch: String, va: Long): String =
+    runCatching { NativeEngine.active().disassemble(bytes, arch, va, false, 1) }
+        .getOrNull()?.lineSequence()?.firstOrNull()?.trim().orEmpty()
+
+private fun deflatPatchJson(p: DeFlatPatch, forceUnsafe: Boolean, arch: String): JSONObject = JSONObject()
     .put("block", p.blockIndex)
     .put("insn", "0x" + java.lang.Long.toHexString(p.insnAddr))
     .put("oldTarget", "0x" + java.lang.Long.toHexString(p.oldTarget))
@@ -73,6 +101,8 @@ private fun deflatPatchJson(p: DeFlatPatch, forceUnsafe: Boolean): JSONObject = 
     .put("reason", if (forceUnsafe && p.safe) p.reason + "（跳表解出，需 allowTable=true 才写入）" else p.reason)
     .put("oldHex", p.oldBytes.joinToString("") { "%02x".format(it) })
     .put("newHex", p.newBytes.joinToString("") { "%02x".format(it) })
+    .put("beforeAsm", deflatDisasmOne(p.oldBytes, arch, p.insnAddr))
+    .put("afterAsm", deflatDisasmOne(p.newBytes, arch, p.insnAddr))
 
 /**
  * 对单个函数做去平坦化分析。返回值（扁平 + ok=true）：
@@ -162,7 +192,43 @@ internal fun EngineRuntime.deflatAnalyze(
         }
     }
 
-    val forceUnsafeTable = tableDerived && !allowTable
+    // 4c) 动态验证：把分发器真的跑一遍，用执行结果校对静态映射（把假设变成证据 / 矛盾则作废）
+    var verified = false
+    var emuChecked = 0
+    var emuMismatch = 0
+    var emuError = 0
+    if (stateToTarget.isNotEmpty()) {
+        val dispStart = dispInsns.firstOrNull()?.offset ?: 0L
+        val stateReg = deflatStateRegOf(bounds, disp)
+        if (stateReg != null && dispStart != 0L) {
+            val cache = HashMap<String, ByteArray?>()
+            val reader: (Long, Int) -> ByteArray? = { addr, size ->
+                val k = addr.toString() + ":" + size
+                if (!cache.containsKey(k)) cache[k] = deflatReadMem(workspaceId, editSessionId, addr, size)
+                cache[k]
+            }
+            var match = 0
+            for ((st, tgt) in stateToTarget) {
+                val emu = DeFlatEmu(dispInsns, reader)
+                emu.setReg(stateReg, st)
+                val got = emu.run(dispStart)
+                if (got == null) {
+                    emuError++
+                } else {
+                    emuChecked++
+                    if (got == tgt) match++ else emuMismatch++
+                }
+            }
+            verified = emuChecked == stateToTarget.size && emuChecked >= 2 && emuMismatch == 0
+        }
+    }
+    if (emuMismatch > 0 && emuError == 0) {
+        // 模拟执行与静态映射矛盾 → 整份映射作废（宁可不做也不写错）
+        stateToTarget = emptyMap()
+        verified = false
+    }
+
+    val forceUnsafeTable = tableDerived && !allowTable && !verified
     val patches = OllvmDeFlat.plan(dBlocks, dispVa, stateToTarget, a)
     val safeP = if (forceUnsafeTable) emptyList() else patches.filter { it.safe }
     val unsafeP = if (forceUnsafeTable) patches else patches.filter { !it.safe }
@@ -195,16 +261,21 @@ internal fun EngineRuntime.deflatAnalyze(
         .put("dispatcherStates", stateToTarget.size)
         .put("dispatchMode", dispatchMode)
         .put("tableDerived", tableDerived)
+        .put("verified", verified)
+        .put("emuChecked", emuChecked)
+        .put("emuMismatch", emuMismatch)
+        .put("emuError", emuError)
         .put("patchable", safeP.size)
         .put("unpatchable", unsafeP.size)
         .put("compare", JSONObject()
             .put("beforeBlocks", n).put("afterBlocks", dg.keptBlocks)
             .put("beforeEdges", g.edges.size).put("afterEdges", dg.edges.size)
             .put("removedBlock", dg.removed)
+            .put("removedEdges", g.edges.count { it.from == disp || it.to == disp })
             .put("added", JSONArray(dg.added.map { JSONArray().put(it.first).put(it.second) })))
         .put("afterCfg", afterCfg)
-        .put("patches", JSONArray(safeP.map { deflatPatchJson(it, false) }))
-        .put("skipped", JSONArray(unsafeP.map { deflatPatchJson(it, forceUnsafeTable) })))
+        .put("patches", JSONArray(safeP.map { deflatPatchJson(it, false, a) }))
+        .put("skipped", JSONArray(unsafeP.map { deflatPatchJson(it, forceUnsafeTable, a) })))
 }
 
 /** 批量扫描：对前 maxFunctions 个函数各跑一次 deflatAnalyze，汇总被平坦化的函数与可重定向数。 */

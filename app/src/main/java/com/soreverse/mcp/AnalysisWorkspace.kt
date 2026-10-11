@@ -3233,23 +3233,29 @@ private fun ElfMetaView(
                             }
                         }
                         item {
-                            Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            // 对齐 Exbin HeaderTabFragment + item_detail：单列卡片（标题=字段 / 副标题=值）
+                            Column(
+                                Modifier.fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(cs.surfaceVariant)
+                                    .padding(12.dp),
                             ) {
                                 Text(
                                     r.field,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = cs.onSurfaceVariant,
-                                    modifier = Modifier.width(120.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = cs.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
                                     r.value,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = cs.onSurface,
-                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = cs.onSurfaceVariant,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 2.dp),
                                 )
                             }
                         }
@@ -6899,14 +6905,35 @@ private fun RzObjectTable(rows: List<JSONObject>, cols: List<RzCol>, zh: Boolean
 
 @Composable
 private fun RelocsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) =
-    RzViewScaffold(
-        tools, zh, context, "relocs", "irj",
-        listOf(
-            RzCol("vaddr", "地址", "VADDR", 88.dp),
-            RzCol("type", "类型", "TYPE", 66.dp),
-            RzCol("name", "符号", "SYMBOL", null),
-        ),
-        onRefresh,
+    // 对齐 Exbin DetailListTabFragment(KIND_RELOCATION)：单列卡片（标题=类型 / 副标题=symbol@addr / meta=offset）
+    ListScaffold(
+        tools = tools, zh = zh, context = context, view = "relocs", limit = 400,
+        onRefresh = onRefresh,
+        rowsFromJson = { json ->
+            val arr = itemsArray(json)
+            (0 until arr.length()).mapNotNull { i ->
+                val it = arr.optJSONObject(i) ?: return@mapNotNull null
+                val type = it.optString("type")
+                val name = it.optString("name").ifBlank { it.optString("symbol") }
+                val vaddr = it.optString("vaddr").ifBlank { it.optString("offset") }
+                val paddr = it.optString("paddr")
+                val addend = it.optString("addend")
+                AnalysisRow(
+                    key = "r$i|$vaddr|$name",
+                    title = type.ifBlank { name.ifBlank { "RELOC" } },
+                    sub = listOf(name, vaddr).filter { s -> s.isNotBlank() }.joinToString("@"),
+                    meta = listOf(
+                        if (vaddr.isNotBlank()) "offset=$vaddr" else "",
+                        if (paddr.isNotBlank()) "paddr=$paddr" else "",
+                        if (addend.isNotBlank()) "addend=$addend" else "",
+                    ).filter { s -> s.isNotBlank() }.joinToString("  "),
+                    va = vaddr,
+                    badge = type,
+                    text = name,
+                )
+            }
+        },
+        onPick = { row -> copyToClipboard(context, row.title, zh) },
     )
 
 @Composable
@@ -8483,6 +8510,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
     var loading by remember(ws, tick) { mutableStateOf(false) }
     var error by remember(ws, tick) { mutableStateOf("") }
     var note by remember(ws, tick) { mutableStateOf("") }
+    var fnSizes by remember(ws, tick) { mutableStateOf<Map<String, Long>>(emptyMap()) }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -8515,6 +8543,15 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         if (res == null) { error = if (zh) "引擎未就绪或命令失败" else "engine/command failed"; return@LaunchedEffect }
         val (n, e, nt) = res
         nodes = n; edges = e; note = nt
+        // 函数大小（供调用图节点卡：addr · size bytes · 调用/被调，对齐 Exbin GlobalCfgView）
+        fnSizes = withContext(Dispatchers.IO) {
+            runCatching {
+                val fns = rzArray(EngineProvider.get(context).rzCommand(ws, "", "aflj"))
+                val m = HashMap<String, Long>()
+                fns.forEach { o -> val nm = o.optString("name"); if (nm.isNotBlank()) m[nm] = o.optLong("size", -1L) }
+                m
+            }.getOrDefault(emptyMap())
+        }
     }
 
     if (ws.isBlank()) return NeedWorkspace(zh)
@@ -8533,7 +8570,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
                 )
                 else -> CallGraphGraphPane(
                     nodes = nodes, edges = edges, findQ = "", zh = zh, ui = tools.cfgUi,
-                    ws = ws, context = context,
+                    fnSizes = fnSizes, ws = ws, context = context,
                     onOpenFunction = { nm, va ->
                         tools.selectedFunctionName = nm
                         tools.selectedFunctionVa = va
@@ -10883,6 +10920,7 @@ private fun callGraphCfgJson(
     sub: List<Pair<String, String>>,
     subEdges: List<Pair<Int, Int>>,
     zh: Boolean,
+    sizes: Map<String, Long> = emptyMap(),
 ): String {
     val outDeg = IntArray(sub.size)
     val inDeg = IntArray(sub.size)
@@ -10899,7 +10937,14 @@ private fun callGraphCfgJson(
         arr.put(
             JSONObject()
                 .put("addr", key)
-                .put("summary", (if (zh) "调用 " else "out ") + outDeg[i] + " · " + (if (zh) "被调 " else "in ") + inDeg[i]),
+                .put("summary", buildString {
+                    // Exbin GlobalCfgView 节点卡：addr · size bytes · 调用 N · 被调 M
+                    val addrText = p.second
+                    if (addrText.isNotBlank()) append(addrText).append("  ·  ")
+                    val sz = sizes[p.first] ?: sizes[key] ?: -1L
+                    if (sz > 0) append(sz).append(if (zh) " 字节  ·  " else "B  ·  ")
+                    append(if (zh) "调用 " else "out ").append(outDeg[i]).append(" · ").append(if (zh) "被调 " else "in ").append(inDeg[i])
+                }),
         )
     }
     val earr = JSONArray()
@@ -12447,6 +12492,7 @@ private fun CallGraphGraphPane(
     findQ: String,
     zh: Boolean,
     ui: CfgDisplayState,
+    fnSizes: Map<String, Long> = emptyMap(),
     ws: String,
     context: android.content.Context,
     onOpenFunction: ((String, String) -> Unit)? = null,
@@ -12713,7 +12759,7 @@ private fun CallGraphGraphPane(
             Box(Modifier.fillMaxSize()) {
                 // GlobalCfgView extends CfgCanvasView：全局调用图复用 CFG 画布（节点/边/迷你图/布局引擎）
                 CfgCanvas(
-                    json = callGraphCfgJson(subPair.first, subPair.second, zh),
+                    json = callGraphCfgJson(subPair.first, subPair.second, zh, fnSizes),
                     zh = zh,
                     modifier = Modifier.fillMaxSize(),
                     ui = ui,

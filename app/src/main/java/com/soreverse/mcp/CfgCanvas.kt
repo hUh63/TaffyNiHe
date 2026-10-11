@@ -53,7 +53,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -1415,6 +1418,42 @@ private fun CfgToolButton(glyph: String, iconSp: Float, primaryMix: Float? = nul
 }
 
 /**
+ * 布局方向 TB/LR 按钮（对标 Exbin `fragment_global_cfg.xml` 的 `btnRankDir`：44x44dp、
+ * 1dp outline 描边、图标 ic_swap_direction、边距 12dp）。
+ * `atStart` 为 true 时贴左上角（画布太矮、右下角工具条会顶上来的避让位）。
+ */
+@Composable
+private fun CfgRankDirToggle(ui: CfgDisplayState, zh: Boolean, modifier: Modifier = Modifier, atStart: Boolean = false) {
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(AppShape.sm)
+    val context = LocalContext.current
+    Box(
+        modifier = modifier
+            .padding(start = if (atStart) 12.dp else 0.dp, end = if (atStart) 0.dp else 12.dp, top = 12.dp)
+            .size(44.dp)
+            .clip(shape)
+            .background(cs.surfaceContainerHigh)
+            .border(BorderStroke(1.dp, cs.outline), shape)
+            .clickable {
+                ui.rankDir = if (ui.rankDir.equals("TB", true)) "LR" else "TB"
+                Toast.makeText(
+                    context,
+                    (if (zh) "布局方向: " else "layout direction: ") + ui.rankDir,
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.SwapHoriz,
+            contentDescription = if (zh) "切换布局方向 (TB/LR)" else "toggle layout direction (TB/LR)",
+            tint = cs.primary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/**
  * CFG 图形画布。json 为 rzCfg 原始 JSON；空/非法 JSON 时显示「无 CFG 数据」而不是崩溃。
  */
 @Composable
@@ -1433,6 +1472,12 @@ internal fun CfgCanvas(
      * 基本块级 CFG 弹窗），不再在画布内弹「块详情」小浮层。
      */
     onNodeClick: ((index: Int, addrText: String) -> Unit)? = null,
+    /**
+     * 是否在画布内显示「布局方向 TB/LR」按钮（Exbin `fragment_global_cfg.xml` 的 `btnRankDir`，
+     * 只有全局调用图画布有）。放在画布内部是为了能与右下角工具条做**精确避让** —— 画布矮时
+     * 工具条会顶上来，二者曾重叠。
+     */
+    showRankDir: Boolean = false,
 ) {
     val density = LocalDensity.current.density
     val baseGraph = remember(json) { parseCfgGraph(json) }
@@ -1783,6 +1828,20 @@ internal fun CfgCanvas(
                 }
             }
 
+            // ── 布局方向 TB/LR（Exbin fragment_global_cfg.xml 的 btnRankDir：44x44dp、top|end 各 12dp）──
+            // 与右下角工具条做精确避让：工具条实际高度（1 列 304dp / 2 列 184dp）+ 按钮 44dp + 24dp 间距
+            // 超过画布高度时，按钮让位到左上角 —— 保证「TB/LR 与缩放按钮」永不重叠。
+            if (showRankDir) {
+                val toolbarH = if (canvasHeightDp < 304f) 184f else 304f
+                val atStart = canvasHeightDp < toolbarH + 44f + 24f
+                CfgRankDirToggle(
+                    ui,
+                    zh,
+                    Modifier.align(if (atStart) Alignment.TopStart else Alignment.TopEnd),
+                    atStart,
+                )
+            }
+
             // ── 左下角小地图（完全对齐 Exbin CfgMinimap：140x100dp、圆角 8dp、边距 12dp）──
             // 仅在「值得导航」时显示：≥2 个真实节点（单节点时只是一块色块 + 满图视口框）
             if (ui.minimap && effective.boxes.count { !it.isDummy } >= 2) {
@@ -1858,7 +1917,12 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     val dash = PathEffect.dashPathEffect(floatArrayOf(9f * scl, 6f * scl), 0f)
 
     // ── 边（正交折线）──
-    layout.routes.forEach { r ->
+    // 大图渲染降级：完整模式可能是几千节点 / 上万条边，每帧全量画路径 + 箭头会把主线程压到
+    // 几十毫秒一帧 → 手势完全失灵（即「切到完整模式后图控制不了」）。边多时只画线不画箭头，
+    // 再多则整段跳过（缩到 0.42 以下本来已降级为圆点，边也看不清）。
+    val drawEdges = layout.routes.size <= 3000
+    val drawEdgeArrows = layout.routes.size <= 1200
+    if (drawEdges) layout.routes.forEach { r ->
         if (r.points.size < 2) return@forEach
         val color = when {
             r.isBack -> backColor
@@ -1883,14 +1947,16 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
                 join = StrokeJoin.Round,
             ),
         )
-        val tip = r.points[r.points.size - 1]
-        val prev = r.points[r.points.size - 2]
-        arrowHead(
-            Offset(px(tip.x), py(tip.y)),
-            Offset(px(prev.x), py(prev.y)),
-            color,
-            arrowSize * (if (r.isBack) 1.35f else 1f),
-        )
+        if (drawEdgeArrows) {
+            val tip = r.points[r.points.size - 1]
+            val prev = r.points[r.points.size - 2]
+            arrowHead(
+                Offset(px(tip.x), py(tip.y)),
+                Offset(px(prev.x), py(prev.y)),
+                color,
+                arrowSize * (if (r.isBack) 1.35f else 1f),
+            )
+        }
     }
 
     // ── 节点（按角色分层：入口/返回/循环头/普通/选中）──

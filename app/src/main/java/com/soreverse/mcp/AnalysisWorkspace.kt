@@ -42,7 +42,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -4302,7 +4301,48 @@ private fun disasmInstrAnnotated(instr: String, cs: androidx.compose.material3.C
 }
 
 /** rizin axtj/axfj 条目是否代码引用（type=CODE）。 */
-private fun xrefIsCode(o: JSONObject): Boolean = o.optString("type").equals("CODE", true)
+/**
+ * rizin 交叉引用是否属于「代码引用」。
+ * ⚠ rizin 把调用记成 `call`、分支/跳转记成 `code`（见 native `xrefTypeStr`）——
+ * 只认 "CODE" 会把**所有函数调用**都过滤掉，表现就是「交叉引用：没有找到调用关系」。
+ */
+private fun xrefIsCode(o: JSONObject): Boolean {
+    val t = o.optString("type")
+    return t.equals("CODE", true) || t.equals("CALL", true)
+}
+
+/** 原生 `rzXrefs`（from/to 为十进制数字）→ 与 axtj/axfj 同形（hex 字符串 + addr 字段）。 */
+private fun nativeXrefRows(arr: JSONArray?, pick: String): List<JSONObject> {
+    if (arr == null) return emptyList()
+    val out = ArrayList<JSONObject>(arr.length())
+    for (i in 0 until arr.length()) {
+        val o = arr.optJSONObject(i) ?: continue
+        val f = o.optLong("from", -1L)
+        val t = o.optLong("to", -1L)
+        val other = if (pick == "from") f else t
+        if (other <= 0L) continue
+        out.add(
+            JSONObject()
+                .put("addr", "0x" + java.lang.Long.toHexString(other))
+                .put("from", if (f > 0L) "0x" + java.lang.Long.toHexString(f) else "")
+                .put("to", if (t > 0L) "0x" + java.lang.Long.toHexString(t) else "")
+                .put("type", o.optString("type").ifBlank { "code" })
+                .put("opcode", o.optString("sourceType")),
+        )
+    }
+    return out
+}
+
+/** 合并两路交叉引用（按对方地址去重，primary 优先）。 */
+private fun mergeXrefs(primary: List<JSONObject>, extra: List<JSONObject>, pick: String): List<JSONObject> {
+    val out = ArrayList<JSONObject>(primary.size + extra.size)
+    val seen = HashSet<String>()
+    fun key(o: JSONObject): String =
+        o.optString("addr").ifBlank { o.optString(pick) }.lowercase().removePrefix("0x").trimStart('0')
+    primary.forEach { o -> val k = key(o); if (k.isNotBlank() && seen.add(k)) out.add(o) }
+    extra.forEach { o -> val k = key(o); if (k.isNotBlank() && seen.add(k)) out.add(o) }
+    return out
+}
 
 /** axtj/axfj 条目 → 列表行。pick 取 "from"（谁引用我）或 "to"（我引用谁）。 */
 private fun xrefRows(list: List<JSONObject>, pick: String): List<AnalysisRow> =
@@ -4351,22 +4391,37 @@ private fun FuncXRefView(
         val res = withContext(Dispatchers.IO) {
             runCatching {
                 val eng = EngineProvider.get(context)
+                // ① axtj / axfj 读的是分析库里的交叉引用：没跑过函数 & 调用分析时恒为空
+                //    （这是「交叉引用显示没有找到调用关系」的主因）。先补一次轻量分析。
+                runCatching { eng.rzCommand(ws, "", "s $loc; af; aac") }
                 val a = parseRzArray(eng.rzCommand(ws, "", "s $loc; axtj")) ?: emptyList()
                 val b = parseRzArray(eng.rzCommand(ws, "", "s $loc; axfj")) ?: emptyList()
+                // ② 原生 BL/B 扫描：自带完整分析 + 直接分支回填（PIC 代码也能命中调用方），与上面合并去重。
+                val nat = runCatching { eng.rzXrefs(ws, "", loc, "both").optJSONArray("xrefs") }.getOrNull()
+                val nIn = nativeXrefRows(nat, "from")
+                val nOut = nativeXrefRows(nat, "to")
+                val extRows = mergeXrefs(a.filter { xrefIsCode(it) }, nIn.filter { xrefIsCode(it) }, "from")
+                val intRows = mergeXrefs(b.filter { xrefIsCode(it) }, nOut.filter { xrefIsCode(it) }, "to")
+                val dataRows = mergeXrefs(
+                    (b + a).filter { !xrefIsCode(it) },
+                    (nIn + nOut).filter { !xrefIsCode(it) },
+                    "from",
+                )
                 var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
                 for (c in listOf("agC json", "aac; agC json", "agc json")) {
                     g = parseRizinGraph(rzText(eng.rzCommand(ws, "", c)))
                     if (g.first.isNotEmpty()) break
                 }
-                Triple(a, b, g)
+                Triple(extRows, intRows, dataRows to g)
             }.getOrNull()
         }
         loading = false
         if (res != null) {
-            val (a, b, g) = res
-            ext = a.filter { xrefIsCode(it) }
-            int = b.filter { xrefIsCode(it) }
-            data = (b + a).filter { !xrefIsCode(it) }
+            val (a, b, dg) = res
+            val (d, g) = dg
+            ext = a
+            int = b
+            data = d
             gNodes = g.first
             gEdges = g.second
         }
@@ -12687,11 +12742,12 @@ private fun buildCallSubgraph(
         inDeg[t] = (inDeg[t] ?: 0) + 1
     }
     fun deg(n: String): Int = (outAdj[n]?.size ?: 0) + (inDeg[n] ?: 0)
-    // 上限语义对齐 Exbin GlobalCfgFragment.readOptions()：完整模式默认全量展示（≤50000，仅作内存护栏，
-    // 用户显式填了 ≠120 的值时按其值护栏），热点 / 根展开默认 120、最大 2000。
-    // 模式是**单选互斥**（Exbin modeSeg singleSelection=true），此处只取当前模式，不做并集。
+    // 完整模式：语义上是「全量」，但 Compose 画布的每帧绘制成本随节点/边数线性增长
+    //（几千节点 + 上万条边 ≈ 每帧几十毫秒 → 手势完全失灵，即用户报告的「切完整模式后图控制不了」），
+    // 因此交互画布的上限收到 1500（Exbin 用的是自绘 View + dotMode，能扛 50000）；被截断时统计行的
+    //「显示 N/总数」会如实标出。用户显式填了更大的值则按其值（最多 5000）。
     val cap = if (mode == "full") {
-        (if (maxNodes <= 120) 50000 else maxNodes).coerceIn(100, 50000)
+        (if (maxNodes <= 120) 1500 else maxNodes).coerceIn(100, 5000)
     } else {
         maxNodes.coerceIn(10, 2000)
     }
@@ -13119,41 +13175,6 @@ private fun StatChip(text: String) {
 }
 
 /**
- * Exbin GlobalCfg 画布右上角的「布局方向 TB/LR」按钮（fragment_global_cfg.xml `btnRankDir`：
- * 44dp、layout_gravity=top|end、12dp 边距、OutlinedButton 风格、点击后重新布局并 Toast 提示）。
- */
-@Composable
-private fun CfgRankDirButton(ui: CfgDisplayState, zh: Boolean, modifier: Modifier = Modifier, atStart: Boolean = false) {
-    val cs = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(AppShape.sm)
-    val context = LocalContext.current
-    Box(
-        modifier = modifier
-            .padding(start = if (atStart) 12.dp else 0.dp, end = if (atStart) 0.dp else 12.dp, top = 12.dp)
-            .size(44.dp)
-            .clip(shape)
-            .background(cs.surfaceContainerHigh)
-            .border(BorderStroke(1.dp, cs.outline), shape)
-            .clickable {
-                ui.rankDir = if (ui.rankDir.equals("TB", true)) "LR" else "TB"
-                Toast.makeText(
-                    context,
-                    (if (zh) "布局方向: " else "layout direction: ") + ui.rankDir,
-                    Toast.LENGTH_SHORT,
-                ).show()
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.SwapHoriz,
-            contentDescription = if (zh) "切换布局方向 (TB/LR)" else "toggle layout direction (TB/LR)",
-            tint = cs.primary,
-            modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-/**
  * 调用图（逐项对齐 Explorer So `fragment_global_cfg.xml`）：
  * 头部卡（marginH 10 / marginTop 6，corner 16，stroke 1 outlineVariant，bg surfaceContainer，内 padding H12 T10 B8）
  * 内含搜索行（圆角 12dp / 13.5sp）、匹配计数（11sp）、模式分段（36dp / paddingH 16 / 12sp）+ 选项折叠
@@ -13442,8 +13463,9 @@ private fun CallGraphGraphPane(
             color = cs.surfaceContainerHigh,
             border = BorderStroke(1.dp, cs.outlineVariant),
         ) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
                 // GlobalCfgView extends CfgCanvasView：全局调用图复用 CFG 画布（节点/边/迷你图/布局引擎）
+                // showRankDir → 画布内右上角的 TB/LR 按钮（Exbin btnRankDir），与右下角工具条做精确避让。
                 CfgCanvas(
                     json = cfgJson,
                     zh = zh,
@@ -13457,10 +13479,8 @@ private fun CallGraphGraphPane(
                         val va = subPair.first.firstOrNull { it.first == name }?.second.orEmpty()
                         cfgPopup = name to va
                     },
+                    showRankDir = true,
                 )
-                // Exbin fragment_global_cfg.xml 的 btnRankDir（布局方向 TB/LR）—— 位于画布卡 top|end。
-                // 画布过矮时右下角工具条会顶上来，此时让位到左上角，避免 TB/LR 与缩放按钮重叠。
-                CfgRankDirButton(ui, zh, Modifier.align(if (maxHeight < 250.dp) Alignment.TopStart else Alignment.TopEnd), atStart = maxHeight < 250.dp)
             }
         }
         // ── 节点点击弹层：该函数的基本块级 CFG（对齐 Exbin GlobalCfgFragment.showCfgPopup）──

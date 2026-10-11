@@ -4426,7 +4426,7 @@ private fun FuncXRefView(
                             cs.onSurfaceVariant, AppText.label,
                         )
                         Spacer(Modifier.size(6.dp))
-                        CallGraphCanvas(sub.first, if (showCross) sub.second else tc.first, "TB", query, zh, "curve", Modifier.fillMaxWidth().weight(1f))
+                        CallGraphCanvas(sub.first, if (showCross) sub.second else sub.second.filterIndexed { i, _ -> i in tc.first }, "TB", query, zh, "curve", Modifier.fillMaxWidth().weight(1f))
                     }
                 }
                 curRows.isEmpty() -> AnalysisEmptyState(

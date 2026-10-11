@@ -52,6 +52,7 @@ internal fun EngineRuntime.analysisReport(workspaceId: String, editSessionId: St
         .put("crypto", crypto)
         .put("security", analyze(resolvedId, editSessionId).optJSONObject("security") ?: JSONObject())
         .put("recommendations", recommendations)
+        .put("deflat", runCatching { deflatScan(resolvedId, editSessionId, 10) }.getOrNull()?.let { if (it.has("error")) JSONObject() else it } ?: JSONObject())
     val file = if (writeToFile) {
         val dir = reportDir()
         val safeName = ws.source.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
@@ -274,3 +275,4 @@ internal fun EngineRuntime.writePatchReport(workspaceId: String, session: EditSe
     report.writeText(payload.toString(2))
     return report
 }
+

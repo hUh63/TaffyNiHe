@@ -101,6 +101,8 @@ class NativeSoEngine(context: Context) {
     fun rzAnalyze(workspaceId: String, editSessionId: String = ""): JSONObject = runtime.rzAnalyze(workspaceId, editSessionId)
     fun rzFunctions(workspaceId: String, editSessionId: String = "", limit: Int = SettingsStore(appContext).defaultLimit, cursor: String = ""): JSONObject = runtime.rzFunctions(workspaceId, editSessionId, limit, cursor)
     fun rzCfg(workspaceId: String, editSessionId: String, locator: String): JSONObject = runtime.rzCfg(workspaceId, editSessionId, locator)
+    fun deflatAnalyze(workspaceId: String, editSessionId: String = "", locator: String, arch: String = "", maxInsns: Int = 3000, allowTable: Boolean = false): JSONObject = runtime.deflatAnalyze(workspaceId, editSessionId, locator, arch, maxInsns, allowTable)
+    fun deflatScan(workspaceId: String, editSessionId: String = "", maxFunctions: Int = 10): JSONObject = runtime.deflatScan(workspaceId, editSessionId, maxFunctions)
     fun rzXrefs(workspaceId: String, editSessionId: String, locator: String, direction: String = "to"): JSONObject = runtime.rzXrefs(workspaceId, editSessionId, locator, direction)
     fun rzSearchBytes(workspaceId: String, editSessionId: String, pattern: String, fromVa: Long = 0, toVa: Long = 0): JSONObject = runtime.rzSearchBytes(workspaceId, editSessionId, pattern, fromVa, toVa)
     fun rzScanCrypto(workspaceId: String, editSessionId: String = ""): JSONObject = runtime.rzScanCrypto(workspaceId, editSessionId)

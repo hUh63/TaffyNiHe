@@ -24,8 +24,9 @@ object FridaTool {
             "dynamic", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
-                "action".oneOf("status (default) | start | stop | ps", "status", "start", "stop", "ps")
+                "action".oneOf("status (default) | start | stop | ps | port", "status", "start", "stop", "ps", "port")
                 "filter" str "进程名过滤关键词(action=ps 可选)"
+                "port" str "自定义 frida-server 监听端口 1024..65535(action=port; 留空=查询当前端口)"
             })
         }
 
@@ -33,7 +34,7 @@ object FridaTool {
             return when (args.str("action", "status").ifBlank { "status" }) {
                 "start" -> {
                     val (okStart, msg) = FridaManager.start(ctx.context)
-                    if (okStart) ok(JSONObject().put("action", "start").put("message", msg).put("port", FridaManager.DEFAULT_PORT))
+                    if (okStart) ok(JSONObject().put("action", "start").put("message", msg).put("port", FridaManager.currentPort(ctx.context)))
                     else err("FRIDA_START_FAILED", msg)
                 }
                 "stop" -> {
@@ -56,6 +57,20 @@ object FridaTool {
                         .put("action", "ps")
                         .put("count", lines.size)
                         .put("processes", JSONArray(lines)))
+                }
+                "port" -> {
+                    val want = args.str("port").trim()
+                    if (want.isBlank()) {
+                        ok(JSONObject().put("action", "port").put("port", FridaManager.currentPort(ctx.context)))
+                    } else {
+                        val p = want.toIntOrNull()
+                        if (p == null || !FridaManager.setPort(ctx.context, p)) {
+                            err("FRIDA_BAD_PORT", "端口无效(需 1024..65535)")
+                        } else {
+                            ok(JSONObject().put("action", "port").put("port", FridaManager.currentPort(ctx.context))
+                                .put("message", "已设为监听端口 ${p}；重启 frida-server 后生效"))
+                        }
+                    }
                 }
                 else -> { // status
                     val s = FridaManager.status(ctx.context)

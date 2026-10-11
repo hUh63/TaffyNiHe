@@ -21,6 +21,35 @@ object CrashReporter {
     private const val READY_TIMEOUT_MS = 8_000L
     private const val POLL_INTERVAL_MS = 50L
     private val handling = AtomicBoolean(false)
+    private const val PREFS = "taffy_debug_prefs"
+    private const val KEY_DEVICE_ID = "crash_device_id"
+    private const val KEY_DEVICE_ID_ENABLED = "crash_include_device_id"
+    private const val KEY_CHANNEL = "app_channel"
+
+    /** 崩溃报告是否包含(匿名)设备标识。隐私闸门，默认关闭。 */
+    fun deviceIdEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_DEVICE_ID_ENABLED, false)
+
+    fun setDeviceIdEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DEVICE_ID_ENABLED, enabled).apply()
+    }
+
+    /** 发布渠道(prefs 可覆盖，默认 debug/release)。 */
+    fun channel(context: Context): String {
+        val c = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_CHANNEL, null)
+        if (!c.isNullOrBlank()) return c
+        return if (BuildConfig.DEBUG) "debug" else "release"
+    }
+
+    /** 匿名设备标识: 首次生成随机 UUID 并持久化 —— 不读取任何硬件/系统标识。 */
+    fun anonymousDeviceId(context: Context): String {
+        val sp = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val existing = sp.getString(KEY_DEVICE_ID, null)
+        if (!existing.isNullOrBlank()) return existing
+        val id = UUID.randomUUID().toString()
+        sp.edit().putString(KEY_DEVICE_ID, id).apply()
+        return id
+    }
 
     fun isCrashProcess(): Boolean = currentProcessName().endsWith(":crash")
 

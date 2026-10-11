@@ -23,6 +23,7 @@ import com.soreverse.mcp.core.CrashReporter
 class CrashReportActivity : ComponentActivity() {
     private lateinit var token: String
     private lateinit var report: String
+    private lateinit var reportView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,12 +96,25 @@ class CrashReportActivity : ComponentActivity() {
                 ),
             )
             addView(
+                android.widget.CheckBox(context).apply {
+                    text = "复制时包含匿名设备标识（随机 UUID，不含任何硬件信息）"
+                    textSize = 13f
+                    isChecked = CrashReporter.deviceIdEnabled(context)
+                    setPadding(0, dp(4), 0, dp(4))
+                    setOnCheckedChangeListener { _, checked ->
+                        CrashReporter.setDeviceIdEnabled(context, checked)
+                        if (::reportView.isInitialized) reportView.text = composedReport()
+                    }
+                },
+            )
+            addView(
                 ScrollView(context).apply {
                     isFillViewport = true
                     setBackgroundColor(Color.WHITE)
                     addView(
                         TextView(context).apply {
-                            text = report
+                            reportView = this
+                            text = composedReport()
                             textSize = 12f
                             typeface = Typeface.MONOSPACE
                             setTextColor(Color.rgb(28, 28, 30))
@@ -126,12 +140,25 @@ class CrashReportActivity : ComponentActivity() {
     private fun copyAll() {
         runCatching {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Taffy crash report", report))
+            clipboard.setPrimaryClip(ClipData.newPlainText("Taffy crash report", composedReport()))
         }.onSuccess {
             Toast.makeText(this, "已复制完整崩溃信息", Toast.LENGTH_SHORT).show()
         }.onFailure {
             Toast.makeText(this, "系统剪贴板拒绝了复制，请长按选择文本", Toast.LENGTH_LONG).show()
         }
+    }
+
+    /** 报告正文 + 隐私闸门开关：渠道恒定附带；设备标识仅在用户勾选时附带(随机 UUID)。 */
+    private fun composedReport(): String {
+        val sb = StringBuilder(report)
+        sb.append("\n\n---\n")
+        sb.append("Channel: ").append(CrashReporter.channel(this)).append('\n')
+        if (CrashReporter.deviceIdEnabled(this)) {
+            sb.append("Device ID: ").append(CrashReporter.anonymousDeviceId(this)).append(" (anonymous, consent-gated)\n")
+        } else {
+            sb.append("Device ID: (未包含 · 隐私闸门默认关闭)\n")
+        }
+        return sb.toString()
     }
 
     private fun showExitConfirmation() {

@@ -466,6 +466,7 @@ internal fun AnalysisWorkspace(
                         "jnireg" -> JniRegView(tools, zh, context, refreshAll)
 
                         "hardening" -> HardeningView(tools, zh, context, refreshAll)
+                        "ollvm" -> OllvmView(tools, zh, context, refreshAll)
 
                         "callgraph" -> CallGraphView(tools, zh, context, refreshAll)
 
@@ -2136,6 +2137,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("funcsig", "签名", "Sig", Icons.Filled.ListAlt),
     AnalysisNavItem("jnireg", "JNI", "JNI", Icons.Filled.DataObject),
     AnalysisNavItem("hardening", "加固", "Hard", Icons.Filled.Warning),
+    AnalysisNavItem("ollvm", "去平坦化", "DeFlat", Icons.Filled.Transform),
     AnalysisNavItem("callgraph", "调用图", "Calls", Icons.Filled.CompareArrows),
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
@@ -2989,7 +2991,7 @@ private fun AnalysisFileBar(state: WorkspaceState, zh: Boolean, onOpenTask: () -
  * 与 Exbin 把「地址查看 / 快速跳转 / 全量分析 / 全局伪 C / 静态数据流追踪」放进 toolbar 菜单同一范式。
  */
 private val analysisOverflowViews = listOf(
-    "hardening", "unpack", "export", "flutter", "analyze", "edit", "calc", "iapp",
+    "hardening", "unpack", "export", "flutter", "analyze", "edit", "calc", "iapp", "ollvm",
     "hex", "results", "tools", "funcdetail", "funcinfo", "comments", "funcsig",
     "asm", "insnexp", "regs", "asm2c", "asm2flow", "base", "demangle", "strdec", "xor", "bytediff",
 )
@@ -4853,6 +4855,167 @@ private fun DisasmView(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── 去平坦化（OLLVM 控制流平坦化，只读分析） ─────────────────────────
+
+private class FlattenReport(
+    val flattened: Boolean,
+    val dispatcherAddr: String,
+    val dispatcherInDeg: Int,
+    val blockCount: Int,
+    val edgeCount: Int,
+    val states: List<Triple<Long, Int, String>>,
+    val note: String,
+)
+
+/** 从基本块指令摘要里取最后一个较小的立即数（状态常量）。 */
+private fun parseStateConst(summary: String): Long? {
+    val re = Regex("#(0x[0-9a-fA-F]+|[0-9]+)")
+    var last: Long? = null
+    re.findAll(summary).forEach { m ->
+        val t = m.groupValues[1]
+        val v = if (t.startsWith("0x", true)) t.substring(2).toLongOrNull(16) else t.toLongOrNull()
+        if (v != null && v in 0..0xFFFFFFL) last = v
+    }
+    return last
+}
+
+/**
+ * 控制流平坦化检测（OLLVM 风格）：
+ *  1) 入度最大的基本块视为「分发器」；
+ *  2) 跳回分发器的块，其指令摘要里最后一个较小立即数视为「状态常量」；
+ *  3) 状态常量 ↔ 块 即恢复出的状态机（按状态值排序给出可读序）。
+ * 只读分析，不重写二进制（塔菲编辑会话不允许改变文件大小）。
+ */
+private fun analyzeFlattening(g: CfgGraph): FlattenReport {
+    val n = g.blocks.size
+    if (n < 3) {
+        return FlattenReport(false, "", 0, n, g.edges.size, emptyList(), if (n == 0) "无基本块" else "基本块过少")
+    }
+    val indeg = IntArray(n)
+    g.edges.forEach { e -> if (e.to in 0 until n) indeg[e.to]++ }
+    var disp = -1
+    var best = 0
+    for (i in 0 until n) if (indeg[i] > best) { best = indeg[i]; disp = i }
+    val states = ArrayList<Triple<Long, Int, String>>()
+    if (disp >= 0 && best >= 3) {
+        g.edges.forEach { e ->
+            if (e.to == disp && e.from != disp) {
+                val b = g.blocks.getOrNull(e.from) ?: return@forEach
+                val v = parseStateConst(b.summary) ?: return@forEach
+                states.add(Triple(v, b.index, b.addrText))
+            }
+        }
+    }
+    val distinct = states.distinctBy { it.second }.sortedBy { it.first }
+    val flat = disp >= 0 && best >= 3 && distinct.size >= 3
+    val note = when {
+        flat -> ""
+        disp >= 0 && best >= 3 -> "分发器候选入度 $best，但可识别的状态常量不足（可能未混淆，或状态由寄存器间接计算）"
+        else -> "未找到明显的分发器（最大入度 $best）"
+    }
+    return FlattenReport(flat, if (disp in 0 until n) g.blocks[disp].addrText else "", best, n, g.edges.size, distinct, note)
+}
+
+@Composable
+private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val ws = tools.sharedWorkspaceId
+    val scope = rememberCoroutineScope()
+    val target = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
+    val fn = tools.selectedFunctionName.ifBlank { target }
+
+    LaunchedEffect(ws, target, tools.reloadTick) {
+        if (ws.isNotBlank() && target.isNotBlank()) loadCfg(context, tools, zh, scope, target)
+    }
+
+    val graph = remember(tools.cfgJson) {
+        if (tools.cfgJson.isBlank()) null else runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
+    }
+    val rep = remember(graph) { graph?.let { analyzeFlattening(it) } }
+
+    Column(Modifier.fillMaxSize()) {
+        ToolPageHeader(
+            if (zh) "去平坦化（OLLVM）" else "De-flatten (OLLVM)",
+            if (zh) "检测控制流平坦化分发器并恢复状态机映射（只读分析，不重写二进制）"
+            else "detect the CFF dispatcher and recover the state machine (read-only)",
+        )
+        Spacer(Modifier.size(6.dp))
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank()) {
+                loadCfg(context, tools, zh, scope, tools.selectedFunctionVa)
+            }
+            SmallAction(if (zh) "重新计算" else "Recompute", loading = tools.cfgLoading) {
+                if (target.isNotBlank()) loadCfg(context, tools, zh, scope, target)
+            }
+            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+        }
+        if (fn.isNotBlank()) {
+            Spacer(Modifier.size(4.dp))
+            MonoLine(if (zh) "目标函数：$fn" else "target: $fn", cs.onSurfaceVariant, AppText.label)
+        }
+        Spacer(Modifier.size(6.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                ws.isBlank() -> NeedWorkspace(zh)
+                tools.cfgLoading && rep == null -> AnalysisLoading()
+                target.isBlank() -> AnalysisEmptyState(
+                    title = if (zh) "请先选择一个函数" else "Pick a function first",
+                    hint = if (zh) "去平坦化以当前选中函数的控制流图为输入" else "de-flatten uses the selected function's CFG",
+                )
+                rep == null || rep.blockCount == 0 -> AnalysisEmptyState(
+                    title = if (zh) "无法解析控制流" else "CFG unavailable",
+                    hint = if (zh) "引擎未返回可用的基本块，请重新计算或确认该地址是函数入口。" else "engine returned no basic blocks",
+                    primaryLabel = if (zh) "重新计算" else "Recompute",
+                    onPrimary = { if (target.isNotBlank()) loadCfg(context, tools, zh, scope, target) },
+                )
+                !rep.flattened -> AnalysisEmptyState(
+                    title = if (zh) "未检测到控制流平坦化" else "No flattening detected",
+                    hint = if (zh) rep.note.ifBlank { "未在该函数里找到 OLLVM 分发器特征。" } else rep.note.ifBlank { "no OLLVM dispatcher pattern" },
+                    primaryLabel = if (zh) "重新计算" else "Recompute",
+                    onPrimary = { if (target.isNotBlank()) loadCfg(context, tools, zh, scope, target) },
+                )
+                else -> Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    MonoLine(
+                        if (zh) "控制流平坦化：分发器 ${rep.dispatcherAddr}（入度 ${rep.dispatcherInDeg}）· ${rep.blockCount} 块 · ${rep.edgeCount} 边 · 恢复 ${rep.states.size} 个状态"
+                        else "CFF: dispatcher ${rep.dispatcherAddr} (in-deg ${rep.dispatcherInDeg}) · ${rep.blockCount} blocks · ${rep.edgeCount} edges · ${rep.states.size} states",
+                        cs.primary, AppText.label,
+                    )
+                    Spacer(Modifier.size(2.dp))
+                    Text(
+                        if (zh) "恢复的状态机（状态值 → 基本块，按状态值排序）" else "recovered state machine (state value -> block)",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        fontWeight = FontWeight.SemiBold,
+                        color = cs.onSurfaceVariant,
+                    )
+                    rep.states.forEachIndexed { i, (v, bi, addr) ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.sm)).background(cs.surfaceContainerHigh)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TypeBadge("#$i", cs.tertiary)
+                            MonoLine("state 0x" + java.lang.Long.toHexString(v), cs.onSurface, AppText.bodyStrong)
+                            TypeBadge("b$bi", cs.onSurfaceVariant)
+                            MonoLine(addr, cs.onSurfaceVariant, AppText.label)
+                        }
+                    }
+                    Spacer(Modifier.size(2.dp))
+                    MonoLine(
+                        if (zh) "提示：状态值未必等于真实执行序（分发器可用 switch/cmp 链分派）；本页给出「状态 → 块」映射，供人工还原。"
+                        else "note: state value is only an approximation of execution order.",
+                        cs.onSurfaceVariant, AppText.label,
+                    )
                 }
             }
         }

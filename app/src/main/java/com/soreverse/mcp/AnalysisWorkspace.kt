@@ -3815,17 +3815,17 @@ private val exbinSearchMethodsEn = listOf(
  * @return (引擎 view, 匹配字段)；null = 引擎没有该数据源（UI 会明确说明，绝不伪造结果）
  */
 private fun exbinSearchSource(typeIdx: Int, methodIdx: Int): Pair<String, String>? = when (typeIdx) {
-    0 -> null                                    // 代码：地址 → 直接跳汇编；指令 → 无数据源
+    0 -> null                                    // 代码：地址 → 直接跳汇编；指令 → rzCommand /a（见 runRzSearch）
     1, 7 -> when (methodIdx) {                   // 符号名 / 引用函数
         0 -> "functions" to "addr"
         1 -> "functions" to "name"
         2 -> "functions" to "params"
         else -> "functions" to "return"
     }
-    2 -> null                                    // 立即数
+    2 -> null                                    // 立即数 → rzCommand /v（见 runRzSearch）
     3 -> "symbols" to "name"                     // 类名
     4 -> if (methodIdx == 0) "strings" to "addr" else "strings" to "content"
-    5 -> if (methodIdx == 1) "data" to "addr" else null   // 引用常量（常量值无数据源）
+    5 -> if (methodIdx == 1) "data" to "addr" else "data" to "auto"  // 引用常量（常量地址 / 常量值）
     6 -> if (methodIdx == 0) "symbols" to "addr" else "symbols" to "name"
     else -> null
 }
@@ -3988,6 +3988,36 @@ private fun SearchView(
     var notice by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
+    /** 用 rzCommand 做全文搜索（代码·指令 = rizin /a；立即数 = rizin /v），
+     *  只从输出里提取地址，命中多少报多少，绝不伪造结果。 */
+    fun runRzSearch(cmd: String, label: String, q: String) {
+        busy = true
+        header = if (zh) "搜索中…" else "searching…"
+        scope.launch {
+            val hits = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    var text = ""
+                    for (c in listOf("s 0; $cmd", cmd)) {
+                        val r = eng.rzCommand(ws, "", c)
+                        text = r.optString("stdout").ifBlank { r.optString("text") }
+                        if (text.isNotBlank()) break
+                    }
+                    val re = Regex("0x[0-9a-fA-F]{4,}")
+                    val seen = LinkedHashSet<String>()
+                    re.findAll(text).forEach { seen.add(it.value.lowercase()) }
+                    seen.take(3000).map { a ->
+                        AnalysisRow(key = "rz|$a", title = a, meta = label, va = a, text = a)
+                    }
+                }.getOrDefault(emptyList())
+            }
+            rows = hits
+            header = if (zh) "搜索结果 (\"$q\") — ${hits.size} 个" else "search results (\"$q\") — ${hits.size}"
+            notice = if (hits.isEmpty()) (if (zh) "没有匹配结果（或引擎不支持该搜索命令）" else "no matches") else ""
+            busy = false
+        }
+    }
+
     fun runSearch(inResults: Boolean) {
         val q = formQuery.trim()
         undoStack = undoStack + (lastQuery to rows)
@@ -4018,11 +4048,21 @@ private fun SearchView(
             }
             return
         }
+        // 代码 · 指令：在全部代码里按指令文本搜索（rizin /a）
+        if (typeIdx == 0 && methodIdx == 1) {
+            runRzSearch("/a $q", if (zh) "指令" else "instruction", q)
+            return
+        }
+        // 立即数：搜索数值（rizin /v）
+        if (typeIdx == 2) {
+            runRzSearch("/v $q", if (zh) "立即数" else "immediate", q)
+            return
+        }
         val src = exbinSearchSource(typeIdx, methodIdx)
         if (src == null) {
             rows = emptyList()
             header = if (zh) "搜索结果 (\"$q\") — 0 个" else "search results (\"$q\") — 0"
-            notice = if (zh) "该搜索类型 / 方式引擎暂无数据源（可用：符号名、类名、引用字符串、引用常量·常量地址、引用全局变量、引用函数）"
+            notice = if (zh) "该搜索类型 / 方式引擎暂无数据源（可用：代码·地址 / 代码·指令 / 符号名、立即数、类名、引用字符串、引用常量、引用全局变量、引用函数）"
             else "no data source for this type/method in the engine"
             return
         }
@@ -8815,8 +8855,23 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
                     if (v <= 0L) "" else {
                         val hv = "0x" + java.lang.Long.toHexString(v)
                         val sec = sectionOf(eng.rzCommand(ws, "", "iSj"), hv)
-                        if (zh) "指针 → $hv" + (if (sec.isNotBlank()) "（$sec）" else "")
-                        else "ptr → $hv" + (if (sec.isNotBlank()) " ($sec)" else "")
+                        // 指针 → 符号映射：在符号表里找覆盖该地址的符号（精确 vaddr 或 [vaddr, vaddr+size)）
+                        val sym = runCatching {
+                            val txt = eng.rzCommand(ws, "", "isj").let { it.optString("stdout").ifBlank { it.optString("text") } }
+                            val arr = JSONArray(txt)
+                            var hit = ""
+                            for (i in 0 until arr.length()) {
+                                val o = arr.optJSONObject(i) ?: continue
+                                val vaS = o.optString("vaddr")
+                                val va = if (vaS.isBlank()) -1L else addrOf(vaS)
+                                val sz = o.optLong("size", 0L)
+                                if (va == v || (sz > 0L && v >= va && v < va + sz)) { hit = o.optString("name"); break }
+                            }
+                            hit
+                        }.getOrDefault("")
+                        val tail = listOf(sym, sec).filter { it.isNotBlank() }.joinToString(" · ")
+                        if (zh) "指针 → $hv" + (if (tail.isNotBlank()) "（$tail）" else "")
+                        else "ptr → $hv" + (if (tail.isNotBlank()) " ($tail)" else "")
                     }
                 }.getOrDefault("")
             }

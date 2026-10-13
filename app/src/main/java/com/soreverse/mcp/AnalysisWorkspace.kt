@@ -4529,12 +4529,27 @@ private fun FuncXRefView(
                     mergeXrefs(b.filter { xrefIsCode(it) }, nativeXrefRows(nat, "to").filter { xrefIsCode(it) }, "to"),
                     "to",
                 )
-                val dataRows = mergeXrefs(
+                var dataRows = mergeXrefs(
                     (b + a).filter { !xrefIsCode(it) },
                     nativeXrefRows(nat, "from").filter { !xrefIsCode(it) } +
                         nativeXrefRows(nat, "to").filter { !xrefIsCode(it) },
                     "from",
                 )
+                // ④ 数据引用兜底：指令里携带的 ptr（pdfj 每条指令的引用地址）。
+                //    axtj/axfj 常常分析不出数据引用（返回空），这时用指令自身的 ptr 补上。
+                //    仅在其它来源为空时才拉 pdfj —— 省掉一次「新 core + 全量分析」的代价。
+                if (dataRows.isEmpty()) {
+                    val ops = parsePdfjOps(rzText(eng.rzCommand(ws, "", "e scr.color=0; s " + loc + "; pdfj")))
+                    val fromPdfj = ops.filter { it.ptr > 0L }.map { op ->
+                        val hexPtr = "0x" + java.lang.Long.toHexString(op.ptr)
+                        JSONObject()
+                            .put("addr", hexPtr)
+                            .put("name", hexPtr)
+                            .put("type", "DATA")
+                            .put("opcode", op.text)
+                    }
+                    if (fromPdfj.isNotEmpty()) dataRows = mergeXrefs(fromPdfj, dataRows, "from")
+                }
                 Triple(extRows, intRows, dataRows to g)
             }.getOrNull()
         }
@@ -5753,8 +5768,10 @@ private fun CfgView(
                         )
                         val merged = LinkedHashMap<Long, List<String>>()
                         g?.blocks?.forEach { b ->
-                            val pick = byGraph[b.addrValue]?.takeIf { it.isNotEmpty() }
-                                ?: byLinear[b.addrValue]?.takeIf { it.isNotEmpty() }
+                            // pdfj 是**逐指令**的（每条一项），计数最准；agf 的 body 是按块渲染的文本，
+                            // 行数可能与真实指令数不一致（旧实现优先 agf → 用户看到「N 条指令」数字不对）。
+                            val pick = byLinear[b.addrValue]?.takeIf { it.isNotEmpty() }
+                                ?: byGraph[b.addrValue]?.takeIf { it.isNotEmpty() }
                             if (pick != null) merged[b.addrValue] = pick
                         }
                         byLinear.forEach { (k, v) -> if (k !in merged) merged[k] = v }
@@ -5794,6 +5811,21 @@ private fun CfgView(
         if (tools.cfgJson.isBlank()) null else runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
     }
     val treeRows = remember(graph) { buildCfgTree(graph) }
+
+    // 按需拉取单个块的指令（有些块不在本函数体内、pdfj 归并拿不到，展开时才补一次）。
+    fun loadBlockInsns(addr: Long) {
+        if (ws.isBlank() || addr <= 0L) return
+        scope.launch {
+            val list = withContext(Dispatchers.IO) {
+                runCatching {
+                    val eng = EngineProvider.get(context)
+                    val txt = rzText(eng.rzCommand(ws, "", "e scr.color=0; s " + java.lang.Long.toHexString(addr) + "; pdj"))
+                    parsePdfjOps(txt).map { it.text }
+                }.getOrDefault(emptyList())
+            }
+            if (list.isNotEmpty()) cfgInsns = cfgInsns + (addr to list)
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         // ── 二级页签（TabLayout fixed + fill：两个等分页签）──
@@ -5864,6 +5896,7 @@ private fun CfgView(
                     sortMode = sortMode,
                     onSort = { sortMode = it },
                     zh = zh,
+                    onNeedInsns = { addr -> loadBlockInsns(addr) },
                     onPickBlock = { addr ->
                         focusAddr = addr
                         focusTok++
@@ -5994,12 +6027,15 @@ private fun CfgNodeListView(
     sortMode: Int,
     onSort: (Int) -> Unit,
     zh: Boolean,
+    onNeedInsns: (Long) -> Unit = {},
     onPickBlock: (String) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val rows = remember(graph) { buildCfgTree(graph) }
     val blocks = graph?.blocks ?: emptyList()
     val collapsed = remember(graph) { mutableStateOf(setOf<Int>()) }
+    // 行点击 = 展开/收起该块的「每一条指令」（旧实现点行直接跳到图形化 → 用户看不到详细指令）
+    val expandedInsn = remember(graph) { mutableStateOf(setOf<Int>()) }
     val visible = remember(rows, collapsed.value, query, sortMode) {
         val q = query.trim().lowercase()
         if (sortMode != 0) {
@@ -6107,10 +6143,15 @@ private fun CfgNodeListView(
                         val b = blocks.getOrNull(r.index) ?: return@items
                         val leaf = r.kids.isEmpty()
                         val collapsedNow = r.index in collapsed.value
+                        val insnOpen = r.index in expandedInsn.value
+                        Column(Modifier.fillMaxWidth()) {
                         Row(
                             Modifier.fillMaxWidth()
                                 .widthIn(min = 360.dp)
-                                .clickable { onPickBlock(b.addrText) }
+                                .clickable {
+                                    expandedInsn.value = if (insnOpen) expandedInsn.value - r.index
+                                    else expandedInsn.value + r.index
+                                }
                                 .padding(
                                     start = (16 + minOf(r.depth, 8) * 16).dp,
                                     end = 16.dp, top = 12.dp, bottom = 12.dp,
@@ -6154,6 +6195,41 @@ private fun CfgNodeListView(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
+                        }
+                        // ── 块内指令明细（点行展开）──
+                        if (insnOpen) {
+                            val detail = insns[b.addrValue].orEmpty()
+                            Column(
+                                Modifier.fillMaxWidth().padding(
+                                    start = (16 + minOf(r.depth, 8) * 16 + 22).dp,
+                                    end = 16.dp, bottom = 8.dp,
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                if (detail.isEmpty()) {
+                                    // 该块不在 pdfj 覆盖范围内（例如跨函数/PLT 目标）→ 展开时按需拉一次
+                                    LaunchedEffect(r.index, insnOpen) {
+                                        if (insnOpen) onNeedInsns(b.addrValue)
+                                    }
+                                    Text(
+                                        if (zh) "正在加载本块指令…" else "loading instructions…",
+                                        fontSize = AppText.label,
+                                        color = cs.onSurfaceVariant,
+                                    )
+                                } else {
+                                    detail.forEachIndexed { i, ins ->
+                                        Text(
+                                            "${i + 1}.  $ins",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            color = cs.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         }
                     }
                 }

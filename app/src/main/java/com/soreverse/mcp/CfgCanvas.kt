@@ -1200,6 +1200,34 @@ private fun cleanCfgInsnLine(raw: String): String? {
     return body
 }
 
+/**
+ * 一条线性指令：off=指令地址，text=反汇编文本，ptr=该指令引用的地址（无则 -1）。
+ * pdfj 的每项形如 `{"offset":n,"disasm":"..","ptr":n?}`，其中 ptr 就是「数据/字符串引用」的来源。
+ */
+internal data class CfgOp(val off: Long, val text: String, val ptr: Long)
+
+/** 解析 `pdfj`（线性指令数组）：顶层就是数组，每项含 offset / disasm / 可选 ptr。 */
+internal fun parsePdfjOps(jsonText: String): List<CfgOp> {
+    if (jsonText.isBlank()) return emptyList()
+    return try {
+        val arr = JSONArray(jsonText)
+        val out = ArrayList<CfgOp>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val off = o.optLong("offset", -1L)
+            val d = o.optString("disasm").ifBlank { o.optString("opcode") }
+            if (off < 0L || d.isBlank()) continue
+            val text = stripAnsi(d).lineSequence().firstOrNull().orEmpty().trim()
+            if (text.isBlank()) continue
+            val ptr = o.optLong("ptr", -1L)
+            out.add(CfgOp(off, text, if (ptr > 0L) ptr else -1L))
+        }
+        out
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
 /** 解析 `pdfj`（线性指令数组，顶层就是数组）：`[{"offset":n,"disasm":"mov x0, x1"}]`。 */
 internal fun parsePdfjLinear(jsonText: String): List<Pair<Long, String>> {
     if (jsonText.isBlank()) return emptyList()

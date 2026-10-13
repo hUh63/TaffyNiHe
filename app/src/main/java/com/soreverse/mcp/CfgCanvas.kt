@@ -1142,6 +1142,14 @@ internal fun parsePdfjInsns(jsonText: String): Map<Long, List<String>> {
  * 而 `pdfj` 的顶层是**线性指令数组**（`[{"offset":..,"disasm":..}]`，没有 `blocks` 字段）——
  * 旧解析按 `{blocks:[…]}` 取值恒为空，这就是控制流节点列表「N 条指令」恒为 0 的根因。
  */
+/**
+ * 剥离 rizin 输出的 ANSI 颜色码（`\u001b[31m` 等）。
+ * rizin 的 disasm 默认带色，Compose 不认控制符 —— 截图里就出现了 `[31m[37m` 这样的泄漏。
+ * 只认「ESC + [ + 数字/分号 + 字母」形式，避免误伤 `mov [x0], x1` 这类合法括号。
+ */
+internal fun stripAnsi(s: String): String =
+    if (s.indexOf('\u001b') < 0) s else s.replace(Regex("\u001b\[[0-9;?]*[A-Za-z]"), "")
+
 internal fun parseGraphInsns(jsonText: String): Map<Long, List<String>> {
     if (jsonText.isBlank()) return emptyMap()
     return try {
@@ -1155,7 +1163,7 @@ internal fun parseGraphInsns(jsonText: String): Map<Long, List<String>> {
             if (addr < 0L) continue
             val body = nd.optString("body")
             if (body.isBlank()) continue
-            val lines = body.split('\n').mapNotNull { cleanCfgInsnLine(it) }.filter { it.isNotBlank() }
+            val lines = stripAnsi(body).split('\n').mapNotNull { cleanCfgInsnLine(it) }.filter { it.isNotBlank() }
             if (lines.isNotEmpty()) m[addr] = lines
         }
         m
@@ -1169,7 +1177,10 @@ private fun cleanCfgInsnLine(raw: String): String? {
     val t = raw.trim().trimEnd()
     if (t.isEmpty()) return null
     val m = Regex("^0x[0-9a-fA-F]+:?\\s+(.*)$").find(t)
-    return (m?.groupValues?.get(1) ?: t).trim()
+    val body = (m?.groupValues?.get(1) ?: t).trim()
+    // rizin 把注释（"; sym.xxx(...)"）也当作 body 的一行，会污染「N 条指令」计数与首行摘要。
+    if (body.startsWith(";") || body.startsWith("//")) return null
+    return body
 }
 
 /** 解析 `pdfj`（线性指令数组，顶层就是数组）：`[{"offset":n,"disasm":"mov x0, x1"}]`。 */
@@ -1183,7 +1194,8 @@ internal fun parsePdfjLinear(jsonText: String): List<Pair<Long, String>> {
             val off = o.optLong("offset", -1L)
             val d = o.optString("disasm").ifBlank { o.optString("opcode") }
             if (off >= 0L && d.isNotBlank()) {
-                out.add(off to d.lineSequence().firstOrNull().orEmpty().trim())
+                val clean = stripAnsi(d).lineSequence().firstOrNull().orEmpty().trim()
+                if (clean.isNotBlank()) out.add(off to clean)
             }
         }
         out

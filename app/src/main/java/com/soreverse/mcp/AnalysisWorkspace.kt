@@ -2189,6 +2189,43 @@ private fun ToolPageHeader(title: String, hint: String) {
 }
 
 /** 小号动作按钮（Exbin 风：圆角 + 1dp 描边 + 无阴影）。 */
+/**
+ * Exbin `XRefTabFragment.createTabButton` 的等价实现：等宽、高 36dp、圆角、选中用 primaryContainer
+ * （旧实现用流式 chip + 行尾文字按钮，窄屏会挤压、也抄不出 Exbin 的页签观感）。
+ */
+@Composable
+private fun XrefTabButton(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(AppShape.sm)
+    Box(
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            .height(36.dp)
+            .clip(shape)
+            .background(if (selected) cs.primaryContainer else cs.surfaceVariant.copy(alpha = 0.35f))
+            .border(
+                BorderStroke(1.dp, if (selected) cs.primary.copy(alpha = 0.55f) else cs.outlineVariant),
+                shape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (selected) cs.onPrimaryContainer else cs.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 @Composable
 private fun SmallAction(
     label: String,
@@ -4343,7 +4380,8 @@ private fun mergeXrefs(primary: List<JSONObject>, extra: List<JSONObject>, pick:
     val out = ArrayList<JSONObject>(primary.size + extra.size)
     val seen = HashSet<String>()
     fun key(o: JSONObject): String =
-        o.optString("addr").ifBlank { o.optString(pick) }.lowercase().removePrefix("0x").trimStart('0')
+        o.optString("addr").ifBlank { o.optString("name") }.ifBlank { o.optString(pick) }
+            .lowercase().removePrefix("0x").trimStart('0')
     primary.forEach { o -> val k = key(o); if (k.isNotBlank() && seen.add(k)) out.add(o) }
     extra.forEach { o -> val k = key(o); if (k.isNotBlank() && seen.add(k)) out.add(o) }
     return out
@@ -4445,7 +4483,9 @@ private fun FuncXRefView(
     val tick = tools.reloadTick
     val loc = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
 
-    var tab by remember { mutableStateOf("graph") }
+    // 默认「外部引用」列表页（对齐 Exbin XRefTabFragment：currentTab = TAB_EXTERNAL），
+    // 旧实现默认图形化 —— 图形化在无邻域时只显示一屏空态，看起来就是「看不到调用」。
+    var tab by remember { mutableStateOf("external") }
     var query by remember { mutableStateOf("") }
     var ext by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
     var int by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
@@ -4453,7 +4493,8 @@ private fun FuncXRefView(
     var gNodes by remember(ws, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
     var gEdges by remember(ws, tick) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var loading by remember(loc, tick) { mutableStateOf(false) }
-    var dir by remember { mutableStateOf("both") }
+    // 默认「我调用的」（对齐 Exbin XRefTabFragment：currentGraphType = GRAPH_CALLEES）
+    var dir by remember { mutableStateOf("callees") }
     var depth by remember { mutableStateOf(1) }
     var showCross by remember { mutableStateOf(true) }
 
@@ -4519,37 +4560,20 @@ private fun FuncXRefView(
 
     Column(Modifier.fillMaxSize()) {
         // 子页签（Explorer So：外部引用 / 内部引用 / 数据引用 / 图形化）
+        // ── 页签行（对齐 Exbin XRefTabFragment.createTabBar：4 个等宽圆角按钮，高 36dp）──
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
         ) {
-            // 子页签可横向滚动 + 右侧固定图标按钮（对齐 Exbin 工具栏：内容 weight=1 + IconButton）。
-            // 旧实现把 4 个 chip 与「重新分析」挤在一行，窄屏上按钮文字被压成省略号（显示不全）。
-            Row(
-                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                listOf(
-                    "external" to (if (zh) "外部引用" else "Callers"),
-                    "internal" to (if (zh) "内部引用" else "Callees"),
-                    "data" to (if (zh) "数据引用" else "Data"),
-                    "graph" to (if (zh) "图形化" else "Graph"),
-                ).forEach { (k, l) -> TabChip(l, selected = tab == k) { tab = k } }
-            }
-            IconButton(onClick = onRefresh, enabled = !loading, modifier = Modifier.size(40.dp)) {
-                if (loading) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = cs.primary)
-                } else {
-                    Icon(
-                        Icons.Filled.Refresh,
-                        contentDescription = if (zh) "重新分析" else "Re-analyze",
-                        modifier = Modifier.size(18.dp),
-                        tint = cs.primary,
-                    )
-                }
+            listOf(
+                "external" to (if (zh) "外部引用" else "Callers"),
+                "internal" to (if (zh) "内部引用" else "Callees"),
+                "data" to (if (zh) "数据引用" else "Data"),
+                "graph" to (if (zh) "图形化" else "Graph"),
+            ).forEach { (k, l) ->
+                XrefTabButton(l, selected = tab == k, modifier = Modifier.weight(1f)) { tab = k }
             }
         }
+        GroupDivider()
         // 搜索（图形化页签隐藏，对齐 Explorer So）
         if (tab != "graph") {
             Spacer(Modifier.size(6.dp))
@@ -4558,8 +4582,8 @@ private fun FuncXRefView(
                 onValueChange = { query = it },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                shape = RoundedCornerShape(AppShape.sm),
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
+                shape = RoundedCornerShape(28.dp),
+                textStyle = MaterialTheme.typography.bodyMedium,
                 leadingIcon = { Icon(Icons.Filled.Search, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant) },
                 placeholder = {
                     Text(
@@ -4591,15 +4615,30 @@ private fun FuncXRefView(
         }
 
         if (tab != "graph") {
-            MonoLine(
-                when (tab) {
-                    "external" -> if (zh) "找到 ${curRows.size} 个外部引用 (调用者)" else "${curRows.size} external refs (callers)"
-                    "internal" -> if (zh) "找到 ${curRows.size} 个内部引用 (被调用)" else "${curRows.size} internal refs (callees)"
-                    else -> if (zh) "找到 ${curRows.size} 个数据引用" else "${curRows.size} data refs"
-                },
-                cs.onSurfaceVariant, AppText.label,
-            )
-            Spacer(Modifier.size(6.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 状态行文案完全对齐 Exbin：showExternalRefs/showInternalRefs/showDataRefs
+                Text(
+                    when (tab) {
+                        "external" -> if (zh) "找到 ${curRows.size} 个外部引用 (调用者)" else "${curRows.size} external refs (callers)"
+                        "internal" -> if (zh) "找到 ${curRows.size} 个内部引用 (被调用)" else "${curRows.size} internal refs (callees)"
+                        else -> if (zh) "找到 ${curRows.size} 个数据/字符串引用" else "${curRows.size} data refs"
+                    },
+                    modifier = Modifier.weight(1f),
+                    fontSize = AppText.label,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (curRows.isEmpty() && !loading) {
+                    IconButton(onClick = onRefresh, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.Refresh, contentDescription = if (zh) "重新分析" else "Re-analyze", modifier = Modifier.size(16.dp), tint = cs.primary)
+                    }
+                }
+            }
+            Spacer(Modifier.size(4.dp))
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -4612,13 +4651,13 @@ private fun FuncXRefView(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // Exbin XRefTabFragment 图形化控件行顺序：我调用的 / 调用者 → 深度 − N + → 重置 → 交叉边
                         TabChip(if (zh) "我调用的" else "Callees", selected = dir == "callees") { dir = "callees" }
                         TabChip(if (zh) "调用者" else "Callers", selected = dir == "callers") { dir = "callers" }
-                        TabChip(if (zh) "双向" else "Both", selected = dir == "both") { dir = "both" }
                         SmallAction("−", enabled = depth > 1) { depth-- }
                         SmallAction(if (zh) "深度 $depth" else "depth $depth", active = true) {}
                         SmallAction("+", enabled = depth < 5) { depth++ }
-                        SmallAction(if (zh) "重置" else "Reset") { depth = 1; dir = "both"; showCross = true }
+                        SmallAction(if (zh) "重置" else "Reset") { depth = 1; dir = "callees"; showCross = true }
                         TabChip(if (zh) "交叉边" else "Cross", selected = showCross) { showCross = !showCross }
                     }
                     Spacer(Modifier.size(6.dp))
@@ -5700,15 +5739,27 @@ private fun CfgView(
                     }
                     else -> {
                         val eng = EngineProvider.get(context)
-                        // `agf json`：块级图，节点带 body（块内反汇编）—— 一次拿齐「块 → 指令」。
-                        // 注意 rizin 的 agf 是「格式参数」型（`agf json`），没有 `agfj` 后缀写法；
-                        // 而 `pdfj` 顶层是线性指令数组（无 blocks 字段），旧代码按 blocks 解析所以恒为 0。
-                        val byGraph = parseGraphInsns(rzText(eng.rzCommand(ws, "", "s $target; agf json")))
-                        if (byGraph.isNotEmpty()) byGraph
-                        else mergeLinearInsns(
-                            parsePdfjLinear(rzText(eng.rzCommand(ws, "", "s $target; pdfj"))),
-                            runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull(),
+                        // `e scr.color=0`：rizin disasm 默认带 ANSI 颜色码，会以 `[31m` 形式泄漏到界面。
+                        // `agf json`：块级图、节点带 body；`pdfj`：线性指令数组（无 blocks 字段）——
+                        // 两者取并集：agf 有 body 的块用它，没有的用 pdfj 按块区间归并补齐
+                        //（只看 agf 时部分块会显示「0 条指令」）。
+                        val g = runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
+                        val byGraph = parseGraphInsns(
+                            rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; agf json_disasm")),
                         )
+                        val byLinear = mergeLinearInsns(
+                            parsePdfjLinear(rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; pdfj"))),
+                            g,
+                        )
+                        val merged = LinkedHashMap<Long, List<String>>()
+                        g?.blocks?.forEach { b ->
+                            val pick = byGraph[b.addrValue]?.takeIf { it.isNotEmpty() }
+                                ?: byLinear[b.addrValue]?.takeIf { it.isNotEmpty() }
+                            if (pick != null) merged[b.addrValue] = pick
+                        }
+                        byLinear.forEach { (k, v) -> if (k !in merged) merged[k] = v }
+                        byGraph.forEach { (k, v) -> if (k !in merged) merged[k] = v }
+                        merged
                     }
                 }
             }.getOrNull() ?: emptyMap()
@@ -5964,13 +6015,22 @@ private fun CfgNodeListView(
                 b.addrText.lowercase().contains(q) || b.summary.lowercase().contains(q)
             }
         } else {
-            // 树序：按 depth 依次展开，折叠节点的子树隐藏
+            // 树序：某行可见 ⟺ 它所有祖先都没被折叠（对齐 Exbin isParentExpanded 的递归语义）。
+            // 旧实现只把「折叠行的直接子节点」加入 hidden，孙节点照样显示 —— 这就是「收起有 bug」。
+            val parentOf = HashMap<Int, Int>()
+            rows.forEach { r -> r.kids.forEach { k -> if (k !in parentOf) parentOf[k] = r.index } }
+            fun anyAncestorCollapsed(idx: Int): Boolean {
+                var p = parentOf[idx]
+                while (p != null) {
+                    if (p in collapsed.value) return true
+                    p = parentOf[p]
+                }
+                return false
+            }
             val out = ArrayList<CfgTreeRow>()
-            val hidden = HashSet<Int>()
             rows.forEach { r ->
-                if (r.index in hidden) return@forEach
+                if (anyAncestorCollapsed(r.index)) return@forEach
                 if (q.isEmpty() || rowMatches(r, blocks, insns, q)) out.add(r)
-                if (r.index in collapsed.value) r.kids.forEach { hidden.add(it) }
             }
             out
         }
@@ -12786,7 +12846,17 @@ private fun buildEgoSubgraph(
         outAdj.getOrPut(f) { ArrayList() }.add(t)
         inAdj.getOrPut(t) { ArrayList() }.add(f)
     }
-    val center = all.firstOrNull { it == root } ?: all.firstOrNull { it.contains(root, true) }
+    // root 可能是 hex 地址（形如 "0x16c8"），而图节点名是函数名（如 sym.JNI_OnLoad）——
+    // 旧实现只按名字比对，导致「图形化/邻域」恒空。这里补一层地址匹配（节点 offset == root 的数值）。
+    val rootVa = parseCfgAddr(root).takeIf { it > 0L }
+    val byVa = if (rootVa != null) {
+        nodes.firstOrNull { it.optLong("offset", -1L) == rootVa }?.let { nd ->
+            nd.optString("name").ifBlank { hexAddr(nd.opt("offset")) }
+        }
+    } else null
+    val center = all.firstOrNull { it == root }
+        ?: (byVa ?: "").takeIf { it.isNotBlank() }
+        ?: all.firstOrNull { it.contains(root, true) }
         ?: (if (root.isBlank()) all.firstOrNull { (inAdj[it]?.size ?: 0) == 0 } ?: all.firstOrNull() else null)
     if (center.isNullOrBlank()) return emptyList<Pair<String, String>>() to emptyList<Pair<Int, Int>>()
     val seen = LinkedHashSet<String>()

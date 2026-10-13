@@ -1147,8 +1147,25 @@ internal fun parsePdfjInsns(jsonText: String): Map<Long, List<String>> {
  * rizin 的 disasm 默认带色，Compose 不认控制符 —— 截图里就出现了 `[31m[37m` 这样的泄漏。
  * 只认「ESC + [ + 数字/分号 + 字母」形式，避免误伤 `mov [x0], x1` 这类合法括号。
  */
-internal fun stripAnsi(s: String): String =
-    if (s.indexOf('\u001b') < 0) s else s.replace(Regex("\u001b\[[0-9;?]*[A-Za-z]"), "")
+internal fun stripAnsi(s: String): String {
+    // rizin 的 disasm 输出带 ANSI 颜色码（0x1B + '[' + 数字 + 终止字母），Compose 不认控制符，
+    // 于是界面里就直接漏出 '[31m' 这种残渣（用户截图可见）。这里做字符级剥离。
+    if (s.indexOf(27.toChar()) < 0) return s
+    val sb = StringBuilder(s.length)
+    var i = 0
+    while (i < s.length) {
+        val ch = s[i]
+        if (ch == 27.toChar() && i + 1 < s.length && s[i + 1] == '[') {
+            i += 2
+            while (i < s.length && s[i] !in 'A'..'Z' && s[i] !in 'a'..'z') i++
+            if (i < s.length) i++
+        } else {
+            sb.append(ch)
+            i++
+        }
+    }
+    return sb.toString()
+}
 
 internal fun parseGraphInsns(jsonText: String): Map<Long, List<String>> {
     if (jsonText.isBlank()) return emptyMap()

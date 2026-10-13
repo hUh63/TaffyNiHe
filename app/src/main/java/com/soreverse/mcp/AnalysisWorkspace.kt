@@ -4314,9 +4314,14 @@ private fun xrefIsCode(o: JSONObject): Boolean {
 /** 原生 `rzXrefs`（from/to 为十进制数字）→ 与 axtj/axfj 同形（hex 字符串 + addr 字段）。 */
 private fun nativeXrefRows(arr: JSONArray?, pick: String): List<JSONObject> {
     if (arr == null) return emptyList()
+    // native 同时返回 incoming（别人引用我）与 outgoing（我引用别人）；不按方向过滤时，
+    // outgoing 条目的 from 恒为「我自己」，会把自己混进调用者列表（反之亦然）。
+    val want = if (pick == "from") "incoming" else "outgoing"
     val out = ArrayList<JSONObject>(arr.length())
     for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
+        val dir = o.optString("direction")
+        if (dir.isNotBlank() && dir != want) continue
         val f = o.optLong("from", -1L)
         val t = o.optLong("to", -1L)
         val other = if (pick == "from") f else t
@@ -4347,14 +4352,81 @@ private fun mergeXrefs(primary: List<JSONObject>, extra: List<JSONObject>, pick:
 /** axtj/axfj 条目 → 列表行。pick 取 "from"（谁引用我）或 "to"（我引用谁）。 */
 private fun xrefRows(list: List<JSONObject>, pick: String): List<AnalysisRow> =
     list.mapNotNull { o ->
-        val va = o.optString("addr").ifBlank { hexAddr(o.opt("addr")) }
-        val name = o.optString(pick).ifBlank { o.optString("ref") }.ifBlank { va }
+        // native 路统一写成 addr；axtj/axfj 只有 from/to（数字）—— 旧实现直接取十进制字符串，
+        // 列表里会显示一串神秘数字，必须 hex 化（有函数名时优先显示名字）。
+        val addrVa = o.opt("addr")?.let { hexAddr(it) }.orEmpty()
+        val va = addrVa.ifBlank { hexAddr(o.opt(pick)) }
+        val name = o.optString("name").ifBlank { va }
         val type = o.optString("type")
         val op = o.optString("opcode").ifBlank { o.optString("text") }
         val meta = listOf(type, op).filter { it.isNotBlank() }.joinToString("  ")
         if (name.isBlank() && va.isBlank()) null
         else AnalysisRow(key = "$va|$name", title = name, meta = meta, va = va, text = name)
     }
+
+/**
+ * 从全局调用图（`agC json` 的 FUNCALL 图）推导某函数的一侧调用关系。
+ * incoming = true → callers（谁调用我）；false → callees（我调用谁）。
+ * 这条路径不依赖当前 core 的 xref 分析库状态，是「交叉引用」最稳的来源。
+ */
+private fun graphXrefRows(
+    nodes: List<JSONObject>,
+    edges: List<Pair<String, String>>,
+    loc: String,
+    incoming: Boolean,
+): List<JSONObject> {
+    if (nodes.isEmpty() || edges.isEmpty()) return emptyList()
+    // parseCfgAddr 同时吃 0x… 与十进制，比 LocatorParser.address/hex 组合更稳（后者只认 X@0x… 形式）
+    val locVa = parseCfgAddr(loc).takeIf { it > 0L }
+    val vaOf = HashMap<String, Long>()
+    var locName = ""
+    nodes.forEach { nd ->
+        val nm = nd.optString("name").ifBlank { nd.optString("title") }
+        val va = nd.optLong("offset", -1L)
+        if (nm.isNotBlank() && va > 0L) vaOf[nm] = va
+        if (locName.isBlank() && nm.isNotBlank() && (nm == loc || (locVa != null && locVa > 0L && va == locVa))) {
+            locName = nm
+        }
+    }
+    if (locName.isBlank()) return emptyList()
+    val outs = if (incoming) edges.filter { it.second == locName } else edges.filter { it.first == locName }
+    val seen = HashSet<String>()
+    return outs.mapNotNull { e ->
+        val other = if (incoming) e.first else e.second
+        if (other.isBlank() || other == locName || !seen.add(other)) return@mapNotNull null
+        val va = vaOf[other]
+        JSONObject()
+            .put("addr", if (va != null && va > 0L) "0x" + java.lang.Long.toHexString(va) else "")
+            .put("name", other)
+            .put("type", "CALL")
+    }
+}
+
+/** 把线性 pdfj 指令按「所属基本块起始地址」归并（块列表来自已解析的 CFG）。 */
+private fun mergeLinearInsns(
+    linear: List<Pair<Long, String>>,
+    graph: CfgGraph?,
+): Map<Long, List<String>> {
+    if (linear.isEmpty() || graph == null || graph.blocks.isEmpty()) return emptyMap()
+    val starts = graph.blocks.map { it.addrValue }.sorted()
+    if (starts.isEmpty()) return emptyMap()
+    fun owner(off: Long): Long {
+        var lo = 0
+        var hi = starts.size - 1
+        var ans = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) / 2
+            if (starts[mid] <= off) { ans = mid; lo = mid + 1 } else hi = mid - 1
+        }
+        return if (ans >= 0) starts[ans] else -1L
+    }
+    val m = LinkedHashMap<Long, MutableList<String>>()
+    linear.forEach { (off, txt) ->
+        val b = owner(off)
+        if (b >= 0) m.getOrPut(b) { ArrayList() }.add(txt)
+    }
+    return m
+}
 
 /**
  * 函数详情 · 交叉引用页（对齐 Explorer So `XRefTabFragment`）：
@@ -4391,27 +4463,37 @@ private fun FuncXRefView(
         val res = withContext(Dispatchers.IO) {
             runCatching {
                 val eng = EngineProvider.get(context)
-                // ① axtj / axfj 读的是分析库里的交叉引用：没跑过函数 & 调用分析时恒为空
-                //    （这是「交叉引用显示没有找到调用关系」的主因）。先补一次轻量分析。
-                runCatching { eng.rzCommand(ws, "", "s $loc; af; aac") }
-                val a = parseRzArray(eng.rzCommand(ws, "", "s $loc; axtj")) ?: emptyList()
-                val b = parseRzArray(eng.rzCommand(ws, "", "s $loc; axfj")) ?: emptyList()
-                // ② 原生 BL/B 扫描：自带完整分析 + 直接分支回填（PIC 代码也能命中调用方），与上面合并去重。
-                val nat = runCatching { eng.rzXrefs(ws, "", loc, "both").optJSONArray("xrefs") }.getOrNull()
-                val nIn = nativeXrefRows(nat, "from")
-                val nOut = nativeXrefRows(nat, "to")
-                val extRows = mergeXrefs(a.filter { xrefIsCode(it) }, nIn.filter { xrefIsCode(it) }, "from")
-                val intRows = mergeXrefs(b.filter { xrefIsCode(it) }, nOut.filter { xrefIsCode(it) }, "to")
-                val dataRows = mergeXrefs(
-                    (b + a).filter { !xrefIsCode(it) },
-                    (nIn + nOut).filter { !xrefIsCode(it) },
-                    "from",
-                )
+                // ⓪ 全局调用图（agC = FUNCALL 图）：节点是函数、边是调用关系。native 侧每次命令都会
+                //    先跑 rz_core_analysis_all，所以这份数据最稳 —— 作为「调用关系」的主来源。
                 var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
-                for (c in listOf("agC json", "aac; agC json", "agc json")) {
+                for (c in listOf("s $loc; af; aac; agC json", "agC json", "aac; agC json", "agc json")) {
                     g = parseRizinGraph(rzText(eng.rzCommand(ws, "", c)))
                     if (g.first.isNotEmpty()) break
                 }
+                // ① 分析库 xref（axtj/axfj）：字段是 from/to（数字），没有 addr。
+                val a = parseRzArray(eng.rzCommand(ws, "", "s $loc; axtj")) ?: emptyList()
+                val b = parseRzArray(eng.rzCommand(ws, "", "s $loc; axfj")) ?: emptyList()
+                // ② 原生 BL/B 扫描（自带完整分析 + 直接分支回填，PIC 代码也能命中调用方）。
+                val nat = runCatching { eng.rzXrefs(ws, "", loc, "both").optJSONArray("xrefs") }.getOrNull()
+                // ③ 由全局调用图推导：callers = 指向本函数的边源；callees = 从本函数出发的边目标。
+                val gIn = graphXrefRows(g.first, g.second, loc, incoming = true)
+                val gOut = graphXrefRows(g.first, g.second, loc, incoming = false)
+                val extRows = mergeXrefs(
+                    gIn,
+                    mergeXrefs(a.filter { xrefIsCode(it) }, nativeXrefRows(nat, "from").filter { xrefIsCode(it) }, "from"),
+                    "from",
+                )
+                val intRows = mergeXrefs(
+                    gOut,
+                    mergeXrefs(b.filter { xrefIsCode(it) }, nativeXrefRows(nat, "to").filter { xrefIsCode(it) }, "to"),
+                    "to",
+                )
+                val dataRows = mergeXrefs(
+                    (b + a).filter { !xrefIsCode(it) },
+                    nativeXrefRows(nat, "from").filter { !xrefIsCode(it) } +
+                        nativeXrefRows(nat, "to").filter { !xrefIsCode(it) },
+                    "from",
+                )
                 Triple(extRows, intRows, dataRows to g)
             }.getOrNull()
         }
@@ -4439,17 +4521,34 @@ private fun FuncXRefView(
         // 子页签（Explorer So：外部引用 / 内部引用 / 数据引用 / 图形化）
         Row(
             Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            listOf(
-                "external" to (if (zh) "外部引用" else "Callers"),
-                "internal" to (if (zh) "内部引用" else "Callees"),
-                "data" to (if (zh) "数据引用" else "Data"),
-                "graph" to (if (zh) "图形化" else "Graph"),
-            ).forEach { (k, l) -> TabChip(l, selected = tab == k) { tab = k } }
-            Spacer(Modifier.weight(1f))
-            SmallAction(if (zh) "重新分析" else "Re-analyze", loading = loading, onClick = onRefresh)
+            // 子页签可横向滚动 + 右侧固定图标按钮（对齐 Exbin 工具栏：内容 weight=1 + IconButton）。
+            // 旧实现把 4 个 chip 与「重新分析」挤在一行，窄屏上按钮文字被压成省略号（显示不全）。
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                listOf(
+                    "external" to (if (zh) "外部引用" else "Callers"),
+                    "internal" to (if (zh) "内部引用" else "Callees"),
+                    "data" to (if (zh) "数据引用" else "Data"),
+                    "graph" to (if (zh) "图形化" else "Graph"),
+                ).forEach { (k, l) -> TabChip(l, selected = tab == k) { tab = k } }
+            }
+            IconButton(onClick = onRefresh, enabled = !loading, modifier = Modifier.size(40.dp)) {
+                if (loading) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = cs.primary)
+                } else {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = if (zh) "重新分析" else "Re-analyze",
+                        modifier = Modifier.size(18.dp),
+                        tint = cs.primary,
+                    )
+                }
+            }
         }
         // 搜索（图形化页签隐藏，对齐 Explorer So）
         if (tab != "graph") {
@@ -5601,7 +5700,15 @@ private fun CfgView(
                     }
                     else -> {
                         val eng = EngineProvider.get(context)
-                        parsePdfjInsns(rzText(eng.rzCommand(ws, "", "s $target; pdfj")))
+                        // `agf json`：块级图，节点带 body（块内反汇编）—— 一次拿齐「块 → 指令」。
+                        // 注意 rizin 的 agf 是「格式参数」型（`agf json`），没有 `agfj` 后缀写法；
+                        // 而 `pdfj` 顶层是线性指令数组（无 blocks 字段），旧代码按 blocks 解析所以恒为 0。
+                        val byGraph = parseGraphInsns(rzText(eng.rzCommand(ws, "", "s $target; agf json")))
+                        if (byGraph.isNotEmpty()) byGraph
+                        else mergeLinearInsns(
+                            parsePdfjLinear(rzText(eng.rzCommand(ws, "", "s $target; pdfj"))),
+                            runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull(),
+                        )
                     }
                 }
             }.getOrNull() ?: emptyMap()
@@ -5794,7 +5901,20 @@ private fun buildCfgTree(graph: CfgGraph?): List<CfgTreeRow> {
     for (i in 0 until n) {
         if (!inTree[i]) { inTree[i] = true; depth[i] = 0 }
     }
-    for (i in 0 until n) {
+    // 输出顺序必须是「父在子之前」（BFS 序）：折叠靠顺序向下传播 hidden，
+    // 若按 index 输出，则父块下标大于子块下标时折叠失效 —— 即用户报告的「收不回去 / 展不开」。
+    val order = ArrayList<Int>(n)
+    val seen = BooleanArray(n)
+    val bfs = ArrayDeque<Int>()
+    bfs.addLast(rootIdx)
+    seen[rootIdx] = true
+    while (bfs.isNotEmpty()) {
+        val u = bfs.removeFirst()
+        order.add(u)
+        sortedKids[u].forEach { v -> if (inTree[v] && !seen[v]) { seen[v] = true; bfs.addLast(v) } }
+    }
+    for (i in 0 until n) if (!seen[i]) { seen[i] = true; order.add(i) }
+    order.forEach { i ->
         rows.add(
             CfgTreeRow(
                 index = i,
@@ -5930,24 +6050,26 @@ private fun CfgNodeListView(
                         Row(
                             Modifier.fillMaxWidth()
                                 .widthIn(min = 360.dp)
-                                .clickable {
-                                    if (!leaf) {
-                                        collapsed.value = if (collapsedNow) collapsed.value - r.index
-                                        else collapsed.value + r.index
-                                    }
-                                    onPickBlock(b.addrText)
-                                }
+                                .clickable { onPickBlock(b.addrText) }
                                 .padding(
                                     start = (16 + minOf(r.depth, 8) * 16).dp,
                                     end = 16.dp, top = 12.dp, bottom = 12.dp,
                                 ),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // 折叠三角是独立点击区（对齐 Exbin ViewHolder.toggleView.setOnClickListener）：
+                            // 点三角只折叠/展开，不再连带跳到图形化 —— 旧实现整行一个 clickable，
+                            // 想折叠却总被跳走，表现就是「收不回去、一点就跳」。
                             Text(
                                 if (leaf) "●" else if (collapsedNow) "▶" else "▼",
                                 fontSize = 16.sp,
                                 color = if (leaf) cs.onSurfaceVariant else cs.primary,
-                                modifier = Modifier.padding(end = 12.dp),
+                                modifier = Modifier
+                                    .clickable(enabled = !leaf) {
+                                        collapsed.value = if (collapsedNow) collapsed.value - r.index
+                                        else collapsed.value + r.index
+                                    }
+                                    .padding(end = 12.dp),
                             )
                             Column(Modifier.weight(1f)) {
                                 Text(

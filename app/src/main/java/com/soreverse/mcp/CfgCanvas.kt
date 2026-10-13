@@ -1135,6 +1135,63 @@ internal fun parsePdfjInsns(jsonText: String): Map<Long, List<String>> {
     }
 }
 
+/**
+ * 解析 `agf json`（块级控制流图）：`{"nodes":[{"title":"0x1234","body":"<多行反汇编>","offset":1234}]}`。
+ *
+ * ⚠ rizin 的 `agf` 是「格式参数」型命令（`agf json`），**没有** `agfj` 后缀写法；
+ * 而 `pdfj` 的顶层是**线性指令数组**（`[{"offset":..,"disasm":..}]`，没有 `blocks` 字段）——
+ * 旧解析按 `{blocks:[…]}` 取值恒为空，这就是控制流节点列表「N 条指令」恒为 0 的根因。
+ */
+internal fun parseGraphInsns(jsonText: String): Map<Long, List<String>> {
+    if (jsonText.isBlank()) return emptyMap()
+    return try {
+        val root = JSONObject(jsonText)
+        val nodes = root.optJSONArray("nodes") ?: return emptyMap()
+        val m = HashMap<Long, List<String>>()
+        for (i in 0 until nodes.length()) {
+            val nd = nodes.optJSONObject(i) ?: continue
+            val addr = parseCfgAddr((nd.opt("offset") ?: "").toString()).takeIf { it >= 0L }
+                ?: parseCfgAddr(nd.optString("title"))
+            if (addr < 0L) continue
+            val body = nd.optString("body")
+            if (body.isBlank()) continue
+            val lines = body.split('\n').mapNotNull { cleanCfgInsnLine(it) }.filter { it.isNotBlank() }
+            if (lines.isNotEmpty()) m[addr] = lines
+        }
+        m
+    } catch (_: Exception) {
+        emptyMap()
+    }
+}
+
+/** 去掉图节点 body 里的地址前缀（"0x1234  mov x0, x1" → "mov x0, x1"）。 */
+private fun cleanCfgInsnLine(raw: String): String? {
+    val t = raw.trim().trimEnd()
+    if (t.isEmpty()) return null
+    val m = Regex("^0x[0-9a-fA-F]+:?\\s+(.*)$").find(t)
+    return (m?.groupValues?.get(1) ?: t).trim()
+}
+
+/** 解析 `pdfj`（线性指令数组，顶层就是数组）：`[{"offset":n,"disasm":"mov x0, x1"}]`。 */
+internal fun parsePdfjLinear(jsonText: String): List<Pair<Long, String>> {
+    if (jsonText.isBlank()) return emptyList()
+    return try {
+        val arr = JSONArray(jsonText)
+        val out = ArrayList<Pair<Long, String>>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val off = o.optLong("offset", -1L)
+            val d = o.optString("disasm").ifBlank { o.optString("opcode") }
+            if (off >= 0L && d.isNotBlank()) {
+                out.add(off to d.lineSequence().firstOrNull().orEmpty().trim())
+            }
+        }
+        out
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
 /** 解析 java 引擎伪 C：按 `label_<hex>:` 切分 → 块入口地址 → 伪C 行列表。 */
 internal fun parsePseudoBlocks(text: String): Map<Long, List<String>> {
     if (text.isBlank()) return emptyMap()

@@ -4661,17 +4661,28 @@ private fun FuncXRefView(
                 loading && cur.isEmpty() && tab != "graph" -> AnalysisLoading()
                 tab == "graph" -> Column(Modifier.fillMaxSize()) {
                     // 控制条（对齐 Explorer So：我调用的 / 调用者 / 深度 − N + / 重置）
+                    // Exbin XRefTabFragment 的图形化控件本来就有「方向」与「深度/重置/交叉边」两组，
+                    // 挤成一行在窄屏上会被截断（交叉边按钮直接看不见）——这里拆成两行。
+                    // 第 1 行：方向（等宽两段，一眼可辨）
                     Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Exbin XRefTabFragment 图形化控件行顺序：我调用的 / 调用者 → 深度 − N + → 重置 → 交叉边
-                        TabChip(if (zh) "我调用的" else "Callees", selected = dir == "callees") { dir = "callees" }
-                        TabChip(if (zh) "调用者" else "Callers", selected = dir == "callers") { dir = "callers" }
+                        XrefTabButton(if (zh) "我调用的" else "Callees", selected = dir == "callees", modifier = Modifier.weight(1f)) { dir = "callees" }
+                        XrefTabButton(if (zh) "调用者" else "Callers", selected = dir == "callers", modifier = Modifier.weight(1f)) { dir = "callers" }
+                    }
+                    Spacer(Modifier.size(6.dp))
+                    // 第 2 行：深度 − N + / 重置 / 交叉边
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         SmallAction("−", enabled = depth > 1) { depth-- }
                         SmallAction(if (zh) "深度 $depth" else "depth $depth", active = true) {}
                         SmallAction("+", enabled = depth < 5) { depth++ }
+                        Spacer(Modifier.weight(1f))
                         SmallAction(if (zh) "重置" else "Reset") { depth = 1; dir = "callees"; showCross = true }
                         TabChip(if (zh) "交叉边" else "Cross", selected = showCross) { showCross = !showCross }
                     }
@@ -5923,45 +5934,54 @@ private fun CfgView(
 
 /** 一个 CFG 树行：depth 缩进、kids 子节点下标、ref 是否已访问过的引用边、entry 是否入口。 */
 private class CfgTreeRow(
+    /** 行 id（唯一）：同一块可能因多条边出现多次（对齐 Exbin buildTreeNodes），不能用块下标做 key。 */
+    val rowId: Int,
     val index: Int,
     val depth: Int,
     val kids: List<Int>,
     val ref: Boolean,
     val entry: Boolean,
-    /** 父块到本块的边类型标签（Exbin：true / false / next），根为 null。 */
+    /** 父行到本行的边类型标签（Exbin：true / false / next），根为 null。 */
     val edgeLabel: String? = null,
 )
 
 /**
- * 从 CFG 图构建树（对齐 Exbin）：从入口 BFS，子边排序 TRUE_BRANCH < FALSE_BRANCH < 其它，
- * 已访问节点作为引用边（ref）；BFS 后把未被访问的块按地址序补为 depth=0 根。
+ * 从 CFG 图构建树（对齐 Exbin `CfgNodeListFragment.buildTreeNodes`）：
+ * 从入口 BFS，**每条出边生成一个子行**（同一块被多条边指向时会出现多行，重复行标 `(ref)`）；
+ * 子边排序 TRUE_BRANCH < FALSE_BRANCH < 其它；BFS 后未被访问的块补为 depth=0 根。
  */
 private fun buildCfgTree(graph: CfgGraph?): List<CfgTreeRow> {
     if (graph == null || graph.blocks.isEmpty()) return emptyList()
     val n = graph.blocks.size
     val rank = { e: CfgEdge -> if (e.kind == "jump") 0 else if (e.kind == "fail") 1 else 2 }
     val outEdges = Array(n) { i -> graph.edges.filter { it.from == i && it.to in 0 until n && it.to != i } }
-    val sortedKids = Array(n) { i ->
-        outEdges[i].sortedBy { rank(it) }.map { it.to }.distinct()
-    }
-    val rows = ArrayList<CfgTreeRow>(n)
-    val depth = IntArray(n) { -1 }
+    val sortedKids = Array(n) { i -> outEdges[i].sortedBy { rank(it) }.map { it.to }.distinct() }
     val visited = BooleanArray(n)
-    val inTree = BooleanArray(n)
-    val ref = BooleanArray(n)
-    val edgeLabel = arrayOfNulls<String>(n)
+    val rows = ArrayList<CfgTreeRow>(n)
+    val kidsOf = HashMap<Int, MutableList<Int>>()
+    val depthOf = HashMap<Int, Int>()
+    val blockOf = HashMap<Int, Int>()
+    var nextId = 0
+    fun addRow(index: Int, depth: Int, ref: Boolean, entry: Boolean, label: String?): Int {
+        val id = nextId++
+        rows.add(CfgTreeRow(id, index, depth, emptyList(), ref, entry, label))
+        depthOf[id] = depth
+        blockOf[id] = index
+        return id
+    }
+    val rootId = addRow(0, 0, false, true, null)
+    visited[0] = true
     val queue = ArrayDeque<Int>()
-    val rootIdx = 0
-    visited[rootIdx] = true
-    inTree[rootIdx] = true
-    depth[rootIdx] = 0
-    queue.add(rootIdx)
+    queue.add(rootId)
     while (queue.isNotEmpty()) {
-        val u = queue.removeFirst()
+        val rid = queue.removeFirst()
+        val u = blockOf[rid] ?: continue
+        val d = depthOf[rid] ?: 0
         // Exbin：只有「真·条件分支」（jump 与 fail 指向不同目标）才标 true/false，否则标 next
         val jumpTo = outEdges[u].firstOrNull { it.kind == "jump" }?.to
         val failTo = outEdges[u].firstOrNull { it.kind == "fail" }?.to
         val conditional = jumpTo != null && failTo != null && jumpTo != failTo
+        val ids = ArrayList<Int>()
         sortedKids[u].forEach { v ->
             val k = outEdges[u].firstOrNull { it.to == v && it.kind == "jump" }?.kind
                 ?: outEdges[u].firstOrNull { it.to == v }?.kind ?: "edge"
@@ -5971,46 +5991,25 @@ private fun buildCfgTree(graph: CfgGraph?): List<CfgTreeRow> {
                 k == "fail" -> "false"
                 else -> "next"
             }
-            if (!visited[v]) {
+            val isRef = visited[v]
+            val cid = addRow(v, d + 1, isRef, false, lbl)
+            ids.add(cid)
+            if (!isRef) {
                 visited[v] = true
-                inTree[v] = true
-                depth[v] = depth[u] + 1
-                edgeLabel[v] = lbl
-                queue.add(v)
-            } else {
-                ref[v] = true
+                queue.add(cid)
             }
         }
+        kidsOf[rid] = ids
     }
     for (i in 0 until n) {
-        if (!inTree[i]) { inTree[i] = true; depth[i] = 0 }
+        if (!visited[i]) {
+            visited[i] = true
+            addRow(i, 0, false, false, null)
+        }
     }
-    // 输出顺序必须是「父在子之前」（BFS 序）：折叠靠顺序向下传播 hidden，
-    // 若按 index 输出，则父块下标大于子块下标时折叠失效 —— 即用户报告的「收不回去 / 展不开」。
-    val order = ArrayList<Int>(n)
-    val seen = BooleanArray(n)
-    val bfs = ArrayDeque<Int>()
-    bfs.addLast(rootIdx)
-    seen[rootIdx] = true
-    while (bfs.isNotEmpty()) {
-        val u = bfs.removeFirst()
-        order.add(u)
-        sortedKids[u].forEach { v -> if (inTree[v] && !seen[v]) { seen[v] = true; bfs.addLast(v) } }
+    return rows.map { r ->
+        CfgTreeRow(r.rowId, r.index, r.depth, kidsOf[r.rowId]?.toList() ?: emptyList(), r.ref, r.entry, r.edgeLabel)
     }
-    for (i in 0 until n) if (!seen[i]) { seen[i] = true; order.add(i) }
-    order.forEach { i ->
-        rows.add(
-            CfgTreeRow(
-                index = i,
-                depth = if (depth[i] < 0) 0 else depth[i],
-                kids = sortedKids[i].filter { inTree[it] },
-                ref = ref[i],
-                entry = i == rootIdx,
-                edgeLabel = edgeLabel[i],
-            ),
-        )
-    }
-    return rows
 }
 
 /**
@@ -6054,9 +6053,9 @@ private fun CfgNodeListView(
             // 树序：某行可见 ⟺ 它所有祖先都没被折叠（对齐 Exbin isParentExpanded 的递归语义）。
             // 旧实现只把「折叠行的直接子节点」加入 hidden，孙节点照样显示 —— 这就是「收起有 bug」。
             val parentOf = HashMap<Int, Int>()
-            rows.forEach { r -> r.kids.forEach { k -> if (k !in parentOf) parentOf[k] = r.index } }
-            fun anyAncestorCollapsed(idx: Int): Boolean {
-                var p = parentOf[idx]
+            rows.forEach { r -> r.kids.forEach { k -> if (k !in parentOf) parentOf[k] = r.rowId } }
+            fun anyAncestorCollapsed(rowId: Int): Boolean {
+                var p = parentOf[rowId]
                 while (p != null) {
                     if (p in collapsed.value) return true
                     p = parentOf[p]
@@ -6065,7 +6064,7 @@ private fun CfgNodeListView(
             }
             val out = ArrayList<CfgTreeRow>()
             rows.forEach { r ->
-                if (anyAncestorCollapsed(r.index)) return@forEach
+                if (anyAncestorCollapsed(r.rowId)) return@forEach
                 if (q.isEmpty() || rowMatches(r, blocks, insns, q)) out.add(r)
             }
             out
@@ -6139,40 +6138,38 @@ private fun CfgNodeListView(
                     hint = if (zh) "换个关键字再试" else "Try another keyword",
                 )
                 else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
-                    items(visible, key = { it.index }) { r ->
+                    items(visible, key = { it.rowId }) { r ->
                         val b = blocks.getOrNull(r.index) ?: return@items
                         val leaf = r.kids.isEmpty()
-                        val collapsedNow = r.index in collapsed.value
+                        val collapsedNow = r.rowId in collapsed.value
                         val insnOpen = r.index in expandedInsn.value
                         Column(Modifier.fillMaxWidth()) {
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .widthIn(min = 360.dp)
-                                .clickable {
-                                    expandedInsn.value = if (insnOpen) expandedInsn.value - r.index
-                                    else expandedInsn.value + r.index
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .widthIn(min = 360.dp)
+                                    .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                // 折叠三角：36dp 独立点击区（够大好点、且不与任何其它手势打架），
+                                // 只负责「折叠 / 展开子节点」。
+                                Box(
+                                    Modifier
+                                        .padding(start = (8 + minOf(r.depth, 8) * 16).dp)
+                                        .size(36.dp)
+                                        .clickable(enabled = !leaf) {
+                                            collapsed.value = if (collapsedNow) collapsed.value - r.rowId
+                                            else collapsed.value + r.rowId
+                                            if (!collapsedNow) expandedInsn.value = expandedInsn.value - r.index
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        if (leaf) "●" else if (collapsedNow) "▶" else "▼",
+                                        fontSize = 16.sp,
+                                        color = if (leaf) cs.onSurfaceVariant else cs.primary,
+                                    )
                                 }
-                                .padding(
-                                    start = (16 + minOf(r.depth, 8) * 16).dp,
-                                    end = 16.dp, top = 12.dp, bottom = 12.dp,
-                                ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // 折叠三角是独立点击区（对齐 Exbin ViewHolder.toggleView.setOnClickListener）：
-                            // 点三角只折叠/展开，不再连带跳到图形化 —— 旧实现整行一个 clickable，
-                            // 想折叠却总被跳走，表现就是「收不回去、一点就跳」。
-                            Text(
-                                if (leaf) "●" else if (collapsedNow) "▶" else "▼",
-                                fontSize = 16.sp,
-                                color = if (leaf) cs.onSurfaceVariant else cs.primary,
-                                modifier = Modifier
-                                    .clickable(enabled = !leaf) {
-                                        collapsed.value = if (collapsedNow) collapsed.value - r.index
-                                        else collapsed.value + r.index
-                                    }
-                                    .padding(end = 12.dp),
-                            )
-                            Column(Modifier.weight(1f)) {
+                                Column(Modifier.weight(1f).padding(start = 6.dp)) {
                                 Text(
                                     blockTitle(b, r),
                                     style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
@@ -6194,14 +6191,23 @@ private fun CfgNodeListView(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                }
+                                // 行尾显式按钮：展开 / 收起「该块的每一条指令」。
+                                // 不再靠整行点击 —— 那样会把「折叠子节点」和「看指令」两种手势搅在一起。
+                                SmallAction(
+                                    label = if (insnOpen) (if (zh) "收起" else "Hide") else (if (zh) "指令" else "Insns"),
+                                    active = insnOpen,
+                                ) {
+                                    expandedInsn.value = if (insnOpen) expandedInsn.value - r.index
+                                    else expandedInsn.value + r.index
+                                }
                             }
-                        }
-                        // ── 块内指令明细（点行展开）──
+                        // ── 块内指令明细（点「指令」按钮展开）──
                         if (insnOpen) {
                             val detail = insns[b.addrValue].orEmpty()
                             Column(
                                 Modifier.fillMaxWidth().padding(
-                                    start = (16 + minOf(r.depth, 8) * 16 + 22).dp,
+                                    start = (8 + minOf(r.depth, 8) * 16 + 36 + 6).dp,
                                     end = 16.dp, bottom = 8.dp,
                                 ),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),

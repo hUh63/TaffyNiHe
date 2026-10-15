@@ -99,8 +99,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -2226,6 +2231,10 @@ private fun XrefTabButton(
     }
 }
 
+/**
+ * 次要动作按钮 —— M3 [OutlinedButton]（active 时用 [FilledTonalButton] 表示"当前选中/可切换状态"）。
+ * 旧实现是自绘 Surface + 11sp 文字，窄屏会被压成省略号（用户反馈过"文字显示不全"）；M3 按钮自带内边距与最小高度。
+ */
 @Composable
 private fun SmallAction(
     label: String,
@@ -2234,30 +2243,30 @@ private fun SmallAction(
     active: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
-    Surface(
-        onClick = { if (enabled) onClick() },
-        enabled = enabled,
-        shape = RoundedCornerShape(AppShape.sm),
-        color = if (active) cs.primary.copy(alpha = 0.16f) else cs.surfaceContainerHigh,
-        border = BorderStroke(1.dp, if (active) cs.primary.copy(alpha = 0.45f) else cs.outlineVariant),
-    ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            if (loading) {
-                CircularProgressIndicator(Modifier.size(11.dp), strokeWidth = 2.dp)
-            }
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = AppText.label,
-                maxLines = 1,
-                color = if (enabled) cs.primary else cs.onSurfaceVariant,
-            )
+    val contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
+    val body: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        if (loading) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.size(6.dp))
         }
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+    }
+    if (active) {
+        FilledTonalButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.heightIn(min = 40.dp),
+            contentPadding = contentPadding,
+            content = body,
+        )
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.heightIn(min = 40.dp),
+            contentPadding = contentPadding,
+            content = body,
+        )
     }
 }
 
@@ -2910,26 +2919,23 @@ private fun AnalysisTabRow(items: List<String>, current: String, zh: Boolean, on
     }
 }
 
-/** 紧凑 tab chip（自绘，Exbin 风：选中=主色底+描边+加粗，未选中=浅底纯字）。 */
+/**
+ * 筛选 / 切换 chip —— 直接用 M3 [FilterChip]（Exbin 的筛选一律是 Material 组件）。
+ * 旧实现是自绘胶囊（主色 15% 底 + 描边），观感与 M3 不一致、也不符合 Exbin 的组件选型。
+ */
 @Composable
 private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(AppShape.pill)
-    val mod = Modifier
-        .clip(shape)
-        .background(if (selected) cs.primary.copy(alpha = 0.15f) else cs.surfaceContainerHigh.copy(alpha = 0.55f))
-        .then(if (selected) Modifier.border(BorderStroke(1.dp, cs.primary.copy(alpha = 0.45f)), shape) else Modifier)
-        .clickable { onClick() }
-        .padding(horizontal = 11.dp, vertical = 6.dp)
-    Text(
-        label,
-        style = MaterialTheme.typography.labelSmall,
-        fontSize = AppText.label,
-        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-        color = if (selected) cs.primary else cs.onSurfaceVariant,
-        maxLines = 1,
-        softWrap = false,
-        modifier = mod,
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
     )
 }
 
@@ -4575,20 +4581,27 @@ private fun FuncXRefView(
 
     Column(Modifier.fillMaxSize()) {
         // 子页签（Explorer So：外部引用 / 内部引用 / 数据引用 / 图形化）
-        // ── 页签行（对齐 Exbin XRefTabFragment.createTabBar：4 个等宽圆角按钮，高 36dp）──
-        Row(
-            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
+        // 页签用 M3 TabRow（Exbin 这页也是 TabLayout；不再自绘按钮行）
+        val xrefTabs = listOf(
+            "external" to (if (zh) "外部引用" else "Callers"),
+            "internal" to (if (zh) "内部引用" else "Callees"),
+            "data" to (if (zh) "数据引用" else "Data"),
+            "graph" to (if (zh) "图形化" else "Graph"),
+        )
+        TabRow(
+            selectedTabIndex = xrefTabs.indexOfFirst { it.first == tab }.coerceAtLeast(0),
+            containerColor = cs.surface,
+            contentColor = cs.primary,
+            divider = { HorizontalDivider(color = cs.outlineVariant) },
         ) {
-            listOf(
-                "external" to (if (zh) "外部引用" else "Callers"),
-                "internal" to (if (zh) "内部引用" else "Callees"),
-                "data" to (if (zh) "数据引用" else "Data"),
-                "graph" to (if (zh) "图形化" else "Graph"),
-            ).forEach { (k, l) ->
-                XrefTabButton(l, selected = tab == k, modifier = Modifier.weight(1f)) { tab = k }
+            xrefTabs.forEach { (k, l) ->
+                Tab(
+                    selected = tab == k,
+                    onClick = { tab = k },
+                    text = { Text(l, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
             }
         }
-        GroupDivider()
         // 搜索（图形化页签隐藏，对齐 Explorer So）
         if (tab != "graph") {
             Spacer(Modifier.size(6.dp))
@@ -6144,64 +6157,60 @@ private fun CfgNodeListView(
                         val collapsedNow = r.rowId in collapsed.value
                         val insnOpen = r.index in expandedInsn.value
                         Column(Modifier.fillMaxWidth()) {
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .widthIn(min = 360.dp)
-                                    .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                // 折叠三角：36dp 独立点击区（够大好点、且不与任何其它手势打架），
-                                // 只负责「折叠 / 展开子节点」。
-                                Box(
-                                    Modifier
-                                        .padding(start = (8 + minOf(r.depth, 8) * 16).dp)
-                                        .size(36.dp)
-                                        .clickable(enabled = !leaf) {
+                            ListItem(
+                                modifier = Modifier.fillMaxWidth().widthIn(min = 360.dp),
+                                leadingContent = {
+                                    // 缩进用 leading 的左侧内边距表达（层级一眼可见）；三角是 40dp 独立点击区
+                                    IconButton(
+                                        onClick = {
                                             collapsed.value = if (collapsedNow) collapsed.value - r.rowId
                                             else collapsed.value + r.rowId
                                             if (!collapsedNow) expandedInsn.value = expandedInsn.value - r.index
                                         },
-                                    contentAlignment = Alignment.Center,
-                                ) {
+                                        enabled = !leaf,
+                                        modifier = Modifier.padding(start = (minOf(r.depth, 8) * 16).dp).size(40.dp),
+                                    ) {
+                                        Text(
+                                            if (leaf) "●" else if (collapsedNow) "▶" else "▼",
+                                            fontSize = 15.sp,
+                                            color = if (leaf) cs.onSurfaceVariant else cs.primary,
+                                        )
+                                    }
+                                },
+                                headlineContent = {
                                     Text(
-                                        if (leaf) "●" else if (collapsedNow) "▶" else "▼",
-                                        fontSize = 16.sp,
-                                        color = if (leaf) cs.onSurfaceVariant else cs.primary,
+                                        blockTitle(b, r),
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                        fontWeight = if (r.entry || r.ref) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = when {
+                                            r.ref -> cs.error
+                                            r.entry -> cs.primary
+                                            else -> cs.onSurface
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
-                                }
-                                Column(Modifier.weight(1f).padding(start = 6.dp)) {
-                                Text(
-                                    blockTitle(b, r),
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                    fontWeight = FontWeight.Normal,
-                                    color = when {
-                                        r.ref -> cs.error
-                                        r.entry -> cs.primary
-                                        else -> cs.onSurface
-                                    },
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                val (cnt, head) = insnOf(b)
-                                Text(
-                                    "$cnt " + (if (zh) "条指令" else "insns") + (if (head.isBlank()) "" else " | $head"),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontSize = AppText.label,
-                                    color = cs.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                }
-                                // 行尾显式按钮：展开 / 收起「该块的每一条指令」。
-                                // 不再靠整行点击 —— 那样会把「折叠子节点」和「看指令」两种手势搅在一起。
-                                SmallAction(
-                                    label = if (insnOpen) (if (zh) "收起" else "Hide") else (if (zh) "指令" else "Insns"),
-                                    active = insnOpen,
-                                ) {
-                                    expandedInsn.value = if (insnOpen) expandedInsn.value - r.index
-                                    else expandedInsn.value + r.index
-                                }
-                            }
+                                },
+                                supportingContent = {
+                                    val (cnt, head) = insnOf(b)
+                                    Text(
+                                        "$cnt " + (if (zh) "条指令" else "insns") + (if (head.isBlank()) "" else " | $head"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = cs.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                trailingContent = {
+                                    TextButton(onClick = {
+                                        expandedInsn.value = if (insnOpen) expandedInsn.value - r.index
+                                        else expandedInsn.value + r.index
+                                    }) {
+                                        Text(if (insnOpen) (if (zh) "收起" else "Hide") else (if (zh) "指令" else "Insns"))
+                                    }
+                                },
+                            )
+
                         // ── 块内指令明细（点「指令」按钮展开）──
                         if (insnOpen) {
                             val detail = insns[b.addrValue].orEmpty()

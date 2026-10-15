@@ -1,3 +1,27 @@
+# TaffyNiHe v1.3.99（分析页整体换用 Material 3 官方组件，去掉自研控件）
+
+之前分析页的控件是**自绘**的（自绘胶囊 chip、自绘 Surface 小按钮、自绘按钮行、自绘列表行），观感与交互都和
+Exbin（Explorer So）不一样 —— 这就是"不符合人类审美"的根源。这一批把分析页的控件层**整体换成 M3 官方组件**：
+
+| 旧（自绘） | 新（M3 官方） | 效果 |
+|---|---|---|
+| `TabChip` 自绘胶囊（主色 15% 底 + 描边） | **`FilterChip`** | 筛选/切换有标准触感与选中态 |
+| `SmallAction` 自绘 Surface + 11sp | **`OutlinedButton` / `FilledTonalButton`** | 按钮有标准内边距与最小高度，**文字不再被压成省略号** |
+| 交叉引用 4 个自绘按钮行 | **`TabRow` + `Tab`**（Exbin 这页本就是 TabLayout） | 页签有指示条、点击热区、滚动手感 |
+| 控制流节点列表自绘 Row | **`ListItem`**（leading 折叠三角 / headline 等宽标题 / supporting 指令数 / trailing「指令」按钮） | 列表项有标准间距与触控反馈 |
+
+另外新增 **《Exbin UI 规范》** 文档（`docs/exbin-ui-spec.md`）：把 Exbin 的骨架（Toolbar + TabLayout + Divider）、
+组件选型（哪种场景用哪个 M3 组件）、尺寸（56dp 工具栏 / 12dp 行距 / 10–12dp 卡片圆角）、配色（只用 M3 token）、
+以及**交互原则**（一个动作一个触发点、点击=主行为、重活给主按钮）固化成基线，后续所有页面按它对齐。
+
+> 这一批是「组件层」；下一批处理侧栏 / 顶栏 / 各工具页的自绘部分。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.98...v1.3.99
+
+---
+
 # TaffyNiHe v1.3.98（节点列表交互重做 + 树结构对齐 Exbin + 图形化控件换行）
 
 ## 1️⃣ 节点列表：展开/收起终于「讲得通」

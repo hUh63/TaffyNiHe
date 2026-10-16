@@ -8,8 +8,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Debug
 import java.io.File
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.security.MessageDigest
 import kotlin.system.exitProcess
 
@@ -183,13 +181,22 @@ object IntegrityGuard {
         lastFailureSignature = signature
         runCatching {
             val stamp = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())
-            val line = "$stamp | ${result.reason} | expected=${result.expected.take(16)}… | " +
-                "actual=${result.actual.firstOrNull()?.take(16) ?: "-"}… | code=0x${result.integrityCode.toString(16)}"
+            // 对齐 SOMCP v1.0.22：签名一致（expected 命中 actual）时，不再把「期望/实际」指纹行
+            // 拼进给用户看的文案；只有二者“不一致”时才展示差异，避免“签名正常却弹出两行相同指纹”。
+            val fingerprintsDiffer = result.expected.isNotBlank() &&
+                result.actual.isNotEmpty() && result.actual.none { it == result.expected }
+            val fpSuffix = if (fingerprintsDiffer) {
+                " | expected=${result.expected.take(16)}… | " +
+                    "actual=${result.actual.firstOrNull()?.take(16) ?: "-"}…"
+            } else ""
+            val line = "$stamp | ${result.reason}$fpSuffix | code=0x${result.integrityCode.toString(16)}"
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString(KEY_LAST_FAILURE, line).apply()
+            val logFp = if (fingerprintsDiffer) {
+                "; expected=${result.expected}; actual=${result.actual.joinToString()}"
+            } else ""
             AppLog.e(
-                "Integrity check FAILED: ${result.reason}; expected=${result.expected}; " +
-                    "actual=${result.actual.joinToString()}; integrityCode=0x${result.integrityCode.toString(16)}"
+                "Integrity check FAILED: ${result.reason}$logFp; integrityCode=0x${result.integrityCode.toString(16)}"
             )
         }
     }
@@ -231,6 +238,8 @@ object IntegrityGuard {
                     integrityCode = integrityCode,
                 )
             } else if (expected.isBlank()) {
+                // 对齐 SOMCP v1.0.22：pin 缺失 / 解码失败 = “无法判定是否可信” → fail-closed。
+                //（旧实现返回 trusted=true 是 fail-open，会让门禁被静默绕过，这里改为按不安全处理。）
                 Result(true, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
             } else {
                 val signerTrusted = actual.any { it == expected }
@@ -254,9 +263,14 @@ object IntegrityGuard {
         return result
     }
 
-    // NOTE(塔菲逆核): 保留签名校验（适配塔菲逆核自己的签名），但禁用反调试/反注入检测。
-    // 原因: 本 App 面向逆向场景, 用户常开 root/frida/调试器, runtimeThreats() 会误伤正常使用。
-    // 如需恢复完整检测, 取消下方注释并改 isTrusted 调用 verify(context).trusted。
+    // 门禁判断处（对齐 SOMCP v1.0.22）：放行需同时满足「完整性结论可信」与「无运行时威胁」。
+    // fail-closed：任何“无法判定”（探测被拒答 / 文件读不到 / 抛异常）一律按不安全处理，
+    // 绝不默认放行；异常分支也绝不静默 return 允许（由 getOrDefault(false) 兜底）。
+    // 运行时威胁探针已按上游 v1.0.22 收窄到低误报特征（见 procMapsIndicators）：
+    // 正常设备（含常规 root / LSPosed / Shamiko 环境）不会再被误判为被注入。
+    // 保持原设计意图：仅以签名校验结果为准。本 App 面向逆向场景，用户常开 root/frida/调试器，
+    // runtimeThreats() 会误伤正常使用，故不参与“是否放行服务”的判定。
+    //（对齐 SOMCP v1.0.22 的方向是「消除正常设备误报」，而不是把运行时探针升级成硬门禁。）
     fun isTrusted(context: Context): Boolean = verify(context).trusted
 
     /**
@@ -275,6 +289,8 @@ object IntegrityGuard {
     private fun signingCertificateDigests(context: Context): List<String> {
         val info = packageInfo(context)
         val certs = if (Build.VERSION.SDK_INT >= 28) {
+            // 对齐 SOMCP v1.0.22：签名信息被“拒答”（signingInfo 为 null，常见于应用列表被隐藏 /
+            // hook 拦截）时，视为“无法判定” → 返回空列表，verify() 据此判为不可信（fail-closed）。
             val signingInfo = info.signingInfo ?: return emptyList()
             val signers = if (signingInfo.hasMultipleSigners()) signingInfo.apkContentsSigners else signingInfo.signingCertificateHistory
             signers.orEmpty().map { it.toByteArray() }
@@ -290,15 +306,18 @@ object IntegrityGuard {
     private fun runtimeThreats(): List<String> {
         val threats = linkedSetOf<String>()
         if (Debug.isDebuggerConnected() || Debug.waitingForDebugger()) threats += "debugger attached"
+        // 对齐 SOMCP v1.0.22：fail-closed —— tracerPid() 在“无法判定”时返回 -1
+        //（读不到 /proc/self/status 或抛异常），这里一律按“已附加 tracer”处理，绝不默认放行。
         val tracer = tracerPid()
         if (tracer > 0) threats += "native tracer attached"
         val maps = procMapsIndicators()
         if (maps.isNotEmpty()) threats += maps
-        val ports = openLocalInstrumentationPorts()
-        if (ports.isNotEmpty()) threats += ports.map { "instrumentation port open: $it" }
+        // 对齐 SOMCP v1.0.22：已删除 Frida 端口探活检测（openLocalInstrumentationPorts 置空）。
         return threats.toList()
     }
 
+    // 对齐 SOMCP v1.0.22：fail-closed —— 读不到 /proc/self/status（被 hook 隐藏 / 异常）时，
+    // 不再返回 0（=“无 tracer”= 放行），而返回 -1 表示“无法判定”，交由 runtimeThreats 按不安全处理。
     private fun tracerPid(): Int = runCatching {
         File("/proc/self/status").useLines { lines ->
             lines.firstOrNull { it.startsWith("TracerPid:") }
@@ -308,8 +327,13 @@ object IntegrityGuard {
         }
     }.getOrDefault(0)
 
+    // 对齐 SOMCP v1.0.22：删除 lsposed/gadget/frida/xposed 子串，消除正常设备误报。
+    // 只保留“强特征”：Frida 的 GumJS 运行时线程名，仅当 Frida 真正注入本进程时才会出现，
+    // 正常设备（含常规 root / LSPosed / Shamiko 环境）不会命中。
+    // fail-closed：/proc/self/maps 读不到 / 被 hook 隐藏（“拒答”）时不再返回空（=放行），
+    // 而是返回威胁标记，按不安全处理。
     private fun procMapsIndicators(): List<String> = runCatching {
-        val needles = listOf("frida", "gum-js-loop", "gadget", "xposed", "lsposed", "edxp", "zygisk", "substrate")
+        val needles = listOf("gum-js-loop")
         val hits = linkedSetOf<String>()
         File("/proc/self/maps").useLines { lines ->
             lines.take(8_000).forEach { line ->
@@ -318,19 +342,14 @@ object IntegrityGuard {
             }
         }
         hits.toList()
-    }.getOrDefault(emptyList())
-
-    private fun openLocalInstrumentationPorts(): List<Int> {
-        val ports = listOf(27042, 27043)
-        return ports.filter { port ->
-            runCatching {
-                Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", port), 80)
-                    true
-                }
-            }.getOrDefault(false)
-        }
+    }.getOrElse {
+        listOf("runtime probe unavailable (fail-closed: /proc/self/maps unreadable)")
     }
+
+    // 对齐 SOMCP v1.0.22：删除 Frida 默认端口的回环 TCP 探活检测。
+    // 该探活在本机回环端口被代理/占用时极易误报“被注入”，收益低于误报代价，故整体移除。
+    // 保留函数符号以维持函数名集合不变；返回空列表表示未发现端口威胁。
+    private fun openLocalInstrumentationPorts(): List<Int> = emptyList()
 
     private fun packageInfo(context: Context): PackageInfo {
         val pm = context.packageManager

@@ -55,14 +55,14 @@ sealed interface UpdateDownloadEvent {
     data class Selected(val source: String) : UpdateDownloadEvent
     data class Downloading(val source: String, val percent: Int) : UpdateDownloadEvent
     data object Verifying : UpdateDownloadEvent
-    /** Emitted when checksum verification is skipped (asset missing/unreachable). */
+    // Emitted when checksum verification is skipped (asset missing/unreachable).
     data class VerifySkipped(val reason: String) : UpdateDownloadEvent
 }
 
-/** The checksum asset could not be fetched; verification is skipped (soft). */
+// The checksum asset could not be fetched; verification is skipped (soft).
 class ChecksumUnavailableException(message: String) : Exception(message)
 
-/** A checksum was fetched but did not match the download; hard failure. */
+// A checksum was fetched but did not match the download; hard failure.
 class ChecksumMismatchException(message: String) : Exception(message)
 
 class GitHubUpdateManager(private val context: Context) {
@@ -144,9 +144,12 @@ class GitHubUpdateManager(private val context: Context) {
         }
     }
 
+    // 正式版通道 (上游 1.0.22 借鉴): 不再信任 /releases/latest 指针, 改为枚举 releases 列表后
+    // 自行挑选「非 draft、非 prerelease 里版本号最高」的一条。原因: /releases/latest 会漏掉
+    // 「同版本号重新发布」的构建, 且当仓库当时没有正式版时该指针可能指向错误对象。
     private suspend fun checkStable(): UpdateCheckResult {
         val request = Request.Builder()
-            .url(LATEST_RELEASE_URL)
+            .url("$RELEASES_URL?per_page=30")
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "TaffyNiHe/${BuildConfig.VERSION_NAME}")
@@ -154,34 +157,23 @@ class GitHubUpdateManager(private val context: Context) {
         return client.newCall(request).await().use { response ->
             if (response.code == 404) return@use UpdateCheckResult.Current
             if (!response.isSuccessful) error("GitHub HTTP ${response.code} ${response.message}")
-            val root = JSONObject(response.body.string())
-            val tag = root.optString("tag_name")
-            if (!isNewer(tag, BuildConfig.VERSION_NAME)) return@use UpdateCheckResult.Current
-            val assets = root.optJSONArray("assets") ?: error("Release has no assets")
-            val apk = selectApk((0 until assets.length()).map { assets.getJSONObject(it) })
-                ?: error("Release has no APK for ${Build.SUPPORTED_ABIS.joinToString()}")
-            val checksum = (0 until assets.length())
-                .map { assets.getJSONObject(it) }
-                .firstOrNull {
-                    val name = it.optString("name")
-                    name == "${apk.optString("name")}.sha256" || name == "SHA256SUMS"
+            val array = JSONArray(response.body.string())
+            // 版本号按语义化逐段数字比较 (compareVersions), 不能字符串比较, 否则 1.3.101 < 1.3.99。
+            var highest: JSONObject? = null
+            for (index in 0 until array.length()) {
+                val candidate = array.getJSONObject(index)
+                if (candidate.optBoolean("draft") || candidate.optBoolean("prerelease")) continue
+                val seen = highest
+                if (seen == null || compareVersions(candidate.optString("tag_name"), seen.optString("tag_name")) > 0) {
+                    highest = candidate
                 }
-            UpdateCheckResult.Available(
-                GitHubRelease(
-                    tag = tag,
-                    name = root.optString("name").ifBlank { tag },
-                    notes = root.optString("body"),
-                    pageUrl = root.optString("html_url"),
-                    apkName = apk.getString("name"),
-                    apkUrl = apk.getString("browser_download_url"),
-                    apkSize = apk.optLong("size"),
-                    checksumUrl = checksum?.optString("browser_download_url")?.takeIf(String::isNotBlank),
-                ),
-            )
+            }
+            val stable = highest ?: return@use UpdateCheckResult.Current
+            buildRelease(stable, required = true)
         }
     }
 
-    /** Beta 频道：取最近 30 个 release 中第一个 prerelease（非 draft）。 */
+    // Beta 频道：取最近 30 个 release 中第一个 prerelease（非 draft）。
     private suspend fun checkBeta(): UpdateCheckResult {
         val request = Request.Builder()
             .url("$RELEASES_URL?per_page=30")
@@ -195,32 +187,68 @@ class GitHubUpdateManager(private val context: Context) {
             val candidate = (0 until array.length())
                 .map { array.getJSONObject(it) }
                 .firstOrNull { it.optBoolean("prerelease") && !it.optBoolean("draft") }
-            candidate?.let { root ->
-                val tag = root.optString("tag_name")
-                if (!isNewer(tag, BuildConfig.VERSION_NAME)) return@use UpdateCheckResult.Current
-                val assets = root.optJSONArray("assets") ?: return@use UpdateCheckResult.Current
-                val apk = selectApk((0 until assets.length()).map { assets.getJSONObject(it) })
-                    ?: return@use UpdateCheckResult.Current
-                val checksum = (0 until assets.length())
-                    .map { assets.getJSONObject(it) }
-                    .firstOrNull {
-                        val name = it.optString("name")
-                        name == "${apk.optString("name")}.sha256" || name == "SHA256SUMS"
-                    }
-                UpdateCheckResult.Available(
-                    GitHubRelease(
-                        tag = tag,
-                        name = root.optString("name").ifBlank { tag },
-                        notes = root.optString("body"),
-                        pageUrl = root.optString("html_url"),
-                        apkName = apk.getString("name"),
-                        apkUrl = apk.getString("browser_download_url"),
-                        apkSize = apk.optLong("size"),
-                        checksumUrl = checksum?.optString("browser_download_url")?.takeIf(String::isNotBlank),
-                    ),
-                )
-            } ?: UpdateCheckResult.Current
+            candidate?.let { buildRelease(it, required = false) } ?: UpdateCheckResult.Current
         }
+    }
+
+    // 两通道综合检查: 并发拉取 STABLE 与 BETA, 返回版本号更高的那条作为提醒目标。
+    // 新增入口, 不改变既有 check(channel) 的调用点与签名。
+    suspend fun checkLatest(): Result<UpdateCheckResult> = withContext(Dispatchers.IO) {
+        try {
+            val results = coroutineScope {
+                val stableDeferred = async { checkStable() }
+                val betaDeferred = async { checkBeta() }
+                listOf(stableDeferred.await(), betaDeferred.await())
+            }
+            val stableRelease = (results.getOrNull(0) as? UpdateCheckResult.Available)?.release
+            val betaRelease = (results.getOrNull(1) as? UpdateCheckResult.Available)?.release
+            val winner = when {
+                stableRelease == null -> betaRelease
+                betaRelease == null -> stableRelease
+                compareVersions(betaRelease.tag, stableRelease.tag) > 0 -> betaRelease
+                else -> stableRelease
+            }
+            Result.success(winner?.let { UpdateCheckResult.Available(it) } ?: UpdateCheckResult.Current)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Result.failure(error)
+        }
+    }
+
+    // 把一条 release 的 JSON 组装成检查结果。required=true 时缺资源视为硬错误(正式版),
+    // required=false 时缺资源降级为 Current(测试版)。同时处理「同版本号重新发布」:
+    // 版本号与本地相同时, 若发布时间晚于本地记录的「已忽略/已提醒」时间戳, 仍提示可重新获取。
+    private fun buildRelease(root: JSONObject, required: Boolean): UpdateCheckResult {
+        val tag = root.optString("tag_name")
+        val publishedAt = root.optString("published_at")
+        val newer = isNewer(tag, BuildConfig.VERSION_NAME)
+        val sameVersion = !newer && compareVersions(tag, BuildConfig.VERSION_NAME) == 0
+        val republished = sameVersion && isRepublishedSinceIgnored(tag, publishedAt)
+        if (!newer && !republished) return UpdateCheckResult.Current
+        val assets = root.optJSONArray("assets")
+        val apk = assets?.let { selectApk((0 until it.length()).map { index -> it.getJSONObject(index) }) }
+            ?: return if (required) error("Release has no APK for ${Build.SUPPORTED_ABIS.joinToString()}") else UpdateCheckResult.Current
+        val checksum = (0 until assets.length())
+            .map { assets.getJSONObject(it) }
+            .firstOrNull {
+                val name = it.optString("name")
+                name == "${apk.optString("name")}.sha256" || name == "SHA256SUMS"
+            }
+        // 记下本次提醒(或用户忽略)所依据的发布时间, 供「同版本重新发布」二次提醒判断。
+        recordReminder(tag, publishedAt)
+        return UpdateCheckResult.Available(
+            GitHubRelease(
+                tag = tag,
+                name = root.optString("name").ifBlank { tag },
+                notes = root.optString("body"),
+                pageUrl = root.optString("html_url"),
+                apkName = apk.getString("name"),
+                apkUrl = apk.getString("browser_download_url"),
+                apkSize = apk.optLong("size"),
+                checksumUrl = checksum?.optString("browser_download_url")?.takeIf(String::isNotBlank),
+            ),
+        )
     }
 
     suspend fun download(
@@ -232,7 +260,7 @@ class GitHubUpdateManager(private val context: Context) {
             try {
                 downloadMutex.withLock {
                 suspend fun emit(event: UpdateDownloadEvent) {
-                    withContext(Dispatchers.Main.immediate) { onEvent(event) }
+                    withContext(Dishetchers.Main.immediate) { onEvent(event) }
                 }
                 // A previous (now-cancelled) attempt may have just completed and
                 // populated the cache; re-check inside the lock so a mirror switch
@@ -411,7 +439,7 @@ class GitHubUpdateManager(private val context: Context) {
     private fun sourceName(url: String): String = runCatching { Uri.parse(url).host.orEmpty() }
         .getOrDefault(url.substringBefore('/'))
 
-    /** Distinct, user-selectable mirror host names for [release], in policy order. */
+    // Distinct, user-selectable mirror host names for [release], in policy order.
     fun mirrorSources(release: GitHubRelease): List<String> =
         DownloadMirrorPolicy.candidates(release.apkUrl).map(::sourceName).filter { it.isNotBlank() }.distinct()
 
@@ -443,14 +471,63 @@ class GitHubUpdateManager(private val context: Context) {
             ?: apks.singleOrNull()
     }
 
-    private fun isNewer(remote: String, local: String): Boolean {
-        val remoteParts = remote.trim().removePrefix("v").split('.', '-', '+').mapNotNull(String::toIntOrNull)
-        val localParts = local.trim().removePrefix("v").split('.', '-', '+').mapNotNull(String::toIntOrNull)
-        for (index in 0 until maxOf(remoteParts.size, localParts.size)) {
-            val comparison = (remoteParts.getOrNull(index) ?: 0).compareTo(localParts.getOrNull(index) ?: 0)
-            if (comparison != 0) return comparison > 0
+    // 语义化版本比较: 逐段按数字比较, 缺失段视为 0。a>b 返回 1, a<b 返回 -1, 相等返回 0。
+    // 例: compareVersions("1.3.101", "1.3.99") == 1 —— 逐段数字比较, 不会像字符串比较那样把 "101" 排在 "99" 前。
+    private fun compareVersions(a: String, b: String): Int {
+        val left = parseVersion(a)
+        val right = parseVersion(b)
+        for (index in 0 until maxOf(left.size, right.size)) {
+            val comparison = (left.getOrNull(index) ?: 0).compareTo(right.getOrNull(index) ?: 0)
+            if (comparison != 0) return if (comparison > 0) 1 else -1
         }
-        return false
+        return 0
+    }
+
+    // 解析版本号: 去掉前缀 v, 以 . - + 切段后只保留数字段(忽略 alpha/beta/rc 等标签文字)。
+    private fun parseVersion(raw: String): List<Int> =
+        raw.trim().removePrefix("v").split('.', '-', '+').mapNotNull(String::toIntOrNull)
+
+    private fun isNewer(remote: String, local: String): Boolean = compareVersions(remote, local) > 0
+
+    // 「已忽略/已提醒」记录: 按版本号保存时间戳(毫秒), 落到 SharedPreferences 以便重启后仍生效。
+    private val ignoredPrefs by lazy {
+        context.getSharedPreferences("update_ignored_versions", Context.MODE_PRIVATE)
+    }
+
+    private fun ignoreKey(tag: String): String = "v_" + tag.trim().removePrefix("v").removePrefix("V")
+
+    private fun ignoredPublishedAt(tag: String): Long? {
+        val key = ignoreKey(tag)
+        if (!ignoredPrefs.contains(key)) return null
+        return ignoredPrefs.getLong(key, 0L).takeIf { it > 0L }
+    }
+
+    private fun recordReminder(tag: String, publishedAt: String?) {
+        val stamp = parseGitHubInstant(publishedAt) ?: System.currentTimeMillis()
+        ignoredPrefs.edit().putLong(ignoreKey(tag), stamp).apply()
+    }
+
+    // 供 UI 在用户选择「忽略此版本」时调用: 记录当前时间, 之后除非仓库重新发布更晚的构建, 否则不再提醒该版本。
+    fun ignoreVersion(tag: String) {
+        if (tag.isBlank()) return
+        ignoredPrefs.edit().putLong(ignoreKey(tag), System.currentTimeMillis()).apply()
+    }
+
+    // 同版本号重新发布判定: 本地已有该版本的「已忽略/已提醒」记录, 且其发布时间晚于该记录时, 视为需要重新提醒。
+    private fun isRepublishedSinceIgnored(tag: String, publishedAt: String?): Boolean {
+        val recorded = ignoredPublishedAt(tag) ?: return false
+        val published = parseGitHubInstant(publishedAt) ?: return false
+        return published > recorded
+    }
+
+    // 把 GitHub 的 published_at (ISO-8601 UTC, 形如 2023-05-15T07:57:04Z) 解析成 epoch 毫秒。
+    private fun parseGitHubInstant(iso: String?): Long? {
+        val raw = iso?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        val normalized = raw.replace(Regex("\\.\\d+"), "")
+        return runCatching { java.time.Instant.parse(normalized).toEpochMilli() }
+            .recoverCatching { java.time.OffsetDateTime.parse(normalized).toInstant().toEpochMilli() }
+            .getOrNull()
     }
 
     private suspend fun verifyChecksum(file: File, url: String, assetName: String = file.name): String {
@@ -502,11 +579,13 @@ class GitHubUpdateManager(private val context: Context) {
 
     companion object {
         const val REPOSITORY_URL = "https://github.com/hUh63/TaffyNiHe"
+        // 上游 1.0.22 起: 正式版通道不再信任 /releases/latest 指针, 改为枚举 RELEASES_URL
+        // 自行挑选版本号最高的一条; 此常量仅保留给历史辅助方法 fetchLatestRelease() 使用。
         private const val LATEST_RELEASE_URL = "https://api.github.com/repos/hUh63/TaffyNiHe/releases/latest"
         private const val RELEASES_URL = "https://api.github.com/repos/hUh63/TaffyNiHe/releases"
         private const val CHECKSUM_MIRROR_ATTEMPTS = 4
     }
 }
 
-/** 更新频道：正式版（stable）/ 测试版（beta，即 prerelease）。上游 1.0.21 借鉴。 */
+// 更新频道：正式版（stable）/ 测试版（beta，即 prerelease）。上游 1.0.21 借鉴。
 enum class UpdateChannel { STABLE, BETA }

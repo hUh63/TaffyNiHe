@@ -38,6 +38,11 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -276,12 +281,13 @@ private data class Satellite(
 /** iOS 风格分组卡片：圆角 12dp、无描边、页面横向 16dp 边距。 */
 @Composable
 private fun IosGroup(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        Modifier
+    Card(
+        modifier = Modifier
             .padding(horizontal = 16.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(AppShape.lg))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            .fillMaxWidth(),
+        shape = RoundedCornerShape(AppShape.lg),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         content = content,
     )
 }
@@ -299,29 +305,33 @@ private fun SatGrid(
         items.chunked(4).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 row.forEach { sat ->
-                    Column(
-                        Modifier
+                    Card(
+                        modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(AppShape.md))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .clickable { onNavigate(sat.tab, sat.toolCategory) }
-                            .padding(vertical = 7.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                            .clickable { onNavigate(sat.tab, sat.toolCategory) },
+                        shape = RoundedCornerShape(AppShape.md),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     ) {
-                        Box(
-                            Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(satelliteColor(sat.accent)),
-                            contentAlignment = Alignment.Center,
+                        Column(
+                            Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Icon(sat.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                            Box(
+                                Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(satelliteColor(sat.accent)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(sat.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                            }
+                            Text(
+                                sat.label,
+                                fontSize = AppText.label,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
-                        Text(
-                            sat.label,
-                            fontSize = AppText.label,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
                     }
                 }
                 repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
@@ -355,26 +365,25 @@ private fun IosRow(
     trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    Row(
-        Modifier
+    ListItem(
+        modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 34.dp)
-            .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // 彩色圆角方形图标（iOS Settings 图标语言）
-        Box(
-            Modifier
-                .size(28.dp)
-                .clip(RoundedCornerShape(7.dp))
-                .background(iconBg),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
-        }
-        Column(Modifier.weight(1f)) {
+            .clickable { onClick() },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = {
+            // 彩色圆角方形图标（iOS Settings 图标语言）
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(iconBg),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+            }
+        },
+        headlineContent = {
             Text(
                 title,
                 fontSize = if (titleMono) 12.sp else AppText.bodyStrong,
@@ -383,38 +392,41 @@ private fun IosRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (!subtitle.isNullOrBlank()) {
+        },
+        supportingContent = if (!subtitle.isNullOrBlank()) {
+            {
                 Text(
                     subtitle,
                     fontSize = AppText.label,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 1.dp),
                 )
             }
-        }
-        trailing?.invoke()
-        if (showChevron) {
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
+        } else null,
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                trailing?.invoke()
+                if (showChevron) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        },
+    )
 }
 
 /** iOS 内缩分隔线：从图标右侧（14 + 28 + 12 = 54dp）开始。 */
 @Composable
 private fun IosDivider() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 54.dp)
-            .height(0.5.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 54.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
     )
 }
 

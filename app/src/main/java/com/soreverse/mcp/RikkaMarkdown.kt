@@ -1,6 +1,5 @@
 package com.soreverse.mcp
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -75,8 +74,8 @@ private fun parseMarkdown(content: String): MarkdownParseResult {
     )
 }
 
-@Composable
 @OptIn(ExperimentalCoroutinesApi::class)
+@Composable
 internal fun RikkaMarkdown(
     content: String,
     modifier: Modifier = Modifier,
@@ -137,10 +136,17 @@ private fun MarkdownAstNode(node: ASTNode, content: String) {
                 }
             }
         }
-        MarkdownElementTypes.BLOCK_QUOTE -> Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)).padding(8.dp),
+        MarkdownElementTypes.BLOCK_QUOTE -> Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(AppShape.xs),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
         ) {
-            Text(node.text(content).trimStart('>', ' '), fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                node.text(content).trimStart('>', ' '),
+                fontStyle = FontStyle.Italic,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(8.dp),
+            )
         }
         MarkdownElementTypes.CODE_FENCE -> {
             val raw = node.text(content)
@@ -182,14 +188,20 @@ private fun inlineText(node: ASTNode, content: String) = buildAnnotatedString {
 @Composable
 private fun MarkdownAstTable(node: ASTNode, content: String) {
     val rows = node.children.filter { it.type == GFMElementTypes.HEADER || it.type == GFMElementTypes.ROW }
-    Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(AppShape.sm)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))) {
-        rows.forEachIndexed { rowIndex, row ->
-            Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                row.children.filter { it.type == GFMTokenTypes.CELL }.forEach { cell ->
-                    Text(cell.text(content).trim().trim('|', ' '), fontWeight = if (rowIndex == 0) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.bodySmall)
+    Surface(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        shape = RoundedCornerShape(AppShape.sm),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+    ) {
+        Column {
+            rows.forEachIndexed { rowIndex, row ->
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    row.children.filter { it.type == GFMTokenTypes.CELL }.forEach { cell ->
+                        Text(cell.text(content).trim().trim('|', ' '), fontWeight = if (rowIndex == 0) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
+                if (rowIndex < rows.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
-            if (rowIndex < rows.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
@@ -238,10 +250,12 @@ private fun MarkdownElement(element: Element) {
                 )
             }
         }
-        "blockquote" -> Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(AppShape.xs)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)).padding(start = 4.dp),
+        "blockquote" -> Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(AppShape.xs),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
         ) {
-            Column(Modifier.fillMaxWidth().padding(start = 10.dp, top = 10.dp, end = 12.dp, bottom = 10.dp)) {
+            Column(Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 12.dp, bottom = 10.dp)) {
                 element.childNodes().forEach { MarkdownNode(it) }
             }
         }
@@ -308,20 +322,24 @@ private fun inlineHtml(element: Element) = buildAnnotatedString {
 @Composable
 private fun MarkdownTable(table: Element) {
     val rows = table.select("tr")
-    Column(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(AppShape.sm)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+    Surface(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        shape = RoundedCornerShape(AppShape.sm),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
     ) {
-        rows.forEachIndexed { rowIndex, row ->
-            Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                row.select("th,td").forEach { cell ->
-                    Text(
-                        cell.text(),
-                        fontWeight = if (rowIndex == 0 || cell.tagName() == "th") FontWeight.Bold else FontWeight.Normal,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+        Column {
+            rows.forEachIndexed { rowIndex, row ->
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    row.select("th,td").forEach { cell ->
+                        Text(
+                            cell.text(),
+                            fontWeight = if (rowIndex == 0 || cell.tagName() == "th") FontWeight.Bold else FontWeight.Normal,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
+                if (rowIndex < rows.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
-            if (rowIndex < rows.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }

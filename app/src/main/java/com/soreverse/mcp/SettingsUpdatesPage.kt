@@ -22,8 +22,14 @@ import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -311,23 +317,21 @@ internal fun SettingsUpdatesPage(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(Modifier.weight(1f))
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(AppShape.pill))
-                                .background(accent.copy(alpha = 0.16f))
-                                .border(
-                                    androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.3f)),
-                                    RoundedCornerShape(AppShape.pill),
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    update.tag,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
                                 )
-                                .padding(horizontal = 9.dp, vertical = 3.dp),
-                        ) {
-                            Text(
-                                update.tag,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = accent,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = accent.copy(alpha = 0.16f),
+                                labelColor = accent,
+                            ),
+                            border = null,
+                        )
                     }
                     if (update.notes.isNotBlank()) {
                         Row(
@@ -488,76 +492,46 @@ private fun UpdateVersionCard(versionText: String, badge: String?, accent: Color
         }
         // 频道徽章（测试版 / BETA）——此前 versionBadge 算了但从未渲染
         if (badge != null) {
-            val pill = RoundedCornerShape(999.dp)
-            Box(
-                Modifier
-                    .clip(pill)
-                    .background(accent.copy(alpha = 0.18f))
-                    .border(BorderStroke(1.dp, accent.copy(alpha = 0.34f)), pill)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    badge,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = accent,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+            val badgeText = badge
+            AssistChip(
+                onClick = {},
+                label = {
+                    Text(
+                        badgeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = accent.copy(alpha = 0.18f),
+                    labelColor = accent,
+                ),
+                border = null,
+            )
         }
     }
 }
 
-/** 频道切换分段 pill：正式版 / 测试版（上游 v1.0.21 设计）。 */
+/** 频道切换分段控件：正式版 / 测试版（M3 SegmentedButton，上游 v1.0.21 设计）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChannelSegmentsPill(selected: String, onSelect: (String) -> Unit, zh: Boolean) {
-    val shape = RoundedCornerShape(AppShape.pill)
     data class Opt(val key: String, val icon: ImageVector, val label: String)
     val options = listOf(
         Opt("stable", Icons.Default.Verified, if (zh) "正式版" else "Stable"),
         Opt("beta", Icons.Default.Science, if (zh) "测试版" else "Beta"),
     )
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f))
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)), shape)
-            .padding(3.dp),
-    ) {
-        options.forEach { opt ->
-            val active = selected == opt.key
-            val tint = when (opt.key) {
-                "beta" -> MaterialTheme.colorScheme.tertiary
-                else -> MaterialTheme.colorScheme.primary
-            }
-            val bgAlpha = if (active) 0.22f else 0f
-            val borderAlpha = if (active) 0.55f else 0f
-            val contentColor = if (active) tint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
-            Row(
-                Modifier
-                    .weight(1f)
-                    .clip(shape)
-                    .background(tint.copy(alpha = bgAlpha))
-                    .border(BorderStroke(1.dp, tint.copy(alpha = borderAlpha)), shape)
-                    .clickable { if (!active) onSelect(opt.key) }
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    opt.icon,
-                    null,
-                    tint = contentColor,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.size(5.dp))
-                Text(
-                    opt.label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = contentColor,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                )
-            }
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, opt ->
+            SegmentedButton(
+                selected = selected == opt.key,
+                onClick = { if (selected != opt.key) onSelect(opt.key) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                icon = {
+                    Icon(opt.icon, null, modifier = Modifier.size(16.dp))
+                },
+                label = { Text(opt.label) },
+            )
         }
     }
 }

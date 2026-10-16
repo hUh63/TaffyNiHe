@@ -38,6 +38,9 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.HorizontalDivider
@@ -46,6 +49,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -207,13 +211,10 @@ internal fun CommandHubScreen(
             onNavigate = onNavigate,
         )
         // 「全部工具」入口：一行小字（不做格子）
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 2.dp)
-                .clip(RoundedCornerShape(AppShape.sm))
-                .clickable { onNavigate(MainTab.Home, null) }
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        TextButton(
+            onClick = { onNavigate(MainTab.Home, null) },
+            modifier = Modifier.padding(horizontal = 32.dp, vertical = 2.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
         ) {
             Text(
                 if (zh) "全部工具" else "All tools",
@@ -430,27 +431,27 @@ private fun IosDivider() {
     )
 }
 
-/** 顶部连接状态胶囊（iOS 风格小圆点 + 文字）。 */
+/** 顶部连接状态胶囊（M3 AssistChip：小圆点 leadingIcon + 状态文字）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConnPill(running: Boolean, zh: Boolean) {
     val cs = MaterialTheme.colorScheme
     val dot = if (running) cs.primary else cs.outline
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(AppShape.pill))
-            .background(if (running) cs.primary.copy(alpha = 0.12f) else cs.surfaceContainerHigh)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
-        Text(
-            if (running) (if (zh) "在线" else "Online") else (if (zh) "离线" else "Offline"),
-            fontSize = AppText.label,
-            fontWeight = FontWeight.Medium,
-            color = if (running) cs.primary else cs.onSurfaceVariant,
-        )
-    }
+    AssistChip(
+        onClick = {},
+        label = {
+            Text(
+                if (running) (if (zh) "在线" else "Online") else (if (zh) "离线" else "Offline"),
+                fontSize = AppText.label,
+                fontWeight = FontWeight.Medium,
+                color = if (running) cs.primary else cs.onSurfaceVariant,
+            )
+        },
+        leadingIcon = { Box(Modifier.size(7.dp).clip(CircleShape).background(dot)) },
+        colors = AssistChipDefaults.assistChipColors(
+            labelColor = if (running) cs.primary else cs.onSurfaceVariant,
+        ),
+    )
 }
 
 /** 功能图标配色轮转（iOS 多彩图标）：primary / tertiary / secondary 循环。 */

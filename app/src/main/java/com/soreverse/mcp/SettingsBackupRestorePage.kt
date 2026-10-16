@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,10 +31,16 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -413,16 +420,16 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Text(
-                            t.backupRestoreAction,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(AppShape.sm))
-                                .clickable { importLauncher.launch(arrayOf("application/json", "*/*")) }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                        TextButton(
+                            onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) },
+                        ) {
+                            Text(
+                                t.backupRestoreAction,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
                 }
             }
@@ -441,7 +448,8 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
     }
 }
 
-/** 标题 + 副标题 + 自定义动画开关（上游 v1.0.21 设计）。 */
+/** 标题 + 副标题 + M3 Switch 开关行（上游 v1.0.21 设计）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BackupToggleRow(
     text: String,
@@ -450,110 +458,85 @@ private fun BackupToggleRow(
     enabled: Boolean = true,
     onChange: (Boolean) -> Unit,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    ListItem(
+        headlineContent = {
             Text(
                 text,
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
             )
+        },
+        supportingContent = {
             Text(
                 subtitle,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
-        }
-        BackupSwitch(
-            checked = checked,
-            onCheckedChange = onChange,
-            enabled = enabled,
-        )
-    }
+        },
+        trailingContent = {
+            BackupSwitch(
+                checked = checked,
+                onCheckedChange = onChange,
+                enabled = enabled,
+            )
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
 }
 
-/** 自定义开关：灰色轨道 / 开启 Primary 蓝，白色圆形拇指带位移动画（上游设计）。 */
+/** M3 官方 Switch（原自绘轨道/滑块已替换，颜色走 M3 默认）。 */
 @Composable
 private fun BackupSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
-    val trackWidth = 48.dp
-    val trackHeight = 28.dp
-    val thumbSize = 24.dp
-    val thumbInset = 2.dp
-    val thumbOffset by animateDpAsState(
-        targetValue = if (checked) trackWidth - thumbSize - thumbInset else thumbInset,
-        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
-        label = "backupSwitchThumb",
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        enabled = enabled,
     )
-    Box(
-        modifier = modifier
-            .size(width = trackWidth, height = trackHeight)
-            .clip(RoundedCornerShape(trackHeight / 2))
-            .background(
-                if (checked) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-            )
-            .alpha(if (enabled) 1f else 0.4f)
-            .toggleable(
-                value = checked,
-                enabled = enabled,
-                role = Role.Switch,
-                onValueChange = onCheckedChange,
-            ),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(
-            modifier = Modifier
-                .offset(x = thumbOffset)
-                .size(thumbSize)
-                .clip(CircleShape)
-                .background(Color.White),
-        )
-    }
 }
 
-/** 导出/导入动作卡：圆形图标底 + 标签（上游 v1.0.21 设计）。 */
+/** 导出/导入动作卡（M3 Card）：圆形图标底 + 标签（上游 v1.0.21 设计）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BackupActionCard(label: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(LocalUiMetrics.current.cardRadius)
-    Column(
-        modifier
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-            .border(
-                androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
-                shape,
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 18.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
     ) {
-        Box(
+        Column(
             Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .padding(vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(
-                icon,
-                null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp),
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
     }
 }
 

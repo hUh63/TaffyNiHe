@@ -28,10 +28,12 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -163,16 +165,21 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
             contentVersion = contentVersion,
             modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp),
         )
-        Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)).padding(horizontal = LocalUiMetrics.current.pagePad, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         ) {
-            LogActionButton(if (logPaused) if (t.zh) "继续" else "Resume" else if (t.zh) "暂停" else "Pause", if (logPaused) Icons.Default.PlayArrow else Icons.Default.Pause, Modifier.weight(1f)) { logPaused = !logPaused }
-            LogActionButton(if (t.zh) "清空" else "Clear", Icons.Default.Delete, Modifier.weight(1f)) { AppLog.clear(); logs.clear() }
-            LogActionButton(if (t.zh) "复制" else "Copy", Icons.Default.ContentCopy, Modifier.weight(1f)) { copy(context, visibleLogs.joinToString("\n") { localizeLogLine(it, t.zh) }, t.copied) }
-            LogActionButton(if (t.zh) "导出" else "Export", Icons.Default.FileDownload, Modifier.weight(1f)) {
-                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                exportLauncher.launch("niehe_logs_$timestamp.txt")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = LocalUiMetrics.current.pagePad, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                LogActionButton(if (logPaused) if (t.zh) "继续" else "Resume" else if (t.zh) "暂停" else "Pause", if (logPaused) Icons.Default.PlayArrow else Icons.Default.Pause, Modifier.weight(1f)) { logPaused = !logPaused }
+                LogActionButton(if (t.zh) "清空" else "Clear", Icons.Default.Delete, Modifier.weight(1f)) { AppLog.clear(); logs.clear() }
+                LogActionButton(if (t.zh) "复制" else "Copy", Icons.Default.ContentCopy, Modifier.weight(1f)) { copy(context, visibleLogs.joinToString("\n") { localizeLogLine(it, t.zh) }, t.copied) }
+                LogActionButton(if (t.zh) "导出" else "Export", Icons.Default.FileDownload, Modifier.weight(1f)) {
+                    val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                    exportLauncher.launch("niehe_logs_$timestamp.txt")
+                }
             }
         }
     }
@@ -180,15 +187,11 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
 
 @Composable
 private fun LogActionButton(label: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(AppShape.lg)
-    Row(
-        modifier
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(AppShape.lg),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(6.dp))

@@ -65,6 +65,12 @@ for i in "${!ABIS[@]}"; do
             -e "s|windows-x86_64|linux-x86_64|g" \
             -e "s|\.cmd||g" -e "s|\.exe||g" \
             "$tpl" > "$build_dir/cross.ini"
+        # bionic 下共享库默认不链接 libm，librz_bin.so 等会报 undefined symbol: modf。
+        # 给链接参数补 -lm（NDK 里 libm 是 stub，符号转发到 libc），幂等。
+        if ! grep -q -- "'-lm'" "$build_dir/cross.ini"; then
+            sed -i "s/^c_link_args = \['/c_link_args = ['-lm', '/" "$build_dir/cross.ini"
+            sed -i "s/^cpp_link_args = \['/cpp_link_args = ['-lm', '/" "$build_dir/cross.ini"
+        fi
         cat > "$build_dir/native.ini" <<'EOF'
 [binaries]
 c = 'cc'

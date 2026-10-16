@@ -123,6 +123,19 @@ jobs:
           TARGET_ABI: ${{ matrix.abi }}
         run: bash build-native-android.sh
 
+      # rz-ghidra 反编译器插件（libcore_ghidra.so）：塔菲的 rizin_core.cpp 从
+      # nativeLibraryDir 加载它并设置 SLEIGHHOME（sleigh 规格随 assets 打包）。
+      # 缺这一步时伪 C 的 pdg 后端永远不可用。脚本为每个 ABI 先装一份 SHARED Rizin SDK
+      # （find_package(Rizin) 需要），再交叉编译 rz-ghidra，产物与依赖的 librz_*.so 一并入 jniLibs。
+      - name: 缓存 rz-ghidra 的 Rizin SDK
+        uses: actions/cache@v4
+        with:
+          path: rizin-sdk/${{ matrix.abi }}
+          key: rzghidra-sdk-${{ matrix.abi }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('rizin-cross-*.ini') }}
+
+      - name: 编译 rz-ghidra (libcore_ghidra.so)
+        run: bash tools/build-rz-ghidra-android.sh
+
       - name: 链接 librz_native.so
         run: |
           set -euo pipefail

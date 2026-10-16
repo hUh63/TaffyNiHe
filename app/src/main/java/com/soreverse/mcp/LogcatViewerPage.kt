@@ -42,11 +42,14 @@ import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -195,6 +198,7 @@ private var persistedPaused = false
  * Logcat 查看器（对标 LogFox 的 GUI 交互）：
  * 实时日志流 + 级别过滤 + 多 tag 过滤 + 关键字高亮 + 级别着色 + 暂停/清空。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LogcatViewerPage(t: UiText) {
     val zh = t.zh
@@ -751,13 +755,16 @@ internal fun LogcatViewerPage(t: UiText) {
     // 控件区固定、日志区 weight 自适应——操作控件常驻可见，日志滚动流畅。
     Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // ── 状态条：状态胶囊 + 实时统计（统一为一行，视觉更轻盈）──
-        Row(
-            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+            shape = MaterialTheme.shapes.medium,
         ) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
             // 状态胶囊：圆点 + 状态文字
             val statusColor = when {
                 !running -> MaterialTheme.colorScheme.outline
@@ -782,6 +789,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
+            }
         }
 
         // ── 采集模式选择（自动 / ADB默认 / Root / Shizuku）──
@@ -875,11 +883,15 @@ internal fun LogcatViewerPage(t: UiText) {
 
         // ── Shizuku 授权提示（LogFox 样式）──
         if (PermissionManager.isShizukuServiceRunning() && !PermissionManager.isShizukuGranted()) {
-            Row(
-                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.secondaryContainer),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium,
             ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                 Text(
                     if (zh) "Shizuku 已连接，等待应用授权" else "Shizuku connected, waiting for authorization",
                     modifier = Modifier.weight(1f).padding(start = 12.dp),
@@ -896,17 +908,21 @@ internal fun LogcatViewerPage(t: UiText) {
                         })
                     }
                 }) { Text(if (zh) "打开" else "Open") }
+                }
             }
         }
 
         // ── 通道状态提示（无权限时明确告知，LogFox 模式状态行）──
         if (channelError.isNotBlank()) {
-            Row(
-                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                shape = MaterialTheme.shapes.medium,
             ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                 Text(
                     channelError + (if (zh) "。" else ". "),
                     modifier = Modifier.weight(1f).padding(start = 12.dp),
@@ -926,6 +942,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     TextButton(onClick = { runCatching { rikka.shizuku.Shizuku.requestPermission(10086) } }) {
                         Text(if (zh) "授权" else "Grant")
                     }
+                }
                 }
             }
         }
@@ -1018,12 +1035,17 @@ internal fun LogcatViewerPage(t: UiText) {
                     filterPresets.forEach { key ->
                         val name = key.removePrefix("preset_")
                         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                name,
-                                modifier = Modifier.weight(1f).clip(MaterialTheme.shapes.small).clickable { applyPreset(key) }.padding(6.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                            AssistChip(
+                                onClick = { applyPreset(key) },
+                                modifier = Modifier.weight(1f),
+                                label = {
+                                    Text(
+                                        name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
                             )
                             TextButton(onClick = { applyPreset(key) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
                                 Text(if (zh) "应用" else "Apply", fontSize = AppText.label)
@@ -1055,10 +1077,13 @@ internal fun LogcatViewerPage(t: UiText) {
                 } else {
                     groups.asReversed().forEachIndexed { i, g ->
                         val expanded = expandedIdx == i
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                shape = MaterialTheme.shapes.medium,
+                            ) {
                             Column(
-                                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-                                    .padding(10.dp),
+                                Modifier.padding(10.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 // 标题行（LogFox: 图标 + 标题 + 展开）
@@ -1150,6 +1175,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
@@ -1180,10 +1206,13 @@ internal fun LogcatViewerPage(t: UiText) {
                 } else {
                     files.forEach { f ->
                         val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(f.lastModified()))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                shape = MaterialTheme.shapes.medium,
+                            ) {
                             Column(
-                                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-                                    .padding(8.dp),
+                                Modifier.padding(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1195,16 +1224,18 @@ internal fun LogcatViewerPage(t: UiText) {
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    Text(
-                                        if (zh) "删除" else "Delete",
-                                        modifier = Modifier.clip(MaterialTheme.shapes.small)
-                                            .clickable {
-                                                runCatching { f.delete() }
-                                                refreshTick++
-                                            }
-                                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.error,
+                                    AssistChip(
+                                        onClick = {
+                                            runCatching { f.delete() }
+                                            refreshTick++
+                                        },
+                                        label = {
+                                            Text(
+                                                if (zh) "删除" else "Delete",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.error,
+                                            )
+                                        },
                                     )
                                 }
                                 Text(
@@ -1251,6 +1282,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                            }
                             }
                         }
                 }
@@ -1316,13 +1348,8 @@ internal fun LogcatViewerPage(t: UiText) {
                     }
                     filtered.take(100).forEach { (label, pkg) ->
                         val selected = pkg in selectedApps
-                        Row(
-                                Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
-                                    .background(
-                                        if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                        else androidx.compose.ui.graphics.Color.Transparent,
-                                    )
-                                    .combinedClickable(
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().combinedClickable(
                                         onClick = {
                                             if (appSelectMode) {
                                                 // 选中模式：点选切换；再点选中项取消
@@ -1339,8 +1366,13 @@ internal fun LogcatViewerPage(t: UiText) {
                                             appSelectMode = true
                                             selectedApps = setOf(pkg)
                                         },
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    ),
+                            color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else Color.Transparent,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 if (appSelectMode) {
@@ -1360,6 +1392,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                            }
                             }
                     }
                 }
@@ -1398,13 +1431,16 @@ internal fun LogcatViewerPage(t: UiText) {
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.body),
                 )
                 // 实时过滤折叠面板（LogFox: 默认折叠，展开显示包名/PID/Tag/开关）
-                Row(
-                    Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
-                        .clickable { filterExpanded = !filterExpanded }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Surface(
+                    onClick = { filterExpanded = !filterExpanded },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                    shape = MaterialTheme.shapes.medium,
                 ) {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                     Icon(Icons.Default.Tune, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(6.dp))
                     Text(if (zh) "实时过滤" else "Live filters", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
@@ -1420,6 +1456,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    }
                 }
                 if (filterExpanded) {
                     // 包名 + PID

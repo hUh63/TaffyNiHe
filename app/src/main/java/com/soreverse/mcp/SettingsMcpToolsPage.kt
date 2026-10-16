@@ -9,17 +9,21 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Storage
@@ -109,7 +113,7 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
                     onClick = { showManage = true },
                 )
                 Row(Modifier.padding(14.dp)) {
-                    PrimaryActionButton(if (t.zh) "导入密钥" else "Import key", { showImport = true }, modifier = Modifier.fillMaxWidth())
+                    PrimaryActionButton(if (t.zh) "导入密钥" else "Import key", { showImport = true }, modifier = Modifier.fillMaxWidth(), leading = Icons.Default.FileUpload)
                 }
             }
         }
@@ -214,7 +218,11 @@ private fun ImportKeyDialog(t: UiText, settings: SettingsStore, onDismiss: () ->
                 } else {
                     error = result.optJSONObject("error")?.optString("message") ?: if (t.zh) "导入失败" else "Import failed"
                 }
-            }) { Text(if (t.zh) "导入" else "Import") }
+            }) {
+                Icon(Icons.Default.FileUpload, null, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (t.zh) "导入" else "Import")
+            }
         },
         dismissButton = { TextButton(onDismiss) { Text(if (t.zh) "取消" else "Cancel") } },
     )
@@ -252,7 +260,11 @@ private fun ManageKeysDialog(t: UiText, settings: SettingsStore, onDismiss: () -
                             settings.apkSignKeystoreName = name
                             settings.apkSignKeySource = "custom"
                             refresh++
-                        }) { Text(if (t.zh) "设为当前" else "Use") }
+                        }) {
+                            Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (t.zh) "设为当前" else "Use")
+                        }
                         IconButtonMini({ SigningKeyStore.delete(context, name); refresh++ }, Icons.Default.Delete, t)
                     }
                 }
@@ -327,8 +339,8 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 PrimaryActionButton(if (t.zh) "按上限裁剪最旧工作区" else "Prune oldest to limit", {
                     TempWorkspaceManager.pruneToLimit(context); refresh++
-                }, modifier = Modifier.fillMaxWidth())
-                PrimaryActionButton(if (t.zh) "清理全部临时工作区" else "Clean all temp workspaces", { showCleanConfirm = true }, modifier = Modifier.fillMaxWidth())
+                }, modifier = Modifier.fillMaxWidth(), leading = Icons.Default.Delete)
+                PrimaryActionButton(if (t.zh) "清理全部临时工作区" else "Clean all temp workspaces", { showCleanConfirm = true }, modifier = Modifier.fillMaxWidth(), leading = Icons.Default.Delete)
             }
         }
     }
@@ -343,7 +355,11 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
                     TempWorkspaceManager.cleanAll(context)
                     showCleanConfirm = false
                     refresh++
-                }) { Text(if (t.zh) "清理" else "Clean", color = MaterialTheme.colorScheme.error) }
+                }) {
+                    Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (t.zh) "清理" else "Clean", color = MaterialTheme.colorScheme.error)
+                }
             },
             dismissButton = { TextButton({ showCleanConfirm = false }) { Text(if (t.zh) "取消" else "Cancel") } },
         )
@@ -381,6 +397,7 @@ internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenSer
                         if (t.zh) "选择工作目录" else "Choose work directory",
                         onOpenServiceConfig,
                         modifier = Modifier.fillMaxWidth(),
+                        leading = Icons.Default.FolderOpen,
                     )
                 }
             } else {

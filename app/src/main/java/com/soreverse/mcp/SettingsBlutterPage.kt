@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -100,8 +103,8 @@ internal fun SettingsBlutterPage(t: UiText) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val indexed = manifest?.optJSONArray("coverage")?.length() ?: 0
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolChip(if (zh) "索引 $indexed 个版本" else "$indexed indexed", onClick = {})
-                    ToolChip(if (zh) "已打包 ${runners.size}" else "packed ${runners.size}", selected = true, onClick = {})
+                    ToolChip(if (zh) "索引 $indexed 个版本" else "$indexed indexed", icon = Icons.Default.List, onClick = {})
+                    ToolChip(if (zh) "已打包 ${runners.size}" else "packed ${runners.size}", icon = Icons.Default.Check, selected = true, onClick = {})
                 }
                 Text(
                     if (zh) "「已索引」不等于「已支持」：只有实测通过并打进 APK 的版本才会被执行，其余版本会明确返回不支持并附带原因，不会尝试错误解析。"

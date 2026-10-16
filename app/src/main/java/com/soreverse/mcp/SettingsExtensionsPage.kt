@@ -16,11 +16,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -36,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +81,7 @@ private fun ExtBtn(
     label: String,
     enabled: Boolean = true,
     accent: Boolean = false,
+    icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     val bgc = when {
@@ -84,7 +103,12 @@ private fun ExtBtn(
             .padding(horizontal = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = AppText.label, color = fgc, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (icon != null) {
+                Icon(icon, null, modifier = Modifier.size(14.dp), tint = fgc)
+            }
+            Text(label, fontSize = AppText.label, color = fgc, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -431,9 +455,9 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
     ) {
         // Tab 条（FlowRow：窄屏不截断）
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ToolChip("${if (zh) "插件" else "Plugins"} ${plugins.size}", selected = tab == 0) { tab = 0 }
-            ToolChip(if (zh) "教程 / API" else "Guide / API", selected = tab == 1, enabled = true) { tab = 1 }
-            ToolChip("${if (zh) "市场" else "Market"} ${if (marketItems.isEmpty()) "" else marketItems.size}", selected = tab == 2) { tab = 2; if (marketItems.isEmpty() && !marketLoading) fetchMarket() }
+            ToolChip("${if (zh) "插件" else "Plugins"} ${plugins.size}", icon = Icons.Default.Extension, selected = tab == 0) { tab = 0 }
+            ToolChip(if (zh) "教程 / API" else "Guide / API", icon = Icons.Default.Description, selected = tab == 1, enabled = true) { tab = 1 }
+            ToolChip("${if (zh) "市场" else "Market"} ${if (marketItems.isEmpty()) "" else marketItems.size}", icon = Icons.Default.Public, selected = tab == 2) { tab = 2; if (marketItems.isEmpty() && !marketLoading) fetchMarket() }
         }
 
         when (tab) {
@@ -464,8 +488,8 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                             singleLine = true,
                         )
                         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ExtBtn(if (zh) "刷新市场" else "Refresh", enabled = !marketLoading, accent = true) { fetchMarket() }
-                            ExtBtn(if (zh) "用默认源" else "Default") { marketSource = DEFAULT_MARKET_URL; fetchMarket() }
+                            ExtBtn(if (zh) "刷新市场" else "Refresh", enabled = !marketLoading, accent = true, icon = Icons.Default.Refresh) { fetchMarket() }
+                            ExtBtn(if (zh) "用默认源" else "Default", icon = Icons.Default.Restore) { marketSource = DEFAULT_MARKET_URL; fetchMarket() }
                         }
                     }
                 }
@@ -509,6 +533,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                     if (installed) (if (zh) "已安装" else "Installed") else (if (zh) "安装" else "Install"),
                                     enabled = !marketLoading && !installed,
                                     accent = !installed,
+                                    icon = if (installed) Icons.Default.Check else Icons.Default.Download,
                                 ) { installFromMarket(o) }
                                 Spacer(Modifier.weight(1f))
                                 Text(mid, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
@@ -523,11 +548,11 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
             else -> {
                 // 操作行
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ExtBtn(if (zh) "＋ 新建插件" else "＋ New plugin", accent = true) { showNewDialog = true }
-                    ExtBtn(if (zh) "导入 .py / Xed .apk / .zip" else "Import") {
+                    ExtBtn(if (zh) "＋ 新建插件" else "＋ New plugin", accent = true, icon = Icons.Default.Add) { showNewDialog = true }
+                    ExtBtn(if (zh) "导入 .py / Xed .apk / .zip" else "Import", icon = Icons.Default.FileUpload) {
                         importLauncher.launch(arrayOf("*/*", "application/zip", "application/vnd.android.package-archive", "text/x-python"))
                     }
-                    ExtBtn(if (zh) "刷新" else "Refresh") { refresh() }
+                    ExtBtn(if (zh) "刷新" else "Refresh", icon = Icons.Default.Refresh) { refresh() }
                 }
                 if (message.isNotEmpty()) {
                     InlineHint(message, tone = HintTone.Ok)
@@ -584,26 +609,26 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                 Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                ExtBtn(if (zh) "运行" else "Run", enabled = !running && compatible, accent = true) { runPlugin(dir) }
+                                ExtBtn(if (zh) "运行" else "Run", enabled = !running && compatible, accent = true, icon = Icons.Default.PlayArrow) { runPlugin(dir) }
                                 if (!compatible) {
-                                    ExtBtn(if (zh) "重新检查" else "Recheck") { refresh() }
+                                    ExtBtn(if (zh) "重新检查" else "Recheck", icon = Icons.Default.Refresh) { refresh() }
                                 }
                                 if (settingItems != null && settingItems.length() > 0) {
-                                    ExtBtn(if (zh) "设置" else "Settings") { settingsTarget = dir }
+                                    ExtBtn(if (zh) "设置" else "Settings", icon = Icons.Default.Settings) { settingsTarget = dir }
                                 }
-                                ExtBtn(if (zh) "编辑" else "Edit") {
+                                ExtBtn(if (zh) "编辑" else "Edit", icon = Icons.Default.Edit) {
                                     EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath
                                     onDest(SettingsDest.Python)
                                 }
-                                ExtBtn(if (zh) "删除" else "Delete") { deleteTarget = dir }
+                                ExtBtn(if (zh) "删除" else "Delete", icon = Icons.Default.Delete) { deleteTarget = dir }
                                 if (isXed) {
                                     val promptFile = File(dir, "AI_CONVERT_PROMPT.txt")
                                     if (promptFile.isFile) {
-                                        ExtBtn("🤖 " + (if (zh) "AI 全自动转换" else "AI convert")) {
+                                        ExtBtn("🤖 " + (if (zh) "AI 全自动转换" else "AI convert"), icon = Icons.Default.AutoAwesome) {
                                             copyToClipboard(context, promptFile.readTextCapped(ReadLimits.META_JSON_BYTES))
                                             Toast.makeText(context, if (zh) "AI 转换 prompt 已复制——粘贴给 AI 即可自动生成完整 plugin.py" else "AI convert prompt copied", Toast.LENGTH_LONG).show()
                                         }
-                                        ExtBtn(if (zh) "看转换报告" else "Report") {
+                                        ExtBtn(if (zh) "看转换报告" else "Report", icon = Icons.Default.Description) {
                                             EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath
                                             onDest(SettingsDest.Python)
                                         }
@@ -667,7 +692,11 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                     showNewDialog = false
                     createPlugin(newId, newName)
                     newId = ""; newName = ""
-                }) { Text(if (zh) "创建" else "Create") }
+                }) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (zh) "创建" else "Create")
+                }
             },
             dismissButton = { TextButton(onClick = { showNewDialog = false }) { Text(if (zh) "取消" else "Cancel") } },
         )

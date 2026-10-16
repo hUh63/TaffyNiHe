@@ -9,6 +9,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -194,6 +199,7 @@ internal fun SettingsSandboxPage(t: UiText) {
             DataRow(
                 title = if (privileged) (if (zh) "特权模式" else "Privileged") else (if (zh) "降级模式（无 root）" else "Degraded (no root)"),
                 subtitle = if (privileged) (if (zh) "root / Shizuku 可用" else "root / Shizuku available") else (if (zh) "仅系统安装器与 PackageManager" else "system installer only"),
+                leading = { Icon(Icons.Default.Refresh, null, tint = MaterialTheme.colorScheme.primary) },
                 trailingText = if (zh) "刷新" else "Refresh",
                 onClick = { refreshTick++ },
             )
@@ -207,6 +213,7 @@ internal fun SettingsSandboxPage(t: UiText) {
                 if (zh) "选择 APK 并安装" else "Pick APK & Install",
                 { pickApk.launch("application/vnd.android.package-archive") },
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                leading = Icons.Default.Android,
             )
         }
 
@@ -222,7 +229,7 @@ internal fun SettingsSandboxPage(t: UiText) {
                 singleLine = true,
             )
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryActionButton(if (zh) "启动" else "Launch", { runOp("launch") }, Modifier.weight(1f))
+                PrimaryActionButton(if (zh) "启动" else "Launch", { runOp("launch") }, Modifier.weight(1f), leading = Icons.Default.PlayArrow)
                 SecondaryActionButton(if (zh) "停止" else "Stop", { pendingAction = "stop" }, Modifier.weight(1f))
                 SecondaryActionButton(if (zh) "卸载" else "Uninstall", { pendingAction = "uninstall" }, Modifier.weight(1f))
             }
@@ -258,6 +265,7 @@ internal fun SettingsSandboxPage(t: UiText) {
                 if (zh) "开始看门狗" else "Start Watchdog",
                 { runOp("watch") },
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+                leading = Icons.Default.PlayArrow,
             )
         }
 

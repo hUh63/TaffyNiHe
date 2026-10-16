@@ -10,10 +10,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -179,8 +188,8 @@ internal fun SettingsNativeExecPage(t: UiText) {
                     MonoRow("extractNativeLibs", if (payload?.optBoolean("extractNativeLibs", false) == true) (if (zh) "已开启" else "on") else (if (zh) "关闭" else "off"))
                     Spacer(Modifier.size(2.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ToolChip(if (zh) "刷新" else "Refresh", enabled = !loading, onClick = { refresh() })
-                        ToolChip(if (zh) "刷新进程" else "Processes", onClick = {
+                        ToolChip(if (zh) "刷新" else "Refresh", icon = Icons.Default.Refresh, enabled = !loading, onClick = { refresh() })
+                        ToolChip(if (zh) "刷新进程" else "Processes", icon = Icons.Default.List, onClick = {
                             scope.launch {
                                 val r = withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "ps")) }
                                 val arr = r?.optJSONArray("processes")
@@ -221,6 +230,7 @@ internal fun SettingsNativeExecPage(t: UiText) {
             val runnable = json.optBoolean("runnable", false)
             DataRow(
                 title = json.optString("name"),
+                leading = { Icon(if (runnable) Icons.Default.PlayArrow else Icons.Default.Memory, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
                 subtitle = buildString {
                     append(json.optString("kind"))
                     val bits = json.optInt("bits", 0)
@@ -306,14 +316,14 @@ internal fun SettingsNativeExecPage(t: UiText) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ToolChip(if (zh) "日志" else "Log", onClick = {
+                        ToolChip(if (zh) "日志" else "Log", icon = Icons.Default.Description, onClick = {
                             scope.launch {
                                 val r = withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "log").put("pid", pid.toInt())) }
                                 outputTitle = "${p.optString("name")} · pid=$pid"
                                 output = r?.optString("text").orEmpty().ifBlank { if (zh) "（日志为空）" else "(empty log)" }
                             }
                         })
-                        ToolChip(if (zh) "终止" else "Kill", onClick = { pendingKill = p })
+                        ToolChip(if (zh) "终止" else "Kill", icon = Icons.Default.Stop, onClick = { pendingKill = p })
                     }
                 }
             }
@@ -358,8 +368,16 @@ internal fun SettingsNativeExecPage(t: UiText) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { runTarget(json, false) }) { Text(if (zh) "前台执行" else "Run") }
-                        TextButton(onClick = { runTarget(json, true) }) { Text(if (zh) "后台运行" else "Daemon") }
+                        TextButton(onClick = { runTarget(json, false) }) {
+                            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (zh) "前台执行" else "Run")
+                        }
+                        TextButton(onClick = { runTarget(json, true) }) {
+                            Icon(Icons.Default.Memory, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (zh) "后台运行" else "Daemon")
+                        }
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick = { target = null }) { Text(if (zh) "取消" else "Cancel") }
                     }

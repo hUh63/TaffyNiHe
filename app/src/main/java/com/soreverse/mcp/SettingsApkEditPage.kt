@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -220,6 +223,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                 }
                 DataRow(
                     title = if (showXml) (if (zh) "收起 XML" else "Hide XML") else (if (zh) "查看 XML" else "View XML"),
+                    leading = { Icon(Icons.Default.Code, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
                     trailingText = if (showXml) "▴" else "▾",
                     onClick = { showXml = !showXml },
                 )
@@ -247,6 +251,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                     if (zh) "应用" else "Apply",
                     { act("set_package", if (zh) "改包名" else "set package", "value" to newPackage) },
                     Modifier.weight(1f),
+                    leading = Icons.Default.Save,
                 )
             }
         }
@@ -289,7 +294,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 listOf("activity", "service", "receiver", "provider").forEach { ct ->
-                    ToolChip(ct, selected = compType == ct, enabled = true) { compType = ct }
+                    ToolChip(ct, icon = Icons.Default.Extension, selected = compType == ct, enabled = true) { compType = ct }
                 }
             }
             OutlinedTextField(

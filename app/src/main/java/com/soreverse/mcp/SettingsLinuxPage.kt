@@ -12,6 +12,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -131,6 +138,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                 },
                 subtitle = (if (zh) "root/Shizuku：" else "root/Shizuku: ") + (if (rootAvailable) (if (zh) "可用" else "yes") else (if (zh) "不可用" else "no")) +
                     "  ·  " + (if (zh) "内置 proot：" else "proot: ") + (if (prootOk) (if (zh) "就绪" else "ready") else (if (zh) "未就绪" else "not ready")),
+                leading = { Icon(Icons.Default.Refresh, null, tint = MaterialTheme.colorScheme.primary) },
                 trailingText = if (zh) "刷新" else "Refresh",
                 onClick = { refreshTick++ },
             )
@@ -187,6 +195,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                         }
                     },
                     Modifier.weight(1f),
+                    leading = Icons.Default.BugReport,
                 )
                 SecondaryActionButton(
                     if (zh) "复制报告" else "Copy",
@@ -213,6 +222,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                     subtitle = (if (zh) "包管理 " else "pkg ") + pkgMgr + "  ·  " +
                         if (installed) (if (zh) "已解压 ${LinuxRootfs.sizeMb(context, name)}MB" else "installed ${LinuxRootfs.sizeMb(context, name)}MB")
                         else (if (zh) "未解压" else "not extracted"),
+                    leading = { Icon(Icons.Default.Memory, null, tint = MaterialTheme.colorScheme.primary) },
                     trailingText = if (installed) (if (zh) "删除" else "Remove") else (if (zh) "安装" else "Install"),
                     onClick = {
                         if (installed) {
@@ -235,7 +245,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 distros.forEach { (name, _, installed) ->
-                    ToolChip(name, selected = target == name, enabled = installed) { target = name }
+                    ToolChip(name, icon = Icons.Default.Memory, selected = target == name, enabled = installed) { target = name }
                 }
             }
             FlowRow(
@@ -244,7 +254,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 quickCommands.forEach { (script, label) ->
-                    ToolChip(label, enabled = busy == null) { runIn(target, script) }
+                    ToolChip(label, icon = Icons.Default.Terminal, enabled = busy == null) { runIn(target, script) }
                 }
             }
             OutlinedTextField(
@@ -269,6 +279,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                         if (c.isNotEmpty()) runIn(target, c)
                     },
                     Modifier.weight(1f),
+                    leading = Icons.Default.PlayArrow,
                 )
                 SecondaryActionButton(
                     if (zh) "清空" else "Clear",

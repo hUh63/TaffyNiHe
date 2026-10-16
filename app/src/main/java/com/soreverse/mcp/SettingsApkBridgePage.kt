@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -181,6 +183,7 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
                         if (zh) "探测全部" else "Probe All",
                         { refreshSnapshot() },
                         modifier = Modifier.fillMaxWidth(),
+                        leading = Icons.Default.Refresh,
                     )
                 }
                 snapshot?.let { snap ->
@@ -417,7 +420,11 @@ private fun BridgeEditDialog(
             TextButton(
                 enabled = name.isNotBlank() && name !in existingNames && url.isNotBlank(),
                 onClick = { onSave(name.trim(), url.trim(), token.trim(), prefix.trim()) },
-            ) { Text(if (zh) "保存" else "Save") }
+            ) {
+                Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (zh) "保存" else "Save")
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(if (zh) "取消" else "Cancel") }

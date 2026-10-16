@@ -1,3 +1,44 @@
+# TaffyNiHe v1.3.101（自绘控件收口：页面里不再有手搓的按钮/chip/卡片）
+
+v1.3.100 把 UI **基座**换成了 M3，这一版把散落在各页面里的**残留自绘控件**
+逐个收干净 —— 现在页面里不再有「手搓 Box + 圆角 + 背景 + clickable」拼出来的
+按钮 / chip / 分段 / 开关 / 卡片。
+
+## 一、设置与工具页
+- **更新页**：版本徽标、频道分段（正式版/测试版）→ `AssistChip` / `SingleChoiceSegmentedButtonRow`
+- **备份页**：开关行 → `ListItem + Switch`（替换自绘轨道+滑块），动作卡 → `Card`，「恢复」→ `TextButton`
+- **服务配置页**：端点卡 → `Card`，「测试」→ `TextButton`
+- **日志页签**：动作按钮 → `FilledTonalButton`，底部工具条 → `Surface`
+
+## 二、首页 Command Hub
+- 顶部「在线/离线」状态胶囊 → `AssistChip`（leadingIcon 放状态圆点）
+- 「全部工具」入口 → `TextButton`
+
+## 三、Markdown 渲染
+- 引用块 / 表格容器 → `Surface`
+- 分隔线 → `HorizontalDivider`
+
+## 四、分析页（最大单文件）
+- 左侧导航栏 → M3 `NavigationRail` + `NavigationRailItem`
+- 分段按钮（热点/根展开/完整、完整数据/仅循环）→ `FilterChip`
+- 当前任务小条 → `AssistChip`
+
+## 五、日志查看页
+- 状态条 / Shizuku 提示 / 通道错误条 / 崩溃记录卡 / 录制文件卡 → `Surface`
+- 过滤预设、应用列表行、「删除」→ `AssistChip` / `Surface(onClick)`
+- 「实时过滤」折叠头 → `Surface(onClick)`
+
+## 保留自绘（专业视图，M3 无对应组件）
+编辑器（行号槽 / 键帽 / 补全面板 / 语法高亮）、控制流画布（节点/边/缩放平移）、
+日志正文（等宽着色流 + 深色画布）、终端面板 —— 这些是**为各自数据类型专门设计的视图**，
+按既定原则保留；它们的外壳与工具条已统一走 M3 组件。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.100...v1.3.101
+
+---
+
 # TaffyNiHe v1.3.100（全局 Material 3 化：所有页面统一到官方组件）
 
 用户反馈「自研的交互太烂、不符合人类审美」—— 根因是**页面里到处是自绘控件**

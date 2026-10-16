@@ -2332,7 +2332,7 @@ private fun AnalysisEmptyState(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Icons.Filled.Info, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(26.dp))
+            EmptyArt()
             Text(
                 title,
                 style = MaterialTheme.typography.titleSmall,

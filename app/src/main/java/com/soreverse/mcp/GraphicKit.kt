@@ -27,6 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -439,12 +441,36 @@ internal fun BusyOverlay(
     }
 }
 
+/**
+ * 空态插图（对齐太墟的空态插图设计）：双层柔光圆底 + 主题色图标。
+ * 用于替代干巴巴的一行文字，让空态有"被设计过"的观感。
+ */
+@Composable
+internal fun EmptyArt(
+    icon: ImageVector = Icons.Filled.Info,
+    modifier: Modifier = Modifier,
+) {
+    val cs = MaterialTheme.colorScheme
+    Box(
+        modifier.size(88.dp).clip(CircleShape).background(cs.primary.copy(alpha = 0.07f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.size(58.dp).clip(CircleShape).background(cs.primary.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = cs.primary.copy(alpha = 0.75f), modifier = Modifier.size(30.dp))
+        }
+    }
+}
+
 /** 空态/错误态占位（页内覆盖说明，不跳转到别处）。 */
 @Composable
 internal fun InlineHint(
     text: String,
     modifier: Modifier = Modifier,
     tone: HintTone = HintTone.Neutral,
+    icon: ImageVector? = null,
 ) {
     val color = when (tone) {
         HintTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -458,6 +484,7 @@ internal fun InlineHint(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (icon != null) EmptyArt(icon = icon)
         Text(
             text,
             style = MaterialTheme.typography.bodySmall,

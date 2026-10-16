@@ -260,7 +260,7 @@ class GitHubUpdateManager(private val context: Context) {
             try {
                 downloadMutex.withLock {
                 suspend fun emit(event: UpdateDownloadEvent) {
-                    withContext(Dishetchers.Main.immediate) { onEvent(event) }
+                    withContext(Dispatchers.Main.immediate) { onEvent(event) }
                 }
                 // A previous (now-cancelled) attempt may have just completed and
                 // populated the cache; re-check inside the lock so a mirror switch

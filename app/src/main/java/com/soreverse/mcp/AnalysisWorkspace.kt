@@ -96,6 +96,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -2278,26 +2279,17 @@ private fun BigActionButton(
     loading: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
-    Surface(
+    Button(
         onClick = { if (enabled && !loading) onClick() },
         enabled = enabled && !loading,
         shape = RoundedCornerShape(AppShape.md),
-        color = if (enabled) cs.primary else cs.surfaceContainerHigh,
-        contentColor = if (enabled) cs.onPrimary else cs.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().height(56.dp),
+        modifier = Modifier.fillMaxWidth().height(52.dp),
     ) {
-        Row(
-            Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            if (loading) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = if (enabled) cs.onPrimary else cs.onSurfaceVariant)
-                Spacer(Modifier.size(8.dp))
-            }
-            Text(label, style = MaterialTheme.typography.titleMedium, fontSize = AppText.bodyStrong, fontWeight = FontWeight.SemiBold)
+        if (loading) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.size(8.dp))
         }
+        Text(label, style = MaterialTheme.typography.titleMedium, fontSize = AppText.bodyStrong, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -3906,26 +3898,23 @@ private fun exbinFilterRows(
 /** Exbin 功能条按钮（`createFunctionButton`）：13sp / 全宽 / padding 16×11 / 圆角 8dp；主按钮 primaryContainer。 */
 @Composable
 private fun ExbinFunctionButton(label: String, primary: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(8.dp)
-    Box(
-        Modifier.fillMaxWidth().padding(bottom = 4.dp).clip(shape)
-            .background(if (primary) cs.primaryContainer else cs.surfaceContainer)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        contentAlignment = Alignment.CenterStart,
-    ) {
+    val pad = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
+    val m = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+    val body: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
         Text(
             label,
             fontSize = 13.sp,
-            color = when {
-                !enabled -> cs.onSurfaceVariant.copy(alpha = 0.45f)
-                primary -> cs.onPrimaryContainer
-                else -> cs.onSurfaceVariant
-            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Start,
+            modifier = Modifier.weight(1f),
         )
+    }
+    if (primary) {
+        FilledTonalButton(onClick = onClick, enabled = enabled, shape = shape, contentPadding = pad, modifier = m, content = body)
+    } else {
+        OutlinedButton(onClick = onClick, enabled = enabled, shape = shape, contentPadding = pad, modifier = m, content = body)
     }
 }
 
@@ -3958,14 +3947,13 @@ private fun ExbinDropdownField(value: String, options: List<String>, onPick: (In
 /** Exbin 复选框行（CheckBox 形态：☑ / ☐ + 14sp onSurface）。 */
 @Composable
 private fun ExbinCheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    val cs = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(if (checked) "\u2611" else "\u2610", fontSize = 16.sp, color = if (checked) cs.primary else cs.outline)
-        Text(label, fontSize = 14.sp, color = cs.onSurface)
+        Checkbox(checked = checked, onCheckedChange = onChange)
+        Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -3980,31 +3968,33 @@ private fun ExbinResultCard(
     onClick: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-            .background(cs.surfaceContainer)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Text(
-            title,
-            fontSize = 12.sp,
-            fontFamily = if (mono) FontFamily.Monospace else null,
-            color = cs.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (meta.isNotBlank()) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
             Text(
-                meta, fontSize = 10.sp, color = cs.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                title,
+                fontSize = 12.sp,
+                fontFamily = if (mono) FontFamily.Monospace else null,
+                color = cs.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-        }
-        if (hint.isNotBlank()) {
-            Text(
-                hint, fontSize = 11.sp, color = hintColor,
-                modifier = Modifier.padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            if (meta.isNotBlank()) {
+                Text(
+                    meta, fontSize = 10.sp, color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (hint.isNotBlank()) {
+                Text(
+                    hint, fontSize = 11.sp, color = hintColor,
+                    modifier = Modifier.padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -6954,21 +6944,25 @@ private fun ResultCard(label: String, mono: Boolean = true, value: () -> String)
     val cs = MaterialTheme.colorScheme
     val v = value()
     if (v.isBlank()) return
-    Column(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(AppShape.md))
-            .background(cs.surfaceContainerHigh)
-            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(AppShape.md),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, cs.outlineVariant),
     ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-        Text(
-            v,
-            style = if (mono) MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body)
-            else MaterialTheme.typography.bodyMedium.copy(fontSize = AppText.bodyStrong),
-            color = cs.onSurface,
-        )
+        Column(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
+            Text(
+                v,
+                style = if (mono) MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body)
+                else MaterialTheme.typography.bodyMedium.copy(fontSize = AppText.bodyStrong),
+                color = cs.onSurface,
+            )
+        }
     }
 }
 
@@ -7104,29 +7098,33 @@ private fun hexToAscii(hex: String, byteCount: Int): String {
 @Composable
 private fun KeyValueCard(zh: Boolean, pairs: List<Pair<String, String>>) {
     val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(AppShape.md))
-            .background(cs.surfaceContainerHigh)
-            .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(AppShape.md),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, cs.outlineVariant),
     ) {
-        pairs.forEach { (k, v) ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Text(
-                    k,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = AppText.label,
-                    color = cs.onSurfaceVariant,
-                    modifier = Modifier.width(64.dp),
-                )
-                Text(
-                    v,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
-                    color = cs.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            pairs.forEach { (k, v) ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                    Text(
+                        k,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = AppText.label,
+                        color = cs.onSurfaceVariant,
+                        modifier = Modifier.width(64.dp),
+                    )
+                    Text(
+                        v,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body),
+                        color = cs.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
@@ -13392,17 +13390,13 @@ private fun CallGraphCanvas(
 /** Explorer So 按钮（MaterialButton.TonalButton：12sp），用于伪 C 顶部 meta 行。 */
 @Composable
 private fun TonalMiniButton(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Surface(
+    FilledTonalButton(
         onClick = onClick,
         shape = RoundedCornerShape(AppShape.sm),
-        color = cs.secondaryContainer,
-        contentColor = cs.onSecondaryContainer,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
         modifier = modifier.heightIn(min = 32.dp),
     ) {
-        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-            Text(label, fontSize = 12.sp, maxLines = 1)
-        }
+        Text(label, fontSize = 12.sp, maxLines = 1)
     }
 }
 

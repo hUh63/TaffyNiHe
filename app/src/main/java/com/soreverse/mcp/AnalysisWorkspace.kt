@@ -28,6 +28,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -2246,12 +2250,16 @@ private fun SmallAction(
     enabled: Boolean = true,
     loading: Boolean = false,
     active: Boolean = false,
+    icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     val contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
     val body: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
         if (loading) {
             CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.size(6.dp))
+        } else if (icon != null) {
+            Icon(icon, null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.size(6.dp))
         }
         Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
@@ -2281,6 +2289,7 @@ private fun BigActionButton(
     label: String,
     enabled: Boolean = true,
     loading: Boolean = false,
+    icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     Button(
@@ -2291,6 +2300,9 @@ private fun BigActionButton(
     ) {
         if (loading) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.size(8.dp))
+        } else if (icon != null) {
+            Icon(icon, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(8.dp))
         }
         Text(label, style = MaterialTheme.typography.titleMedium, fontSize = AppText.bodyStrong, fontWeight = FontWeight.SemiBold)
@@ -2796,7 +2808,7 @@ private fun CalcView(zh: Boolean, context: android.content.Context) {
             BigActionButton(if (zh) "计算" else "Calc", loading = loading) { run() }
             Spacer(Modifier.size(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallAction(if (zh) "清空" else "Clear") { inputs = emptyMap(); result = ""; error = "" }
+                SmallAction(if (zh) "清空" else "Clear", icon = Icons.Filled.Delete) { inputs = emptyMap(); result = ""; error = "" }
                 SmallAction(if (zh) "复制结果" else "Copy", enabled = result.isNotBlank()) { copyToClipboard(context, result, zh) }
             }
             if (error.isNotBlank()) { Spacer(Modifier.size(4.dp)); AnalysisErrorBanner(error) }
@@ -4670,7 +4682,7 @@ private fun FuncXRefView(
                         SmallAction(if (zh) "深度 $depth" else "depth $depth", active = true) {}
                         SmallAction("+", enabled = depth < 5) { depth++ }
                         Spacer(Modifier.weight(1f))
-                        SmallAction(if (zh) "重置" else "Reset") { depth = 1; dir = "callees"; showCross = true }
+                        SmallAction(if (zh) "重置" else "Reset", icon = Icons.Filled.Refresh) { depth = 1; dir = "callees"; showCross = true }
                         TabChip(if (zh) "交叉边" else "Cross", selected = showCross) { showCross = !showCross }
                     }
                     Spacer(Modifier.size(6.dp))
@@ -5167,7 +5179,7 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
             SmallAction(if (zh) "重新计算" else "Recompute", loading = tools.cfgLoading) {
                 if (target.isNotBlank()) loadCfg(context, tools, zh, scope, target)
             }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
         }
         if (fn.isNotBlank()) {
             Spacer(Modifier.size(4.dp))
@@ -5232,7 +5244,7 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                     )
                     Spacer(Modifier.size(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        SmallAction(if (zh) "生成去平坦化计划" else "Build plan", loading = deFlatBusy) {
+                        SmallAction(if (zh) "生成计划" else "Build plan", loading = deFlatBusy) {
                             scope.launch {
                                 deFlatBusy = true
                                 deFlatJson = ""
@@ -5261,7 +5273,7 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                                 deFlatBusy = false
                             }
                         }
-                        SmallAction(if (zh) "扫描整个 SO" else "Scan SO", loading = deFlatBusy) {
+                        SmallAction(if (zh) "扫描 SO" else "Scan SO", loading = deFlatBusy) {
                             scope.launch {
                                 deFlatBusy = true
                                 scanJson = ""
@@ -8013,7 +8025,7 @@ private fun XorDecryptView(zh: Boolean, context: android.content.Context) {
             SmallAction(if (zh) "单字节" else "Single", active = scheme == "single") { scheme = "single" }
             SmallAction(if (zh) "递增" else "Inc", active = scheme == "inc") { scheme = "inc" }
             SmallAction(if (zh) "递减" else "Dec", active = scheme == "dec") { scheme = "dec" }
-            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank() || keyText.isNotBlank()) {
+            SmallAction(if (zh) "清空" else "Clear", icon = Icons.Filled.Delete, enabled = input.isNotBlank() || keyText.isNotBlank()) {
                 input = ""; keyText = ""
             }
         },
@@ -8124,7 +8136,7 @@ private fun ArmRegisterView(zh: Boolean, context: android.content.Context) {
         actions = {
             SmallAction("AArch64", active = arch == "arm64") { arch = "arm64" }
             SmallAction("ARM (A32)", active = arch == "arm32") { arch = "arm32" }
-            SmallAction(if (zh) "复制全部" else "Copy all") {
+            SmallAction(if (zh) "复制全部" else "Copy all", icon = Icons.Filled.ContentCopy) {
                 val sb = StringBuilder()
                 sb.append(if (arch == "arm64") "AArch64\n" else "ARM (A32)\n")
                 general.forEach { sb.append("%-12s %-18s %s\n".format(it.name, it.alias, it.usage)) }
@@ -8266,7 +8278,7 @@ private fun StringDecodeView(zh: Boolean, context: android.content.Context) {
         title = if (zh) "字符串解码" else "String decoder",
         hint = if (zh) "Hex / Base64 / UTF-8 / ASCII / URL / Unicode 转义" else "Hex / Base64 / UTF-8 / ASCII / URL / \\u escapes",
         actions = {
-            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "清空" else "Clear", icon = Icons.Filled.Delete, enabled = input.isNotBlank()) { input = "" }
             SmallAction(if (zh) "复制输入" else "Copy input", enabled = trimmed.isNotBlank()) { copyToClipboard(context, trimmed, zh) }
         },
         content = {
@@ -8324,7 +8336,7 @@ private fun ByteDiffView(zh: Boolean, context: android.content.Context) {
         title = if (zh) "字节差分对比" else "Byte diff",
         hint = if (zh) "对比两段 hex 数据，逐字节输出差异行" else "Diff two hex blobs byte by byte",
         actions = {
-            SmallAction(if (zh) "清空" else "Clear", enabled = aText.isNotBlank() || bText.isNotBlank()) { aText = ""; bText = "" }
+            SmallAction(if (zh) "清空" else "Clear", icon = Icons.Filled.Delete, enabled = aText.isNotBlank() || bText.isNotBlank()) { aText = ""; bText = "" }
             SmallAction(if (zh) "交换 A/B" else "Swap A/B", enabled = aText.isNotBlank() || bText.isNotBlank()) {
                 val t = aText; aText = bText; bText = t
             }
@@ -8631,7 +8643,7 @@ private fun InsnExplainView(zh: Boolean, context: android.content.Context) {
         title = if (zh) "指令含义" else "Instruction explain",
         hint = if (zh) "ARM / ARM64 汇编指令中文语义查询（逐行）" else "Explain ARM / ARM64 instructions line by line",
         actions = {
-            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "清空" else "Clear", icon = Icons.Filled.Delete, enabled = input.isNotBlank()) { input = "" }
             SmallAction(if (zh) "复制说明" else "Copy", enabled = explained.isNotEmpty()) {
                 val sb = StringBuilder()
                 explained.forEach { (raw, mnem, pair) ->
@@ -8881,7 +8893,7 @@ private fun AsmToPseudoCView(zh: Boolean, context: android.content.Context) {
         title = if (zh) "汇编转伪C" else "Asm → Pseudo-C",
         hint = if (zh) "把多条汇编指令翻译成可读的伪 C 代码" else "Translate assembly into readable pseudo-C",
         actions = {
-            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "清空" else "Clear", icon = Icons.Filled.Delete, enabled = input.isNotBlank()) { input = "" }
             SmallAction(if (zh) "复制伪C" else "Copy C", enabled = pseudo.isNotBlank()) { copyToClipboard(context, pseudo, zh) }
             Text(
                 if (zh) "${lines.size} 条指令" else "${lines.size} insns",
@@ -8997,7 +9009,7 @@ private fun AsmToFlowChartView(zh: Boolean, context: android.content.Context) {
         title = if (zh) "汇编转流程图" else "Asm → Flowchart",
         hint = if (zh) "按基本块切分汇编，输出 ASCII 框图" else "Split asm into basic blocks → ASCII flowchart",
         actions = {
-            SmallAction(if (zh) "清空" else "Clear", enabled = input.isNotBlank()) { input = "" }
+            SmallAction(if (zh) "清空" else "Clear", icon = Icons.Filled.Delete, enabled = input.isNotBlank()) { input = "" }
             SmallAction(if (zh) "复制框图" else "Copy", enabled = flow.isNotBlank()) { copyToClipboard(context, flow, zh) }
             Text(
                 if (zh) "${lines.count { isBranch(it.mnem) }} 个分支" else "${lines.count { isBranch(it.mnem) }} branches",
@@ -9660,19 +9672,19 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
         )
         Spacer(Modifier.size(6.dp))
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "前往" else "Go", enabled = addr.isNotBlank()) { load() }
+            SmallAction(if (zh) "前往" else "Go", icon = Icons.AutoMirrored.Filled.ArrowForward, enabled = addr.isNotBlank()) { load() }
             SmallAction("←") { step(-1) }
             SmallAction("→") { step(1) }
             SmallAction(if (zh) "代码模式" else "Code", active = mode == "code") { mode = "code"; load() }
             SmallAction(if (zh) "数据模式" else "Data", active = mode == "data") { mode = "data"; load() }
             SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank()) { addr = tools.selectedFunctionVa; load() }
             SmallAction(if (zh) "指针解读" else "Pointer", enabled = addr.isNotBlank()) { readPointer() }
-            SmallAction(if (zh) "复制" else "Copy", enabled = lines.isNotEmpty()) {
+            SmallAction(if (zh) "复制" else "Copy", icon = Icons.Filled.ContentCopy, enabled = lines.isNotEmpty()) {
                 val sb = StringBuilder()
                 lines.forEach { o -> sb.append(if (mode == "code") "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("disasm")}" else "${o.optString("offset")}  ${o.optString("bytes")}  ${o.optString("ascii")}").append('\n') }
                 copyToClipboard(context, sb.toString().trimEnd(), zh)
             }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
         }
         if (info.isNotBlank()) {
             Spacer(Modifier.size(6.dp))
@@ -9717,7 +9729,7 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong),
                 placeholder = { Text(if (zh) "前往地址（0x… 虚地址）" else "go to address", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label), color = cs.onSurfaceVariant) },
             )
-            SmallAction(if (zh) "前往" else "Go", loading = loading, enabled = addr.isNotBlank()) { load() }
+            SmallAction(if (zh) "前往" else "Go", icon = Icons.AutoMirrored.Filled.ArrowForward, loading = loading, enabled = addr.isNotBlank()) { load() }
             SmallAction("→") { step(1) }
         }
     }
@@ -9846,12 +9858,12 @@ private fun FuncSigView(tools: ToolPagesState, zh: Boolean, context: android.con
             SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionVa.isNotBlank() || tools.selectedFunctionName.isNotBlank()) {
                 locator = tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName }
             }
-            SmallAction(if (zh) "复制全部" else "Copy all", enabled = sigs.isNotEmpty()) {
+            SmallAction(if (zh) "复制全部" else "Copy all", icon = Icons.Filled.ContentCopy, enabled = sigs.isNotEmpty()) {
                 val sb = StringBuilder()
                 sigs.forEach { s -> sb.append(sigLine(s, zh)).append('\n') }
                 copyToClipboard(context, sb.toString().trimEnd(), zh)
             }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
         }
         Spacer(Modifier.size(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -10006,8 +10018,8 @@ private fun JniRegView(tools: ToolPagesState, zh: Boolean, context: android.cont
 
     Column(Modifier.fillMaxSize()) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
-            SmallAction(if (zh) "复制全部" else "Copy all", enabled = pairs.isNotEmpty()) {
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, loading = loading, onClick = onRefresh)
+            SmallAction(if (zh) "复制全部" else "Copy all", icon = Icons.Filled.ContentCopy, enabled = pairs.isNotEmpty()) {
                 val sb = StringBuilder()
                 pairs.forEach { p -> sb.append(p.optString("javaName")).append(' ').append(p.optString("signature")).append("  @").append(p.optString("sigAddr")).append('\n') }
                 copyToClipboard(context, sb.toString().trimEnd(), zh)
@@ -11065,12 +11077,12 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
         }
         Spacer(Modifier.size(6.dp))
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "生成" else "Generate", loading = loading, onClick = { generate() })
+            SmallAction(if (zh) "生成" else "Generate", icon = Icons.Filled.PlayArrow, loading = loading, onClick = { generate() })
             SmallAction("TSV", active = tabSep) { tabSep = true }
             SmallAction("CSV", active = !tabSep) { tabSep = false }
-            SmallAction(if (zh) "复制" else "Copy", enabled = text.isNotBlank()) { copyToClipboard(context, text, zh) }
+            SmallAction(if (zh) "复制" else "Copy", icon = Icons.Filled.ContentCopy, enabled = text.isNotBlank()) { copyToClipboard(context, text, zh) }
             SmallAction(if (zh) "保存到文件" else "Save file", enabled = text.isNotBlank()) { saveToWorkspace() }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
             if (count > 0) Text(if (zh) "$count 行" else "$count rows", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
         }
         Spacer(Modifier.size(6.dp))
@@ -11104,7 +11116,7 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
                 style = MaterialTheme.typography.labelSmall, fontSize = AppText.label,
                 fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f),
             )
-            SmallAction(if (zh) "刷新" else "Refresh") { refreshFiles() }
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh) { refreshFiles() }
             SmallAction(if (zh) "复制目录" else "Copy dir") { copyToClipboard(context, exportsDir(context).absolutePath, zh) }
         }
         files.forEach { f ->
@@ -11116,7 +11128,7 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 Text("%d KB".format(f.length() / 1024), style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.onSurfaceVariant)
-                SmallAction(if (zh) "打开" else "Open") { openExportFile(context, f, zh) }
+                SmallAction(if (zh) "打开" else "Open", icon = Icons.Filled.FolderOpen) { openExportFile(context, f, zh) }
                 SmallAction(if (zh) "分享" else "Share") { shareExportFile(context, f, zh) }
                 SmallAction(if (zh) "删除" else "Del") { f.delete(); refreshFiles() }
             }
@@ -11416,8 +11428,8 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
         }
         Spacer(Modifier.size(6.dp))
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "刷新" else "Refresh", loading = loading, onClick = onRefresh)
-            SmallAction(if (zh) "复制" else "Copy", enabled = shown.isNotEmpty()) {
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, loading = loading, onClick = onRefresh)
+            SmallAction(if (zh) "复制" else "Copy", icon = Icons.Filled.ContentCopy, enabled = shown.isNotEmpty()) {
                 val sb = StringBuilder("addr\toffset\tsize\ttype\tvalue\ttarget\n")
                 shown.forEach { e -> sb.append(e.optString("addr")).append('\t').append(e.optString("offset")).append('\t')
                     .append(e.optString("size")).append('\t').append(e.optString("type")).append('\t')
@@ -12065,7 +12077,7 @@ private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.co
                 sb.append(if (zh) "被调用" else "callees").append(" (${callees.size}): ").append(callees.joinToString(", ") { it.optString("to") })
                 copyToClipboard(context, sb.toString(), zh)
             }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
         }
         Spacer(Modifier.size(6.dp))
         OutlinedTextField(
@@ -12210,10 +12222,10 @@ private fun CommentsView(tools: ToolPagesState, zh: Boolean, context: android.co
             SmallAction(if (zh) "取当前函数" else "Current fn", enabled = tools.selectedFunctionName.isNotBlank() || tools.selectedFunctionVa.isNotBlank()) {
                 target = tools.selectedFunctionName.ifBlank { tools.selectedFunctionVa }
             }
-            SmallAction(if (zh) "复制全部" else "Copy all", enabled = items.isNotEmpty()) {
+            SmallAction(if (zh) "复制全部" else "Copy all", icon = Icons.Filled.ContentCopy, enabled = items.isNotEmpty()) {
                 copyToClipboard(context, items.joinToString("\n") { "${it.key}\t${it.text}" }, zh)
             }
-            SmallAction(if (zh) "清空全部" else "Clear all", enabled = items.isNotEmpty()) {
+            SmallAction(if (zh) "清空全部" else "Clear all", icon = Icons.Filled.Delete, enabled = items.isNotEmpty()) {
                 AnalysisComments.save(context, emptyList()); items = emptyList()
             }
             Text(if (zh) "${items.size} 条注释" else "${items.size} comments",
@@ -12237,14 +12249,14 @@ private fun CommentsView(tools: ToolPagesState, zh: Boolean, context: android.co
         )
         Spacer(Modifier.size(6.dp))
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "保存注释" else "Save", enabled = target.isNotBlank() && body.isNotBlank()) {
+            SmallAction(if (zh) "保存注释" else "Save", icon = Icons.Filled.Save, enabled = target.isNotBlank() && body.isNotBlank()) {
                 items = AnalysisComments.put(context, target.trim(), body.trim())
                 body = ""
             }
             SmallAction(if (zh) "删除该条" else "Delete", enabled = target.isNotBlank()) {
                 items = AnalysisComments.remove(context, target.trim())
             }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
         }
         Spacer(Modifier.size(8.dp))
         OutlinedTextField(
@@ -12371,8 +12383,8 @@ private fun AnalyzeModeView(tools: ToolPagesState, zh: Boolean, context: android
                 cs.onSurface, AppText.label,
             )
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallAction(if (zh) "快速分析 (aa)" else "Quick (aa)", loading = running == "quick", onClick = { run("quick") })
-                SmallAction(if (zh) "全量分析 (aaaa)" else "Full (aaaa)", loading = running == "full", onClick = { run("full") })
+                SmallAction(if (zh) "快速分析" else "Quick (aa)", loading = running == "quick", onClick = { run("quick") })
+                SmallAction(if (zh) "全量分析" else "Full (aaaa)", loading = running == "full", onClick = { run("full") })
                 SmallAction(if (zh) "刷新统计" else "Refresh", onClick = { collectStats(); onRefresh() })
             }
             if (log.isNotBlank()) MonoLine(log, cs.primary, AppText.label)
@@ -12447,7 +12459,7 @@ private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.
                 symLocator = tools.selectedFunctionName.ifBlank { tools.selectedFunctionVa }
                 insAddr = tools.selectedFunctionVa.ifBlank { tools.disasmAddr }
             }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
             if (busy) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
         }
         Spacer(Modifier.size(8.dp))
@@ -12513,7 +12525,7 @@ private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.
                                 }) { insOut = it }
                             }
                         }
-                        SmallAction(if (zh) "重汇编并写入" else "Apply", enabled = insAddr.isNotBlank() && insAsm.isNotBlank()) {
+                        SmallAction(if (zh) "汇编并写入" else "Apply", enabled = insAddr.isNotBlank() && insAsm.isNotBlank()) {
                             pending = {
                                 run({
                                     callMcpTool(context, "taffy_native_patch_instructions", JSONObject()
@@ -12615,13 +12627,13 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
 
     Column(Modifier.fillMaxSize()) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SmallAction(if (zh) "生成伪C" else "Generate", loading = loading, onClick = { gen() })
-            SmallAction(if (zh) "复制" else "Copy", enabled = text.isNotBlank()) { copyToClipboard(context, text, zh) }
+            SmallAction(if (zh) "生成伪C" else "Generate", icon = Icons.Filled.PlayArrow, loading = loading, onClick = { gen() })
+            SmallAction(if (zh) "复制" else "Copy", icon = Icons.Filled.ContentCopy, enabled = text.isNotBlank()) { copyToClipboard(context, text, zh) }
             if (okCount > 0 || failCount > 0) {
                 TypeBadge(if (zh) "成功 $okCount" else "ok $okCount", cs.primary)
                 if (failCount > 0) TypeBadge(if (zh) "失败 $failCount" else "fail $failCount", cs.error)
             }
-            SmallAction(if (zh) "刷新" else "Refresh", onClick = onRefresh)
+            SmallAction(if (zh) "刷新" else "Refresh", icon = Icons.Filled.Refresh, onClick = onRefresh)
         }
         Spacer(Modifier.size(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

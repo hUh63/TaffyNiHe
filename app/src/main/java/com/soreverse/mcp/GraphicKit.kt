@@ -2,10 +2,15 @@ package com.soreverse.mcp
 
 import android.content.ClipData
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,17 +29,26 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -45,29 +59,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.composed
-import androidx.compose.ui.input.pointer.PointerEventPass
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 图形化组件地基（对标 Explorer So 的交互范式）。
+ * 图形化组件地基 —— **全部基于 Material 3 官方组件**。
  *
- * 目的：把原先散落在各页面的"命令输入框 + 大段文本输出 / 各写各的卡片"收敛为
- * 一套可复用的图形化原语，供 12 个工具页统一使用：
- *  - TerminalPane  统一终端输出面板（原先有 0xFF111111 / 0xFF0B0F14 / 半透明 surface 三套）
- *  - DataRow       统一数据行卡片（Exbin 的 item_detail 模板：chip + 主副标题 + 等宽元信息）
- *  - SearchCountBar 实时搜索 + "当前显示 / 总数" 计数条
- *  - ConfirmDialog 破坏性操作二次确认
- *  - ChoiceDialog  过滤器单选对话框
- *  - BusyOverlay   可取消的耗时操作覆盖层
- *  - TypeChip      左侧类型/标签徽标
+ * 设计原则（详见 docs/exbin-ui-spec.md）：页面只允许使用 M3 官方组件，
+ * 不再自绘外壳（禁止 `Box + background + border + clickable` 拼按钮/卡片/行）。
+ * 本文件只保留 M3 尚无直接对应物的三样东西：
+ *  - TerminalPane  终端/命令输出面板（深色底是终端语义，用 M3 [Surface] 承载）
+ *  - MonoRow       键值行（等宽对齐，Exbin item_base_row 同款）
+ *  - InlineHint    空态/错误态页内说明
+ * 其余一律映射到官方组件：
+ *  - TypeChip  → [AssistChip]
+ *  - ToolChip  → [FilterChip]
+ *  - DataRow   → [ListItem]
  */
 internal object TerminalColors {
     val bg = Color(0xFF0B0F14)
@@ -87,8 +95,7 @@ internal fun copyToClipboard(context: Context, text: String, label: String = "ta
 }
 
 /**
- * 统一终端输出面板：深色底 + 等宽字 + 可选中复制 + 顶部"复制/清空"。
- * 替代原先三套互不统一的终端框实现。
+ * 终端输出面板：M3 [Surface] 承载深色等宽输出区 + 顶部"复制/清空"。
  */
 @Composable
 internal fun TerminalPane(
@@ -148,48 +155,58 @@ internal fun TerminalPane(
                 }
             }
         }
-        Box(
-            Modifier
+        Surface(
+            modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 44.dp, max = maxHeight)
-                .clip(shape)
-                .background(TerminalColors.bg)
-                .border(1.dp, TerminalColors.fg.copy(alpha = 0.10f), shape)
-                .padding(10.dp),
+                .heightIn(min = 44.dp, max = maxHeight),
+            shape = shape,
+            color = TerminalColors.bg,
+            border = BorderStroke(1.dp, TerminalColors.fg.copy(alpha = 0.10f)),
         ) {
-            if (text.isBlank()) {
-                Text(
-                    placeholder,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = TerminalColors.dim,
-                )
-            } else {
-                SelectionContainer {
+            Box(Modifier.fillMaxWidth().padding(10.dp)) {
+                if (text.isBlank()) {
                     Text(
-                        text,
+                        placeholder,
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = TerminalColors.fg,
+                        color = TerminalColors.dim,
                     )
+                } else {
+                    SelectionContainer {
+                        Text(
+                            text,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = TerminalColors.fg,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-/** 左侧类型/标签徽标（对应 Exbin 列表项左端的返回类型 chip）。 */
+/** 左侧类型/标签徽标 —— M3 [AssistChip]（无边框、容器着色）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TypeChip(text: String, color: Color = MaterialTheme.colorScheme.primary) {
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(AppShape.xs))
-            .background(color.copy(alpha = 0.14f))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    ) {
-        Text(text, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.SemiBold)
-    }
+    AssistChip(
+        onClick = {},
+        label = {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        },
+        colors = AssistChipDefaults.assistChipColors(
+            containerColor = color.copy(alpha = 0.14f),
+            labelColor = color,
+        ),
+        border = null,
+    )
 }
 
-/** 紧凑动作/切换 chip（工具页高密度操作条用；比 FilterChip 省约 40% 高度）。 */
+/** 筛选/切换 chip —— M3 [FilterChip]。 */
 @Composable
 internal fun ToolChip(
     label: String,
@@ -198,34 +215,20 @@ internal fun ToolChip(
     accent: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
-    val bg = when {
-        !enabled -> cs.surfaceContainerHigh.copy(alpha = 0.35f)
-        selected || accent -> cs.primary.copy(alpha = 0.20f)
-        else -> cs.surfaceContainerHigh
-    }
-    val fg = when {
-        !enabled -> cs.onSurfaceVariant.copy(alpha = 0.4f)
-        selected || accent -> cs.primary
-        else -> cs.onSurface
-    }
-    Box(
-        Modifier
-            .heightIn(min = 28.dp)
-            .clip(RoundedCornerShape(AppShape.sm))
-            .background(bg)
-            .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = fg, maxLines = 1)
-    }
+    FilterChip(
+        selected = selected || accent,
+        onClick = onClick,
+        enabled = enabled,
+        label = {
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        },
+    )
 }
 
 /**
- * 统一数据行卡片内容（放在 [GlassGroup] / [AppCard] 里使用）。
- * 点击 = 主动作，长按 = 次级动作（复制/更多），与 Exbin 一致。
+ * 统一数据行 —— M3 [ListItem]。点击 = 主动作，长按 = 次级动作（复制/更多）。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun DataRow(
     title: String,
@@ -237,65 +240,59 @@ internal fun DataRow(
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
 ) {
-    val metrics = LocalUiMetrics.current
-    val clickable = onClick != null || onLongClick != null
-    Row(
-        modifier
-            .fillMaxWidth()
-            .then(
-                if (clickable) {
-                    Modifier.pointerInput(onClick, onLongClick) {
-                        detectTapGestures(
-                            onTap = { onClick?.invoke() },
-                            onLongPress = { onLongClick?.invoke() },
-                        )
-                    }
-                } else {
-                    Modifier
-                },
-            )
-            .padding(horizontal = 14.dp, vertical = metrics.rowPadV),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        leading?.invoke()
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    val cs = MaterialTheme.colorScheme
+    ListItem(
+        modifier = modifier.combinedClickable(
+            onClick = { onClick?.invoke() },
+            onLongClick = onLongClick?.let { cb -> { cb() } },
+        ),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = leading,
+        headlineContent = {
             Text(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = cs.onSurface,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (!subtitle.isNullOrBlank()) {
+        },
+        supportingContent = if (!subtitle.isNullOrBlank() || !meta.isNullOrBlank()) {
+            {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (!subtitle.isNullOrBlank()) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (!meta.isNullOrBlank()) {
+                        Text(
+                            meta,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = cs.onSurfaceVariant.copy(alpha = 0.8f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        } else null,
+        trailingContent = if (!trailingText.isNullOrBlank()) {
+            {
                 Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    trailingText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = cs.primary,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
-            if (!meta.isNullOrBlank()) {
-                Text(
-                    meta,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (!trailingText.isNullOrBlank()) {
-            Text(
-                trailingText,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-    }
+        } else null,
+    )
 }
 
 /** 实时搜索框 + "当前显示 / 总数" 计数条（对应 Exbin 的 et_search + tv_count）。 */
@@ -342,7 +339,7 @@ internal fun SearchCountBar(
     }
 }
 
-/** 破坏性操作二次确认对话框（卸载/删除/覆盖/推送等）。 */
+/** 破坏性操作二次确认对话框（M3 [AlertDialog]）。 */
 @Composable
 internal fun ConfirmDialog(
     title: String,
@@ -386,22 +383,18 @@ internal fun ChoiceDialog(
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 options.forEachIndexed { i, opt ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(AppShape.sm))
-                            .pointerInput(i) { detectTapGestures { onPick(i); onDismiss() } }
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            opt,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (selected == i) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            fontWeight = if (selected == i) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                    ListItem(
+                        modifier = Modifier.clickable { onPick(i); onDismiss() },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        headlineContent = {
+                            Text(
+                                opt,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (selected == i) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                fontWeight = if (selected == i) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        },
+                    )
                 }
             }
         },
@@ -472,7 +465,7 @@ internal fun InlineHint(
 
 internal enum class HintTone { Neutral, Error, Ok }
 
-/** 小尺寸等宽信息行（用于详情里的键值对）。 */
+/** 小尺寸等宽信息行（用于详情里的键值对，Exbin item_base_row 同款）。 */
 @Composable
 internal fun MonoRow(label: String, value: String, modifier: Modifier = Modifier) {
     Row(

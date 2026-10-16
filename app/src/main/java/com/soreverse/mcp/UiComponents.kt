@@ -25,16 +25,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.contentColorFor
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +51,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/**
+ * 通用页面组件地基 —— **全部基于 Material 3 官方组件**（详见 docs/exbin-ui-spec.md）。
+ *
+ * 骨架统一为 M3 三件套：`TopAppBar` + 内容 + （需要时）底部栏。
+ * 列表统一 `ListItem` / `Card`，禁止自绘 `Box + background + border + clickable`。
+ */
+
+/** 页面标题栏 —— M3 [TopAppBar]。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ScreenHeader(
     title: String,
@@ -55,47 +69,50 @@ internal fun ScreenHeader(
     trailing: (@Composable () -> Unit)? = null,
     titleColor: Color? = null,
 ) {
-    val metrics = LocalUiMetrics.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = metrics.pagePad, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (showBack && onBack != null) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                title,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.headlineSmall,
-                color = titleColor ?: MaterialTheme.colorScheme.onBackground,
-                letterSpacing = (-0.3).sp,
-            )
-            if (!subtitle.isNullOrBlank()) {
+    TopAppBar(
+        title = {
+            Column {
                 Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor ?: MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-        }
-        trailing?.invoke()
-    }
+        },
+        navigationIcon = {
+            if (showBack && onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        "返回",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        },
+        actions = { trailing?.invoke() },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+    )
 }
 
 /**
- * 沉浸式工具页外壳：紧凑顶栏（返回 + 标题 + 动作槽）+ 全幅内容区。
+ * 工具页外壳 —— M3 [Scaffold] + [TopAppBar]。
  *
- * 取代「设置子页」范式（大标题 [ScreenHeader] + 页面内边距）——功能页要的是空间，
- * 不是又一层设置排版。顶栏默认 ~42dp，比 [ScreenHeader] 省约 1/3 纵向空间。
+ * 取代「设置子页」范式（大标题 [ScreenHeader] + 页面内边距）——功能页要的是空间。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ToolPageScaffold(
     title: String,
@@ -104,49 +121,51 @@ internal fun ToolPageScaffold(
     actions: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(start = if (onBack != null) 2.dp else 14.dp, end = 6.dp, top = 1.dp, bottom = 1.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (onBack != null) {
-                IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        "返回",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (!subtitle.isNullOrBlank()) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            actions?.invoke()
-        }
-        Box(Modifier.fillMaxSize()) { content() }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            title,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (!subtitle.isNullOrBlank()) {
+                            Text(
+                                subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                "返回",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                },
+                actions = { actions?.invoke() },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+            )
+        },
+    ) { innerPad ->
+        Box(Modifier.fillMaxSize().padding(innerPad)) { content() }
     }
 }
 
+/** 分组容器 —— M3 [Card]（Exbin 风：圆角 + 1dp 描边 + 零阴影）。 */
 @Composable
 internal fun GlassGroup(
     title: String? = null,
@@ -154,7 +173,6 @@ internal fun GlassGroup(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val metrics = LocalUiMetrics.current
-    val shape = RoundedCornerShape(metrics.cardRadius)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!title.isNullOrBlank()) {
             Text(
@@ -165,15 +183,15 @@ internal fun GlassGroup(
                 fontWeight = FontWeight.SemiBold,
             )
         }
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shape)
-                .padding(vertical = 4.dp),
-            content = content,
-        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(metrics.cardRadius),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), content = content)
+        }
         if (!footer.isNullOrBlank()) {
             Text(
                 footer,
@@ -194,6 +212,7 @@ internal fun GroupDivider() {
     )
 }
 
+/** 可点击导航行 —— M3 [ListItem]。 */
 @Composable
 internal fun NavRow(
     title: String,
@@ -203,61 +222,71 @@ internal fun NavRow(
     trailing: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
-    val metrics = LocalUiMetrics.current
     val resolvedTint = iconTint ?: MaterialTheme.colorScheme.primary
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = metrics.rowPadV),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        if (icon != null) {
-            Box(
-                Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(AppShape.md))
-                    .background(resolvedTint.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, null, tint = resolvedTint, modifier = Modifier.size(18.dp))
+    ListItem(
+        modifier = Modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint) } },
+        headlineContent = {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
+            )
+        },
+        supportingContent = if (!subtitle.isNullOrBlank()) {
+            {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            if (!subtitle.isNullOrBlank()) {
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        } else null,
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!trailing.isNullOrBlank()) {
+                    Text(
+                        trailing,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (onClick != null) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-        }
-        if (!trailing.isNullOrBlank()) {
-            Text(trailing, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-        }
-        if (onClick != null) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+        },
+    )
 }
 
+/** 带开关的设置行 —— M3 [ListItem] + [Switch]（默认 M3 配色）。 */
 @Composable
 internal fun ToggleRow(text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    val metrics = LocalUiMetrics.current
-    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = metrics.rowPadV - 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge)
-        Switch(
-            checked = checked,
-            onCheckedChange = onChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
-                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
-            ),
-        )
-    }
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        headlineContent = {
+            Text(
+                text,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        },
+        trailingContent = {
+            Switch(checked = checked, onCheckedChange = onChange)
+        },
+    )
 }
 
+/** 整宽主操作按钮 —— M3 [Button]。 */
 @Composable
 internal fun PrimaryActionButton(
     text: String,
@@ -267,12 +296,17 @@ internal fun PrimaryActionButton(
     container: Color? = null,
 ) {
     val metrics = LocalUiMetrics.current
-    val shape = RoundedCornerShape(metrics.controlRadius)
-    val resolved = container ?: MaterialTheme.colorScheme.primary
     Button(
         onClick = onClick,
-        shape = shape,
-        colors = ButtonDefaults.buttonColors(containerColor = resolved, contentColor = contentColorFor(resolved)),
+        shape = RoundedCornerShape(metrics.controlRadius),
+        colors = if (container != null) {
+            androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = container,
+                contentColor = androidx.compose.material3.contentColorFor(container),
+            )
+        } else {
+            androidx.compose.material3.ButtonDefaults.buttonColors()
+        },
         modifier = modifier.height(50.dp),
     ) {
         if (leading != null) {
@@ -310,7 +344,7 @@ internal fun IndexedBadge(index: Int) {
     }
 }
 
-/** Exbin 风卡片：圆角 + 1dp 描边 + 无阴影，可选标题/尾部。用于承载任意内容区。 */
+/** 承载任意内容区 —— M3 [Card]（同 [GlassGroup]，可选内边距）。 */
 @Composable
 internal fun AppCard(
     modifier: Modifier = Modifier,
@@ -320,7 +354,6 @@ internal fun AppCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val metrics = LocalUiMetrics.current
-    val shape = RoundedCornerShape(metrics.cardRadius)
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!title.isNullOrBlank()) {
             Text(
@@ -331,20 +364,22 @@ internal fun AppCard(
                 modifier = Modifier.padding(horizontal = 2.dp),
             )
         }
-        Column(
-            Modifier.fillMaxWidth().clip(shape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shape)
-                .padding(contentPadding),
-            content = content,
-        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(metrics.cardRadius),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(contentPadding), content = content)
+        }
         if (!footer.isNullOrBlank()) {
             Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 2.dp))
         }
     }
 }
 
-/** Exbin 风列表项：36dp 图标 + 标题/副标题/元信息三行 + 可选尾部。 */
+/** 列表项 —— M3 [ListItem]（对齐 Explorer So item_list_card 的信息层级）。 */
 @Composable
 internal fun CardRow(
     title: String,
@@ -355,38 +390,27 @@ internal fun CardRow(
     trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
-    // 对齐 Explorer So item_list_card.xml：圆角 12dp / 无描边 / bg surfaceVariant / 外边距 4dp / 内边距 14dp
-    // 图标 36dp + 标题 TitleSmall + 副标题 BodySmall + 说明 LabelSmall(primary)
     val cs = MaterialTheme.colorScheme
     val tint = iconTint ?: cs.primary
-    Surface(
-        onClick = onClick ?: {},
-        enabled = onClick != null,
-        shape = RoundedCornerShape(12.dp),
-        color = cs.surfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (icon != null) {
-                Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                    Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+    ListItem(
+        modifier = Modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = icon?.let { { Icon(it, null, tint = tint, modifier = Modifier.size(24.dp)) } },
+        headlineContent = {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        supportingContent = if (!subtitle.isNullOrBlank() || !meta.isNullOrBlank()) {
+            {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (!subtitle.isNullOrBlank()) {
+                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (!meta.isNullOrBlank()) {
+                        Text(meta, style = MaterialTheme.typography.labelSmall, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (!subtitle.isNullOrBlank()) {
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (!meta.isNullOrBlank()) {
-                    Text(meta, style = MaterialTheme.typography.labelSmall, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            trailing?.invoke()
-        }
-    }
+        } else null,
+        trailingContent = trailing,
+    )
 }
-

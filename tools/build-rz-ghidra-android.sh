@@ -95,8 +95,11 @@ EOF
     fi
 
     # --- 2) rz-ghidra 源码 + submodule（反编译器 C++ 在 submodule 里）---
+    # 版本必须与 rizin 对齐：塔菲钉 rizin v0.9.1，因此用 rz-ghidra v0.9.0。
+    # （master 的 core_ghidra.cpp 用了 0.9.x 之后的 API，直接编会报
+    #  "requires 2 arguments, but 3 were provided"。）
     if [ ! -e "$RZ_GHIDRA_SRC/.git" ]; then
-        git clone --depth 1 https://github.com/rizinorg/rz-ghidra.git "$RZ_GHIDRA_SRC"
+        git clone --depth 1 --branch v0.9.0 https://github.com/rizinorg/rz-ghidra.git "$RZ_GHIDRA_SRC"
     fi
     git -C "$RZ_GHIDRA_SRC" submodule update --init --recursive --depth 1 || true
 

@@ -25,20 +25,74 @@ object ShellDetectorTool {
         val desc: String,
     )
 
-    /** 常见加固壳特征表: (壳名, so 特征子串列表, application 特征子串列表, 说明) */
+    // 常见加固壳特征表: (壳名, so 特征子串列表, application 特征子串列表, 说明)
+    // 命中规则: 对 lib 目录下的 so 文件名(去目录)做不区分大小写的子串匹配。
+    // 设计原则:
+    //   1) 同一厂商的多个 so(互为子串, 如 libjiagu/x86/a64)合并到一条, 避免同包命中多条;
+    //   2) 库名彼此不是子串的(如 libshella 与 libshellx)才拆成多条;
+    //   3) 共用特征(如 libDexHelper、libtup)单独成条并注明, 不分散进多条厂商, 规避误判。
     private val SHELLS = listOf(
-        ShellSig("360加固(jiagu)", listOf("libjiagu", "jiagu_art"), listOf("com.stub.StubApp", "com.stub.stubax5"), "360 全家桶, StubApp/moz 入口"),
-        ShellSig("腾讯乐固(Legu)", listOf("libshella", "shella", "libShell"), listOf("com.tencent.StubShell", "com.tencent.StubShell.TxAppEntry"), "腾讯云加固"),
-        ShellSig("爱加密(iJiami)", listOf("libexec", "libexecmain", "ijiami"), listOf("com.secshell.app.SecShellApplication", "com.secnebula"), "爱加密"),
-        ShellSig("梆梆加固(Secco)", listOf("libSecShell", "SecShell"), listOf("com.secneo.apk.wrapper.ApkWrapper", "com.intlgame"), "梆梆安全"),
-        ShellSig("娜迦(Naga)", listOf("libchaosvmp", "libDexHelper", "naga"), listOf("com.nagainet.dynamicload.ApplicationWrapper"), "娜迦/顶象"),
-        ShellSig("顶象/网秦(DexHelper)", listOf("libDexHelper"), listOf("com.nirvana", "com.protect"), "顶象/数字天盾等"),
-        ShellSig("梆梆/网秦通用", listOf("libprotect", "libshell", "librun"), emptyList(), "常见兜底特征"),
+        ShellSig("360加固(jiagu)", listOf("libjiagu"), listOf("com.stub.StubApp", "com.stub.stub01.Stub01", "com.qihoo.util.StubApplication"), "360 加固保; jiagu 主库, ls/x86/a64/x64/art 变体同源"),
+        ShellSig("360加固(jgdtc 新版)", listOf("libjgdtc"), emptyList(), "360 新版壳库(jgdtc 系列, 含 x86/a64/x64/art)"),
+        ShellSig("360加固(protectClass)", listOf("libprotectClass"), emptyList(), "360 旧版壳库"),
+        ShellSig("腾讯乐固(标准 libshella)", listOf("libshella"), listOf("com.tencent.StubShell.TxAppEntry", "com.tencent.StubShell"), "腾讯乐固(乐固)标准版; 入口 TxAppEntry"),
+        ShellSig("腾讯乐固(x86 libshellx)", listOf("libshellx"), emptyList(), "腾讯乐固 x86 架构版"),
+        ShellSig("腾讯乐固(通用 libshell.so)", listOf("libshell.so"), emptyList(), "乐固通用壳库名(无版本后缀)"),
+        ShellSig("腾讯乐固(新版 libshell-super)", listOf("libshell-super"), emptyList(), "腾讯乐固 2019 新版壳"),
+        ShellSig("腾讯乐固(liblegudb)", listOf("liblegudb"), emptyList(), "乐固运行时数据库库"),
+        ShellSig("爱加密(libexec)", listOf("libexec", "libexecmain"), listOf("s.h.e.l.l.S", "com.shell.SuperApplication", "com.secshell"), "爱加密; dex 由 libexec 解密"),
+        ShellSig("爱加密(libijiami)", listOf("libijiami"), emptyList(), "爱加密 ijiami 品牌特征库"),
+        ShellSig("梆梆安全(libSecShell)", listOf("libSecShell"), listOf("com.secneo.apkwrapper.ApplicationWrapper", "com.secneo.apkwrapper.AW", "com.secneo"), "梆梆安全(SecNeo)免费版"),
+        ShellSig("梆梆安全(libsecexe)", listOf("libsecexe"), emptyList(), "梆梆安全免费版"),
+        ShellSig("梆梆安全(libsecmain)", listOf("libsecmain"), emptyList(), "梆梆安全主运行库"),
+        ShellSig("梆梆企业版(libDexHelper 共用)", listOf("libDexHelper"), emptyList(), "梆梆企业版; 网秦/顶象等亦有同名文件, 需结合 application 判厂商"),
+        ShellSig("娜迦(libchaosvmp)", listOf("libchaosvmp"), listOf("com.chaosvmp", "com.nagainet"), "娜迦 VMP 壳"),
+        ShellSig("娜迦(libddog/libfdog)", listOf("libddog", "libfdog"), emptyList(), "娜迦 ddog/fdog 模块"),
+        ShellSig("娜迦企业版(libedog)", listOf("libedog"), emptyList(), "娜迦企业版模块"),
+        ShellSig("阿里聚安全(libsgmain)", listOf("libsgmain"), listOf("com.ali.mobisecenhance.StubApplication", "com.ali.mobisecenhance"), "阿里无线保镖/聚安全主库"),
+        ShellSig("阿里聚安全(libsgsecurityguard)", listOf("libsgsecurityguard"), emptyList(), "阿里 SecurityGuard 安全组件"),
+        ShellSig("阿里聚安全(libsgsecuritybody)", listOf("libsgsecuritybody"), emptyList(), "阿里聚安全 body 组件"),
+        ShellSig("阿里聚安全(libmobisec)", listOf("libmobisec"), emptyList(), "阿里旧版聚安全(常与无线保镖同现)"),
+        ShellSig("阿里云加固(libdemolish)", listOf("libdemolish"), emptyList(), "阿里云加固; assets 侧 libdemolishdata.so"),
+        ShellSig("阿里云 mPaaS", listOf("libmpaas", "libmpaasguard"), emptyList(), "阿里 mPaaS 客户端框架壳"),
+        ShellSig("百度加固", listOf("libbaiduprotect"), listOf("com.baidu.protect.StubApplication", "com.baidu.protect"), "百度加固; x86/art 变体同源"),
+        ShellSig("几维安全(libkwscmm)", listOf("libkwscmm"), listOf("com.kiwisec"), "几维(Kiwi) C++ 壳"),
+        ShellSig("几维安全(runtime/linker)", listOf("libkwscruntime", "libkwscore", "libkwspm", "libkwsvm", "libkwslinker", "libkwscr"), emptyList(), "几维运行时/链接/虚拟机模块"),
+        ShellSig("腾讯御安全", listOf("libtosprotection"), listOf("com.tencent.tosprotection"), "腾讯御安全(TOS); armeabi/v7a/x86 变体同源"),
+        ShellSig("网易易盾(libnesec)", listOf("libnesec"), listOf("com.netease.nis.wrapper.MyApplication", "com.netease.nis"), "网易易盾 nesec"),
+        ShellSig("网易易盾(libbugrpt)", listOf("libbugrpt"), emptyList(), "网易易盾上报库, 常与 nesec 同现"),
+        ShellSig("网秦/国信灵通(libnqshield)", listOf("libnqshield"), emptyList(), "网秦/国信灵通; 部分易盾版本亦用同名文件"),
+        ShellSig("通付盾(libegis)", listOf("libegis"), listOf("com.tup.sec"), "通付盾主库"),
+        ShellSig("通付盾(libNSaferOnly)", listOf("libNSaferOnly"), emptyList(), "通付盾 N Safer 组件"),
+        ShellSig("通付盾/腾讯(libtup 共用)", listOf("libtup"), emptyList(), "libtup 在多份资料中被分别归到通付盾/腾讯, 按共用处理"),
+        ShellSig("顶象(libdxprotect)", listOf("libdxprotect"), listOf("com.dingxiang.mobile"), "顶象移动加固"),
+        ShellSig("顶象(libx3g)", listOf("libx3g"), listOf("com.x3g.stub"), "顶象 x3g 壳库"),
+        ShellSig("盛大加固(libsprotect)", listOf("libsprotect"), emptyList(), "盛大加固 so 保护"),
+        ShellSig("盛大加固(libapssec)", listOf("libapssec"), emptyList(), "盛大加固 aps 保护"),
+        ShellSig("盛大加固(libndkprotect)", listOf("libndkprotect"), emptyList(), "盛大 NDK 层保护"),
+        ShellSig("瑞星加固(librsprotect)", listOf("librsprotect"), emptyList(), "瑞星加固"),
+        ShellSig("海云安加固(libitsec)", listOf("libitsec"), emptyList(), "海云安加固"),
+        ShellSig("启明星辰(libvenSec/libvenustech)", listOf("libvenSec", "libvenustech"), emptyList(), "启明星辰加固"),
+        ShellSig("So保护(SoProtect)", listOf("libSoProtect"), emptyList(), "So 文件保护壳 SoProtect"),
+        ShellSig("So保护(MySOProtect)", listOf("libMySOProtect"), emptyList(), "MySOProtect so 壳"),
+        ShellSig("APKProtect", listOf("libAPKProtect"), emptyList(), "APKProtect 壳"),
+        ShellSig("Virbox(libvdog)", listOf("libvdog"), emptyList(), "深思数盾 Virbox 虚拟化(Vdog)"),
+        ShellSig("Virbox(libvirbox)", listOf("libvirbox"), emptyList(), "深思数盾 Virbox 壳库"),
+        ShellSig("VMP虚拟化(libvmp)", listOf("libvmp", "libvmp_protect"), emptyList(), "指令虚拟化(VMP)通用库"),
+        ShellSig("Dex虚拟化(libDexVmp)", listOf("libDexVmp"), emptyList(), "Dex 层虚拟化保护"),
+        ShellSig("反调试(libanti)", listOf("libanti", "libantidebug"), emptyList(), "反调试/反注入(通用, 非具体厂商)"),
+        ShellSig("反调试(libdbg)", listOf("libdbg"), emptyList(), "调试器检测(通用)"),
+        ShellSig("加固通用兜底(libprotect.so)", listOf("libprotect.so"), emptyList(), "通用 so 保护兜底库名"),
+        ShellSig("加固通用兜底(librun)", listOf("librun"), emptyList(), "常见运行时壳库名兜底"),
+        ShellSig("AppSealing(INKA)", listOf("libAppSealing"), emptyList(), "韩国 AppSealing 加固"),
+        ShellSig("LIAPP(Lockin)", listOf("libliapp"), emptyList(), "韩国 LIAPP 加固"),
+        ShellSig("DexProtector(Licel)", listOf("libdexprotector"), emptyList(), "DexProtector 商业加固(观察项)"),
+        ShellSig("DexGuard(Guardsquare)", listOf("libdexguard"), emptyList(), "Guardsquare DexGuard(观察项)"),
     )
 
     val tool: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_apk_shell_check",
-            "【APK 加固检测】只读扫描 APK, 识别是否被加固及可能的加固产品(360/腾讯乐固/爱加密/梆梆/娜迦等)。逆向第一步: 判断好不好改/要不要先脱壳。检测: lib/*.so 壳库名、classes.dex 大小异常(极小=代码被抽走)、assets 壳资源、Manifest 的 application 指向。纯只读, 不改文件。",
+            "【APK 加固检测】只读扫描 APK, 识别是否被加固及可能的加固产品(360/腾讯乐固/爱加密/梆梆/娜迦/阿里聚安全/百度/几维/网易易盾/顶象/通付盾/盛大/瑞星/启明星辰/Virbox 等 40+ 厂商)。逆向第一步: 判断好不好改/要不要先脱壳。检测: lib/*.so 壳库名、classes.dex 大小异常(极小=代码被抽走)、assets 壳资源、Manifest 的 application 指向; 内置 50+ 条壳特征库, 并直接列出 lib/*.so 文件名(detectedLibs)。纯只读, 不改文件。",
             "Read-only APK hardening/packer detection. Scans ZIP entries, native lib names, classes.dex size (tiny = code stripped), shell assets and Manifest application to infer if the APK is packed and by which packer. First step of RE: decide whether to unpack first. Read-only.",
             "analyze", ToolClass.EXTRA, heavy = false,
         ) {
@@ -124,6 +178,7 @@ object ShellDetectorTool {
                     .put("path", path)
                     .put("packed", packed)
                     .put("shells", hits)
+                    .put("detectedLibs", JSONArray(libs.distinct()))
                     .put("signature", JSONObject()
                         .put("v1", v1Cert != null)
                         .put("v1Cert", v1Cert ?: JSONObject.NULL)

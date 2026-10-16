@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.FormatListNumbered
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.Toc
@@ -218,7 +218,7 @@ internal object EditorCommands {
         EditorCommand("nav.jump", "跳转（行/偏移/符号）", "Go to (line/offset/symbol)", G_NAV, icon = Icons.Filled.MyLocation) { it.act("jump") },
         EditorCommand("nav.outline", "符号大纲", "Symbol outline", G_NAV, icon = Icons.AutoMirrored.Filled.Toc) { it.act("panel:outline") },
         // ── 视图 ──
-        EditorCommand("view.linenums", "行号", "Line numbers", G_VIEW, icon = Icons.AutoMirrored.Filled.FormatListNumbered, isOn = { it.flag("linenums") }) { it.act("toggle:linenums") },
+        EditorCommand("view.linenums", "行号", "Line numbers", G_VIEW, icon = Icons.AutoMirrored.Filled.List, isOn = { it.flag("linenums") }) { it.act("toggle:linenums") },
         EditorCommand("view.readonly", "只读", "Read only", G_VIEW, icon = Icons.Filled.Lock, isOn = { it.flag("readonly") }) { it.act("toggle:readonly") },
         EditorCommand("view.windowed", "窗口化查看", "Windowed view", G_VIEW, icon = Icons.Filled.AspectRatio, isOn = { it.flag("windowed") }) { it.act("toggle:windowed") },
         EditorCommand("view.keys", "符号键行", "Keys row", G_VIEW, icon = Icons.Filled.Keyboard, isOn = { it.flag("keys") }) { it.act("toggle:keys") },

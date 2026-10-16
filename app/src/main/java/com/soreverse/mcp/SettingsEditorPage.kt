@@ -207,9 +207,9 @@ private fun outlineOf(src: String, m: CodeHighlighter.Lang): List<OutlineItem> {
 @Composable
 private fun MiniAction(
     label: String,
-    icon: ImageVector? = null,
     enabled: Boolean = true,
     accent: Boolean = false,
+    icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     val bgc = when {

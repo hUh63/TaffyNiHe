@@ -96,6 +96,12 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -2956,51 +2962,35 @@ private fun AnalysisRail(
     onLeave: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
-    Column(
-        Modifier.width(80.dp).fillMaxHeight()
-            .background(cs.surface)
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    NavigationRail(
+        modifier = Modifier.fillMaxHeight().statusBarsPadding(),
+        containerColor = MaterialTheme.colorScheme.surface,
     ) {
         analysisRailItems.forEach { k ->
             val isBack = k == "back"
             val selected = if (k == "home") current == "home" || current in analysisHomeTabKeys
             else !isBack && k == current
-            val tint = if (selected) cs.primary else cs.onSurfaceVariant
-            Column(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable {
-                        if (isBack) return@clickable onLeave()
+            NavigationRailItem(
+                selected = selected,
+                onClick = {
+                    if (isBack) {
+                        onLeave()
+                    } else {
                         onPick(if (k == "home") "functions" else k)
                         onClose()
-                        Unit
                     }
-                    .padding(vertical = 2.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(
-                    Modifier.size(width = 56.dp, height = 32.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (selected) cs.secondaryContainer else Color.Transparent),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(analysisViewIcon(k), null, tint = tint, modifier = Modifier.size(22.dp))
-                }
-                Spacer(Modifier.size(3.dp))
-                Text(
-                    analysisViewLabel(k, zh),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontSize = 11.sp,
-                    color = tint,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+                },
+                icon = { Icon(analysisViewIcon(k), null) },
+                label = {
+                    Text(
+                        analysisViewLabel(k, zh),
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                alwaysShowLabel = true,
+            )
         }
     }
 }
@@ -3440,32 +3430,28 @@ private fun AnalysisAppBar(
 }
 
 /** 当前任务小条（点击 → 任务页）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskChip(state: WorkspaceState, zh: Boolean, onOpenTask: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val task = state.currentTask()
-    val shape = RoundedCornerShape(AppShape.sm)
-    Row(
-        Modifier.clip(shape)
-            .background(cs.surfaceVariant.copy(alpha = 0.45f))
-            .clickable(onClick = onOpenTask)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        Icon(Icons.Filled.FolderOpen, null, tint = cs.primary, modifier = Modifier.size(13.dp))
-        Text(
-            shortSoLabel(task?.title ?: (if (zh) "选择任务" else "Pick task")),
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = AppText.label,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = if (task != null) cs.onSurface else cs.primary,
-        )
-        if (task != null && state.tools.sharedWorkspaceId.isBlank()) {
-            Text("⚠", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.error)
-        }
-    }
+    AssistChip(
+        onClick = onOpenTask,
+        label = {
+            Text(
+                shortSoLabel(task?.title ?: (if (zh) "选择任务" else "Pick task")),
+                style = MaterialTheme.typography.labelSmall,
+                fontSize = AppText.label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (task != null) cs.onSurface else cs.primary,
+            )
+        },
+        leadingIcon = { Icon(Icons.Filled.FolderOpen, null, tint = cs.primary, modifier = Modifier.size(13.dp)) },
+        trailingIcon = if (task != null && state.tools.sharedWorkspaceId.isBlank()) {
+            { Text("⚠", style = MaterialTheme.typography.labelSmall, fontSize = AppText.label, color = cs.error) }
+        } else null,
+    )
 }
 
 // ───────────────────────── 函数列表（默认视图 / 页面入口） ─────────────────────────
@@ -13427,21 +13413,16 @@ private fun ChevronButton(
 }
 
 /** Explorer So 调用图分段按钮（MaterialButtonToggleGroup：minHeight 36dp / paddingH 16dp / 12sp）。 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SegButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Surface(
+    SegmentedButton(
+        selected = selected,
         onClick = onClick,
-        shape = RoundedCornerShape(AppShape.sm),
-        color = if (selected) cs.secondaryContainer else Color.Transparent,
-        contentColor = if (selected) cs.onSecondaryContainer else cs.primary,
-        border = BorderStroke(1.dp, if (selected) Color.Transparent else cs.outlineVariant),
-        modifier = Modifier.heightIn(min = 36.dp),
-    ) {
-        Box(Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-            Text(label, fontSize = 12.sp, maxLines = 1)
-        }
-    }
+        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 1),
+        icon = {},
+        label = { Text(label, fontSize = 12.sp, maxLines = 1) },
+    )
 }
 
 /** Explorer So 统计 chip（ChipGroup 中的 chip）。 */

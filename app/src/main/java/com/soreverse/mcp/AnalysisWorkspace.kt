@@ -96,8 +96,6 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -13413,14 +13411,11 @@ private fun ChevronButton(
 }
 
 /** Explorer So 调用图分段按钮（MaterialButtonToggleGroup：minHeight 36dp / paddingH 16dp / 12sp）。 */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SegButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    SegmentedButton(
+    FilterChip(
         selected = selected,
         onClick = onClick,
-        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 1),
-        icon = {},
         label = { Text(label, fontSize = 12.sp, maxLines = 1) },
     )
 }

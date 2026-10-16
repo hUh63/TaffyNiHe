@@ -21,11 +21,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -204,9 +213,9 @@ internal fun CapturePage(t: UiText) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            ToolChip(if (zh) "HTTP 抓包" else "HTTP capture", selected = tab == "http", enabled = true) { tab = "http" }
-            ToolChip(if (zh) "采集工具" else "Tools", selected = tab == "tools", enabled = true) { tab = "tools" }
-            ToolChip(if (zh) "教程" else "Guide", selected = tab == "guide", enabled = true) { tab = "guide" }
+            ToolChip(if (zh) "HTTP 抓包" else "HTTP capture", icon = Icons.Default.Public, selected = tab == "http", enabled = true) { tab = "http" }
+            ToolChip(if (zh) "采集工具" else "Tools", icon = Icons.Default.Build, selected = tab == "tools", enabled = true) { tab = "tools" }
+            ToolChip(if (zh) "教程" else "Guide", icon = Icons.Default.Description, selected = tab == "guide", enabled = true) { tab = "guide" }
         }
 
         when (tab) {
@@ -246,6 +255,7 @@ internal fun CapturePage(t: UiText) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // 注：这些是协议/方法取值筛选（非动作），保持纯文字以免图标噪音。
                     listOf("全部", "HTTPS", "HTTP", "GET", "POST", "CONNECT").forEach { m ->
                         ToolChip(m, selected = methodFilter == m, enabled = true) { methodFilter = m }
                     }
@@ -271,8 +281,16 @@ internal fun CapturePage(t: UiText) {
                         }
                         copyToClipboard(context, json.toString(2))
                         Toast.makeText(context, if (zh) "已复制 ${filteredEntries.size} 条（JSON）" else "Copied ${filteredEntries.size} entries", Toast.LENGTH_SHORT).show()
-                    }) { Text(if (zh) "导出 JSON" else "Export") }
-                    TextButton(onClick = { pendingClearCapture = true }) { Text(if (zh) "清除" else "Clear", color = MaterialTheme.colorScheme.error) }
+                    }) {
+                        Icon(Icons.Default.Download, null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (zh) "导出 JSON" else "Export")
+                    }
+                    TextButton(onClick = { pendingClearCapture = true }) {
+                        Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (zh) "清除" else "Clear", color = MaterialTheme.colorScheme.error)
+                    }
                 }
 
                 if (filteredEntries.isEmpty()) {
@@ -320,7 +338,11 @@ internal fun CapturePage(t: UiText) {
                         }
                         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             StatusPill("tcpdump", tcpdumpOk, Modifier.weight(1f))
-                            TextButton(onClick = { probeEnv() }) { Text(if (zh) "检测" else "Probe") }
+                            TextButton(onClick = { probeEnv() }) {
+                                Icon(Icons.Default.BugReport, null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (zh) "检测" else "Probe")
+                            }
                         }
                         InlineHint(
                             if (zh) "连接列表与 tcpdump 需要 Root 或 Shizuku；接口/流量/DNS 无特权也可查看。抓包文件输出到 /data/local/tmp。"
@@ -330,10 +352,10 @@ internal fun CapturePage(t: UiText) {
 
                     GlassGroup(title = if (zh) "快捷采集" else "Quick collect") {
                         FlowRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            ToolChip(if (zh) "接口信息" else "Interfaces", selected = false, enabled = !busy) { callTool("info") }
-                            ToolChip(if (zh) "连接列表" else "Connections", selected = false, enabled = !busy && privOk) { callTool("conn") }
-                            ToolChip(if (zh) "流量统计" else "Traffic", selected = false, enabled = !busy) { callTool("traffic") }
-                            ToolChip("DNS", selected = false, enabled = !busy) { callTool("dns") }
+                            ToolChip(if (zh) "接口信息" else "Interfaces", icon = Icons.Default.Link, selected = false, enabled = !busy) { callTool("info") }
+                            ToolChip(if (zh) "连接列表" else "Connections", icon = Icons.Default.SwapHoriz, selected = false, enabled = !busy && privOk) { callTool("conn") }
+                            ToolChip(if (zh) "流量统计" else "Traffic", icon = Icons.Default.Analytics, selected = false, enabled = !busy) { callTool("traffic") }
+                            ToolChip("DNS", icon = Icons.Default.Public, selected = false, enabled = !busy) { callTool("dns") }
                         }
                     }
 

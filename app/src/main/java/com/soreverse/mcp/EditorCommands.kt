@@ -1,9 +1,45 @@
 package com.soreverse.mcp
 
 import android.content.Context
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.FormatListNumbered
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.Toc
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.FindReplace
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FormatIndentDecrease
+import androidx.compose.material.icons.filled.FormatIndentIncrease
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * 编辑器「命令系统」——借鉴 Xed-Editor 的 Command / CommandProvider / ToolbarConfiguration 三层设计。
@@ -51,6 +87,8 @@ internal class EditorCommand(
     val zh: String,
     val en: String,
     val group: String,
+    // 工具条/命令面板按钮图标（Exbin 风格：图标 + 短动词）。为 null 时按钮只显示文字，保持原样。
+    val icon: ImageVector? = null,
     val repeatOnHold: Boolean = false,
     /** 开关型命令的当前状态（用于工具条高亮）。 */
     val isOn: (EditorHost) -> Boolean = { false },
@@ -121,44 +159,44 @@ internal object EditorCommands {
     /** 全部命令。 */
     val ALL: List<EditorCommand> = listOf(
         // ── 编辑 ──
-        EditorCommand("edit.undo", "撤销", "Undo", G_EDIT, enabled = { it.canUndo }) { it.act("undo") },
-        EditorCommand("edit.redo", "重做", "Redo", G_EDIT, enabled = { it.canRedo }) { it.act("redo") },
+        EditorCommand("edit.undo", "撤销", "Undo", G_EDIT, icon = Icons.AutoMirrored.Filled.Undo, enabled = { it.canUndo }) { it.act("undo") },
+        EditorCommand("edit.redo", "重做", "Redo", G_EDIT, icon = Icons.AutoMirrored.Filled.Redo, enabled = { it.canRedo }) { it.act("redo") },
         // ── 行操作 ──
-        EditorCommand("line.indent", "缩进", "Indent", G_LINE) { h ->
+        EditorCommand("line.indent", "缩进", "Indent", G_LINE, icon = Icons.Filled.FormatIndentIncrease) { h ->
             writeText(h, EditorTextOps.indent(h.text, h.selStart, h.selEnd, false, useTab(h.lang)))
         },
-        EditorCommand("line.outdent", "取消缩进", "Outdent", G_LINE) { h ->
+        EditorCommand("line.outdent", "取消缩进", "Outdent", G_LINE, icon = Icons.Filled.FormatIndentDecrease) { h ->
             writeText(h, EditorTextOps.indent(h.text, h.selStart, h.selEnd, true, useTab(h.lang)))
         },
-        EditorCommand("line.comment", "注释", "Comment", G_LINE) { h ->
+        EditorCommand("line.comment", "注释", "Comment", G_LINE, icon = Icons.Filled.Code) { h ->
             writeText(h, EditorTextOps.toggleComment(h.text, h.selStart, h.selEnd, commentPrefix(h.lang)))
         },
-        EditorCommand("line.dup", "复制行", "Duplicate line", G_LINE) { h ->
+        EditorCommand("line.dup", "复制行", "Duplicate line", G_LINE, icon = Icons.Filled.ContentCopy) { h ->
             writeText(h, EditorTextOps.duplicateLines(h.text, h.selStart, h.selEnd))
         },
-        EditorCommand("line.up", "上移行", "Move line up", G_LINE, repeatOnHold = true) { h ->
+        EditorCommand("line.up", "上移行", "Move line up", G_LINE, icon = Icons.Filled.ArrowUpward, repeatOnHold = true) { h ->
             writeText(h, EditorTextOps.moveLines(h.text, h.selStart, h.selEnd, -1))
         },
-        EditorCommand("line.down", "下移行", "Move line down", G_LINE, repeatOnHold = true) { h ->
+        EditorCommand("line.down", "下移行", "Move line down", G_LINE, icon = Icons.Filled.ArrowDownward, repeatOnHold = true) { h ->
             writeText(h, EditorTextOps.moveLines(h.text, h.selStart, h.selEnd, 1))
         },
-        EditorCommand("line.del", "删除行", "Delete line", G_LINE) { h ->
+        EditorCommand("line.del", "删除行", "Delete line", G_LINE, icon = Icons.Filled.Delete) { h ->
             writeText(h, EditorTextOps.deleteLines(h.text, h.selStart, h.selEnd))
         },
-        EditorCommand("line.sortAsc", "行排序 ↑", "Sort lines A→Z", G_LINE, enabled = { it.text.contains('\n') }) { h ->
+        EditorCommand("line.sortAsc", "行排序 ↑", "Sort lines A→Z", G_LINE, icon = Icons.AutoMirrored.Filled.Sort, enabled = { it.text.contains('\n') }) { h ->
             writeText(h, EditorTextOps.sortLines(h.text, h.selStart, h.selEnd, desc = false))
         },
-        EditorCommand("line.sortDesc", "行排序 ↓", "Sort lines Z→A", G_LINE, enabled = { it.text.contains('\n') }) { h ->
+        EditorCommand("line.sortDesc", "行排序 ↓", "Sort lines Z→A", G_LINE, icon = Icons.AutoMirrored.Filled.Sort, enabled = { it.text.contains('\n') }) { h ->
             writeText(h, EditorTextOps.sortLines(h.text, h.selStart, h.selEnd, desc = true))
         },
         // ── 大小写 / 格式化 ──
-        EditorCommand("case.upper", "转大写", "UPPER", G_CASE, enabled = { it.hasSelection }) { h ->
+        EditorCommand("case.upper", "转大写", "UPPER", G_CASE, icon = Icons.Filled.TextFields, enabled = { it.hasSelection }) { h ->
             writeText(h, EditorTextOps.changeCase(h.text, h.selStart, h.selEnd, true))
         },
-        EditorCommand("case.lower", "转小写", "lower", G_CASE, enabled = { it.hasSelection }) { h ->
+        EditorCommand("case.lower", "转小写", "lower", G_CASE, icon = Icons.Filled.TextFields, enabled = { it.hasSelection }) { h ->
             writeText(h, EditorTextOps.changeCase(h.text, h.selStart, h.selEnd, false))
         },
-        EditorCommand("case.format", "格式化", "Format", G_CASE) { h ->
+        EditorCommand("case.format", "格式化", "Format", G_CASE, icon = Icons.Filled.AutoFixHigh) { h ->
             val json = if (h.lang == CodeHighlighter.Lang.JSON) EditorTextOps.formatJson(h.text) else null
             if (json != null) {
                 writeText(h, json to 0)
@@ -171,33 +209,33 @@ internal object EditorCommands {
             }
         },
         // ── 文件 ──
-        EditorCommand("file.save", "保存", "Save", G_FILE, enabled = { it.text.isNotBlank() }) { it.act("save") },
-        EditorCommand("file.open", "打开文件", "Open file", G_FILE) { it.act("open") },
-        EditorCommand("file.new", "新建文件", "New file", G_FILE) { it.act("new") },
-        EditorCommand("file.rollback", "回滚备份", "Restore backup", G_FILE, enabled = { true }) { it.act("rollback") },
+        EditorCommand("file.save", "保存", "Save", G_FILE, icon = Icons.Filled.Save, enabled = { it.text.isNotBlank() }) { it.act("save") },
+        EditorCommand("file.open", "打开文件", "Open file", G_FILE, icon = Icons.Filled.FolderOpen) { it.act("open") },
+        EditorCommand("file.new", "新建文件", "New file", G_FILE, icon = Icons.Filled.NoteAdd) { it.act("new") },
+        EditorCommand("file.rollback", "回滚备份", "Restore backup", G_FILE, icon = Icons.Filled.Restore, enabled = { true }) { it.act("rollback") },
         // ── 导航 ──
-        EditorCommand("nav.find", "查找替换", "Find / Replace", G_NAV) { it.act("find") },
-        EditorCommand("nav.jump", "跳转（行/偏移/符号）", "Go to (line/offset/symbol)", G_NAV) { it.act("jump") },
-        EditorCommand("nav.outline", "符号大纲", "Symbol outline", G_NAV) { it.act("panel:outline") },
+        EditorCommand("nav.find", "查找替换", "Find / Replace", G_NAV, icon = Icons.Filled.FindReplace) { it.act("find") },
+        EditorCommand("nav.jump", "跳转（行/偏移/符号）", "Go to (line/offset/symbol)", G_NAV, icon = Icons.Filled.MyLocation) { it.act("jump") },
+        EditorCommand("nav.outline", "符号大纲", "Symbol outline", G_NAV, icon = Icons.AutoMirrored.Filled.Toc) { it.act("panel:outline") },
         // ── 视图 ──
-        EditorCommand("view.linenums", "行号", "Line numbers", G_VIEW, isOn = { it.flag("linenums") }) { it.act("toggle:linenums") },
-        EditorCommand("view.readonly", "只读", "Read only", G_VIEW, isOn = { it.flag("readonly") }) { it.act("toggle:readonly") },
-        EditorCommand("view.windowed", "窗口化查看", "Windowed view", G_VIEW, isOn = { it.flag("windowed") }) { it.act("toggle:windowed") },
-        EditorCommand("view.keys", "符号键行", "Keys row", G_VIEW, isOn = { it.flag("keys") }) { it.act("toggle:keys") },
+        EditorCommand("view.linenums", "行号", "Line numbers", G_VIEW, icon = Icons.AutoMirrored.Filled.FormatListNumbered, isOn = { it.flag("linenums") }) { it.act("toggle:linenums") },
+        EditorCommand("view.readonly", "只读", "Read only", G_VIEW, icon = Icons.Filled.Lock, isOn = { it.flag("readonly") }) { it.act("toggle:readonly") },
+        EditorCommand("view.windowed", "窗口化查看", "Windowed view", G_VIEW, icon = Icons.Filled.AspectRatio, isOn = { it.flag("windowed") }) { it.act("toggle:windowed") },
+        EditorCommand("view.keys", "符号键行", "Keys row", G_VIEW, icon = Icons.Filled.Keyboard, isOn = { it.flag("keys") }) { it.act("toggle:keys") },
         // ── 代码智能 ──
-        EditorCommand("ai.complete", "补全", "Complete", G_AI, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:complete") },
-        EditorCommand("ai.hover", "文档", "Hover doc", G_AI, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:hover") },
-        EditorCommand("ai.defs", "跳转定义", "Go to definition", G_AI, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:defs") },
-        EditorCommand("ai.diag", "诊断", "Diagnostics", G_AI, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:diag") },
-        EditorCommand("ai.ask", "AI 助手", "AI assist", G_AI) { it.act("ai:ask") },
-        EditorCommand("ai.packs", "语法包管理", "Syntax packs", G_AI) { it.act("packs") },
+        EditorCommand("ai.complete", "补全", "Complete", G_AI, icon = Icons.Filled.AutoAwesome, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:complete") },
+        EditorCommand("ai.hover", "文档", "Hover doc", G_AI, icon = Icons.Filled.Info, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:hover") },
+        EditorCommand("ai.defs", "跳转定义", "Go to definition", G_AI, icon = Icons.AutoMirrored.Filled.ArrowForward, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:defs") },
+        EditorCommand("ai.diag", "诊断", "Diagnostics", G_AI, icon = Icons.Filled.Warning, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:diag") },
+        EditorCommand("ai.ask", "AI 助手", "AI assist", G_AI, icon = Icons.AutoMirrored.Filled.Chat) { it.act("ai:ask") },
+        EditorCommand("ai.packs", "语法包管理", "Syntax packs", G_AI, icon = Icons.Filled.Extension) { it.act("packs") },
         // ── 面板 ──
-        EditorCommand("panel.console", "控制台", "Console", G_PANEL) { it.act("panel:console") },
-        EditorCommand("panel.files", "工作区文件", "Workspace files", G_PANEL) { it.act("panel:files") },
-        EditorCommand("nav.selectall", "全选", "Select all", G_EDIT) { it.act("selectall") },
-        EditorCommand("edit.copy", "复制", "Copy", G_EDIT, enabled = { it.hasSelection }) { it.act("copy") },
-        EditorCommand("edit.cut", "剪切", "Cut", G_EDIT, enabled = { it.hasSelection }) { it.act("cut") },
-        EditorCommand("edit.paste", "粘贴", "Paste", G_EDIT) { it.act("paste") },
+        EditorCommand("panel.console", "控制台", "Console", G_PANEL, icon = Icons.Filled.Computer) { it.act("panel:console") },
+        EditorCommand("panel.files", "工作区文件", "Workspace files", G_PANEL, icon = Icons.Filled.Folder) { it.act("panel:files") },
+        EditorCommand("nav.selectall", "全选", "Select all", G_EDIT, icon = Icons.Filled.SelectAll) { it.act("selectall") },
+        EditorCommand("edit.copy", "复制", "Copy", G_EDIT, icon = Icons.Filled.ContentCopy, enabled = { it.hasSelection }) { it.act("copy") },
+        EditorCommand("edit.cut", "剪切", "Cut", G_EDIT, icon = Icons.Filled.ContentCut, enabled = { it.hasSelection }) { it.act("cut") },
+        EditorCommand("edit.paste", "粘贴", "Paste", G_EDIT, icon = Icons.Filled.ContentPaste) { it.act("paste") },
     )
 
     fun byId(id: String): EditorCommand? = ALL.firstOrNull { it.id == id }

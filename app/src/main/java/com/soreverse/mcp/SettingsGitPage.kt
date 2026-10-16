@@ -12,6 +12,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -151,7 +165,7 @@ internal fun SettingsGitPage(t: UiText) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 distros.forEach { d ->
-                    ToolChip("${d.name} · ${d.pkgMgr}", selected = distro == d.name) { distro = d.name; output = "" }
+                    ToolChip("${d.name} · ${d.pkgMgr}", icon = Icons.Filled.Memory, selected = distro == d.name) { distro = d.name; output = "" }
                 }
             }
             DataRow(
@@ -197,6 +211,7 @@ internal fun SettingsGitPage(t: UiText) {
                     if (zh) "应用目录并刷新" else "Apply & refresh",
                     { repoPath = repoInput; refreshTick++ },
                     Modifier.weight(1f),
+                    leading = Icons.Filled.Refresh,
                 )
             }
         }
@@ -208,7 +223,7 @@ internal fun SettingsGitPage(t: UiText) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ActionChip("init", !running) {
+                ActionChip("init", !running, Icons.Filled.Create) {
                     pendingMsg = if (zh) "将在该目录初始化 Git 仓库（分支 main），不会删除已有文件。" else "Initialize a git repo (branch main) here."
                     pendingConfirm = {
                         gitRun("git init -b main && git config user.email 'taffy@local' && git config user.name 'taffy' && echo '[已初始化仓库 (分支 main)]'") { r ->
@@ -216,16 +231,16 @@ internal fun SettingsGitPage(t: UiText) {
                         }
                     }
                 }
-                ActionChip(if (zh) "状态" else "status", !running) {
+                ActionChip(if (zh) "状态" else "status", !running, Icons.Filled.Info) {
                     gitRun("git status -sb") { r -> appendOut(r.output.trim()) }
                 }
-                ActionChip("diff", !running) {
+                ActionChip("diff", !running, Icons.Filled.CompareArrows) {
                     gitRun("git --no-pager diff --stat") { r -> appendOut(r.output.trim().ifEmpty { "(无差异)" }) }
                 }
-                ActionChip("log", !running) {
+                ActionChip("log", !running, Icons.Filled.History) {
                     gitRun("git --no-pager log --oneline -20") { r -> appendOut(r.output.trim()) }
                 }
-                ActionChip(if (zh) "暂存全部" else "add -A", !running) {
+                ActionChip(if (zh) "暂存全部" else "add -A", !running, Icons.Filled.Add) {
                     gitRun("git add -A && echo '[已暂存全部改动]'") { r -> appendOut(r.output.trim()); refreshStatus() }
                 }
             }
@@ -258,6 +273,7 @@ internal fun SettingsGitPage(t: UiText) {
                         }
                     },
                     Modifier.weight(1f),
+                    leading = Icons.Filled.Save,
                 )
             }
         }
@@ -277,7 +293,7 @@ internal fun SettingsGitPage(t: UiText) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ActionChip(if (zh) "设置 origin" else "set origin", !running) {
+                ActionChip(if (zh) "设置 origin" else "set origin", !running, Icons.Filled.Link) {
                     val u = remoteUrl.trim()
                     if (u.isNotEmpty()) {
                         pendingMsg = if (zh) "将覆盖 origin 为：$u（已存在则先移除）" else "Set origin to $u (removes existing)"
@@ -288,16 +304,16 @@ internal fun SettingsGitPage(t: UiText) {
                         }
                     }
                 }
-                ActionChip("fetch", !running) {
+                ActionChip("fetch", !running, Icons.Filled.Cloud) {
                     gitRun("git fetch --prune") { r -> appendOut(r.output.trim()); refreshStatus() }
                 }
-                ActionChip(if (zh) "拉取" else "pull", !running) {
+                ActionChip(if (zh) "拉取" else "pull", !running, Icons.Filled.Download) {
                     pendingMsg = if (zh) "将执行 git pull（合并远程到当前分支）。" else "Run git pull."
                     pendingConfirm = {
                         gitRun("git pull") { r -> appendOut(r.output.trim()); refreshStatus() }
                     }
                 }
-                ActionChip(if (zh) "推送" else "push", !running) {
+                ActionChip(if (zh) "推送" else "push", !running, Icons.Filled.ArrowUpward) {
                     pendingMsg = if (zh) "将推送【当前分支】到 origin。" else "Push the CURRENT branch to origin."
                     pendingConfirm = {
                         gitRun("br=\$(git symbolic-ref --short HEAD 2>/dev/null || echo main); git push origin \"\$br\"") { r ->
@@ -333,6 +349,6 @@ internal fun SettingsGitPage(t: UiText) {
 }
 
 @Composable
-private fun ActionChip(label: String, enabled: Boolean, onClick: () -> Unit) {
-    ToolChip(label, enabled = enabled) { onClick() }
+private fun ActionChip(label: String, enabled: Boolean, icon: ImageVector? = null, onClick: () -> Unit) {
+    ToolChip(label, icon = icon, enabled = enabled) { onClick() }
 }

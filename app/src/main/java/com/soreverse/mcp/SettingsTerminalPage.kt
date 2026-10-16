@@ -20,6 +20,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -289,14 +295,14 @@ internal fun SettingsTerminalPage(t: UiText) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                ToolChip(if (zh) "跟随" else "Follow", selected = follow) { follow = !follow }
+                ToolChip(if (zh) "跟随" else "Follow", icon = Icons.Filled.Sync, selected = follow) { follow = !follow }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (sessionActive) {
                     SecondaryActionButton(if (zh) "重启" else "Restart", { startSession() }, Modifier.weight(1f))
                     SecondaryActionButton(if (zh) "结束" else "Stop", { stopSession() }, Modifier.weight(1f))
                 } else {
-                    PrimaryActionButton(if (zh) "启动会话" else "Start Session", { startSession() }, Modifier.fillMaxWidth())
+                    PrimaryActionButton(if (zh) "启动会话" else "Start Session", { startSession() }, Modifier.fillMaxWidth(), leading = Icons.Filled.PlayArrow)
                 }
             }
         }
@@ -316,11 +322,20 @@ internal fun SettingsTerminalPage(t: UiText) {
         // ── 终端软键 ──
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             termKeys.forEach { (k, label) ->
-                ToolChip(label) { terminalKey(k) }
+                val keyIcon = when (k) {
+                    "clear" -> Icons.Filled.Clear
+                    "interrupt" -> Icons.Filled.Refresh
+                    "up" -> Icons.Filled.KeyboardArrowUp
+                    "down" -> Icons.Filled.KeyboardArrowDown
+                    else -> null
+                }
+                ToolChip(label, icon = keyIcon) { terminalKey(k) }
             }
         }
 
         // ── 快捷命令 ──
+        // 注：快捷命令 chip 混合了 shell 原生命令（ls/pwd/id/uname/clear）与友好名（工作区/磁盘/进程），
+        // 建议后续统一为中文短动词；此处不擅改文案、不加图标（避免与页面终端语义重复）。
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             quick.forEach { (c, label) ->
                 ToolChip(label, enabled = sessionActive) { send(c) }

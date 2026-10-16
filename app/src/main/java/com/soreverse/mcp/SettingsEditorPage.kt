@@ -63,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -206,6 +207,7 @@ private fun outlineOf(src: String, m: CodeHighlighter.Lang): List<OutlineItem> {
 @Composable
 private fun MiniAction(
     label: String,
+    icon: ImageVector? = null,
     enabled: Boolean = true,
     accent: Boolean = false,
     onClick: () -> Unit,
@@ -229,14 +231,27 @@ private fun MiniAction(
             .padding(horizontal = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label,
-            fontSize = AppText.label,
-            color = fgc,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = fgc,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+            Text(
+                label,
+                fontSize = AppText.label,
+                color = fgc,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1224,6 +1239,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         val cmd = EditorCommands.byId(id) ?: return@items
                         MiniAction(
                             label = cmd.label(zh),
+                            icon = cmd.icon,
                             enabled = cmd.enabled(host),
                             accent = cmd.isOn(host),
                         ) { cmd.perform(host) }
@@ -1261,6 +1277,16 @@ internal fun SettingsEditorPage(t: UiText) {
                         cmds.take(6).forEach { cmd ->
                             DropdownMenuItem(
                                 text = { Text(cmd.label(zh), color = if (cmd.enabled(host)) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) },
+                                leadingIcon = if (cmd.icon != null) {
+                                    {
+                                        Icon(
+                                            imageVector = cmd.icon!!,
+                                            contentDescription = null,
+                                            tint = if (cmd.enabled(host)) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                } else null,
                                 enabled = cmd.enabled(host),
                                 onClick = { showMoreMenu = false; cmd.perform(host) },
                             )
@@ -1633,6 +1659,14 @@ internal fun SettingsEditorPage(t: UiText) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
+                                if (cmd.icon != null) {
+                                    Icon(
+                                        imageVector = cmd.icon!!,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(13.dp),
+                                    )
+                                }
                                 Text(cmd.label(zh), fontSize = AppText.label, color = MaterialTheme.colorScheme.primary)
                                 Text("←", fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { EditorCommands.moveInToolbar(context, id, -1); toolbarVersion++ }.padding(horizontal = 3.dp))
                                 Text("→", fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { EditorCommands.moveInToolbar(context, id, 1); toolbarVersion++ }.padding(horizontal = 3.dp))
@@ -1666,6 +1700,14 @@ internal fun SettingsEditorPage(t: UiText) {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
+                                    if (cmd.icon != null) {
+                                        Icon(
+                                            imageVector = cmd.icon!!,
+                                            contentDescription = null,
+                                            tint = if (cmd.enabled(host)) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
                                     Text(
                                         cmd.label(zh),
                                         style = MaterialTheme.typography.bodySmall,

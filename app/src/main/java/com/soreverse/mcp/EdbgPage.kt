@@ -15,11 +15,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -239,8 +241,8 @@ internal fun EdbgPage(t: UiText) {
         // ── 分区 Tab ──
         item {
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ToolChip(if (zh) "调试" else "Debug", selected = tab == "session") { tab = "session" }
-                ToolChip(if (zh) "反编译" else "Decompile", selected = tab == "decompile") { tab = "decompile" }
+                ToolChip(if (zh) "调试" else "Debug", icon = Icons.Default.BugReport, selected = tab == "session") { tab = "session" }
+                ToolChip(if (zh) "反编译" else "Decompile", icon = Icons.Default.Code, selected = tab == "decompile") { tab = "decompile" }
             }
         }
 
@@ -267,7 +269,7 @@ internal fun EdbgPage(t: UiText) {
                     )
                 }
                 item {
-                    PrimaryActionButton(if (zh) "返回类列表" else "Back to list", { classSource = "" }, Modifier.fillMaxWidth())
+                    PrimaryActionButton(if (zh) "返回类列表" else "Back to list", { classSource = "" }, Modifier.fillMaxWidth(), leading = Icons.AutoMirrored.Filled.ArrowBack)
                 }
             } else if (classList.isNotEmpty()) {
                 item {
@@ -324,6 +326,7 @@ internal fun EdbgPage(t: UiText) {
                                 if (zh) "停止调试" else "Stop",
                                 { confirmStop = true },
                                 Modifier.fillMaxWidth(),
+                                leading = Icons.Default.Stop,
                                 container = MaterialTheme.colorScheme.error,
                             )
                             if (confirmStop) {
@@ -351,6 +354,8 @@ internal fun EdbgPage(t: UiText) {
             }
             item {
                 GlassGroup(title = if (zh) "快捷命令" else "Quick commands") {
+                    // 注：以下 chip 文案为原始调试器命令代号（c/s/finish/run/bt/hbreak/watch 等），
+                    // 用户难以理解，建议后续改为“继续/单步/执行到返回/运行/回溯栈”等中文短动词；此处不擅改文案。
                     FlowRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("c", "s", "finish", "run", "bt").forEach { quick ->
                             ToolChip(quick, enabled = sessionActive && !busy) { if (sessionActive) { cmdInput = quick; runAction("cmd") } }

@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -210,6 +211,7 @@ internal fun TypeChip(text: String, color: Color = MaterialTheme.colorScheme.pri
 @Composable
 internal fun ToolChip(
     label: String,
+    icon: ImageVector? = null,
     selected: Boolean = false,
     enabled: Boolean = true,
     accent: Boolean = false,
@@ -219,6 +221,7 @@ internal fun ToolChip(
         selected = selected || accent,
         onClick = onClick,
         enabled = enabled,
+        leadingIcon = icon?.let { { Icon(it, null, modifier = Modifier.size(16.dp)) } },
         label = {
             Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
         },

@@ -19,7 +19,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -246,7 +250,14 @@ internal fun RizinPage(t: UiText) {
         ) {
             RzTab.values().forEach { tt ->
                 val enabled = workspaceId.isNotBlank() || tt == RzTab.Overview
-                ToolChip(if (zh) tt.zhName else tt.enName, selected = tab == tt, enabled = enabled) { tab = tt; if (tt == RzTab.Strings) loadStringsIfNeeded() }
+                val tabIcon = when (tt) {
+                    RzTab.Overview -> Icons.Filled.Info
+                    RzTab.Functions -> Icons.Filled.Code
+                    RzTab.Strings -> Icons.Filled.Description
+                    RzTab.Disasm -> Icons.Filled.Memory
+                    RzTab.Command -> Icons.Filled.Terminal
+                }
+                ToolChip(if (zh) tt.zhName else tt.enName, icon = tabIcon, selected = tab == tt, enabled = enabled) { tab = tt; if (tt == RzTab.Strings) loadStringsIfNeeded() }
             }
         }
 
@@ -439,9 +450,11 @@ private fun RzCommandTab(
                 Icon(Icons.AutoMirrored.Filled.Send, "发送命令", tint = MaterialTheme.colorScheme.primary)
             }
         }
+        // 注：以下 chip 文案为 rz 原生命令代号（afl/izz/iI/iS/ii），可读性差；
+        // 建议后续为每条命令配中文别名（如 afl -> 函数列表），此处仅统一补终端图标。
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("afl", "izz", "iI", "iS", "ii").forEach { c ->
-                ToolChip(c, enabled = enabled) { onValue(c) }
+                ToolChip(c, icon = Icons.Filled.Terminal, enabled = enabled) { onValue(c) }
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {

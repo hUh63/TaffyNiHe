@@ -1,3 +1,50 @@
+# TaffyNiHe v1.3.100（全局 Material 3 化：所有页面统一到官方组件）
+
+用户反馈「自研的交互太烂、不符合人类审美」—— 根因是**页面里到处是自绘控件**
+（自绘胶囊 chip、自绘 Surface 小按钮、自绘按钮行、自绘列表行、自绘卡片）。
+这一版把**整个 App 的 UI 基座换成 Material 3 官方组件**，所有页面随之统一。
+
+## 一、UI 基座全量 M3 化（一处改动，全局页面生效）
+
+| 基座组件（原本自绘） | 现在实现 | 影响范围 |
+|---|---|---|
+| `GlassGroup` / `AppCard` | **`Card`**（圆角 + 0dp elevation + 1dp 描边） | 24 个文件 · 105 处 |
+| `NavRow` | **`ListItem`** | 8 个文件 · 29 处 |
+| `ToggleRow` | **`ListItem` + `Switch`**（M3 默认配色） | 10 个文件 · 39 处 |
+| `CardRow` / `DataRow` | **`ListItem`** | 16 个文件 · 27 处 |
+| `ScreenHeader` | **`TopAppBar`** | 5 个文件 |
+| `ToolPageScaffold` | **`Scaffold` + `TopAppBar`** | 3 个文件 · 22 处 |
+| `ToolChip` | **`FilterChip`** | 13 个文件 · 41 处 |
+| `TypeChip` | **`AssistChip`** | 10 个文件 · 15 处 |
+| `GroupDivider` | **`HorizontalDivider`** | 20 个文件 · 150 处 |
+
+## 二、分析页（最大单文件）容器/按钮换芯
+`ResultCard` / `KeyValueCard` / `ExbinResultCard` → **`Card`**；
+`BigActionButton` → **`Button`**；
+`TonalMiniButton` / `ExbinFunctionButton` → **`FilledTonalButton` / `OutlinedButton`**；
+`ExbinCheckRow` → **`Checkbox`**。
+
+## 三、首页 Command Hub
+`IosGroup` / 工作台宫格 → **`Card`**；`IosRow` → **`ListItem`**；细分隔线 → **`HorizontalDivider`**。
+
+## 四、底部导航
+已是 M3 **`NavigationBar`** + `NavigationBarItem`（核对确认）。
+
+## 五、新增《Exbin UI 规范》文档（docs/exbin-ui-spec.md）
+把骨架（`TopAppBar` + `TabRow` + 内容）、组件选型表（什么场景用哪个 M3 组件）、
+尺寸（56dp 工具栏 / 12dp 行距 / 10–12dp 卡片圆角）、配色（只用 M3 token）、
+交互原则（一个动作一个触发点 / 点击=主行为 / 重活给主按钮）固化为基线，
+后续所有页面按它对齐。
+
+> 编辑器 / 日志 / 控制流画布 / 终端这类**专业视图**保留其专用自绘界面
+> （文本编辑的 gutter、日志的等宽流、画布的缩放平移），因为它们本就没有通用的 M3 对应物。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.99...v1.3.100
+
+---
+
 # TaffyNiHe v1.3.99（分析页整体换用 Material 3 官方组件，去掉自研控件）
 
 之前分析页的控件是**自绘**的（自绘胶囊 chip、自绘 Surface 小按钮、自绘按钮行、自绘列表行），观感与交互都和

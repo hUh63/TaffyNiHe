@@ -1,3 +1,28 @@
+# TaffyNiHe v1.3.104（工具大输出落盘）
+
+## 大工具输出不再"一断之了"（借鉴太墟）
+
+以前当工具返回的内容超过 `toolResultMaxChars` 时，服务端直接回一个
+`RESULT_TRUNCATED` **错误**，调用方除了前 N 个字符**什么都拿不到** —— 大反汇编、
+大函数列表、大 ELF 概览这类结果基本等于白跑。
+
+现在改为**落盘 + 预览 + 路径**：
+
+- 完整结果写入 `filesDir/tool-results/result-<时间戳>.json`（自动保留最近 20 份）
+- 响应体变为成功结构，带：
+  - `savedTo`：落盘文件的绝对路径
+  - `readHint`：提示用 `taffy_file_read(path=...)` 读取全文
+  - `preview`：前 `toolResultMaxChars` 个字符（AI 可先看开头判断要不要取全文）
+  - `originalLength` / `shownLength` / `truncated`
+
+这样"结果太大"从一个失败变成一个**可继续的动作**。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.103...v1.3.104
+
+---
+
 # TaffyNiHe v1.3.103（内置 rz-ghidra：伪 C 的 Ghidra 反编译器后端终于可用）
 
 ## 内置 rz-ghidra 反编译器插件（libcore_ghidra.so）

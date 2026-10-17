@@ -362,8 +362,15 @@ private enum class EditorPanel { CONSOLE, FILES, OUTLINE }
  */
 @Composable
 internal fun SettingsEditorPage(t: UiText) {
-    CodeHighlighter.useDarkPalette = androidx.compose.foundation.isSystemInDarkTheme()
-    val context = LocalContext.current.applicationContext
+    val editorContext = LocalContext.current.applicationContext
+    // 高亮配色必须跟 App 实际主题走：设置里选了深色而系统是浅色时，
+    // 用系统值会在深色编辑底上取到浅色关键字，代码几乎看不清。
+    CodeHighlighter.useDarkPalette = when (SettingsStore(editorContext).themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> androidx.compose.foundation.isSystemInDarkTheme()
+    }
+    val context = editorContext
     val scope = rememberCoroutineScope()
     val zh = t.zh
     val marker = "__TAFFY_END__"

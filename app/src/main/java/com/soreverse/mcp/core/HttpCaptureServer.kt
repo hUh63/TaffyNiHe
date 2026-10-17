@@ -1,6 +1,7 @@
 package com.soreverse.mcp.core
 
 import java.io.OutputStream
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.text.SimpleDateFormat
@@ -194,7 +195,11 @@ class HttpCaptureServer(
                 val port = if (hp > 0) hostPort.substring(hp + 1).toIntOrNull() ?: 443 else 443
                 // 跳过 CONNECT 的 headers
                 while (true) { val l = readLineRaw(clientIn) ?: break; if (l.isEmpty()) break }
-                val upstream = try { Socket(host, port) } catch (e: Exception) {
+                // 必须显式 connect 超时：Socket(host,port) 在目标黑洞时能阻塞数分钟，
+                // 期间该代理连接一直挂着，后续请求全部排队无响应。
+                val upstream = try {
+                    Socket().apply { connect(InetSocketAddress(host, port), 10_000) }
+                } catch (e: Exception) {
                     runCatching { client.getOutputStream().write("HTTP/1.1 502 Bad Gateway\r\n\r\n".toByteArray()) }
                     return
                 }
@@ -256,7 +261,9 @@ class HttpCaptureServer(
                 isH2c -> "H2C"
                 else -> method
             }
-            val upstream = try { Socket(host, port) } catch (e: Exception) { return }
+            val upstream = try {
+                Socket().apply { connect(InetSocketAddress(host, port), 10_000) }
+            } catch (e: Exception) { return }
             upstream.soTimeout = 30000
             val upOut = upstream.getOutputStream()
             val sb = StringBuilder()

@@ -107,6 +107,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -354,14 +355,16 @@ private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeC
     val updateManager = remember { GitHubUpdateManager(context.applicationContext) }
     var availableRelease by remember { mutableStateOf<GitHubRelease?>(null) }
     var showUpdatePrompt by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf(MainTab.Home) }
+    // App 未声明 configChanges，屏幕旋转 / 深色切换 / 字体缩放都会重建 Activity，
+    // 用 rememberSaveable 保住当前 tab 与设置子页，不要每次都弹回首页。
+    var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
     var editorMounted by remember { mutableStateOf(false) }
     // 编辑器有未保存内容时，切换底部导航前的二次确认目标页（null = 无待确认）
     var pendingLeave by remember { mutableStateOf<MainTab?>(null) }
     // 「任务」页继续历史任务：正在恢复的任务 id（按钮转圈）+ 恢复失败原因（弹窗展示）
     var resumingTaskId by remember { mutableStateOf<String?>(null) }
     var taskResumeError by remember { mutableStateOf<String?>(null) }
-    var settingsDest by remember { mutableStateOf(SettingsDest.Root) }
+    var settingsDest by rememberSaveable { mutableStateOf(SettingsDest.Root) }
     var language by remember { mutableStateOf(settings.language) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     var accentColor by remember { mutableStateOf(settings.accentColor) }

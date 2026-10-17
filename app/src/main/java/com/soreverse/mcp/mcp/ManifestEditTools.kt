@@ -248,22 +248,14 @@ object ManifestEditTools {
                     return
                 }
             }
-            // 降级方法2: 重建 ZIP, 保留原 AXML 字节(只改文本表示, 实际 AXML 不变)
-            // 注意: 这意味着 manifest 文本修改不会真正生效, 需要用 APKEditor 回编
-            val tempApk = File.createTempFile("apk_manifest_", ".apk", file.parentFile)
-            java.util.zip.ZipFile(file).use { zf ->
-                java.util.zip.ZipOutputStream(tempApk.outputStream()).use { zos ->
-                    zf.entries().toList().forEach { e ->
-                        zos.putNextEntry(java.util.zip.ZipEntry(e.name))
-                        zf.getInputStream(e).use { it.copyTo(zos) }
-                        zos.closeEntry()
-                    }
-                }
-            }
-            // 标记需要回编
-            file.copyTo(File(file.parentFile, "${file.nameWithoutExtension}.bak.apk"), overwrite = true)
-            tempApk.copyTo(file, overwrite = true)
-            tempApk.delete()
+            // 旧实现的"降级方法2"只是原样重打包 ZIP（AXML 字节没变），
+            // 却覆盖了原 APK 并让上层返回 success=true —— 用户看到"修改成功"，实际零改动。
+            // 这里改为明确失败：宁可报错，也不产出"看起来改好了"的假结果。
+            throw IllegalStateException(
+                "无法写入 AXML：当前 ARSCLib 版本没有可用的 manifest setter，" +
+                    "文本级修改无法编码回二进制 XML。原 APK 未被修改；" +
+                    "请改用 taffy_apk_decode + 手工改 AndroidManifest.xml + taffy_apk_rebuild 流程。"
+            )
         }
     }
 

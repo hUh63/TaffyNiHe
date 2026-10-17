@@ -1,5 +1,6 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -211,8 +213,10 @@ internal fun AgentRunView(
         Spacer(Modifier.height(6.dp))
 
         // ── 动作行 ──
+        // 最多同时出现 5 个动作（开始/中止/继续上次/历史/预算），窄屏会被挤出屏幕且无法点到，
+        // 这里允许横向滚动，保证每个动作都可达。
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

@@ -894,15 +894,38 @@ $historyRows
         val payloadText = payload.toString().replace("\\/", "/")
         val cap = settings.toolResultMaxChars
         val rendered = if (cap > 0 && payloadText.length > cap) {
-            err("RESULT_TRUNCATED", "Tool result exceeded configured character limit", "limit", cap)
+            // 大工具输出「落盘 + 预览 + 路径」（借鉴太墟的做法）：
+            // 旧实现直接返回 RESULT_TRUNCATED 错误，调用方除了前 cap 个字符什么都拿不到；
+            // 现在把完整结果写到 filesDir/tool-results/ 并回传 savedTo，
+            // 客户端可用 taffy_file_read(path=...) 按需读取全文。
+            val savedPath = runCatching { spillToolResult(payloadText) }.getOrNull()
+            JSONObject()
+                .put("ok", true)
                 .put("truncated", true)
+                .put("reason", "tool result exceeds " + cap + " chars; full payload spilled to disk")
                 .put("originalLength", payloadText.length)
+                .put("shownLength", cap)
+                .put("savedTo", savedPath ?: JSONObject.NULL)
+                .put(
+                    "readHint",
+                    if (savedPath != null) "完整结果已落盘：用 taffy_file_read 传入 path=" + savedPath + " 读取；也可缩小查询范围（limit/offset/filter）"
+                    else "落盘失败，仅返回预览",
+                )
                 .put("preview", payloadText.substring(0, cap))
                 .toString()
         } else payloadText
         return JSONObject()
             .put("isError", (!payload.optBoolean("ok", true)) || payload.has("error"))
             .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", rendered)))
+    }
+
+    /** 把超大的工具结果落盘，返回绝对路径（保留最近 20 份，避免无限增长）。 */
+    private fun spillToolResult(text: String): String {
+        val dir = java.io.File(context.filesDir, "tool-results").apply { mkdirs() }
+        dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(20)?.forEach { it.delete() }
+        val f = java.io.File(dir, "result-" + System.currentTimeMillis() + ".json")
+        f.writeText(text)
+        return f.absolutePath
     }
 
     private fun io.ktor.server.application.ApplicationCall.authorized(): Boolean {

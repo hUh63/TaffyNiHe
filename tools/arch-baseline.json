@@ -13,7 +13,8 @@
     "com.soreverse.mcp -> com.soreverse.mcp.mcp -> com.soreverse.mcp",
     "com.soreverse.mcp -> com.soreverse.mcp.mcp -> com.soreverse.mcp.core -> com.soreverse.mcp",
     "com.soreverse.mcp -> com.soreverse.mcp.service -> com.soreverse.mcp",
-    "com.soreverse.mcp -> com.soreverse.mcp.service -> com.soreverse.mcp.core -> com.soreverse.mcp"
+    "com.soreverse.mcp -> com.soreverse.mcp.service -> com.soreverse.mcp.core -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.ui -> com.soreverse.mcp.core -> com.soreverse.mcp"
   ],
   "allowedLayerViolations": [
     "com.soreverse.mcp.core -> com.soreverse.mcp",

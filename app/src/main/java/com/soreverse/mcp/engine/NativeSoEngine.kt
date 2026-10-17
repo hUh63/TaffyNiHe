@@ -134,6 +134,10 @@ class NativeSoEngine(context: Context) {
     fun jniCapabilities(): JSONObject = runtime.jniCapabilities()
     fun importTrace(workspaceId: String, editSessionId: String = ""): JSONObject = runtime.importTrace(workspaceId, editSessionId)
     fun importCapabilities(): JSONObject = runtime.importCapabilities()
+    // —— 静态指纹三件套（加固指纹 / 混淆度 / 反调试点）——
+    fun packerScan(workspaceId: String, editSessionId: String = ""): JSONObject = runtime.packerScan(workspaceId, editSessionId)
+    fun obfuscScan(workspaceId: String, editSessionId: String = "", limit: Int = 40): JSONObject = runtime.obfuscScan(workspaceId, editSessionId, limit)
+    fun antiDebugScan(workspaceId: String, editSessionId: String = ""): JSONObject = runtime.antiDebugScan(workspaceId, editSessionId)
 
 }
 

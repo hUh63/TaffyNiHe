@@ -1202,6 +1202,8 @@ object ToolCatalog {
         *SurfaceTool.ALL.toTypedArray(),
         // 塔菲逆核: SO 静态深挖三件套(加密字符串 / JNI 注册表 / 导入归因)
         *DeepReverseTools.ALL.toTypedArray(),
+        // 塔菲逆核: SO 静态指纹三件套(加固指纹 / 混淆度 / 反调试点)
+        *StaticFingerprintTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

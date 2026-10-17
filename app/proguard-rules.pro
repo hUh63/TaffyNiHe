@@ -4,6 +4,12 @@
 # 而静默产出空结果（AGP 9.4.1 的 R8 下曾复现）。
 -keep class com.soreverse.mcp.core.BackupCrypto { *; }
 
+# 完整性守卫 / 自身产物保护：R8 的水平合并会把它们并进相邻类，mapping 里就不再是独立条目
+# （出问题无法按类名定位崩溃堆栈），也会让按类/方法名做的完整性校验落空。
+-keep class com.soreverse.mcp.core.IntegrityGuard { *; }
+-keep class com.soreverse.mcp.core.SelfArtifactGuard { *; }
+-keep class com.soreverse.mcp.nativecore.NativeProbe { *; }
+
 -keep class com.soreverse.mcp.nativecore.RizinNativeEngine {
     *;
 }

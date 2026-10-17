@@ -463,12 +463,23 @@ class GitHubUpdateManager(private val context: Context) {
 
     private fun selectApk(assets: List<JSONObject>): JSONObject? {
         val apks = assets.filter { it.optString("name").endsWith(".apk", true) }
-        val abiNames = Build.SUPPORTED_ABIS.flatMap { abi ->
-            listOf(abi.lowercase(), abi.lowercase().replace('-', '_'))
+        if (apks.isEmpty()) return null
+        // 按设备 ABI 优先级挑（SUPPORTED_ABIS 本身按优先级排序），先命中的优先。
+        // 两处刻意避开旧实现的坑：
+        //  1) 旧代码把所有 ABI 名铺平后对资产列表取 firstOrNull —— 变成「资产列表里第一个
+        //     碰巧匹配任意 ABI 的包」，资产上传顺序会把设备真正优先的 ABI 压掉（例如设备
+        //     首选 arm64-v8a，却下到排在更前面的 armeabi-v7a）；上游同名缺陷见其 release note。
+        //  2) 旧代码用子串包含 —— "x86" 会命中 "x86_64.apk"。改用「-<abi>.」整段匹配。
+        for (abi in Build.SUPPORTED_ABIS) {
+            val key = abi.lowercase()
+            for (asset in apks) {
+                val name = asset.optString("name").lowercase()
+                val hit = name.contains("-$key.") || name.contains("_$key.") ||
+                    name.endsWith("$key.apk") || name.contains("-$key-") || name.contains("_$key-")
+                if (hit) return asset
+            }
         }
-        return apks.firstOrNull { asset -> abiNames.any { it in asset.optString("name").lowercase() } }
-            ?: apks.firstOrNull { "universal" in it.optString("name").lowercase() }
-            ?: apks.singleOrNull()
+        return apks.firstOrNull { "universal" in it.optString("name").lowercase() } ?: apks.singleOrNull()
     }
 
     // 语义化版本比较: 逐段按数字比较, 缺失段视为 0。a>b 返回 1, a<b 返回 -1, 相等返回 0。

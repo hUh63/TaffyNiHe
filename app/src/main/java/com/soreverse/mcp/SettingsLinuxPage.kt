@@ -36,6 +36,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.soreverse.mcp.core.InjectionProbe
 import com.soreverse.mcp.core.LinuxRootfs
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.RootShell
@@ -65,6 +66,7 @@ internal fun SettingsLinuxPage(t: UiText) {
     var pendingRemove by remember { mutableStateOf<String?>(null) }
     val clipboard = LocalClipboardManager.current
     var diag by remember { mutableStateOf<List<LinuxRootfs.DiagItem>>(emptyList()) }
+    var injFindings by remember { mutableStateOf<List<InjectionProbe.Finding>>(emptyList()) }
 
     val distros = remember(refreshTick) {
         LinuxRootfs.distros(context).map { d -> Triple(d.name, d.pkgMgr, LinuxRootfs.installed(context, d.name)) }
@@ -204,6 +206,54 @@ internal fun SettingsLinuxPage(t: UiText) {
                             clipboard.setText(
                                 AnnotatedString(diag.joinToString("\n") { "${it.level.uppercase()}\t${it.title}\t${it.detail}" })
                             )
+                        }
+                    },
+                    Modifier.weight(1f),
+                )
+            }
+        }
+
+        GlassGroup(
+            title = if (zh) "注入痕迹探针（只读）" else "Injection Trace Probe (read-only)",
+            footer = if (zh) "仅记录不阻断：结果不参与完整性门禁、不影响任何功能。用于自查本包是否被 LSPatch 二次打包或被注入 LSPosed" else "Record only, never blocks: not part of the integrity gate",
+        ) {
+            if (injFindings.isEmpty()) {
+                InlineHint(if (zh) "点「扫描」读取 /proc/self/maps、尝试加载框架类、检查本包 ZIP 条目（全部只读、低成本）" else "Tap Scan for a read-only, low-cost check")
+            } else {
+                injFindings.forEachIndexed { i, f ->
+                    if (i > 0) GroupDivider()
+                    DataRow(
+                        title = f.kind,
+                        subtitle = f.detail,
+                        trailingText = if (f.severity == "warn") "⚠️" else "ℹ️",
+                        onClick = { },
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PrimaryActionButton(
+                    if (zh) "扫描注入痕迹" else "Scan",
+                    {
+                        if (busy == null) {
+                            busy = "injection"
+                            scope.launch {
+                                injFindings = InjectionProbe.detectAsync(context)
+                                busy = null
+                            }
+                        }
+                    },
+                    Modifier.weight(1f),
+                    leading = Icons.Default.BugReport,
+                )
+                SecondaryActionButton(
+                    if (zh) "复制结果" else "Copy",
+                    {
+                        if (injFindings.isNotEmpty()) {
+                            val lines = injFindings.joinToString("\n") { "[${it.severity}] ${it.kind} — ${it.detail}" }
+                            clipboard.setText(AnnotatedString(lines + "\n（诊断信息，不参与完整性判定，也不阻断功能）"))
                         }
                     },
                     Modifier.weight(1f),

@@ -1,3 +1,64 @@
+# TaffyNiHe v1.3.109（运行恢复 · MCP 传输层保护 · 统一插件平台）
+
+上一版把编排做出来了，这一版补的是「跑起来之后」的三件事：中断了能不能接上、
+超大响应会不会把客户端弄崩、插件到底装成了什么样。
+
+## 一、运行恢复（断点续跑）
+
+以前进程被杀，那次编排就只能从头重跑。
+
+- **消息历史逐调用落盘**：引擎每执行完一个工具调用就回调一次检查点，
+  `filesDir/agent-runs/<runId>/nodes/<nodeId>.history.json` 里存完整的
+  `role + parts(text/reasoning/tool 四元组)`；写盘走 `tmp + rename`，被杀不会留半截 JSON
+- **恢复不重放已完成的部分**：续跑时如果最后一轮 assistant 还有没跑完的工具调用，
+  先补完它们再请求模型——否则会把同一个请求重发给模型，导致重复调用
+- **节点级跳过**：`resume` 只跳过 `status == ok` 的节点，失败/超时/预算跳过的一律重跑。
+  续跑的意义是把没做完的做完，不是把失败结果固化下来
+- **入口**：`taffy_agent_run action=resume runId=...`；编排页在运行结束后出现「继续上次」按钮，
+  历史列表里点开任意一次也能续跑
+
+> 边界说清楚：工具调用是逐条落盘的，所以「已经执行完的只读工具」不会重跑；但如果在
+> **落盘之前**被杀，那一条会重放一次。子代理的角色白名单里刻意没有写入类工具，正是为此。
+
+## 二、MCP 传输层保护 + stdio 桥
+
+- **单条响应尺寸闸门**：`/mcp`、SSE、legacy 三条通道统一检查，单条响应超过上限
+  （默认 150 万字符，可由 `toolResultMaxChars` 抬高）时把整条响应落盘，
+  只回一条**结构合法**的 JSON-RPC 摘要 + `x-taffy-spilled(savedTo/originalLength/cap)`。
+  工具级落盘默认是关的，这一层是兜底——否则某个工具直接吐几 MB，客户端解析就崩了
+- **stdio 桥**（`assets/mcp/stdio_bridge.py`，设置 → 服务 → 「导出 stdio 桥」）：
+  让只支持 stdio 的 MCP 宿主（Claude Desktop 等）用上塔菲。桥跑在**电脑侧**，
+  把 stdin 的 JSON-RPC 行转发到手机 HTTP 端点，自动识别 SSE 的 `data:` 行，
+  单条响应超阈值同样落盘，日志只走 stderr。
+
+  ```
+  python3 stdio_bridge.py --url http://127.0.0.1:8765/mcp
+  ```
+
+  为什么桥不在 APK 里：Android 应用没有可被外部连接的 stdin/stdout，桥放电脑侧是唯一稳的形态。
+
+## 三、统一插件平台
+
+以前插件逻辑全在设置页里，UI 与实现绑死，MCP 侧完全看不到插件。
+
+- **`core/PluginManager`** 成为单一事实来源：
+  - `list` 扫 `filesDir/plugins`，解析 `meta.json` → 统一清单（id/名称/版本/入口/权限/设置项数/问题列表）
+  - `diagnose` 健康统计 + 逐条 issue + 权限直方图：缺入口、版本不兼容、meta 损坏、权限未声明，一次列全
+  - `checkRunAllowed` 运行前硬校验；`recordRun`/`audit` 记录每次运行的成败与摘要（保留 40 条）
+- **权限模型**：`meta.json` 可声明 `permissions: ["tools:taffy_so_*", "files:read", "net:outbound"]`，
+  匹配支持通配；**未声明一律不放行工具调用**（老插件按只读文件对待，只提示不阻断）
+- **`taffy_plugin`**（action=list/diagnose/check/audit）：只读，不安装不卸载——装什么由用户决定
+- 设置页插件 tab：运行前自动校验、运行后自动写审计、新增「诊断」按钮把结论直接打到输出区
+
+## 四、单测
+
+- `PluginPlatformTest`：版本比较（数字而非字典序、缺失段按 0 视为相等）、
+  权限通配与**默认拒绝**、清单序列化
+- `AgentOrchestrationTest` 扩到 14 例：历史编解码往返（未完成的调用必须保持未完成）、
+  畸形条目跳过、`run.json` 计划与结果反向解析
+
+---
+
 # TaffyNiHe v1.3.108（多智能体编排 · 状态栏避让修复）
 
 这一版加的是**编排**，不是又塞一个万能 agent。

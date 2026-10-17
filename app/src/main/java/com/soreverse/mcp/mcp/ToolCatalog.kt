@@ -1204,6 +1204,8 @@ object ToolCatalog {
         *DeepReverseTools.ALL.toTypedArray(),
         // 塔菲逆核: SO 静态指纹三件套(加固指纹 / 混淆度 / 反调试点)
         *StaticFingerprintTools.ALL.toTypedArray(),
+        // 塔菲逆核: 多智能体编排网关(role 白名单 + DAG 调度 + 证据汇总，异步 runId)
+        *com.soreverse.mcp.mcp.agent.AgentApiTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

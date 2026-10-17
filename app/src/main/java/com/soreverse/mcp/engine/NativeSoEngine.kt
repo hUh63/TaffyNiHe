@@ -124,5 +124,16 @@ class NativeSoEngine(context: Context) {
     fun emulate(workspaceId: String, editSessionId: String, symbolName: String, args: JSONArray, trace: Boolean): JSONObject = runtime.emulate(workspaceId, editSessionId, symbolName, args, trace)
     fun dumpMemory(workspaceId: String, editSessionId: String, addr: Long, size: Int): JSONObject = runtime.dumpMemory(workspaceId, editSessionId, addr, size)
 
+    // —— 静态深挖三件套（加密字符串 / JNI 注册表 / 导入归因）——
+    fun strDecryptScan(workspaceId: String, editSessionId: String = "", limit: Int = 40): JSONObject = runtime.strDecryptScan(workspaceId, editSessionId, limit)
+    fun strDecrypt(workspaceId: String, editSessionId: String = "", locator: String, length: Int = 32, keyHex: String = ""): JSONObject = runtime.strDecrypt(workspaceId, editSessionId, locator, length, keyHex)
+    fun strDecryptHints(): JSONObject = runtime.strDecryptHints()
+    fun strDecryptCapabilities(): JSONObject = runtime.strDecryptCapabilities()
+    fun jniScan(workspaceId: String, editSessionId: String = ""): JSONObject = runtime.jniScan(workspaceId, editSessionId)
+    fun jniResolve(workspaceId: String, editSessionId: String = "", query: String): JSONObject = runtime.jniResolve(workspaceId, editSessionId, query)
+    fun jniCapabilities(): JSONObject = runtime.jniCapabilities()
+    fun importTrace(workspaceId: String, editSessionId: String = ""): JSONObject = runtime.importTrace(workspaceId, editSessionId)
+    fun importCapabilities(): JSONObject = runtime.importCapabilities()
+
 }
 

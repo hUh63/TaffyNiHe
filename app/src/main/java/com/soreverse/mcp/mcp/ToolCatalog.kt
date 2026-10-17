@@ -1200,6 +1200,8 @@ object ToolCatalog {
         *ScriptTool.ALL.toTypedArray(),
         // 塔菲逆核: A2UI 声明式界面网关(模型返回界面描述，客户端渲染原生 Compose 组件)
         *SurfaceTool.ALL.toTypedArray(),
+        // 塔菲逆核: SO 静态深挖三件套(加密字符串 / JNI 注册表 / 导入归因)
+        *DeepReverseTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

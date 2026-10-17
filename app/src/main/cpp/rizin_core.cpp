@@ -862,8 +862,11 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzAnalyze(
     rz_core_analysis_all(core);
 
     RzList* funcs = rz_analysis_function_list(core->analysis);
+    // rz_analysis_function_list() 返回的是 RzAnalysis 内部函数链表(analysis->fcns)的
+    // 借用引用，不是新分配的链表。在这里 free 会留下悬垂指针，随后 cleanupCore ->
+    // rz_core_free -> rz_analysis_free 对同一链表二次释放，Scudo 报
+    // "corrupted chunk header" 后 SIGABRT（应用莫名退出）。只读长度，不要 free。
     int funcCount = funcs ? rz_list_length(funcs) : 0;
-    rz_list_free(funcs);
 
     char b[256];
     snprintf(b, sizeof(b), "{\"ok\":true,\"functions\":%d,\"size\":%zu}", funcCount, buf.size());

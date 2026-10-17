@@ -1206,6 +1206,8 @@ object ToolCatalog {
         *StaticFingerprintTools.ALL.toTypedArray(),
         // 塔菲逆核: 多智能体编排网关(role 白名单 + DAG 调度 + 证据汇总，异步 runId)
         *com.soreverse.mcp.mcp.agent.AgentApiTool.ALL.toTypedArray(),
+        // 塔菲逆核: 统一插件平台(清单/诊断/运行校验/审计，只读)
+        *PluginTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

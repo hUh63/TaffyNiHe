@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
@@ -55,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import com.soreverse.mcp.core.PluginManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -342,6 +344,11 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
 
     /** 运行插件: plugin_runner.py 注入 taffy_ext + TAFFY_* 环境。入口文件由 meta.json entry 决定（默认 plugin.py）。 */
     fun runPlugin(dir: File) {
+        // 统一插件平台的运行前校验：缺入口 / 版本不兼容直接拦下，不再等运行到一半才报错
+        PluginManager.checkRunAllowed(context, dir.name)?.let {
+            appendOut("[不可运行] $it\n")
+            return
+        }
         val runner = PythonRuntime.supportScript(context, "plugin_runner.py")
         val cli = PythonRuntime.supportScript(context, "taffy_cli.py")
         if (runner == null || cli == null) { appendOut("[运行器不可用]\n"); return }
@@ -380,11 +387,24 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                 }
                 out
             }
-            val r = withContext(Dispatchers.IO) {
-                PythonRuntime.run(context, "", args = listOf(runner, pluginPy.absolutePath), timeoutSec = 180, extraEnv = env)
+            val r = runCatching {
+                withContext(Dispatchers.IO) {
+                    PythonRuntime.run(context, "", args = listOf(runner, pluginPy.absolutePath), timeoutSec = 180, extraEnv = env)
+                }
             }
             running = false
-            appendOut(r.output.ifBlank { "(无输出)\n" })
+            val out = r.getOrNull()?.output.orEmpty()
+            appendOut(
+                out.ifBlank {
+                    r.exceptionOrNull()?.let { "[运行失败] ${it.message}\n" } ?: "(无输出)\n"
+                }
+            )
+            PluginManager.recordRun(
+                context,
+                dir.name,
+                r.isSuccess,
+                out.take(200).ifBlank { r.exceptionOrNull()?.message.orEmpty() },
+            )
         }
     }
 
@@ -553,6 +573,44 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                         importLauncher.launch(arrayOf("*/*", "application/zip", "application/vnd.android.package-archive", "text/x-python"))
                     }
                     ExtBtn(if (zh) "刷新" else "Refresh", icon = Icons.Default.Refresh) { refresh() }
+                    ExtBtn(if (zh) "诊断" else "Diagnose", icon = Icons.Default.Build) {
+                        val d = PluginManager.diagnose(context)
+                        val sb = StringBuilder()
+                        sb.append(
+                            if (zh) "插件诊断：共 ${d.optInt("total")} 个，健康 ${d.optInt("healthy")} 个，问题 ${d.optInt("problematic")} 个\n"
+                            else "Plugins: ${d.optInt("total")} total, ${d.optInt("healthy")} healthy, ${d.optInt("problematic")} problematic\n"
+                        )
+                        val issues = d.optJSONArray("issues")
+                        if (issues != null && issues.length() > 0) {
+                            for (i in 0 until issues.length()) {
+                                val o = issues.optJSONObject(i) ?: continue
+                                sb.append("· ").append(o.optString("plugin")).append(": ").append(o.optString("issue")).append('\n')
+                            }
+                        } else {
+                            sb.append(if (zh) "（未发现问题）\n" else "(no issues)\n")
+                        }
+                        val perms = d.optJSONObject("permissions")
+                        if (perms != null && perms.length() > 0) {
+                            val keys = perms.keys()
+                            val list = ArrayList<String>()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                list.add("$k x${perms.optInt(k)}")
+                            }
+                            sb.append(if (zh) "权限声明：" else "permissions: ").append(list.joinToString(", ")).append('\n')
+                        }
+                        val audit = PluginManager.audit(context, 5)
+                        if (audit.length() > 0) {
+                            sb.append(if (zh) "最近运行：\n" else "recent runs:\n")
+                            for (i in 0 until audit.length()) {
+                                val o = audit.optJSONObject(i) ?: continue
+                                sb.append("· ").append(o.optString("id"))
+                                    .append(if (o.optBoolean("ok")) " ok" else " failed")
+                                    .append(" · ").append(o.optString("note").take(80)).append('\n')
+                            }
+                        }
+                        appendOut(sb.toString())
+                    }
                 }
                 if (message.isNotEmpty()) {
                     InlineHint(message, tone = HintTone.Ok)

@@ -1,3 +1,46 @@
+# TaffyNiHe v1.3.105（响应式三态 · 全量 ZIP 备份 · 架构门禁）
+
+## 一、WindowSizeClass 三态响应式布局（借鉴太墟）
+
+以前手机、折叠屏展开、平板一律用底部导航，宽屏浪费一半空间。
+
+| 宽度尺寸类 | 导航 | 内容 |
+|---|---|---|
+| **Compact**（手机竖屏） | `NavigationBar` 底部导航（与改前**逐像素一致**） | 原样 |
+| **Medium**（折叠屏展开/小平板） | **`NavigationRail`** 左侧垂直导航栏（图标 + 常显文字） | 占满其余宽度 |
+| **Expanded**（平板横屏/大折叠） | 同上 | 额外 `widthIn(max = 1200.dp)` 居中，避免超宽屏文字拉成一条线 |
+
+导航项与 AppBottomNav 完全一致（首页/分析/任务/编辑器/设置）；tab 切换、编辑器常驻保活、离开确认、子页自动隐藏导航等逻辑**一行未改**。
+
+## 二、全量 ZIP 备份 / 恢复（借鉴太墟）
+
+以前只能备份**设置 JSON**。现在新增「全量备份」：
+
+- **打包内容**：`prefs/`（SharedPreferences，**敏感 key 一律跳过**）、`tasks/`、`extensions/`、`edit-snapshots/`、`workspaces/`（含 `cacheDir/picked_*`），加一份 `manifest.json`（格式版本/时间/条目统计/跳过清单）
+- **脱敏**：key 名含 token / secret / password / key / credential / cookie / session 的**整条跳过**（日志与摘要里只有 key 名，绝无 value）
+- **加密可选**：复用现有 `BackupCrypto`（AES-256-GCM + Argon2id），输出 `.bak.enc`
+- **恢复**：先校验 manifest → **自动生成 `pre-restore-<ts>.zip` 快照** → 两遍流式恢复（prefs → 其它 → workspaces）→ **失败自动回滚**并提示回滚文件路径
+- **安全**：`safeResolve` + `canonicalPath` 前缀校验防 ZipSlip；单文件 > 20MB / 条目 > 20000 自动跳过并报告
+
+## 三、架构门禁（policy 驱动，借鉴太墟）
+
+新增 `tools/arch-policy.py`，接在 CI 的单元测试之后：
+
+1. **文件尺寸棘轮**：> 4000 行 WARN，> 8000 行 ERROR；存量超限文件登记在 `tools/arch-baseline.json`，**只允许收缩不允许扩张**（变胖即 ERROR）
+2. **包依赖无环**：解析本项目 import 建包级有向图，DFS 检出环，基线内的存量环豁免、**新增环即 ERROR**
+3. **分层方向**：`core < engine < mcp < ui`，低层不得 import 高层，基线例外可登记
+4. **禁止项**：单文件 TODO/FIXME > 20 处、应用代码里直接 `println(`
+
+首次运行自动自举基线（历史债务不红 CI），`--update-baseline` 可重新登记。
+
+> 顺带发现两个存量问题（已进基线/降级为 WARN）：`AnalysisWorkspace.kt` 单文件 **13823 行**（全仓最大）、`ToolPagesState.kt` 有一处 `println(`。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.104...v1.3.105
+
+---
+
 # TaffyNiHe v1.3.104（工具大输出落盘）
 
 ## 大工具输出不再"一断之了"（借鉴太墟）

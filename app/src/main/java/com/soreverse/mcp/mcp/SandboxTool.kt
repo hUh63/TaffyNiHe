@@ -23,7 +23,23 @@ import java.io.File
  */
 object SandboxTool {
 
-    /** 常见 activity 启动意图解析：默认用 launcher intent */
+    /**
+     * 安全闸门：packageName / activity / apkPath 会被拼进 root/shell 命令行
+     * （[PermissionManager.exec] 走 `su -c` 或 `sh -c`），因此必须先拒绝 shell 元字符，
+     * 否则经 MCP 传入 `com.a; id > /data/local/tmp/x` 就是一次任意命令执行。
+     */
+    private fun isSafeIdent(s: String): Boolean =
+        s.isNotEmpty() && s.length <= 220 && s.all { c ->
+            c.isLetterOrDigit() || c == '.' || c == '_' || c == '/' || c == '-' || c.code == 36
+        }
+
+    // 用字符码判断，避免 Kotlin 字符字面量的转义层级出错：
+    // 34=" 39=' 96=` 36=$ 59=; 124=| 38=& 60=< 62=> 10=LF 13=CR 92=\
+    private val SHELL_META_CODES = intArrayOf(34, 39, 96, 36, 59, 124, 38, 60, 62, 10, 13, 92)
+
+    private fun isShellSafe(s: String): Boolean =
+        s.isNotEmpty() && s.none { c -> c.code in SHELL_META_CODES }
+
     private fun launchIntentFor(ctx: Context, pkg: String): Intent? =
         runCatching { ctx.packageManager.getLaunchIntentForPackage(pkg) }.getOrNull()
 
@@ -57,6 +73,18 @@ object SandboxTool {
         }
 
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
+            val pkgArg = args.str("packageName")
+            if (pkgArg.isNotBlank() && !isSafeIdent(pkgArg)) {
+                return err("INVALID_ARGUMENT", "packageName 含非法字符: $pkgArg", "packageName", pkgArg)
+            }
+            val actArg = args.str("activity")
+            if (actArg.isNotBlank() && !isSafeIdent(actArg)) {
+                return err("INVALID_ARGUMENT", "activity 含非法字符: $actArg", "activity", actArg)
+            }
+            val apkArg = args.str("apkPath")
+            if (apkArg.isNotBlank() && !isShellSafe(apkArg)) {
+                return err("INVALID_ARGUMENT", "apkPath 含非法字符: $apkArg", "apkPath", apkArg)
+            }
             return runCatching {
                 when (args.str("action").ifBlank { "install" }) {
                     "install" -> install(ctx, args)

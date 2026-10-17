@@ -124,7 +124,9 @@ class SettingsStore(context: Context) {
         set(value) = prefs.edit().putString("bindHost", if (value == "0.0.0.0") "0.0.0.0" else "127.0.0.1").apply()
 
     var authEnabled: Boolean
-        get() = prefs.getBoolean("authEnabled", false)
+        // 默认开启：服务默认绑定 0.0.0.0（同网段可达），无鉴权等于把 root shell 交给整个局域网。
+        // 老用户 prefs 里已写入的值不受影响，仍可在设置页显式关闭。
+        get() = prefs.getBoolean("authEnabled", true)
         set(value) {
             val wasEnabled = prefs.getBoolean("authEnabled", false)
             prefs.edit().putBoolean("authEnabled", value).apply()

@@ -111,13 +111,17 @@ object ApkZipTool {
             }
             val inFile = File(inPath)
             if (!inFile.isFile) return err("FILE_NOT_FOUND", "原 APK 不存在: $inPath")
-            if (File(outPath).absolutePath == inFile.absolutePath) {
+            // 用 canonicalPath 比较：absolutePath 会被 "./"、"../"、软链接绕过，
+            // 一旦同文件，replaceEntry 会先截断输出流，把原 APK 清成 0 字节。
+            val outFile = File(outPath)
+            val sameFile = runCatching { outFile.canonicalPath == inFile.canonicalPath }.getOrDefault(false)
+            if (sameFile) {
                 return err("INVALID_ARGUMENT", "outputApk 不能与 inputApk 相同")
             }
             val srcFile = File(srcPath)
             if (!srcFile.isFile) return err("FILE_NOT_FOUND", "新内容来源不存在: $srcPath")
             val r = runCatching {
-                replaceEntry(inFile, File(outPath), entry, srcFile.readBytes(), args.str("addIfMissing", "false").toBoolean())
+                replaceEntry(inFile, outFile, entry, srcFile.readBytes(), args.str("addIfMissing", "false").toBoolean())
             }.getOrElse { return err("REPLACE_FAILED", it.message ?: "替换失败") }
             if (!r.replaced) return err("ENTRY_NOT_FOUND", "APK 里没有条目 $entry（如需新增请传 addIfMissing=true）")
             return ok(JSONObject()

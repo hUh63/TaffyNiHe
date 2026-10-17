@@ -985,7 +985,8 @@ $historyRows
         val settings = SettingsStore(context)
         if (!settings.authEnabled) return true
         val token = settings.accessToken
-        if (token.isBlank()) return true
+        // fail-closed：开了鉴权却没有可用 token 属于异常态，此时放行等于完全无保护。
+        if (token.isBlank()) return false
         // 优先检查 Authorization: Bearer <token> 头部（最安全）
         val auth = request.header("Authorization").orEmpty()
         val bearer = auth.removePrefix("Bearer").trim()

@@ -1020,7 +1020,9 @@ object ToolCatalog {
                     // 防止通过远程工具调用修改认证开关、绑定地址和 Token。
                     settings.applyPatch(patch, allowSecrets = false, allowSecurityFields = false)
                 }
-                else -> ok(settings.snapshot(maskSecrets = args.bool("maskSecrets", true)))
+                // 安全修复: maskSecrets 由客户端传入等于允许远程取明文 token，
+                // 与"服务可能无鉴权暴露在局域网"叠加就是凭据直接泄漏。此处强制脱敏。
+                else -> ok(settings.snapshot(maskSecrets = true))
             }
         }
     }

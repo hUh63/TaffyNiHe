@@ -40,11 +40,22 @@ object AdvancedTools {
             })
         }
 
+        /** 只接受 0x 十六进制或纯十进制：地址会被拼进 rizin 命令串，`;` 可追加任意命令。 */
+        private fun isSafeAddress(s: String): Boolean {
+            val t = s.trim()
+            val body = if (t.startsWith("0x") || t.startsWith("0X")) t.substring(2) else t
+            return body.isNotEmpty() && body.length <= 16 &&
+                body.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }
+        }
+
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val ws = args.str("workspaceId")
             if (ws.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 workspaceId", "workspaceId", "")
             val action = args.str("action", "sections")
             val address = args.str("address")
+            if (address.isNotBlank() && !isSafeAddress(address)) {
+                return err("INVALID_ARGUMENT", "address 非法（只接受 0x 十六进制或十进制）: $address", "address", address)
+            }
             val engine = EngineProvider.get(ctx.context)
             val cmd = when (action) {
                 "va_to_offset" -> {

@@ -86,6 +86,13 @@ object FullBackup {
             val pwd = password?.takeIf { it.isNotBlank() }
                 ?: throw IllegalArgumentException("该备份已加密，请提供密码")
             onProgress("解密备份包…")
+            // 解密同样要整包进内存（密文 + 明文 + Base64 中间态），超限直接拒绝而不是让系统杀进程。
+            val restoreLimit = 200L * 1024 * 1024
+            if (src.length() > restoreLimit) {
+                throw IllegalStateException(
+                    "备份包 ${src.length() / 1048576}MB，超过可恢复上限 ${restoreLimit / 1048576}MB（解密需要约 3 倍内存）。"
+                )
+            }
             val plain = Base64.decode(BackupCrypto.decrypt(src.readBytes(), pwd), Base64.DEFAULT)
             val tmp = File(context.cacheDir, "restore-" + stamp() + ".zip")
             FileOutputStream(tmp).use { it.write(plain) }
@@ -106,6 +113,8 @@ object FullBackup {
             onProgress("恢复前先备份当前状态…")
             val pre = try {
                 createArchive(context, null, "pre-restore-", onProgress)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 throw IllegalStateException("无法创建恢复前快照，已中止恢复: ${e.message.orEmpty()}", e)
             }
@@ -121,6 +130,9 @@ object FullBackup {
                     categories = result.categories,
                     preRestorePath = pre.path,
                 )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 用户主动取消不是失败：直接向上抛，不触发回滚，也不包装成"恢复失败"。
+                throw e
             } catch (e: Exception) {
                 onProgress("恢复失败，回滚到恢复前快照…")
                 val rollbackOk = runCatching {
@@ -157,7 +169,9 @@ object FullBackup {
         val tag = stamp()
         val encrypted = !password.isNullOrBlank()
         val outFile = File(dir, namePrefix + tag + if (encrypted) ".bak.enc" else ".zip")
-        val zipFile = if (encrypted) File(dir, ".build-" + tag + ".tmp") else outFile
+        // 统一先写临时文件，成功后 rename 到最终名：
+        // 直接写 outFile 时进程被杀会留下"半截包"（manifest 最后才写 → 恢复时报缺少 manifest）。
+        val zipFile = File(dir, ".build-" + tag + ".tmp")
         val roots = roots(context)
         val createdAt = System.currentTimeMillis()
         val skipped = mutableListOf<String>()
@@ -196,12 +210,30 @@ object FullBackup {
 
         if (encrypted) {
             onProgress("加密备份包…")
+            // 整包读入 + Base64 字符串 + 密文 ≈ 3 倍内存，超过闸门直接失败并保留中间包以便用户改用不加密备份。
+            val sizeLimit = 200L * 1024 * 1024
+            if (zipFile.length() > sizeLimit) {
+                throw IllegalStateException(
+                    "备份内容 ${zipFile.length() / 1048576}MB，超过加密上限 ${sizeLimit / 1048576}MB，" +
+                        "加密需要约 3 倍内存。请关闭密码改用不加密备份（中间包保留在 ${zipFile.name}）。"
+                )
+            }
             val plain = zipFile.readBytes()
             val payload = Base64.encodeToString(plain, Base64.NO_WRAP)
             plain.fill(0)
             val blob = BackupCrypto.encrypt(payload, password!!)
-            FileOutputStream(outFile).use { it.write(blob) }
+            val encTmp = File(dir, ".enc-" + tag + ".tmp")
+            FileOutputStream(encTmp).use { it.write(blob) }
+            if (!encTmp.renameTo(outFile)) {
+                encTmp.copyTo(outFile, overwrite = true)
+                encTmp.delete()
+            }
             zipFile.delete()
+        } else {
+            if (!zipFile.renameTo(outFile)) {
+                zipFile.copyTo(outFile, overwrite = true)
+                zipFile.delete()
+            }
         }
 
         onProgress("备份完成")

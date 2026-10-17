@@ -198,6 +198,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.github.rikkahub:markdown:d79a97cc8e")
     implementation("org.jsoup:jsoup:1.23.2")
+    // codemode 脚本引擎: Rhino 纯 JVM 实现(无 native 依赖, Android 可跑; 解释模式 + safe standard objects 沙箱)
+    implementation("org.mozilla:rhino:1.7.15")
 
     // 权限管理: Shizuku (adb 级 shell 权限) + Dhizuku (设备所有者权限)
     // provider 模块提供 rikka.shizuku.ShizukuProvider（Manifest 必需，缺了启动闪退）

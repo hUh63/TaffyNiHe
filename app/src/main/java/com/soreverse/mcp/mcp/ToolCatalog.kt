@@ -1196,6 +1196,8 @@ object ToolCatalog {
         *SoSyncOriginalTool.ALL.toTypedArray(),
         // 塔菲逆核: 原生可执行通道(execve + jniLibs，免 root/proot)
         *NativeExecTool.ALL.toTypedArray(),
+        // 塔菲逆核: codemode 脚本引擎(JS 一次调用编排多步工具；Rhino 纯 JVM 沙箱)
+        *ScriptTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

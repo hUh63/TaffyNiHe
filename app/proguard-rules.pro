@@ -159,3 +159,9 @@
 -keepclassmembers class org.eclipse.elk.** { *; }
 -keep class org.eclipse.emf.** { *; }
 -keepclassmembers class org.eclipse.emf.** { *; }
+
+# 塔菲逆核 codemode 脚本引擎 Rhino（纯 JVM）。
+# tools.debugger 引用 AWT/Swing、Context 引用 java.beans，Android 都没有，需 dontwarn。
+-keep class org.mozilla.javascript.** { *; }
+-dontwarn org.mozilla.javascript.**
+-dontwarn java.beans.**

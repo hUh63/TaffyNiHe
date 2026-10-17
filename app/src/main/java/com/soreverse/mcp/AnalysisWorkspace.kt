@@ -483,6 +483,8 @@ internal fun AnalysisWorkspace(
 
                         "obfscan" -> ObfuscScanView(tools.sharedWorkspaceId, zh, context)
 
+                        "agentrun" -> AgentRunView(tools.sharedWorkspaceId, zh, context)
+
                         "hardening" -> HardeningView(tools, zh, context, refreshAll)
                         "ollvm" -> OllvmView(tools, zh, context, refreshAll)
 
@@ -2158,6 +2160,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("ollvm", "去平坦化", "DeFlat", Icons.Filled.Transform),
     AnalysisNavItem("strcipher", "密文恢复", "Cipher", Icons.Filled.LockOpen),
     AnalysisNavItem("obfscan", "混淆扫描", "Obf", Icons.Filled.Transform),
+    AnalysisNavItem("agentrun", "多智能体", "Agents", Icons.Filled.Inventory),
     AnalysisNavItem("callgraph", "调用图", "Calls", Icons.Filled.CompareArrows),
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
@@ -3034,7 +3037,7 @@ private fun AnalysisFileBar(state: WorkspaceState, zh: Boolean, onOpenTask: () -
 private val analysisOverflowViews = listOf(
     "hardening", "unpack", "export", "flutter", "analyze", "edit", "calc", "iapp", "ollvm",
     "hex", "results", "tools", "funcdetail", "funcinfo", "comments", "funcsig",
-    "asm", "insnexp", "regs", "asm2c", "asm2flow", "base", "demangle", "strdec", "xor", "bytediff", "strcipher", "obfscan",
+    "asm", "insnexp", "regs", "asm2c", "asm2flow", "base", "demangle", "strdec", "xor", "bytediff", "strcipher", "obfscan", "agentrun",
 )
 
 /** 菜单分组标题（不可点）。 */

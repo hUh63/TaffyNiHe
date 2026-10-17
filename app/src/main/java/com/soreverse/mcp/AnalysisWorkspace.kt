@@ -2160,7 +2160,7 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("ollvm", "去平坦化", "DeFlat", Icons.Filled.Transform),
     AnalysisNavItem("strcipher", "密文恢复", "Cipher", Icons.Filled.LockOpen),
     AnalysisNavItem("obfscan", "混淆扫描", "Obf", Icons.Filled.Transform),
-    AnalysisNavItem("agentrun", "多智能体", "Agents", Icons.Filled.Inventory),
+    AnalysisNavItem("agentrun", "多智能体", "Agents", Icons.Filled.Storage),
     AnalysisNavItem("callgraph", "调用图", "Calls", Icons.Filled.CompareArrows),
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),

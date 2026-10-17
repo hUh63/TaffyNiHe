@@ -51,6 +51,7 @@
 **没有 JSON 兜底出口** —— 数据是什么形状就怎么渲染。
 
 ## 八、修复
+- **分析完莫名退出（堆崩溃）**：`rzAnalyze` 在统计完函数个数后对 `rz_analysis_function_list()` 的返回值调了 `rz_list_free()`，但那是 `RzAnalysis` 内部链表（`analysis->fcns`）的借用引用，不是新分配的链表 —— 随后的 `rz_core_free → rz_analysis_free` 会二次释放同一链表，Scudo 报 `corrupted chunk header` 后 SIGABRT。现在只读长度、不再释放（同文件其余 `rz_list_free` 释放的都是新分配链表，写法本来就对）
 - **更新包下错 ABI**：`selectApk` 原来把所有 ABI 名铺平后对资产列表取第一个命中项，等于「资产上传顺序 > 设备优先级」，且 `x86` 子串会命中 `x86_64`。改为按 `Build.SUPPORTED_ABIS` 优先级逐个匹配、用 `-<abi>.` 整段判断
 - **R8 水平合并**：给 `IntegrityGuard` / `SelfArtifactGuard` / `NativeProbe` 加 `-keep`，避免被并进相邻类后 mapping 里没有独立条目
 - **架构门禁**：`AnalysisWorkspace.kt` 已登记在基线里、只允许收缩。本次把加固报告的纯逻辑（`HardFinding` / 特征表 / `hardMatch` / `shannonEntropy` / `hardVerdict` / `hardIntegrity` / `hardSteps`）迁到 `AnalysisDeepViews.kt`，文件从 13823 行降到 13706 行

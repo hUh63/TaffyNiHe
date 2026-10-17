@@ -31,6 +31,7 @@ object ToolCatalogPresentation {
         "archive" to (if (zh) "压缩与解压：ZIP/TAR/TAR.GZ 的列表、解压、创建、增删改" else "Archive: ZIP/TAR/TAR.GZ list, extract, create, add/delete/rename entries"),
         "apk" to (if (zh) "APK 专项：APK 内部搜索、补丁、资源列表、交叉引用等" else "APK-specific tools: APK search, patch, resource list, cross-reference, etc."),
         "runtime" to (if (zh) "本地运行时：jniLibs 原生可执行通道（execve）与进程管理" else "Local runtime: jniLibs native executable channel (execve) and process management"),
+        "ui" to (if (zh) "界面渲染：A2UI 声明式界面（模型返回界面描述，客户端渲染原生组件）" else "UI rendering: A2UI declarative surfaces rendered as native widgets"),
     )
 
     fun grouped(zh: Boolean, includeApk: List<String> = emptyList()): List<Pair<String, List<Pair<String, String>>>> {

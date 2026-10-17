@@ -1198,6 +1198,8 @@ object ToolCatalog {
         *NativeExecTool.ALL.toTypedArray(),
         // 塔菲逆核: codemode 脚本引擎(JS 一次调用编排多步工具；Rhino 纯 JVM 沙箱)
         *ScriptTool.ALL.toTypedArray(),
+        // 塔菲逆核: A2UI 声明式界面网关(模型返回界面描述，客户端渲染原生 Compose 组件)
+        *SurfaceTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

@@ -38,6 +38,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.RikkaPart
+import com.soreverse.mcp.core.SurfaceBlocks
+import com.soreverse.mcp.core.SurfaceParser
+import com.soreverse.mcp.ui.A2UiRenderer
 
 @Composable
 internal fun DeepChatMessageItem(message: DeepChatMessage, zh: Boolean) {
@@ -72,7 +75,7 @@ internal fun DeepChatMessageItem(message: DeepChatMessage, zh: Boolean) {
         if (message.parts.isNotEmpty()) {
             DeepMessageParts(parts = message.parts, streaming = message.streaming, zh = zh)
         } else if (message.text.isNotBlank()) {
-            MarkdownMessageContent(message.text, selectable = !message.streaming)
+            DeepAssistantBody(text = message.text, streaming = message.streaming)
         } else if (message.streaming) {
             Text(if (zh) "正在分析并调用工具…" else "Analyzing and calling tools…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
@@ -191,6 +194,33 @@ internal fun DeepProcessTimeline(parts: List<RikkaPart>, streaming: Boolean, zh:
 @Composable
 internal fun MarkdownMessageContent(markdown: String, selectable: Boolean) {
     RikkaMarkdown(content = markdown, modifier = Modifier.fillMaxWidth(), selectable = selectable)
+}
+
+/**
+ * 助手消息正文：模型若用 ```surface 代码块返回 A2UI 界面描述，就渲染成原生组件，
+ * 其余文本仍走 Markdown。流式生成中（JSON 还没写完整）或解析失败时，一律回退纯文本 Markdown，
+ * 保证任何模型输出都不会白屏。
+ */
+@Composable
+internal fun DeepAssistantBody(text: String, streaming: Boolean) {
+    if (streaming || !SurfaceBlocks.contains(text)) {
+        MarkdownMessageContent(text, selectable = !streaming)
+        return
+    }
+    val specs = remember(text) {
+        SurfaceBlocks.extract(text).mapNotNull { body -> SurfaceParser.parse(body).specOrNull }
+    }
+    val rest = remember(text) { SurfaceBlocks.strip(text).trim() }
+    if (specs.isEmpty()) {
+        MarkdownMessageContent(if (rest.isBlank()) text else rest, selectable = true)
+        return
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (rest.isNotBlank()) MarkdownMessageContent(rest, selectable = true)
+        for (spec in specs) {
+            A2UiRenderer(spec)
+        }
+    }
 }
 
 /** 对话历史：列出所有用户轮次，点击任意一轮即回退到该轮并回填输入（多步回退）。 */

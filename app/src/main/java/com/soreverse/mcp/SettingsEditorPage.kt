@@ -587,28 +587,6 @@ internal fun SettingsEditorPage(t: UiText) {
         }
     }
 
-    /** 应用「上次编辑会话」的标签集合（正文来自 autosave.json）。 */
-    fun applyRestoredSession(list: List<EditorTab>) {
-        if (list.isEmpty()) return
-        tabs = list
-        activeTab = 0
-        val first = list[0]
-        code = first.code
-        tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
-        // 上次会话里首个标签是脏的，就保持「未保存」标记（savedCode 置空即 dirty）
-        savedCode = if (sessionEntries.firstOrNull()?.dirty == true) "" else first.code
-        mode = first.mode
-        currentFile = if (first.untitled) null else first.name
-        currentFilePath = first.path
-        val p = first.path
-        if (p != null) {
-            scope.launch {
-                val st = withContext(Dispatchers.IO) { FileStampUtil.stamp(File(p)) }
-                if (st != null) fileStamps[p] = st else fileStamps.remove(p)
-            }
-        }
-        appendOut(if (zh) "\n[已恢复 ${list.size} 个未关闭标签的自动草稿]\n" else "\n[Restored ${list.size} autosaved tab(s)]\n")
-    }
 
     // ── 查找（支持正则/大小写）──
     fun currentMatches(): List<Int>? {
@@ -768,6 +746,29 @@ internal fun SettingsEditorPage(t: UiText) {
         if (code.isBlank() || code == savedCode) return@LaunchedEffect
         delay(8000)
         pushCheckpoint(if (zh) "自动保存" else "auto")
+    }
+
+    /** 应用「上次编辑会话」的标签集合（正文来自 autosave.json）。 */
+    fun applyRestoredSession(list: List<EditorTab>) {
+        if (list.isEmpty()) return
+        tabs = list
+        activeTab = 0
+        val first = list[0]
+        code = first.code
+        tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
+        // 上次会话里首个标签是脏的，就保持「未保存」标记（savedCode 置空即 dirty）
+        savedCode = if (sessionEntries.firstOrNull()?.dirty == true) "" else first.code
+        mode = first.mode
+        currentFile = if (first.untitled) null else first.name
+        currentFilePath = first.path
+        val p = first.path
+        if (p != null) {
+            scope.launch {
+                val st = withContext(Dispatchers.IO) { FileStampUtil.stamp(File(p)) }
+                if (st != null) fileStamps[p] = st else fileStamps.remove(p)
+            }
+        }
+        appendOut(if (zh) "\n[已恢复 ${list.size} 个未关闭标签的自动草稿]\n" else "\n[Restored ${list.size} autosaved tab(s)]\n")
     }
 
     fun snapshotCurrent() {

@@ -64,6 +64,12 @@ class McpHttpServer(private val context: Context, private val port: Int, private
 
         /** 统一工具模式下的唯一入口工具名。 */
         const val UNIFIED_TOOL = "taffy_unified"
+
+        /**
+         * 单条 JSON-RPC 响应的字符上限（未配置 toolResultMaxChars 时的默认值）。
+         * 1.5M 字符大致对应一条 stdio 行的安全上限量级，也留出了客户端解析的内存余量。
+         */
+        const val DEFAULT_RESPONSE_CAP = 1_500_000
     }
     override val coroutineContext = SupervisorJob() + Dispatchers.Default
     private val startedAt = System.currentTimeMillis()
@@ -375,11 +381,58 @@ class McpHttpServer(private val context: Context, private val port: Int, private
             return
         }
         val accept = call.request.header("Accept").orEmpty()
+        // 传输层兜底: 工具级落盘（wrapToolResult）默认关闭，某些工具仍可能直接把几 MB 塞进
+        // 单条响应。这里的检查覆盖所有通道，保证「一条响应」永远不超过上限——超了就把整条
+        // 响应落盘，只回一条结构合法的 JSON-RPC 摘要，客户端不会因为解析超大行而崩。
+        val capped = capResponseSize(response)
         if (accept.contains("text/event-stream")) {
-            call.respondText("event: message\ndata: $response\n\n", ContentType.Text.EventStream)
+            call.respondText("event: message\ndata: $capped\n\n", ContentType.Text.EventStream)
         } else {
-            call.respondText(response.toString(), ContentType.Application.Json)
+            call.respondText(capped, ContentType.Application.Json)
         }
+    }
+
+    /**
+     * 单条响应的尺寸闸门。
+     *
+     * 阈值优先取用户配置的 toolResultMaxChars（≥ 400k），否则用 1.5M 字符的默认值——
+     * 这个量级对应「一条 stdio 行」在多数客户端上的安全上限，也是本 App 传输层能保证
+     * 客户端不 OOM 的余量。
+     */
+    private fun capResponseSize(response: Any): String {
+        val text = response.toString()
+        val configured = SettingsStore(context).toolResultMaxChars
+        val cap = if (configured > 0) maxOf(configured, 400_000) else DEFAULT_RESPONSE_CAP
+        if (text.length <= cap) return text
+
+        val savedPath = runCatching { spillToolResult(text) }.getOrNull()
+        val note = "Response of " + text.length + " chars exceeded the " + cap +
+            "-char transport cap; the full payload was written to disk. " +
+            (if (savedPath != null) "Read it with taffy_file_read(path=\"" + savedPath + "\")."
+             else "Spill failed; narrow the query with limit/offset/filter.")
+
+        val obj = runCatching { JSONObject(text) }.getOrNull() ?: return text.take(cap)
+        val id = obj.opt("id") ?: JSONObject.NULL
+        return JSONObject()
+            .put("jsonrpc", "2.0")
+            .put("id", id)
+            .put(
+                "result",
+                JSONObject().put(
+                    "content",
+                    JSONArray().put(
+                        JSONObject().put("type", "text").put("text", note)
+                    )
+                )
+            )
+            .put(
+                "x-taffy-spilled",
+                JSONObject()
+                    .put("savedTo", savedPath ?: JSONObject.NULL)
+                    .put("originalLength", text.length)
+                    .put("cap", cap)
+            )
+            .toString()
     }
 
     private fun serverDiscovery(): JSONObject = JSONObject()

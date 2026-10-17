@@ -102,6 +102,21 @@ internal fun AgentRunView(
         }.getOrNull()
     }
 
+    /** 轮询到结束：1.2s 一次，最多 30 分钟（编排本身有 wallClock 上限）。 */
+    fun poll(id: String) {
+        scope.launch {
+            var guard = 0
+            while (guard < 1500) {
+                delay(1200)
+                val s = callTool("taffy_agent_run", JSONObject().put("action", "status").put("runId", id))
+                if (s != null) statusJson = s.toString()
+                val st = s?.optString("status").orEmpty()
+                if (st.isNotBlank() && st != "running") break
+                guard++
+            }
+        }
+    }
+
     fun start() {
         if (busy) return
         busy = true
@@ -125,21 +140,6 @@ internal fun AgentRunView(
             val id = r.optString("runId")
             runId = id
             poll(id)
-        }
-    }
-
-    /** 轮询到结束：1.2s 一次，最多 30 分钟（编排本身有 wallClock 上限）。 */
-    fun poll(id: String) {
-        scope.launch {
-            var guard = 0
-            while (guard < 1500) {
-                delay(1200)
-                val s = callTool("taffy_agent_run", JSONObject().put("action", "status").put("runId", id))
-                if (s != null) statusJson = s.toString()
-                val st = s?.optString("status").orEmpty()
-                if (st.isNotBlank() && st != "running") break
-                guard++
-            }
         }
     }
 

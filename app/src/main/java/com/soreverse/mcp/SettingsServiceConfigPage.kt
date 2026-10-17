@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import java.io.File
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -204,6 +205,18 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 PrimaryActionButton(if (t.zh) "复制 NPX" else "Copy NPX", { copy(context, clientConfig(preferred, settings), t.copied) })
                 PrimaryActionButton(if (t.zh) "复制 UVX" else "Copy UVX", { copy(context, clientConfigUvx(preferred, settings), t.copied) })
                 SecondaryActionButton(if (t.zh) "复制直连" else "Copy direct") { copy(context, clientConfigDirect(preferred, settings), t.copied) }
+                SecondaryActionButton(if (t.zh) "导出 stdio 桥" else "Export stdio bridge") {
+                    val path = exportStdioBridge(context)
+                    Toast.makeText(
+                        context,
+                        if (path != null) {
+                            if (t.zh) "已导出：$path（在电脑上 python3 运行）" else "Saved to $path"
+                        } else {
+                            if (t.zh) "导出失败" else "Export failed"
+                        },
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
         GlassGroup(title = if (t.zh) "访问控制" else "Access control", footer = if (t.zh) "修改端口、绑定地址或 Token 后需重启服务。" else "Restart the service after changing port, bind address, or token.") {
@@ -343,6 +356,21 @@ private fun clientConfigDirect(url: String, settings: SettingsStore): String {
 }
 
 private fun prettyJson(obj: JSONObject): String = obj.toString(2).replace("\\/", "/")
+
+/**
+ * 把内置的 stdio 桥脚本导出到应用外部目录。
+ *
+ * 为什么桥在电脑侧：Android 应用没有可被外部连接的 stdin/stdout。手机端监听 HTTP，
+ * 电脑侧用这个脚本做协议转换，只支持 stdio 的 MCP 宿主（Claude Desktop 等）就能用上塔菲。
+ */
+private fun exportStdioBridge(context: Context): String? = runCatching {
+    val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "mcp-bridge").apply { mkdirs() }
+    val out = File(dir, "stdio_bridge.py")
+    context.assets.open("mcp/stdio_bridge.py").use { input ->
+        out.outputStream().use { input.copyTo(it) }
+    }
+    out.absolutePath
+}.getOrNull()
 
 private fun needsAllowHttp(url: String): Boolean {
     val lower = url.lowercase()

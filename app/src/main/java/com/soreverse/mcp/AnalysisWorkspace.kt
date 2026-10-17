@@ -479,6 +479,11 @@ internal fun AnalysisWorkspace(
 
                         "jnireg" -> JniRegView(tools, zh, context, refreshAll)
 
+                        // 静态深挖: 密文恢复（扫描密文段 + 256 变换排名）与混淆度批量判定
+                        "strcipher" -> StringCipherView(tools.sharedWorkspaceId, zh, context)
+
+                        "obfscan" -> ObfuscScanView(tools.sharedWorkspaceId, zh, context)
+
                         "hardening" -> HardeningView(tools, zh, context, refreshAll)
                         "ollvm" -> OllvmView(tools, zh, context, refreshAll)
 
@@ -2152,6 +2157,8 @@ private val analysisNavItems = listOf(
     AnalysisNavItem("jnireg", "JNI", "JNI", Icons.Filled.DataObject),
     AnalysisNavItem("hardening", "加固", "Hard", Icons.Filled.Warning),
     AnalysisNavItem("ollvm", "去平坦化", "DeFlat", Icons.Filled.Transform),
+    AnalysisNavItem("strcipher", "密文恢复", "Cipher", Icons.Filled.LockOpen),
+    AnalysisNavItem("obfscan", "混淆扫描", "Obf", Icons.Filled.Transform),
     AnalysisNavItem("callgraph", "调用图", "Calls", Icons.Filled.CompareArrows),
     AnalysisNavItem("export", "导出", "Export", Icons.Filled.Terminal),
     AnalysisNavItem("unpack", "脱壳", "Unpk", Icons.Filled.LockOpen),
@@ -3029,6 +3036,7 @@ private val analysisOverflowViews = listOf(
     "hardening", "unpack", "export", "flutter", "analyze", "edit", "calc", "iapp", "ollvm",
     "hex", "results", "tools", "funcdetail", "funcinfo", "comments", "funcsig",
     "asm", "insnexp", "regs", "asm2c", "asm2flow", "base", "demangle", "strdec", "xor", "bytediff",
+    "strcipher", "obfscan",
 )
 
 /** 菜单分组标题（不可点）。 */

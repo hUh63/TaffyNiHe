@@ -1,3 +1,65 @@
+# TaffyNiHe v1.3.106（会话恢复 · 脚本引擎 · A2UI · 注入探针）
+
+## 一、编辑器会话恢复（借鉴太墟 SessionFork / checkpoint / rewind）
+
+以前编辑器只有单档 `.bak`，改错了只能靠撤销栈，关掉就没了。
+
+- **checkpoint 栈**：文本停止变化 8 秒后自动压一份、手动保存/另存各压一份，`filesDir/editor-checkpoints/<路径哈希>/`；内容相同不重复存，环形保留 20 份 / 总 4MB 上限
+- **rewind**：工具条新增 `⟲` 历史按钮，点任一份即回退；回退前先把当前内容压一份「回退前」，可以再前进回来
+- **外部修改冲突检测**：打开文件时记录 `(mtime, size, sha256)`；保存前比对，若被 MCP 工具 / 终端 / git 改过，弹「文件已被外部修改」对话框，提供 **放弃 / 另存 / 覆盖** 三选一（另存写到 `editor_files/<名>-<时间戳>.<ext>`，原文件一字不动）
+- **崩溃恢复**：未保存的标签正文写 `autosave.json`（单标签 > 200KB 只留标题并标注）、元信息写 `editor_session` prefs；下次进编辑器弹「恢复上次编辑会话 / 忽略」
+
+三者与原有 `.bak` 并存，职责分开：`.bak` 是 diff 基线的「最近一档」，checkpoint 是「多历史点栈」，autosave 是「未保存正文」。
+
+## 二、codemode 脚本引擎 `taffy_script`（借鉴太墟）
+
+以前多步分析要模型逐个 tool call 往返。现在可以一段 JS 编排：
+
+```js
+const list = toolJson('taffy_so_close', { action: 'list' });
+const names = (list.workspaces || []).map(w => w.name);
+log('工作区 ' + names.length + ' 个');
+return names.filter(n => n.endsWith('.so'));
+```
+
+- **沙箱**：Rhino 1.7.15（纯 JVM，1.4MB）+ `initSafeStandardObjects` + `ClassShutter{false}` + 解释模式。`java / Packages / getClass / load / readFile / XMLHttpRequest / setTimeout` 全部 `undefined`，原型链逃逸也拿不到宿主对象 —— 脚本唯一的能力就是通过 `tool()` 借用已注册工具
+- **API**：`tool(name, args)` / `toolJson(name, args)` / `log(...)` / 全局 `args`；用 `return` 返回结果
+- **配额**：默认 8s 超时（上限 30s，线程 join + 指令计数观察者双保险，超时用 `Error` 子类硬中断）、默认 50 次工具调用（上限 200）、logs 64KB / result 256KB 截断
+- **失败不外抛**：工具级失败 → 脚本内可判断的 `{"ok":false,"error":{code}}` 字符串；脚本级错误 → `SCRIPT_ERROR` 带行号；递归调用 `taffy_script` 被拒绝
+
+## 三、A2UI 声明式界面（借鉴太墟 `render_surface`）
+
+模型不再只能吐大段 Markdown —— 可以在回复里用 ```` ```surface ```` 围栏返回一份界面描述，客户端渲染成**原生 Compose 卡片**：
+
+```surface
+{ "version": 1, "root": { "type": "card", "props": {"title":"扫描结果"}, "children": [
+  { "type": "keyvalue", "props": {"rows": [["架构","arm64"],["大小","1.2MB"]]} },
+  { "type": "table", "props": {"columns":["名字","地址"],"rows":[["libfoo.so","0x1000"]]} },
+  { "type": "alert", "props": {"tone":"warn","text":"检测到加固"} }
+] } }
+```
+
+- **11 种组件**：card / text / keyvalue / table / code / chips / alert / progress / button / list / divider，全部映射到 M3 官方组件（`Card`/`ListItem`/`AssistChip`/`LinearProgressIndicator`/`OutlinedButton`…），只用主题 token
+- **安全限额**：节点 ≤ 200、深度 ≤ 8、单字符串 ≤ 4000、每层 children ≤ 50，超限直接失败而不是给半截界面；未知组件跳过并累积 warning
+- **降级**：解析失败 / 流式中（JSON 没写完）一律回退 Markdown，绝不黑屏
+- **工具**：`taffy_render_surface` 可让模型先校验 spec 再输出，错误带 `path` 便于自我修正
+
+## 四、注入痕迹探针（对齐上游 SOMCP v1.0.22）
+
+设置 → Linux 环境诊断页新增「注入痕迹探针（只读）」：
+
+- **Xposed 系**：`/proc/self/maps` 匹配 lsposed/edxposed/xposed/sandhook/yuki/riru/zygisk（只记映射文件名，不贴整行），以及 `XposedBridge` / `XposedHelpers` / LSPatch `HookBridge` 等类的可加载性
+- **LSPatch / 二次打包**：自身 APK 的 ZIP 条目里查 `assets/lspatch/`、`META-INF/xposed/`、`assets/xposed_init`；`sourceDir` 落在 `/data/local/tmp`、`/sdcard` 等异常路径
+- **标记位**：debuggable / allowBackup / testOnly
+
+**只记录、不阻断**：结果**不参与**完整性门禁、不影响任何功能、不杀进程 —— 因为本 App 的用户就是要开 root / LSPosed / Frida，误伤比漏报更糟。刻意**不**把 `frida` / `gadget` 写进关键字表。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.105...v1.3.106
+
+---
+
 # TaffyNiHe v1.3.105（响应式三态 · 全量 ZIP 备份 · 架构门禁）
 
 ## 一、WindowSizeClass 三态响应式布局（借鉴太墟）

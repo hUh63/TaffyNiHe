@@ -71,14 +71,27 @@ internal class RikkaAgentEngine(
         tools: List<RikkaTool>,
         maxSteps: Int,
         requiredTools: List<String> = emptyList(),
+        initialMessages: List<RikkaMessage> = emptyList(),
+        onCheckpoint: (suspend (List<RikkaMessage>) -> Unit)? = null,
         onParts: (List<RikkaPart>) -> Unit,
     ): String {
-        val messages = mutableListOf(
-            RikkaMessage("system", listOf(RikkaPart.Text(systemPrompt))),
-            RikkaMessage("user", listOf(RikkaPart.Text(userPrompt))),
-        )
+        val messages = if (initialMessages.isNotEmpty()) {
+            initialMessages.toMutableList()
+        } else {
+            mutableListOf(
+                RikkaMessage("system", listOf(RikkaPart.Text(systemPrompt))),
+                RikkaMessage("user", listOf(RikkaPart.Text(userPrompt))),
+            )
+        }
         val visibleParts = mutableListOf<RikkaPart>()
         val executedTools = linkedSetOf<String>()
+        // 断点续跑: 上一轮 assistant 里若还有没执行完的工具调用, 先把它们补完再请求模型。
+        // 不这样做的话, 恢复后会带着「半截」的 assistant 消息再发一次请求, 模型会重复调用。
+        if (messages.lastOrNull()?.role == "assistant" &&
+            messages.last().parts.filterIsInstance<RikkaPart.Tool>().any { it.result == null }
+        ) {
+            executeCalls(messages, tools, executedTools, visibleParts, onParts, onCheckpoint)
+        }
         repeat(maxSteps.coerceIn(1, 256)) {
             var assistant = RikkaMessage("assistant", emptyList())
             stream(messages, tools).collect { delta ->
@@ -99,44 +112,63 @@ internal class RikkaAgentEngine(
                 }
                 return assistant.parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }.trim()
             }
-            calls.forEach { call ->
-                val requestedName = call.name.trim()
-                val shortName = requestedName.substringAfterLast('.').substringAfterLast('/')
-                val tool = tools.firstOrNull { it.name == requestedName }
-                    ?: tools.firstOrNull { it.name.equals(requestedName, ignoreCase = true) }
-                    ?: tools.firstOrNull { it.name.equals(shortName, ignoreCase = true) }
-                val result = if (tool == null) {
-                    JSONObject()
-                        .put("status", "error")
-                        .put("error", "unknown_tool")
-                        .put("tool", requestedName)
-                        .put("available_tools", tools.map { it.name })
-                        .toString()
-                } else {
-                    val args = runCatching { JSONObject(call.arguments.ifBlank { "{}" }) }
-                        .getOrElse {
-                            JSONObject()
-                                .put("status", "error")
-                                .put("error", "invalid_arguments")
-                                .put("tool", requestedName)
-                                .put("details", it.message.orEmpty())
-                                .toString()
-                        }
-                    if (args is String) {
-                        args
-                    } else {
-                        tool.execute(args as JSONObject).also { executedTools += tool.name }
-                    }
-                }
-                val completed = call.copy(result = result)
-                messages[messages.lastIndex] = messages.last().copy(
-                    parts = messages.last().parts.map { if (it is RikkaPart.Tool && it.id == call.id) completed else it },
-                )
-                onParts(visibleParts + messages.last().parts)
-            }
+            executeCalls(messages, tools, executedTools, visibleParts, onParts, onCheckpoint)
             visibleParts += messages.last().parts
         }
         error("Maximum tool steps exceeded")
+    }
+
+    /**
+     * 执行当前 assistant 消息里所有未完成的工具调用, 每完成一个就回调一次检查点。
+     *
+     * 逐调用落盘的意义: 进程被杀时, 已经跑完的工具结果不会丢, 恢复后只会重跑没结果的那些。
+     * 代价是写入类工具若在落盘前被杀会重放一次——所以子代理的角色白名单里刻意不放写入工具。
+     */
+    private suspend fun executeCalls(
+        messages: MutableList<RikkaMessage>,
+        tools: List<RikkaTool>,
+        executedTools: MutableSet<String>,
+        visibleParts: MutableList<RikkaPart>,
+        onParts: (List<RikkaPart>) -> Unit,
+        onCheckpoint: (suspend (List<RikkaMessage>) -> Unit)?,
+    ) {
+        val calls = messages.last().parts.filterIsInstance<RikkaPart.Tool>().filter { it.result == null }
+        calls.forEach { call ->
+            val requestedName = call.name.trim()
+            val shortName = requestedName.substringAfterLast('.').substringAfterLast('/')
+            val tool = tools.firstOrNull { it.name == requestedName }
+                ?: tools.firstOrNull { it.name.equals(requestedName, ignoreCase = true) }
+                ?: tools.firstOrNull { it.name.equals(shortName, ignoreCase = true) }
+            val result = if (tool == null) {
+                JSONObject()
+                    .put("status", "error")
+                    .put("error", "unknown_tool")
+                    .put("tool", requestedName)
+                    .put("available_tools", tools.map { it.name })
+                    .toString()
+            } else {
+                val args = runCatching { JSONObject(call.arguments.ifBlank { "{}" }) }
+                    .getOrElse {
+                        JSONObject()
+                            .put("status", "error")
+                            .put("error", "invalid_arguments")
+                            .put("tool", requestedName)
+                            .put("details", it.message.orEmpty())
+                            .toString()
+                    }
+                if (args is String) {
+                    args
+                } else {
+                    tool.execute(args as JSONObject).also { executedTools += tool.name }
+                }
+            }
+            val completed = call.copy(result = result)
+            messages[messages.lastIndex] = messages.last().copy(
+                parts = messages.last().parts.map { if (it is RikkaPart.Tool && it.id == call.id) completed else it },
+            )
+            onParts(visibleParts + messages.last().parts)
+            onCheckpoint?.invoke(messages.toList())
+        }
     }
 
     private fun stream(messages: List<RikkaMessage>, tools: List<RikkaTool>): Flow<List<RikkaPart>> =

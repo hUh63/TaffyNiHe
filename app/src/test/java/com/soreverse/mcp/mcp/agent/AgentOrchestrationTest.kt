@@ -1,7 +1,12 @@
 package com.soreverse.mcp.mcp.agent
 
+import com.soreverse.mcp.core.RikkaMessage
+import com.soreverse.mcp.core.RikkaPart
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -116,6 +121,74 @@ class AgentOrchestrationTest {
         AgentRoles.ALL.filter { it.id != "report" }.forEach { role ->
             assertTrue("${role.id} needs at least one tool", role.toolNames.isNotEmpty())
         }
+    }
+
+
+    @Test
+    fun historyCodecRoundTripsToolResults() {
+        val messages = listOf(
+            RikkaMessage("system", listOf(RikkaPart.Text("sys"))),
+            RikkaMessage("user", listOf(RikkaPart.Text("go"))),
+            RikkaMessage(
+                "assistant",
+                listOf(
+                    RikkaPart.Tool(id = "c1", name = "taffy_analyze_elf", arguments = "{\"workspaceId\":\"w\"}", result = "{\"ok\":true}", index = 0),
+                    RikkaPart.Tool(id = "c2", name = "taffy_read_disasm", arguments = "{}", result = null, index = 1),
+                )
+            ),
+        )
+        val decoded = AgentHistoryCodec.decode(AgentHistoryCodec.encode(messages))
+        assertEquals(3, decoded.size)
+        assertEquals("system", decoded[0].role)
+        val tools = decoded[2].parts.filterIsInstance<RikkaPart.Tool>()
+        assertEquals(2, tools.size)
+        assertEquals("taffy_analyze_elf", tools[0].name)
+        assertEquals("{\"ok\":true}", tools[0].result)
+        assertNull("unfinished call must stay unfinished after round trip", tools[1].result)
+    }
+
+    @Test
+    fun historyCodecSkipsMalformedEntries() {
+        val arr = JSONArray()
+            .put(JSONObject().put("role", "").put("parts", JSONArray()))
+            .put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("kind", "unknown"))))
+        val decoded = AgentHistoryCodec.decode(arr)
+        assertEquals("blank role dropped, unknown part dropped", 1, decoded.size)
+        assertEquals(0, decoded[0].parts.size)
+    }
+
+    @Test
+    fun recordCodecRestoresPlanAndCompletedResults() {
+        val runJson = JSONObject()
+            .put("goal", "g")
+            .put(
+                "plan",
+                JSONArray()
+                    .put(JSONObject().put("id", "n1-recon").put("role", "recon").put("task", "t").put("dependsOn", JSONArray()))
+                    .put(
+                        JSONObject().put("id", "n9-report").put("role", "report").put("task", "r")
+                            .put("dependsOn", JSONArray().put("n1-recon")).put("aggregate", true)
+                    )
+            )
+            .put(
+                "results",
+                JSONArray().put(
+                    JSONObject().put("nodeId", "n1-recon").put("role", "recon").put("status", "ok")
+                        .put("text", "done").put("ms", 42)
+                        .put("evidence", JSONArray().put(JSONObject().put("claim", "c").put("where", "0x1").put("confidence", "high")))
+                )
+            )
+        val plan = AgentRecordCodec.decodePlan(runJson)
+        assertEquals(2, plan.size)
+        assertEquals(listOf("n1-recon"), plan[1].dependsOn)
+        assertTrue(plan[1].aggregate)
+
+        val results = AgentRecordCodec.decodeResults(runJson)
+        assertEquals(1, results.size)
+        assertEquals("ok", results[0].status)
+        assertEquals(42L, results[0].ms)
+        assertEquals(1, results[0].evidence.size)
+        assertEquals("high", results[0].evidence[0].confidence)
     }
 
     @Test

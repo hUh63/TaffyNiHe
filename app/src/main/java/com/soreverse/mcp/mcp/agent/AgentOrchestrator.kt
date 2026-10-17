@@ -124,33 +124,113 @@ internal object AgentOrchestrator {
         zh: Boolean = true,
         onEvent: (AgentEvent) -> Unit = {},
     ): AgentRunRecord {
-        val runId = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-" +
-            UUID.randomUUID().toString().take(4)
-        val startedAt = System.currentTimeMillis()
-        val budget = AgentBudget(
-            maxSubAgents = maxSubAgents.coerceIn(1, 8),
-            maxToolCalls = maxToolCalls.coerceIn(10, 400),
-            wallClockMs = wallClockMs.coerceIn(60_000L, 30 * 60_000L),
-        )
-        val settings: SettingsStore = ctx.settings
+        val runId = newRunId()
+        val budget = newBudget(maxSubAgents, maxToolCalls, wallClockMs)
 
-        // 1) 工作区：优先用传入的；否则用 path 打开（避免让模型去 open，浪费一轮）
+        // 工作区：优先用传入的；否则用 path 打开（避免让模型去 open，浪费一轮）
         var ws = workspaceId
         if (ws.isBlank() && path.isNotBlank()) {
             ws = openWorkspace(ctx, path)
             if (ws.isNotBlank()) onEvent(AgentEvent.Note("workspace opened: $ws"))
         }
 
-        val engine = AgentKernel.engine(settings)
+        return execute(
+            ctx = ctx,
+            runId = runId,
+            goal = goal,
+            ws = ws,
+            startedAt = System.currentTimeMillis(),
+            nodes = plan(goal, roles),
+            preDone = emptyMap(),
+            budget = budget,
+            zh = zh,
+            maxStepsPerNode = maxStepsPerNode,
+            onEvent = onEvent,
+        )
+    }
+
+    /**
+     * 从落盘的 run.json 续跑。
+     *
+     * 只跳过 `status == "ok"` 的节点：失败/超时/预算跳过的节点会被重跑——续跑的意义是把没做完的
+     * 做完，而不是把失败结果原样固化。若某节点上次留下了消息历史（进程被杀时），
+     * [SubAgentRunner] 会自动带着历史继续，不会从头再来。
+     */
+    suspend fun resume(
+        ctx: ToolContext,
+        runId: String,
+        maxSubAgents: Int = 5,
+        maxToolCalls: Int = 80,
+        wallClockMs: Long = 8 * 60_000L,
+        maxStepsPerNode: Int = 14,
+        zh: Boolean = true,
+        onEvent: (AgentEvent) -> Unit = {},
+    ): AgentRunRecord {
+        val saved = loadRun(ctx, runId)
+            ?: return AgentRunRecord(
+                runId = runId,
+                goal = "",
+                workspaceId = "",
+                startedAt = System.currentTimeMillis(),
+                finishedAt = System.currentTimeMillis(),
+                status = "failed",
+                conclusion = "找不到运行记录：$runId",
+                plan = emptyList(),
+                results = emptyList(),
+                budget = JSONObject(),
+            )
+        val nodes = AgentRecordCodec.decodePlan(saved)
+        val preDone = AgentRecordCodec.decodeResults(saved)
+            .filter { it.status == "ok" }
+            .associateBy { it.nodeId }
+        onEvent(AgentEvent.Note("resume $runId: ${preDone.size}/${nodes.size} nodes already completed"))
+        return execute(
+            ctx = ctx,
+            runId = runId,
+            goal = saved.optString("goal"),
+            ws = saved.optString("workspaceId"),
+            startedAt = saved.optLong("startedAt", System.currentTimeMillis()),
+            nodes = nodes,
+            preDone = preDone,
+            budget = newBudget(maxSubAgents, maxToolCalls, wallClockMs),
+            zh = zh,
+            maxStepsPerNode = maxStepsPerNode,
+            onEvent = onEvent,
+        )
+    }
+
+    private fun newRunId(): String =
+        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-" + UUID.randomUUID().toString().take(4)
+
+    private fun newBudget(maxSubAgents: Int, maxToolCalls: Int, wallClockMs: Long): AgentBudget = AgentBudget(
+        maxSubAgents = maxSubAgents.coerceIn(1, 8),
+        maxToolCalls = maxToolCalls.coerceIn(10, 400),
+        wallClockMs = wallClockMs.coerceIn(60_000L, 30 * 60_000L),
+    )
+
+    private suspend fun execute(
+        ctx: ToolContext,
+        runId: String,
+        goal: String,
+        ws: String,
+        startedAt: Long,
+        nodes: List<AgentNode>,
+        preDone: Map<String, NodeResult>,
+        budget: AgentBudget,
+        zh: Boolean,
+        maxStepsPerNode: Int,
+        onEvent: (AgentEvent) -> Unit,
+    ): AgentRunRecord {
+        val engine = AgentKernel.engine(ctx.settings)
         val runner = SubAgentRunner(ctx, engine, zh, budget, runId, onEvent)
-        val nodes = plan(goal, roles)
-        onEvent(AgentEvent.Note("plan: ${nodes.size} nodes"))
+        onEvent(AgentEvent.Note("plan: ${nodes.size} nodes, ${preDone.size} already completed"))
 
         val results = LinkedHashMap<String, NodeResult>()
+        results.putAll(preDone)
         val pending = LinkedHashMap<String, AgentNode>()
-        nodes.forEach { pending[it.id] = it }
+        nodes.forEach { if (!results.containsKey(it.id)) pending[it.id] = it }
 
-        // 2) 拓扑分层执行
+        // 拓扑分层执行
         while (pending.isNotEmpty()) {
             val ready = pending.values.filter { node -> node.dependsOn.all { results.containsKey(it) } }
             if (ready.isEmpty()) {
@@ -174,7 +254,7 @@ internal object AgentOrchestrator {
                 batch.map { node ->
                     async(Dispatchers.Default) {
                         val upstream = upstreamFor(node, results)
-                        val r = try {
+                        try {
                             runner.run(node, ws, upstream, maxStepsPerNode)
                         } catch (e: CancellationException) {
                             throw e
@@ -189,7 +269,6 @@ internal object AgentOrchestrator {
                                 error = e.message ?: e.javaClass.simpleName,
                             )
                         }
-                        r
                     }
                 }.awaitAll()
             }.forEach { r ->
@@ -213,7 +292,7 @@ internal object AgentOrchestrator {
             }
         }
 
-        // 3) 结论：优先用 report 节点产出；它失败就用本地汇总兜底（不空手而归）
+        // 结论：优先用 report 节点产出；它失败就用本地汇总兜底（不空手而归）
         val ordered = nodes.mapNotNull { results[it.id] }
         val reportNode = ordered.firstOrNull { it.role == "report" }
         val conclusion = reportNode?.text?.takeIf { it.isNotBlank() }

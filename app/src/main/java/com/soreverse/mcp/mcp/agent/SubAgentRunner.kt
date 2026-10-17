@@ -7,6 +7,8 @@ import com.soreverse.mcp.mcp.ToolContext
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
@@ -93,6 +95,12 @@ internal class SubAgentRunner(
         val timeoutMs = minOf(nodeTimeoutCapMs, remaining)
 
         var streamed = ""
+        // 断点续跑: 若上次同名节点留下了消息历史, 带着它继续, 而不是从头再来。
+        val histFile = historyFile(node.id)
+        val resumed = histFile.isFile
+        val initialMessages = if (resumed) readHistory(histFile) else emptyList()
+        if (resumed) onEvent(AgentEvent.Note("resume ${node.id} from checkpoint (${initialMessages.size} messages)"))
+
         val produced: String? = try {
             withTimeoutOrNull(timeoutMs) {
                 engine.run(
@@ -100,6 +108,8 @@ internal class SubAgentRunner(
                     userPrompt = user,
                     tools = toolSet.tools,
                     maxSteps = steps,
+                    initialMessages = initialMessages,
+                    onCheckpoint = { msgs -> persistHistory(histFile, msgs) },
                 ) { parts ->
                     val text = parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }
                     if (text.length > streamed.length) {
@@ -145,6 +155,7 @@ internal class SubAgentRunner(
             )
         }
 
+        runCatching { if (histFile.isFile) histFile.delete() }
         val body = AgentEvidenceParser.body(produced)
         val evidence = AgentEvidenceParser.parse(produced)
         val reportPath = persist(node.id, role.id, node.task, produced)
@@ -161,6 +172,34 @@ internal class SubAgentRunner(
             ms = ms,
             reportPath = reportPath,
         )
+    }
+
+    private fun runDir(): File = File(File(ctx.context.filesDir, "agent-runs"), runId)
+
+    private fun historyFile(nodeId: String): File = File(File(runDir(), "nodes"), "$nodeId.history.json")
+
+    private fun readHistory(file: File): List<com.soreverse.mcp.core.RikkaMessage> = runCatching {
+        if (!file.isFile) return emptyList()
+        val text = file.readText(Charsets.UTF_8)
+        if (text.isBlank()) return emptyList()
+        AgentHistoryCodec.decode(org.json.JSONArray(text))
+    }.getOrElse {
+        AppLog.w("agent[$runId] read history failed: ${it.message}")
+        emptyList()
+    }
+
+    private suspend fun persistHistory(file: File, messages: List<com.soreverse.mcp.core.RikkaMessage>) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val dir = file.parentFile
+                if (dir != null && !dir.exists()) dir.mkdirs()
+                val tmp = File(file.parentFile, file.name + ".tmp")
+                tmp.writeText(AgentHistoryCodec.encode(messages).toString(), Charsets.UTF_8)
+                // 原子替换：写一半被杀时不会留下半截 JSON 让恢复失败
+                if (file.exists()) file.delete()
+                tmp.renameTo(file)
+            }.onFailure { AppLog.w("agent[$runId] persist history failed: ${it.message}") }
+        }
     }
 
     /**

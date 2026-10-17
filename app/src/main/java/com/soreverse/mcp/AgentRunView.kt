@@ -124,7 +124,13 @@ internal fun AgentRunView(
             }
             val id = r.optString("runId")
             runId = id
-            // 轮询到结束：1.2s 一次，最多 30 分钟（编排本身有 wallClock 上限）
+            poll(id)
+        }
+    }
+
+    /** 轮询到结束：1.2s 一次，最多 30 分钟（编排本身有 wallClock 上限）。 */
+    fun poll(id: String) {
+        scope.launch {
             var guard = 0
             while (guard < 1500) {
                 delay(1200)
@@ -134,6 +140,27 @@ internal fun AgentRunView(
                 if (st.isNotBlank() && st != "running") break
                 guard++
             }
+        }
+    }
+
+    /** 从落盘记录续跑：已完成的节点不会重跑，中断的节点带着消息历史继续。 */
+    fun resumeRun(id: String) {
+        if (id.isBlank()) return
+        busy = true
+        error = ""
+        scope.launch {
+            val r = callTool(
+                "taffy_agent_run",
+                JSONObject().put("action", "resume").put("runId", id).put("zh", zh),
+            )
+            busy = false
+            if (r == null || !r.optBoolean("ok", false)) {
+                error = r?.optJSONObject("error")?.optString("message").orEmpty()
+                    .ifBlank { if (zh) "续跑失败" else "resume failed" }
+                return@launch
+            }
+            runId = id
+            poll(id)
         }
     }
 
@@ -198,6 +225,11 @@ internal fun AgentRunView(
             if (status == "running") {
                 OutlinedButton(onClick = { cancel() }) {
                     Text(if (zh) "中止" else "Cancel")
+                }
+            }
+            if (runId.isNotBlank() && status.isNotBlank() && status != "running") {
+                OutlinedButton(onClick = { resumeRun(runId) }, enabled = !busy) {
+                    Text(if (zh) "继续上次" else "Resume")
                 }
             }
             TextButton(onClick = { loadHistory() }) {
@@ -476,6 +508,11 @@ private fun HistoryPane(historyJson: String, zh: Boolean, onPick: (String) -> Un
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        if (zh) "点开可回看，也可对未完成的运行继续" else "tap to review; resume unfinished runs",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }

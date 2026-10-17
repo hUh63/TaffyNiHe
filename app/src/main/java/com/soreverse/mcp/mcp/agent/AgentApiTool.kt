@@ -49,7 +49,7 @@ object AgentApiTool {
             heavy = true,
         ) {
             objectSchema(props {
-                "action" str "roles(默认)=角色清单 | plan=只出计划 | run=启动 | status=查进度 | get=完整记录 | list=历史 | cancel=中止"
+                "action" str "roles(默认)=角色清单 | plan=只出计划 | run=启动 | resume=从落盘记录续跑 | status=查进度 | get=完整记录 | list=历史 | cancel=中止"
                 "goal" str "run/plan 必填：这次要查清什么（如「这个 so 有没有反调试、字符串是否加密、壳是哪家」）"
                 "workspaceId" str "已打开的工作区 ID（与 path 二选一）"
                 "path" str "目标文件绝对路径：未给 workspaceId 时自动打开临时工作区"
@@ -58,7 +58,7 @@ object AgentApiTool {
                 "maxToolCalls" int "工具调用总上限（默认 80，10~400）"
                 "wallClockMs" int "总时长上限毫秒（默认 480000=8 分钟，60000~1800000）"
                 "maxSteps" int "单个子代理的最大工具步数（默认 14）"
-                "runId" str "status/get/cancel 必填：run 返回的运行 ID"
+                "runId" str "resume/status/get/cancel 必填：run 返回的运行 ID"
                 "limit" int "list 返回条数（默认 20）"
                 "zh" bool "true=中文提示词与输出（默认 true）"
             })
@@ -67,6 +67,10 @@ object AgentApiTool {
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val action = args.str("action", "roles").ifBlank { "roles" }.lowercase()
             val zh = args.bool("zh", true)
+            val maxAgents = args.intValue("maxSubAgents", 5)
+            val maxTools = args.intValue("maxToolCalls", 80)
+            val wallMs = args.intValue("wallClockMs", 8 * 60_000).toLong()
+            val maxSteps = args.intValue("maxSteps", 14)
             return when (action) {
                 "roles" -> ok(
                     JSONObject()
@@ -106,10 +110,27 @@ object AgentApiTool {
                             workspaceId = args.str("workspaceId").trim(),
                             path = args.str("path").trim(),
                             roles = roleIds(args),
-                            maxSubAgents = args.intValue("maxSubAgents", 5),
-                            maxToolCalls = args.intValue("maxToolCalls", 80),
-                            wallClockMs = args.intValue("wallClockMs", 8 * 60_000).toLong(),
-                            maxStepsPerNode = args.intValue("maxSteps", 14),
+                            maxSubAgents = maxAgents,
+                            maxToolCalls = maxTools,
+                            wallClockMs = wallMs,
+                            maxStepsPerNode = maxSteps,
+                            zh = zh,
+                        )
+                    }
+                }
+
+                "resume" -> {
+                    val runId = args.str("runId").trim()
+                    if (runId.isBlank()) {
+                        err("INVALID_ARGUMENT", "resume 需要 runId（要续跑的那次运行）", "runId", "")
+                    } else {
+                        AgentRuntime.resume(
+                            ctx = ctx,
+                            runId = runId,
+                            maxSubAgents = maxAgents,
+                            maxToolCalls = maxTools,
+                            wallClockMs = wallMs,
+                            maxStepsPerNode = maxSteps,
                             zh = zh,
                         )
                     }

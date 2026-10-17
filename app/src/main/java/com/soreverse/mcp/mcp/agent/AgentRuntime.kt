@@ -76,7 +76,7 @@ internal object AgentRuntime {
                     wallClockMs = wallClockMs,
                     maxStepsPerNode = maxStepsPerNode,
                     zh = zh,
-                ) { ev -> applyEvent(snapshot, ev) }
+                ) { ev -> applyEvent(snapshot, ev, runId) }
                 snapshot
                     .put("status", record.status)
                     .put("finishedAt", record.finishedAt)
@@ -99,8 +99,98 @@ internal object AgentRuntime {
         return JSONObject().put("ok", true).put("runId", runId).put("status", "running")
     }
 
+    /**
+     * 从落盘记录续跑一次已中断的运行。
+     *
+     * 已有节点的结果先回填到进度快照里（UI 一进入就能看到「哪些已经做完」），
+     * 然后只跑没做完的；同名节点若留有消息历史，子代理会带着历史继续。
+     */
+    fun resume(
+        ctx: ToolContext,
+        runId: String,
+        maxSubAgents: Int,
+        maxToolCalls: Int,
+        wallClockMs: Long,
+        maxStepsPerNode: Int,
+        zh: Boolean,
+    ): JSONObject {
+        if (!AgentKernel.isConfigured(ctx.settings)) {
+            val missing = AgentKernel.missingConfig(ctx.settings)
+            return JSONObject()
+                .put("ok", false)
+                .put(
+                    "error",
+                    JSONObject()
+                        .put("code", "AI_NOT_CONFIGURED")
+                        .put("message", "AI 未配置：请填写 endpoint / apiKey / model（缺 ${missing.joinToString()}）")
+                        .put("missing", JSONArray(missing))
+                )
+        }
+        val saved = AgentOrchestrator.loadRun(ctx, runId)
+            ?: return JSONObject()
+                .put("ok", false)
+                .put("error", JSONObject().put("code", "NOT_FOUND").put("message", "找不到该运行：$runId"))
+        if (jobs.containsKey(runId)) {
+            return JSONObject()
+                .put("ok", false)
+                .put("error", JSONObject().put("code", "ALREADY_RUNNING").put("message", "该运行仍在进行中"))
+        }
+
+        val snapshot = JSONObject()
+            .put("runId", runId)
+            .put("goal", saved.optString("goal"))
+            .put("status", "running")
+            .put("resumed", true)
+            .put("startedAt", saved.optLong("startedAt", System.currentTimeMillis()))
+            .put("notes", JSONArray())
+        // 回填已完成节点
+        val nodes = JSONObject()
+        saved.optJSONArray("results")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val r = arr.optJSONObject(i) ?: continue
+                val id = r.optString("nodeId")
+                if (id.isBlank()) continue
+                nodes.put(id, r)
+            }
+        }
+        snapshot.put("nodes", nodes)
+        live[runId] = snapshot
+
+        val job = scope.launch {
+            try {
+                val record = AgentOrchestrator.resume(
+                    ctx = ctx,
+                    runId = runId,
+                    maxSubAgents = maxSubAgents,
+                    maxToolCalls = maxToolCalls,
+                    wallClockMs = wallClockMs,
+                    maxStepsPerNode = maxStepsPerNode,
+                    zh = zh,
+                ) { ev -> applyEvent(snapshot, ev, runId) }
+                snapshot
+                    .put("status", record.status)
+                    .put("finishedAt", record.finishedAt)
+                    .put("conclusion", record.conclusion)
+                    .put("record", record.toJson())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                snapshot.put("status", "cancelled").put("finishedAt", System.currentTimeMillis())
+                throw e
+            } catch (e: Throwable) {
+                AppLog.e("agent[$runId] resume failed", e)
+                snapshot
+                    .put("status", "failed")
+                    .put("finishedAt", System.currentTimeMillis())
+                    .put("error", e.message ?: e.javaClass.simpleName)
+            } finally {
+                jobs.remove(runId)
+            }
+        }
+        jobs[runId] = job
+        return JSONObject().put("ok", true).put("runId", runId).put("status", "running").put("resumed", true)
+    }
+
     /** 事件 → 进度快照。节点状态在快照里增量更新，UI 轮询即可看到实时进度。 */
-    private fun applyEvent(snapshot: JSONObject, ev: AgentEvent) {
+    private fun applyEvent(snapshot: JSONObject, ev: AgentEvent, runId: String) {
         runCatching {
             val nodes = snapshot.optJSONObject("nodes") ?: JSONObject().also { snapshot.put("nodes", it) }
             when (ev) {

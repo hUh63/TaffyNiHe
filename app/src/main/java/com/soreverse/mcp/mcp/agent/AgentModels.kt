@@ -136,3 +136,145 @@ internal object AgentEvidenceParser {
         return if (marker < 0) text.trim() else text.substring(0, marker).trim()
     }
 }
+
+/**
+ * 子代理消息历史的落盘编解码。
+ *
+ * 只保留重放所需的最小字段：role / parts(kind+text|tool 四元组)。不存 usage、不存 reasoning
+ * 之外的东西——reasoning 要存，因为部分供应商在后续轮次里依赖它保持推理连贯。
+ *
+ * 解码对未知 kind 与畸形条目一律跳过，绝不因为一条坏数据让整次恢复失败。
+ */
+internal object AgentHistoryCodec {
+
+    fun encode(messages: List<com.soreverse.mcp.core.RikkaMessage>): JSONArray {
+        val out = JSONArray()
+        messages.forEach { m ->
+            val parts = JSONArray()
+            m.parts.forEach { part ->
+                when (part) {
+                    is com.soreverse.mcp.core.RikkaPart.Text ->
+                        parts.put(JSONObject().put("kind", "text").put("text", part.text))
+                    is com.soreverse.mcp.core.RikkaPart.Reasoning ->
+                        parts.put(JSONObject().put("kind", "reasoning").put("text", part.text))
+                    is com.soreverse.mcp.core.RikkaPart.Tool ->
+                        parts.put(
+                            JSONObject()
+                                .put("kind", "tool")
+                                .put("id", part.id)
+                                .put("name", part.name)
+                                .put("arguments", part.arguments)
+                                .put("result", part.result ?: JSONObject.NULL)
+                                .put("index", part.index)
+                        )
+                }
+            }
+            out.put(JSONObject().put("role", m.role).put("parts", parts))
+        }
+        return out
+    }
+
+    fun decode(arr: JSONArray): List<com.soreverse.mcp.core.RikkaMessage> {
+        val out = ArrayList<com.soreverse.mcp.core.RikkaMessage>(arr.length())
+        for (i in 0 until arr.length()) {
+            val m = arr.optJSONObject(i) ?: continue
+            val role = m.optString("role")
+            if (role.isBlank()) continue
+            val partsArr = m.optJSONArray("parts") ?: JSONArray()
+            val parts = ArrayList<com.soreverse.mcp.core.RikkaPart>(partsArr.length())
+            for (j in 0 until partsArr.length()) {
+                val p = partsArr.optJSONObject(j) ?: continue
+                when (p.optString("kind")) {
+                    "text" -> parts.add(com.soreverse.mcp.core.RikkaPart.Text(p.optString("text")))
+                    "reasoning" -> parts.add(com.soreverse.mcp.core.RikkaPart.Reasoning(p.optString("text")))
+                    "tool" -> parts.add(
+                        com.soreverse.mcp.core.RikkaPart.Tool(
+                            id = p.optString("id"),
+                            name = p.optString("name"),
+                            arguments = p.optString("arguments"),
+                            result = if (p.isNull("result")) null else p.optString("result"),
+                            index = p.optInt("index"),
+                        )
+                    )
+                }
+            }
+            out.add(com.soreverse.mcp.core.RikkaMessage(role, parts))
+        }
+        return out
+    }
+}
+
+/** run.json 的反向解析：恢复运行只需要「计划」和「已完成的节点结果」。 */
+internal object AgentRecordCodec {
+
+    fun decodePlan(o: JSONObject): List<AgentNode> {
+        val arr = o.optJSONArray("plan") ?: return emptyList()
+        val out = ArrayList<AgentNode>(arr.length())
+        for (i in 0 until arr.length()) {
+            val n = arr.optJSONObject(i) ?: continue
+            val id = n.optString("id")
+            if (id.isBlank()) continue
+            val deps = ArrayList<String>()
+            val d = n.optJSONArray("dependsOn")
+            if (d != null) {
+                for (j in 0 until d.length()) {
+                    val s = d.optString(j)
+                    if (s.isNotBlank()) deps.add(s)
+                }
+            }
+            out.add(
+                AgentNode(
+                    id = id,
+                    roleId = n.optString("role"),
+                    task = n.optString("task"),
+                    dependsOn = deps,
+                    aggregate = n.optBoolean("aggregate"),
+                )
+            )
+        }
+        return out
+    }
+
+    fun decodeResults(o: JSONObject): List<NodeResult> {
+        val arr = o.optJSONArray("results") ?: return emptyList()
+        val out = ArrayList<NodeResult>(arr.length())
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i) ?: continue
+            val id = r.optString("nodeId")
+            if (id.isBlank()) continue
+            val ev = ArrayList<AgentEvidence>()
+            val evArr = r.optJSONArray("evidence")
+            if (evArr != null) {
+                for (j in 0 until evArr.length()) {
+                    val e = evArr.optJSONObject(j) ?: continue
+                    val claim = e.optString("claim")
+                    if (claim.isBlank()) continue
+                    ev.add(AgentEvidence(claim, e.optString("where"), e.optString("confidence", "low")))
+                }
+            }
+            val tools = ArrayList<String>()
+            val tArr = r.optJSONArray("toolsUsed")
+            if (tArr != null) for (j in 0 until tArr.length()) tools.add(tArr.optString(j))
+            val unresolved = ArrayList<String>()
+            val uArr = r.optJSONArray("unresolvedTools")
+            if (uArr != null) for (j in 0 until uArr.length()) unresolved.add(uArr.optString(j))
+
+            out.add(
+                NodeResult(
+                    nodeId = id,
+                    role = r.optString("role"),
+                    task = r.optString("task"),
+                    status = r.optString("status"),
+                    text = r.optString("text"),
+                    evidence = ev,
+                    toolsUsed = tools,
+                    unresolvedTools = unresolved,
+                    ms = r.optLong("ms"),
+                    error = r.optString("error"),
+                    reportPath = r.optString("reportPath"),
+                )
+            )
+        }
+        return out
+    }
+}

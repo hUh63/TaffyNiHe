@@ -84,7 +84,7 @@ internal object PluginManager {
 
         val minVersion = meta.optString("minAppVersion")
         if (minVersion.isNotBlank() && !versionAtLeast(appVersionName(context), minVersion)) {
-            issues.add("需要 App ≥ $minVersion（当前 $appVersionName(context)）")
+            issues.add("需要 App ≥ $minVersion（当前 ${appVersionName(context)}）")
         }
 
         val perms = ArrayList<String>()

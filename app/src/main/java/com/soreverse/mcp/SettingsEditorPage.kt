@@ -142,6 +142,9 @@ private data class EditorTab(
 /** 大纲条目（符号导航：类型 + 名称 + 行号）。 */
 private data class OutlineItem(val kind: String, val name: String, val line: Int)
 
+/** 保存前的「外部修改」冲突现场（保存时二次校验不通过就弹出三选一对话框）。 */
+private data class SaveConflict(val path: String, val known: FileStamp?, val current: FileStamp?)
+
 /** 语言显示名。 */
 private fun langLabel(m: CodeHighlighter.Lang, zh: Boolean): String = when (m) {
     CodeHighlighter.Lang.PYTHON -> "Python"
@@ -391,6 +394,14 @@ internal fun SettingsEditorPage(t: UiText) {
     var currentFile by remember { mutableStateOf<String?>(null) }
     var currentFilePath by remember { mutableStateOf<String?>(null) }
     var recentFiles by remember { mutableStateOf<List<String>>(emptyList()) }
+    // ── 会话恢复：checkpoint 历史 / 外部修改冲突 / 上次会话 ──
+    // 打开文件时记下的 (mtime, size, sha256)，按路径区分；保存前再比一次
+    val fileStamps = remember { mutableMapOf<String, FileStamp>() }
+    var checkpoints by remember { mutableStateOf<List<CheckpointMeta>>(emptyList()) }
+    var showHistoryMenu by remember { mutableStateOf(false) }
+    var pendingConflict by remember { mutableStateOf<SaveConflict?>(null) }
+    var pendingRestore by remember { mutableStateOf<List<EditorTab>?>(null) }
+    var sessionEntries by remember { mutableStateOf<List<SessionEntry>>(emptyList()) }
     val consoleScroll = rememberScrollState()
     // 查找/替换
     var showFind by remember { mutableStateOf(false) }
@@ -515,6 +526,9 @@ internal fun SettingsEditorPage(t: UiText) {
                 savedCode = text
                 currentFilePath = path
                 currentFile = File(path).name
+                // 记录打开瞬间的文件指纹，供保存前的「外部修改」冲突检测比对（sha256 在 IO 线程算）
+                val st = withContext(Dispatchers.IO) { FileStampUtil.stamp(File(path)) }
+                if (st != null) fileStamps[path] = st else fileStamps.remove(path)
                 val detected = CodeHighlighter.Lang.fromExt(File(path).extension)
                 mode = detected
                 if (detected == CodeHighlighter.Lang.EXT) {
@@ -524,6 +538,76 @@ internal fun SettingsEditorPage(t: UiText) {
                 appendOut("\n[无法读取: $path]\n")
             }
         }
+    }
+
+    // ══════════════════════ 会话恢复（checkpoint / 冲突 / 上次会话）══════════════════════
+    // 说明：这一批局部函数必须定义在第一个使用者（saveFile / UI）之前 —— Kotlin 局部函数不支持前向引用。
+    // 快照目录与 autosave.json、editor_files/backup 三者并存：backup 是「最近一次」单档（EditorDiffMarks 的
+    // diff 基线），checkpoint 是「多历史点」栈，autosave 是「未保存正文」。
+
+    /** 快照键：有文件路径用路径，草稿用 untitled/<标题>。 */
+    fun sessionKey(): String = currentFilePath ?: ("untitled/" + (currentFile ?: "draft"))
+
+    /** 重新读快照列表（IO 线程）。 */
+    fun reloadCheckpoints(key: String = sessionKey()) {
+        scope.launch {
+            checkpoints = withContext(Dispatchers.IO) { EditorCheckpointStore.list(context, key) }
+        }
+    }
+
+    /** 压入一份 checkpoint（IO 线程，失败静默）。 */
+    fun pushCheckpoint(label: String) {
+        val text = code
+        if (text.isBlank()) return
+        val key = sessionKey()
+        scope.launch {
+            withContext(Dispatchers.IO) { EditorCheckpointStore.push(context, key, text, label) }
+            checkpoints = withContext(Dispatchers.IO) { EditorCheckpointStore.list(context, key) }
+        }
+    }
+
+    /** rewind：恢复到某个历史点。恢复前先把当前内容压一份「回退前」，保证可再前进回来。 */
+    fun restoreCheckpoint(meta: CheckpointMeta) {
+        val key = sessionKey()
+        scope.launch {
+            val text = withContext(Dispatchers.IO) { EditorCheckpointStore.read(context, key, meta.id) }
+            if (text == null) {
+                appendOut("\n[快照读取失败: #${meta.id}]\n")
+                return@launch
+            }
+            if (text == code) {
+                appendOut("\n[快照 #${meta.id} 与当前内容一致，无需回退]\n")
+                return@launch
+            }
+            runCatching { withContext(Dispatchers.IO) { EditorCheckpointStore.push(context, key, code, if (zh) "回退前" else "before-rewind") } }
+            pushUndo(tf.text)
+            setCode(text)
+            checkpoints = withContext(Dispatchers.IO) { EditorCheckpointStore.list(context, key) }
+            appendOut("\n[已回退到快照 #${meta.id} · ${meta.label} · ${meta.lines} 行]\n")
+        }
+    }
+
+    /** 应用「上次编辑会话」的标签集合（正文来自 autosave.json）。 */
+    fun applyRestoredSession(list: List<EditorTab>) {
+        if (list.isEmpty()) return
+        tabs = list
+        activeTab = 0
+        val first = list[0]
+        code = first.code
+        tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
+        // 上次会话里首个标签是脏的，就保持「未保存」标记（savedCode 置空即 dirty）
+        savedCode = if (sessionEntries.firstOrNull()?.dirty == true) "" else first.code
+        mode = first.mode
+        currentFile = if (first.untitled) null else first.name
+        currentFilePath = first.path
+        val p = first.path
+        if (p != null) {
+            scope.launch {
+                val st = withContext(Dispatchers.IO) { FileStampUtil.stamp(File(p)) }
+                if (st != null) fileStamps[p] = st else fileStamps.remove(p)
+            }
+        }
+        appendOut(if (zh) "\n[已恢复 ${list.size} 个未关闭标签的自动草稿]\n" else "\n[Restored ${list.size} autosaved tab(s)]\n")
     }
 
     // ── 查找（支持正则/大小写）──
@@ -641,30 +725,49 @@ internal fun SettingsEditorPage(t: UiText) {
             list.add(EditorTab(o.optString("name", if (zh) "草稿" else "Draft"), o.optString("path").ifBlank { null }, o.optString("code"), m, o.optBoolean("untitled", true)))
         }
         if (list.isEmpty()) return@LaunchedEffect
-        tabs = list
-        activeTab = 0
-        val first = list[0]
-        code = first.code
-        tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
-        savedCode = first.code
-        mode = first.mode
-        currentFile = if (first.untitled) null else first.name
-        currentFilePath = first.path
-        appendOut(if (zh) "\n[已恢复 ${list.size} 个未关闭标签的自动草稿]\n" else "\n[Restored ${list.size} autosaved tab(s)]\n")
+        // 崩溃/被杀后的恢复改成「问一句再恢复」：先读会话元信息，弹框让用户选 恢复 / 忽略
+        sessionEntries = withContext(Dispatchers.IO) { EditorSessionStore.load(context) }
+        pendingRestore = list
     }
     LaunchedEffect(code, tabs.size) {
         delay(2000)
+        // 还没回答「是否恢复上次会话」时不要回写，否则会把待恢复的 autosave.json 冲掉
+        if (pendingRestore != null) return@LaunchedEffect
         if (activeTab < tabs.size) {
             tabs = tabs.toMutableList().also { it[activeTab] = it[activeTab].copy(code = code, mode = mode) }
         }
+        val savingTabs = tabs
+        val activeDirty = code != savedCode
+        // 正文写 autosave.json（> 200KB 的标签只留标题，正文省略并标注）；元信息写 SharedPreferences
         runCatching {
-            val arr = JSONArray()
-            tabs.forEach { tb ->
-                arr.put(JSONObject().put("name", tb.name).put("path", tb.path ?: "").put("code", tb.code)
-                    .put("mode", tb.mode.name).put("untitled", tb.untitled))
+            withContext(Dispatchers.IO) {
+                val arr = JSONArray()
+                savingTabs.forEach { tb ->
+                    val big = tb.code.length > EditorSessionStore.MAX_INLINE_BYTES
+                    arr.put(JSONObject().put("name", tb.name).put("path", tb.path ?: "").put("code", if (big) "" else tb.code)
+                        .put("mode", tb.mode.name).put("untitled", tb.untitled).put("omitted", big))
+                }
+                autosaveFile.writeText(arr.toString())
+                EditorSessionStore.save(context, savingTabs.mapIndexed { idx, tb ->
+                    SessionEntry(
+                        name = tb.name,
+                        path = tb.path,
+                        // 只有 active 标签的脏标记是准的；非 active 标签无正文对比基线，草稿一律算脏
+                        dirty = if (idx == activeTab) activeDirty else tb.path == null,
+                        sizeBytes = tb.code.length.toLong(),
+                        omitted = tb.code.length > EditorSessionStore.MAX_INLINE_BYTES,
+                    )
+                })
             }
-            autosaveFile.writeText(arr.toString())
         }
+    }
+
+    // 自动 checkpoint：文本停止变化 8 秒后压一份（等价「空闲即快照」，绝不逐键写盘）。
+    // 内容没变（code == savedCode）不压，避免刚打开就产生一份和内容相同的快照。
+    LaunchedEffect(code, currentFilePath) {
+        if (code.isBlank() || code == savedCode) return@LaunchedEffect
+        delay(8000)
+        pushCheckpoint(if (zh) "自动保存" else "auto")
     }
 
     fun snapshotCurrent() {
@@ -1025,26 +1128,78 @@ internal fun SettingsEditorPage(t: UiText) {
         }
     }
 
-    fun saveFile() {
-        if (code.isBlank()) return
+    /** 真正落盘（冲突对话框的「覆盖」也走这里；forcePath 用于另存为新副本）。 */
+    fun writeCurrentFile(forcePath: String? = null) {
+        val text = code
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                val target = currentFilePath
+                val target = forcePath ?: currentFilePath
                 if (target != null && File(target).isFile) {
                     snapshotIfChanged(target)
-                    val ok = runCatching { File(target).writeText(code); true }.getOrDefault(false)
-                    if (ok) "已保存到工作区: $target" else "写回失败（无权限？用 root/Termux 或改为另存）"
+                    val ok = runCatching { File(target).writeText(text); true }.getOrDefault(false)
+                    if (ok) {
+                        // 写完刷新指纹，避免下一次保存把自己刚写的当成外部修改
+                        val fresh = FileStampUtil.stamp(File(target))
+                        if (fresh != null) fileStamps[target] = fresh else fileStamps.remove(target)
+                        "已保存到工作区: $target"
+                    } else "写回失败（无权限？用 root/Termux 或改为另存）"
                 } else {
                     val dir = File(context.filesDir, "editor_files").apply { mkdirs() }
                     val ext = mode.ext
                     val name = currentFile ?: "file_${System.currentTimeMillis()}.$ext"
-                    File(dir, name).writeText(code)
+                    File(dir, name).writeText(text)
                     "已保存: ${File(dir, name).absolutePath}"
                 }
             }
-            savedCode = code
+            savedCode = text
             appendOut("\n[$result]\n")
+            pushCheckpoint(if (zh) "手动保存" else "manual save")
             refreshRecent()
+        }
+    }
+
+    /** 冲突时「另存为新副本」：写到 editor_files/<名字>-<时间戳>.<扩展名>，原文件一个字不动。 */
+    fun saveAsNewCopy() {
+        val srcPath = pendingConflict?.path
+        pendingConflict = null
+        val srcName = if (srcPath != null) File(srcPath).name else (currentFile ?: "file.${mode.ext}")
+        val base = srcName.substringBeforeLast('.', srcName)
+        val ext = srcName.substringAfterLast('.', mode.ext)
+        val text = code
+        scope.launch {
+            val target = File(File(context.filesDir, "editor_files").apply { mkdirs() }, "$base-${System.currentTimeMillis()}.$ext")
+            val ok = withContext(Dispatchers.IO) { runCatching { target.writeText(text); true }.getOrDefault(false) }
+            if (ok) {
+                savedCode = text
+                currentFile = target.name
+                currentFilePath = target.absolutePath
+                val fresh = withContext(Dispatchers.IO) { FileStampUtil.stamp(target) }
+                if (fresh != null) fileStamps[target.absolutePath] = fresh
+                appendOut("\n[已另存为副本: ${target.absolutePath}]\n")
+                pushCheckpoint(if (zh) "另存" else "save-as")
+                refreshRecent()
+            } else {
+                appendOut("\n[另存失败: ${target.absolutePath}]\n")
+            }
+        }
+    }
+
+    /** 保存入口（工具条 💾 / 命令 save / 命令面板都走这里）：先查「外部修改」冲突，再落盘。 */
+    fun saveFile() {
+        if (code.isBlank()) return
+        scope.launch {
+            val target = currentFilePath
+            if (target != null) {
+                val known = fileStamps[target]
+                // 算 sha256 可能读整文件，必须离开主线程
+                val cur = withContext(Dispatchers.IO) { FileStampUtil.stamp(File(target)) }
+                if (FileStampUtil.changed(known, cur)) {
+                    // 打开后文件被外部（MCP 工具 / 终端 / git）改过 —— 交给用户三选一
+                    pendingConflict = SaveConflict(target, known, cur)
+                    return@launch
+                }
+            }
+            writeCurrentFile()
         }
     }
 
@@ -1246,6 +1401,55 @@ internal fun SettingsEditorPage(t: UiText) {
                     }
                     items(textActions) { action ->
                         if (action.showWhen(host)) MiniAction(label = action.label(zh)) { action.perform(host) }
+                    }
+                }
+            }
+            // 「历史」入口：checkpoint 栈（没有 History 图标可用，用文字符号，避免 Unresolved reference）
+            Box {
+                IconButton(
+                    onClick = { showHistoryMenu = true; reloadCheckpoints() },
+                    modifier = Modifier.size(34.dp),
+                ) {
+                    Text("⟲", fontSize = AppText.bodyStrong, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(expanded = showHistoryMenu, onDismissRequest = { showHistoryMenu = false }) {
+                    Text(
+                        (if (zh) "历史快照 · " else "History · ") + EditorCheckpointStore.MAX_COUNT + " +${EditorCheckpointStore.MAX_BYTES / (1024 * 1024)}MB",
+                        fontSize = AppText.label,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    if (checkpoints.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text(if (zh) "暂无快照（编辑 8 秒后自动生成）" else "No checkpoints yet", fontSize = AppText.label) },
+                            onClick = { showHistoryMenu = false },
+                        )
+                    }
+                    checkpoints.forEach { cp ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "#" + (cp.id % 10000) + " · " + cp.label + " · " + cp.lines + (if (zh) " 行" else "L"),
+                                    fontSize = AppText.label,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            onClick = { showHistoryMenu = false; restoreCheckpoint(cp) },
+                        )
+                    }
+                    if (checkpoints.isNotEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text(if (zh) "清空历史快照" else "Clear checkpoints", fontSize = AppText.label, color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                showHistoryMenu = false
+                                val key = sessionKey()
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { EditorCheckpointStore.clear(context, key) }
+                                    reloadCheckpoints(key)
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -1895,6 +2099,105 @@ internal fun SettingsEditorPage(t: UiText) {
                 }
             }
         }
+    }
+
+    // 崩溃 / 被杀后的「恢复上次编辑会话」（只提示一次，进程内不再弹）
+    val restoreList = pendingRestore
+    if (restoreList != null) {
+        val dirtyCount = sessionEntries.count { it.dirty }
+        val omitted = sessionEntries.count { it.omitted }
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null; EditorSessionStore.clear(context) },
+            title = { Text(if (zh) "恢复上次编辑会话？" else "Restore last session?", fontSize = AppText.title) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        (if (zh) "上次退出时有 " else "") + restoreList.size + (if (zh) " 个标签未关闭" else " tab(s) were open") +
+                            (if (dirtyCount > 0) (if (zh) "，其中 $dirtyCount 个有未保存改动" else ", $dirtyCount with unsaved changes") else ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    restoreList.take(8).forEachIndexed { i, tb ->
+                        val e = sessionEntries.getOrNull(i)
+                        Text(
+                            "· " + (tb.path ?: (if (zh) "草稿" else "Draft")) +
+                                (if (e != null && e.dirty) (if (zh) "（未保存）" else " (unsaved)") else ""),
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (restoreList.size > 8) {
+                        Text(
+                            if (zh) "… 另有 ${restoreList.size - 8} 个标签" else "… ${restoreList.size - 8} more",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (omitted > 0) {
+                        Text(
+                            if (zh) "注意：$omitted 个标签正文超过 200KB，已省略正文，仅恢复标题。" else "Note: $omitted tab(s) over 200KB — body omitted.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { applyRestoredSession(restoreList); pendingRestore = null }) {
+                    Text(if (zh) "恢复" else "Restore")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestore = null; EditorSessionStore.clear(context) }) {
+                    Text(if (zh) "忽略" else "Ignore")
+                }
+            },
+        )
+    }
+
+    // 保存前的「文件已被外部修改」冲突：覆盖 / 另存副本 / 放弃
+    val conflict = pendingConflict
+    if (conflict != null) {
+        AlertDialog(
+            onDismissRequest = { pendingConflict = null },
+            title = { Text(if (zh) "文件已被外部修改" else "File changed externally", fontSize = AppText.title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        conflict.path,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        if (zh) "你打开这个文件之后，它被编辑器之外的进程（MCP 工具 / 终端 / git 等）改动过。直接保存会覆盖掉那些改动。"
+                        else "This file was modified by another process since you opened it. Saving will overwrite those changes.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val k = conflict.known
+                    val c = conflict.current
+                    Text(
+                        (if (zh) "打开时: " else "opened: ") + (k?.let { "${it.size}B ${it.sha256.take(8)}" } ?: "-") +
+                            "\n" + (if (zh) "现在: " else "now: ") + (c?.let { "${it.size}B ${it.sha256.take(8)}" } ?: (if (zh) "文件已不存在" else "gone")),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { pendingConflict = null }) { Text(if (zh) "放弃" else "Discard") }
+                    TextButton(onClick = { saveAsNewCopy() }) { Text(if (zh) "另存" else "Save as") }
+                    TextButton(onClick = { pendingConflict = null; writeCurrentFile() }) {
+                        Text(if (zh) "覆盖" else "Overwrite", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+        )
     }
 
     // 跳转对话框（行号 / 0x 字节偏移 / 符号名）

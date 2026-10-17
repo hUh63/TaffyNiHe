@@ -1,3 +1,78 @@
+# TaffyNiHe v1.3.108（多智能体编排 · 状态栏避让修复）
+
+这一版加的是**编排**，不是又塞一个万能 agent。
+
+以前的「AI 深度分析」是一个 agent 从头做到尾：上下文越跑越长，工具面越用越杂，跑到一半
+就开始遗忘前面的证据。多智能体编排换了个思路——把目标拆给几个专职子代理，每个只拿到
+自己那组工具，各干一段，最后汇总。
+
+## 一、六个专职角色
+
+| 角色 | 职责 | 工具白名单 |
+|---|---|---|
+| `recon` | 摸清形状：类型/架构/入口/段布局/依赖/是否加壳 | so_open / analyze_elf / read_stats / apk_analyze / meta_info |
+| `strings` | 字符串侧取证：可疑字符串、交叉引用、密文段、导入归因 | search_strings / string_xref / so_string_decrypt / so_import_trace |
+| `code` | 代码层：可疑函数、反汇编、伪 C、签名、JNI 注册表 | analyze_functions / read_disasm / so_decompile / so_func_sig / so_jni_register |
+| `flow` | 控制流：调用关系、CFG 形态、平坦化、能否还原 | analyze_cfg / analyze_xrefs / so_obfusc_scan / so_deflatten |
+| `packer` | 加固与脱壳：厂商与证据、反调试点、dump 与修复 | so_packer_fingerprint / so_anti_debug / apk_shell_check / unpack |
+| `report` | 汇总：交叉印证、写结论 | （无工具） |
+
+白名单是**硬约束**，在工具打包处过滤——模型根本看不到白名单外的工具，不是靠提示词劝它别乱用。
+
+## 二、编排机制
+
+- **计划先行**：`action=plan` 只出 DAG（谁做什么、依赖谁），不花钱不动文件，可以先看再跑
+- **并行调度**：拓扑分层，无依赖的节点并发（并发度 2）；`flow` 依赖 `code`（要先知道有哪些函数才看 CFG）；`report` 独占最后一层，输入是全部前置结论
+- **上游结论下传**：每个节点拿到的不是共享对话历史，而是前置节点的「结论 + 证据条目」，上下文短且可控
+- **证据契约**：子代理必须输出 `EVIDENCE: [{claim, where, confidence}]`，`where` 要求是地址/符号/段名/字段路径。解析失败就退化成文本摘要，不假装成功
+- **预算三件套**：子代理数（≤8）/ 工具调用数（≤400）/ 总时长（≤30 分钟）。超限的节点标 `skipped_budget` 并在结果里说明，不静默截断
+- **异步运行**：`run` 立刻返回 `runId`，`status` 轮询增量进度（每节点状态/工具调用/流式输出），`cancel` 真能停——不会被 MCP 客户端超时掐断后任务还在后台跑
+- **全量落盘**：`filesDir/agent-runs/<runId>/` 下写 `run.json`（计划、每节点状态/耗时/工具/证据）与 `conclusion.md`；单节点报告 > 8KB 时单独落 `nodeId.md`，结果里只回路径
+
+## 三、界面
+
+分析页 ⋮「塔菲工具」→ **多智能体**：
+
+- 目标输入 + 角色多选（FilterChip）+ 预算切换
+- 运行区按节点一张卡：角色 / 状态 / 耗时 / 工具调用序列（失败标 ✗）/ 实时输出尾部
+- 结论区用 Markdown 渲染
+- 历史区列出以往运行，点开回看
+
+**没有原始 JSON 出口**——排查看的是执行过程，不是读字段。
+
+## 四、修复：状态栏重叠
+
+`targetSdk=36` 起系统强制 edge-to-edge，但主 Scaffold 被显式设成
+`contentWindowInsets = WindowInsets(0, 0, 0, 0)`，等于把避让责任推给每个页面——实际只有
+分析页、编辑器、首页零星加了 `statusBarsPadding` / `safeDrawingPadding`，任务页、设置、
+日志、工具清单全都顶到状态栏下面。
+
+现在改为 M3 默认（`systemBars`），由 Scaffold 的 `innerPadding` 统一给出状态栏与导航条避让，
+同时移除各页面自己的 padding（避免双重间距）。全 App 一致，不会再出现某页漏掉。
+
+## 五、单测
+
+`AgentOrchestrationTest`：计划结构（recon 先行 / flow 依赖 code / report 聚合 / 角色过滤 /
+未知角色忽略）、证据解析（正常 / 垃圾输入 / 缺 claim 丢弃）、预算（额度、超时、取消）、
+角色定义与提示词契约。
+
+## 关于太墟 v1.0.0（2026-10-17）
+
+对照其发布说明，本版采纳了这几点设计：
+
+- **上下文预算与产物引用恢复** → `AgentBudget` + 报告落盘 + 结果里带 `reportPath`
+- **交付证据机制** → `EVIDENCE` 契约（每条结论必须能定位）
+- **取消标记** → `cancel` 走协程取消 + 预算取消双通道（太墟踩过「取消标记粘死」的坑，这里改成每次运行独立 budget 实例，不复用标记）
+
+暂未采纳：
+
+- **运行恢复（进程被杀后续跑）**：塔菲已支持事后回看 `run.json`，但中途续跑需要把每个节点的消息历史持久化，会让落盘体积翻几倍；等真有人跑长任务再上
+- **mcp STDIO 超长行落盘**：塔菲的 MCP 服务端已有工具大输出落盘，通道不同但目的相同
+- **统一插件平台**：塔菲的扩展系统已经覆盖（Xed 格式兼容 + 声明式设置 + minAppVersion）
+- **移除液态玻璃主题**：塔菲本来就只有 M3
+
+---
+
 # TaffyNiHe v1.3.107（静态深挖：加密字符串 · JNI 注册表 · 导入归因 · 加固结构指纹）
 
 这一版把逆向现场「只能靠猜」的三件事变成了「可以直接查」，另外把加固判定从

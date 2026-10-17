@@ -103,6 +103,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -118,7 +119,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -402,6 +405,24 @@ private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeC
             appDarkColors(accent, pureBlackDark, highContrast)
         } else {
             appLightColors(accent, highContrast)
+        }
+    }
+    // 深色模式下同步系统栏底色/图标：XML theme 把 statusBarColor/navigationBarColor 写死成浅色 #F2F2F7，
+    // 且 windowLightStatusBar=true。Android 14 及以下这两个属性仍然生效，
+    // 不动态改写就会出现「深色界面 + 一条浅灰状态栏 + 深色图标」的割裂（Android 15+ 强制 edge-to-edge，此赋值被忽略但无害）。
+    val rootView = LocalView.current
+    val hostWindow = (context as ComponentActivity).window
+    SideEffect {
+        val barColor = colors.surface.toArgb()
+        runCatching {
+            hostWindow.statusBarColor = barColor
+            hostWindow.navigationBarColor = barColor
+        }
+        runCatching {
+            androidx.core.view.WindowCompat.getInsetsController(hostWindow, rootView).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
         }
     }
     val metrics = remember(uiDensity, cornerStyle) { uiMetrics(uiDensity, cornerStyle) }

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "generated": "2026-10-17T02:53:21Z",
+  "note": "架构门禁基线: 存量债务登记表, 只允许收缩不允许扩张。",
+  "oversizeFiles": {
+    "app/src/main/java/com/soreverse/mcp/AnalysisWorkspace.kt": 13823
+  },
+  "allowedCycles": [
+    "com.soreverse.mcp -> com.soreverse.mcp.core -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.engine -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.engine -> com.soreverse.mcp.core -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.engine -> com.soreverse.mcp.nativecore -> com.soreverse.mcp.core -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.mcp -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.mcp -> com.soreverse.mcp.core -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.service -> com.soreverse.mcp",
+    "com.soreverse.mcp -> com.soreverse.mcp.service -> com.soreverse.mcp.core -> com.soreverse.mcp"
+  ],
+  "allowedLayerViolations": [
+    "com.soreverse.mcp.core -> com.soreverse.mcp",
+    "com.soreverse.mcp.core -> com.soreverse.mcp.engine",
+    "com.soreverse.mcp.core -> com.soreverse.mcp.mcp",
+    "com.soreverse.mcp.core -> com.soreverse.mcp.nativecore",
+    "com.soreverse.mcp.core -> com.soreverse.mcp.service",
+    "com.soreverse.mcp.engine -> com.soreverse.mcp",
+    "com.soreverse.mcp.engine -> com.soreverse.mcp.blutter",
+    "com.soreverse.mcp.engine -> com.soreverse.mcp.nativecore",
+    "com.soreverse.mcp.mcp -> com.soreverse.mcp",
+    "com.soreverse.mcp.mcp -> com.soreverse.mcp.nativecore"
+  ],
+  "thresholds": {
+    "maxWarnLines": 4000,
+    "maxErrorLines": 8000,
+    "maxTodoPerFile": 20
+  }
+}

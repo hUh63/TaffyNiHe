@@ -136,6 +136,12 @@ jobs:
           chmod +x gradlew
           ./gradlew test --no-daemon --stacktrace
 
+      - name: 架构门禁 (policy)
+        # 借鉴太墟的 policy 驱动架构门禁: 依赖白名单 / 无环 / 尺寸棘轮。
+        # 纯 Python3 标准库静态扫描, 零依赖; 存量债务由 tools/arch-baseline.json 承载,
+        # 只允许收缩不允许扩张。有 ERROR 退出码为 1。
+        run: python3 tools/arch-policy.py
+
       - name: 构建 arm64-v8a APK (Build APK)
         run: |
           BUILD_TYPE="${{ steps.build_type.outputs.type }}"
@@ -243,5 +249,4 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-
 

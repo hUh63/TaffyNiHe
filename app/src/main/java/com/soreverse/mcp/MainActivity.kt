@@ -29,6 +29,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.ui.geometry.Offset
@@ -37,11 +39,17 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
@@ -55,6 +63,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -63,6 +72,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -82,6 +92,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -101,6 +114,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -132,12 +146,18 @@ import java.util.Locale
 typealias AndroidSettings = android.provider.Settings
 
 class MainActivity : ComponentActivity() {
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 12)
         }
-        setContent { IntegrityGate { SoReverseApp() } }
+        setContent {
+            // calculateWindowSizeClass 需要 Activity 作用域：在这里算一次宽度尺寸类，
+            // 再传给 SoReverseApp 做 Compact / Medium / Expanded 三态响应式布局。
+            val windowSizeClass = calculateWindowSizeClass(this@MainActivity)
+            IntegrityGate { SoReverseApp(widthSizeClass = windowSizeClass.widthSizeClass) }
+        }
     }
 }
 
@@ -321,8 +341,9 @@ private fun textFor(mode: String, context: Context): UiText {
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
 @Composable
-private fun SoReverseApp() {
+private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
     val context = LocalContext.current
     val settings = remember { SettingsStore(context) }
     val appScope = rememberCoroutineScope()
@@ -488,42 +509,75 @@ private fun SoReverseApp() {
                             ),
                         ),
                 )
+                // 三态响应式布局（借鉴太墟 taixu）：Compact = 手机竖屏，沿用底部导航；
+                // Medium = 折叠屏展开 / 小平板（600~840dp），Expanded = 平板横屏 / 大折叠（>=840dp），
+                // 后两者改用左侧 NavigationRail（图标 + 文字），让内容区占满其余宽度。
+                val wideLayout = widthSizeClass != WindowWidthSizeClass.Compact
+                val expandedLayout = widthSizeClass == WindowWidthSizeClass.Expanded
+                // 借鉴上游 SOMCP v1.0.21: 设置子页面与工具功能页自动隐藏导航
+                // （沉浸全屏工作区，返回上级时恢复；隐藏/恢复带滑动动画）
+                val inSubPage = (tab == MainTab.Settings && settingsDest != SettingsDest.Root) ||
+                    (tab == MainTab.Tools && toolCategory != null)
+                // 底部导航与左侧导航栏共用同一套切换逻辑（含编辑器离开确认），状态处理完全不变
+                val onNavSelect: (MainTab) -> Unit = { target ->
+                    if (target != tab) {
+                        if (tab == MainTab.Editor && EditorSession.dirty && EditorSession.confirmOnExit) {
+                            pendingLeave = target
+                        } else {
+                            settingsDest = SettingsDest.Root
+                            toolCategory = null
+                            tab = target
+                        }
+                    }
+                }
                 Scaffold(
                     containerColor = Color.Transparent,
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     bottomBar = {
-                        // 借鉴上游 SOMCP v1.0.21: 设置子页面与工具功能页自动隐藏底部导航栏
-                        // （沉浸全屏工作区，返回上级时恢复；隐藏/恢复带滑动动画）
-                        val inSubPage = (tab == MainTab.Settings && settingsDest != SettingsDest.Root) ||
-                            (tab == MainTab.Tools && toolCategory != null)
-                        AnimatedVisibility(
-                            visible = !inSubPage,
-                            enter = slideInVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeIn(),
-                            exit = slideOutVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeOut(),
-                        ) {
-                            AppBottomNav(
-                                current = tab,
-                                zh = t.zh,
-                                onSelect = { target ->
-                                    if (target != tab) {
-                                        if (tab == MainTab.Editor && EditorSession.dirty && EditorSession.confirmOnExit) {
-                                            pendingLeave = target
-                                        } else {
-                                            settingsDest = SettingsDest.Root
-                                            toolCategory = null
-                                            tab = target
-                                        }
-                                    }
-                                },
-                            )
+                        // 仅窄屏（手机竖屏）保留底部导航
+                        if (!wideLayout) {
+                            AnimatedVisibility(
+                                visible = !inSubPage,
+                                enter = slideInVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeIn(),
+                                exit = slideOutVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeOut(),
+                            ) {
+                                AppBottomNav(current = tab, zh = t.zh, onSelect = onNavSelect)
+                            }
                         }
                     },
                 ) { padding ->
-                    Box(
+                    Row(
                         Modifier
                             .padding(padding)
                             .fillMaxSize(),
                     ) {
+                        if (wideLayout) {
+                            // 宽屏：垂直左侧栏（M3 NavigationRail），图标常显文字
+                            AnimatedVisibility(
+                                visible = !inSubPage,
+                                enter = slideInHorizontally(animationSpec = tween(if (reduceMotion) 0 else 220)) { -it } + fadeIn(),
+                                exit = slideOutHorizontally(animationSpec = tween(if (reduceMotion) 0 else 220)) { -it } + fadeOut(),
+                            ) {
+                                AppSideNavRail(current = tab, zh = t.zh, onSelect = onNavSelect)
+                            }
+                        }
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxSize(),
+                            contentAlignment = Alignment.TopCenter,
+                        ) {
+                        // Expanded 给主内容一个宽度上限并水平居中，避免超宽屏文字被拉成一条线
+                        Box(
+                            if (expandedLayout) {
+                                Modifier
+                                    .fillMaxHeight()
+                                    .widthIn(max = 1200.dp)
+                                    .fillMaxWidth()
+                            } else {
+                                Modifier.fillMaxSize()
+                            },
+                        ) {
                         val animMs = if (reduceMotion) 0 else 180
                         // 编辑器独立页：常驻挂载以保活（切走时移出可视区——不销毁、不接收触摸）
                         val editorActive = tab == MainTab.Editor
@@ -661,7 +715,9 @@ private fun SoReverseApp() {
                         }
                             }
                         }
-                    }
+                    }   // 内容宽度上限容器（Expanded 居中，Medium 占满）
+                    }   // 内容区（weight 占满左侧导航栏之外的宽度）
+                    }   // Row：左侧 NavigationRail + 内容区
                 }
             }
             if (!disclaimerAccepted) {
@@ -807,3 +863,44 @@ private fun SoReverseApp() {
     }
 }
 
+// 宽屏（Medium / Expanded）左侧导航栏用的 5 个 tab，图标与文案与 AppBottomNav 保持一致
+private data class SideNavItem(
+    val tab: MainTab,
+    val labelZh: String,
+    val labelEn: String,
+    val icon: ImageVector,
+)
+
+private val sideNavItems = listOf(
+    SideNavItem(MainTab.Home, "首页", "Home", Icons.Filled.Home),
+    SideNavItem(MainTab.Tools, "分析", "Analyze", Icons.Filled.Science),
+    SideNavItem(MainTab.Tasks, "任务", "Tasks", Icons.Filled.Folder),
+    SideNavItem(MainTab.Editor, "编辑器", "Editor", Icons.Filled.Code),
+    SideNavItem(MainTab.Settings, "设置", "Settings", Icons.Filled.Settings),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppSideNavRail(current: MainTab, zh: Boolean, onSelect: (MainTab) -> Unit) {
+    NavigationRail(
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Spacer(Modifier.height(8.dp))
+        sideNavItems.forEach { item ->
+            NavigationRailItem(
+                selected = current == item.tab,
+                onClick = { onSelect(item.tab) },
+                icon = { Icon(item.icon, contentDescription = null) },
+                label = { Text(if (zh) item.labelZh else item.labelEn) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            )
+        }
+    }
+}

@@ -58,7 +58,6 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -339,7 +338,7 @@ internal fun AnalysisWorkspace(
                 onClose = { railOpen = false },
             )
         }
-        Column(Modifier.weight(1f).fillMaxHeight().statusBarsPadding()) {
+        Column(Modifier.weight(1f).fillMaxHeight()) {
         // ── 顶栏（对齐 Explorer So 的 MaterialToolbar：≡ + 标题 + 刷新 + ⋮） ──
         AnalysisAppBar(
             state = state,
@@ -2980,7 +2979,7 @@ private fun AnalysisRail(
     onClose: () -> Unit,
 ) {
     NavigationRail(
-        modifier = Modifier.fillMaxHeight().statusBarsPadding(),
+        modifier = Modifier.fillMaxHeight(),
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         analysisRailItems.forEach { k ->

@@ -52,7 +52,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -536,7 +535,6 @@ private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeC
                 }
                 Scaffold(
                     containerColor = Color.Transparent,
-                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     bottomBar = {
                         // 仅窄屏（手机竖屏）保留底部导航
                         if (!wideLayout) {

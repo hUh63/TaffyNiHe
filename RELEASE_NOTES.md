@@ -1,3 +1,38 @@
+# TaffyNiHe v1.3.103（内置 rz-ghidra：伪 C 的 Ghidra 反编译器后端终于可用）
+
+## 内置 rz-ghidra 反编译器插件（libcore_ghidra.so）
+
+此前 APK 里**没有** `libcore_ghidra.so`：`rizin_core.cpp` 会去 `nativeLibraryDir` 找它，
+找不到就只在日志里留一句 `ghidra plugin missing at .../lib/<abi>/libcore_ghidra.so`，
+伪 C 的 **`pdg`（Ghidra 反编译器）后端永远不可用**，只能回退到 Exbin 自研反编译器。
+
+这一版把它补上了：
+
+- 新增 `tools/build-rz-ghidra-android.sh`：为**四个 ABI**各自构建
+  1) 一份 **SHARED Rizin SDK**（rz-ghidra 的 CMake 走 `find_package(Rizin)`，
+     而 `build-native-android.sh` 只产静态归档，所以必须单独装一份带 `RizinConfig.cmake` 的）
+  2) **rz-ghidra v0.9.0**（与仓库钉的 rizin **v0.9.1** API 对齐；用 master 会报
+     `requires 2 arguments, but 3 were provided`）
+  3) 把 core 插件以固定名 `libcore_ghidra.so` 放进 `jniLibs/<abi>/`，并把它依赖的
+     `librz_*.so` 一并打包（否则运行时 dlopen 失败）
+- CI `prep` job 接线 + Rizin SDK 按 ABI 缓存
+
+**踩到的三个坑（都已修）**：
+1. bionic 下共享库默认不链接 libm → `librz_bin.so` 报 `undefined symbol: modf`（cross 模板补 `-lm`）
+2. rizin 的 `pf_parser.c` 用了 `ldexpf()`（float 版），API<30 的 bionic 不导出（改成 double 形式）
+3. rz-ghidra 版本必须与 rizin 对齐（master ✗ → v0.9.0 ✓）
+
+打包 sleigh 规格（`assets/rizin/plugins/rz_ghidra_sleigh`）本就在仓库里，
+`applyGhidraConfig()` 运行时会设置 `SLEIGHHOME`，现在 `pdg` 应可直接产出 Ghidra 伪 C。
+
+> APK 体积会相应增加（每个 ABI 多一份 `libcore_ghidra.so` + 共享 `librz_*.so`）。
+
+---
+
+**完整对比**：https://github.com/hUh63/TaffyNiHe/compare/v1.3.102...v1.3.103
+
+---
+
 # TaffyNiHe v1.3.102（按键全部学 Exbin · 加固特征库 56 条 · 上游对齐）
 
 ## 一、按键 UI 全部对齐 Exbin（Explorer So）

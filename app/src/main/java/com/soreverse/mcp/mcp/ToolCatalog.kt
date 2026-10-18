@@ -432,10 +432,26 @@ object ToolCatalog {
         val op = a.str("op")
         if (op.isNotEmpty()) {
             when (op) {
-                "add" -> HexCodec.long(a.str("addr"))?.let {
-                    e.liefAddExportedFunction(a.str("workspaceId"), a.str("editSessionId"), it, a.str("name"))
-                } ?: err("INVALID_ARGUMENT", "addr must be a hexadecimal address", "addr", a.str("addr"))
-                "remove" -> e.liefRemoveSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("name"))
+                "add" -> {
+                    // dryRun 原来只对 rename 生效：add/remove 会把 dryRun 静默丢掉直接改 SO，
+                    // 用户以为是预览，实际已经写进去了（remove 还不可逆）。
+                    if (a.bool("dryRun")) return@EngineToolHandler err(
+                        "DRYRUN_UNSUPPORTED",
+                        "op=add 不支持 dryRun 预览（该操作会直接修改 SO）；去掉 dryRun 或改用 edits[]",
+                        "op", op,
+                    )
+                    HexCodec.long(a.str("addr"))?.let {
+                        e.liefAddExportedFunction(a.str("workspaceId"), a.str("editSessionId"), it, a.str("name"))
+                    } ?: err("INVALID_ARGUMENT", "addr must be a hexadecimal address", "addr", a.str("addr"))
+                }
+                "remove" -> {
+                    if (a.bool("dryRun")) return@EngineToolHandler err(
+                        "DRYRUN_UNSUPPORTED",
+                        "op=remove 不支持 dryRun 预览（该操作不可逆）；去掉 dryRun 或改用 edits[]",
+                        "op", op,
+                    )
+                    e.liefRemoveSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("name"))
+                }
                 else -> {
                     val edits = a.optJSONArray("edits") ?: return@EngineToolHandler err("BAD_REQUEST", "\"edits\" array is required for symbol edits", "edits", JSONObject.NULL)
                     e.editSymbol(a.str("workspaceId"), a.str("editSessionId"), a.str("locator"), edits, a.bool("dryRun"))

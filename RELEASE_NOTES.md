@@ -1,3 +1,58 @@
+# TaffyNiHe v1.3.113（并发与状态机 · 第二轮深挖）
+
+这一轮不再扫样式，而是盯着「两个操作同时发生」和「异常分支」找问题：30 条候选里核实出
+21 个真缺陷，全部修掉。
+
+## 一、工作区与编辑（会丢数据的地方）
+
+- **淘汰会删掉正在用的工作区**：原来只按 `createdAt` 淘汰，不看是否正被另一个调用使用。
+  现在记录 `lastAccessAt`，30 秒内被访问过的持久工作区跳过；`temporary` 工作区也纳入淘汰
+  ——它们以前计入内存预算却永远不释放，预算一超标就把所有持久工作区全删光。
+- **淘汰时不关模拟会话**：workspace 删了，但绑定的 unidbg VM 与整份 SO 副本还活着，
+  淘汰等于没释放内存。现在一并关闭。
+- **编辑与读取的撕裂**：`editHex / editAsm / editSymbol` 原来用 `System.arraycopy` 就地改写
+  `session.data`，另一个线程的 hexdump / disasm / `lief.parse` 可能读到写了一半的 ELF 头。
+  全部改成 copy-on-write（替换引用）。
+- **补丁报告与产物不一致**：报告在锁外遍历 `patches/data`，并发编辑时要么 CME，要么生成
+  一份和刚写出的 .so 对不上的取证报告。改为锁内生成。
+- **unidbg 失败泄漏**：VM 建好之后 load SO 失败时不做清理，每次失败泄漏一份 emulator。
+  现在失败路径释放 emulator 与临时 so；已关闭的会话也不再接受调用（对已释放的 native
+  指针发调用会直接 SIGSEGV）。
+
+## 二、APK 写回（会让包装不上的地方）
+
+- **重建 ZIP 丢了压缩方式与对齐**：`apk_patch_bytes`、`smali_edit`（共三处）都用
+  `ZipEntry(name)` 重建条目，默认 DEFLATED。`resources.arsc` 与 `lib/` 下的 `.so` 一旦被
+  重新压缩，APK 直接装不上，而工具还返回「字节已写入」。新增 `core/ZipRepack`：保留原压缩
+  方式、extra 与时间戳，并对这两类条目强制 STORED + 4 字节对齐。
+- **CAS 校验读错字段**：`native_patch_string` 读 `output`（实际输出在 `stdout`）恒为空，
+  带 `expectedText` 的调用 100% 报 CAS_MISMATCH；`native_patch_instructions` 同源问题，
+  反而是校验恒通过。已统一走 `rzStdout()`。
+- **静默假成功**：`apk_manifest_edit` 的 rename_package / add_permission / remove_permission
+  在正则没命中时照样写回并报成功；现在返回 `NO_CHANGE` / `NOT_FOUND`。
+- **dryRun 不生效**：`taffy_edit_symbol` 的 `op=add/remove` 直接把 dryRun 丢掉、真实改 SO，
+  现在明确拒绝（`DRYRUN_UNSUPPORTED`）。
+- **.bak 被覆盖**：连续两次补丁后 `.bak` 已不是原始 APK，回滚会回到「半改」状态。改为只在
+  首次生成。
+- `apk_rebuild` 的 `force=false` 不再先删除既有产物；`manifest_xml_edit` 的
+  `debuggable/exportedValue` 不再把 `"False"`/`"0"` 静默当 true；`batch` 的 `transactional`
+  只在真有快照时才是 true（新增 `transactionalSupported`）；`apk_patch_bytes read` 改为
+  流式跳过 offset（原来为取 256 字节把整条读进内存）。
+
+## 三、页面状态机（会卡死的地方）
+
+- **抓包页永久「处理中…」**：`busy` 没有 try/finally，一次异常就永久卡住；配合没有
+  `onCancel` 的遮罩，返回键也被 Dialog 吞掉，只能杀进程。已加 try/finally + 防重入 + onCancel。
+- **BusyOverlay 兜底**：任何页面的 busy 残留，90 秒后可以单独关掉遮罩（任务继续在后台跑）。
+- **智能体编排**：启动后有 1.2 秒的重复提交窗口（能同时起两个 run），已用 running 占位消除；
+  轮询失败原来静默空转 30 分钟，现在连续 3 次失败即报错；`runId/status` 改用
+  `rememberSaveable`，离开页面回来能继续看进度、也能中止。
+- **快照回滚失败静默**：原来把 Result 丢掉只刷新列表，用户以为已回滚。现在成功/失败都有提示。
+- **切文件不清搜索结果**：分析 A 的搜索结果会残留到 B，点进去跳到完全不相干的位置。已清空。
+- **Unidbg 并发模拟**：`running` 在协程里才置 true，连点两次会并发跑两份 native 模拟。
+- **权限页不刷新**：从系统设置授权回来仍显示「未授予」，现在 `ON_RESUME` 自动重查。
+- 搜索增加 busy 守卫（慢请求后到会覆盖新结果，表头与列表不一致）。
+
 # TaffyNiHe v1.3.112（pdg 单一 Rizin · 门禁不再闪退 · 转储环境检测）
 
 ## 一、pdg 伪 C 的真正修复

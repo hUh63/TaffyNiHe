@@ -305,7 +305,10 @@ object AdvancedTools {
 
                                 val tempFile = File.createTempFile("patch_", ".apk", file.parentFile)
                                 EditSnapshotService.snapshot(ctx.context, "taffy_apk_patch_bytes", file.absolutePath)
-                                file.copyTo(File(file.parentFile, "${file.nameWithoutExtension}.bak.apk"), overwrite = true)
+                                // 只在没有备份时复制：原来每次补丁都覆盖，第二次之后 .bak 已不是原始 APK，
+                                // 回滚会回到"半改"状态。
+                                val bak = File(file.parentFile, "${file.nameWithoutExtension}.bak.apk")
+                                if (!bak.exists()) file.copyTo(bak, overwrite = false)
                                 // 保留原条目的压缩方式/extra，并对 resources.arsc 与 lib/*.so 做 STORED+对齐：
                                 // 原来一律 DEFLATED 重建，会让 APK 直接装不上（原生库也会加载失败）。
                                 ZipRepack.copyAll(file, tempFile) { name -> if (name == entryName) newBytes else null }

@@ -25,6 +25,26 @@ object RootShell {
 
     @Volatile private var cachedRoot: Boolean? = null
 
+    /** 单次执行的输出上限（字符）：`logcat -d` / `dumpsys` 这类命令可以刷出几十 MB。 */
+    private const val MAX_OUTPUT_CHARS = 4 * 1024 * 1024
+
+    /** 超限后继续排空管道但不再累积：否则 OOM 会杀掉整个 App。 */
+    private class BoundedText(private val limit: Int) {
+        private val sb = StringBuilder()
+        @Volatile var truncated = false
+            private set
+        @Synchronized fun addLine(line: String) {
+            if (sb.length >= limit) { truncated = true; return }
+            val remain = limit - sb.length
+            if (line.length <= remain) sb.append(line) else {
+                sb.append(line, 0, remain)
+                truncated = true
+            }
+            sb.append('\n')
+        }
+        @Synchronized fun text(): String = sb.toString()
+    }
+
     /**
      * 安全修复: 对 shell 命令参数进行清洗，防止命令注入攻击。
      * 仅允许字母、数字、点、下划线、连字符、斜杠和空格（用于多参数场景）。
@@ -70,19 +90,27 @@ object RootShell {
             writer.flush()
             writer.close()
 
-            val out = StringBuilder()
-            val err = StringBuilder()
-            val outThread = Thread { BufferedReader(InputStreamReader(process.inputStream)).useLines { seq -> seq.forEach { out.appendLine(it) } } }
-            val errThread = Thread { BufferedReader(InputStreamReader(process.errorStream)).useLines { seq -> seq.forEach { err.appendLine(it) } } }
+            val out = BoundedText(MAX_OUTPUT_CHARS)
+            val err = BoundedText(MAX_OUTPUT_CHARS)
+            // daemon：非 daemon 线程在超时分支无人 join 时会一直活着
+            val outThread = Thread {
+                BufferedReader(InputStreamReader(process.inputStream)).useLines { seq -> seq.forEach { out.addLine(it) } }
+            }.apply { isDaemon = true }
+            val errThread = Thread {
+                BufferedReader(InputStreamReader(process.errorStream)).useLines { seq -> seq.forEach { err.addLine(it) } }
+            }.apply { isDaemon = true }
             outThread.start(); errThread.start()
 
             val finished = process.waitFor(timeoutSec, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
-                return Result(-1, out.toString().trim(), (err.toString() + "\n[timeout after ${timeoutSec}s]").trim())
+                // 必须 join 再读：不然 reader 线程会在返回之后继续往缓冲区里追加
+                outThread.join(500); errThread.join(500)
+                return Result(-1, out.text().trim(), (err.text() + "\n[timeout after ${timeoutSec}s]").trim())
             }
             outThread.join(2000); errThread.join(2000)
-            Result(process.exitValue(), out.toString().trim(), err.toString().trim())
+            val tail = if (out.truncated || err.truncated) "\n[output truncated at ${MAX_OUTPUT_CHARS} chars]" else ""
+            Result(process.exitValue(), (out.text().trim() + tail).trim(), (err.text().trim() + tail).trim())
         }.getOrElse { e ->
             Result(-1, "", e.message ?: e.javaClass.simpleName)
         }

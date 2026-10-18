@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.PermissionManager
+import com.soreverse.mcp.core.StreamCompat
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
@@ -35,7 +36,7 @@ object CaptureTools {
         return runCatching {
             val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
             // 安全加固：限量读取 + 超时终止，防止卡死 MCP 工作线程
-            val out = p.inputStream.use { it.readNBytes(2_000_000) }.decodeToString()
+            val out = p.inputStream.use { StreamCompat.readCapped(it, 2_000_000) }.decodeToString()
             val finished = p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) p.destroy()
             if (finished) p.exitValue() to out else (-1 to (out + "\n[执行超时(15s) 已终止]"))

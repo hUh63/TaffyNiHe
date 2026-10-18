@@ -56,7 +56,12 @@ class ElfParser(private val data: ByteArray) {
         for ((index, sec) in sections.withIndex()) {
             if (sec.type != 2L && sec.type != 11L) continue
             val strtab = sections.getOrNull(sec.link)?.let { sectionBytes(it) } ?: ByteArray(0)
-            val count = if (sec.entsize > 0) (sec.size / sec.entsize).toInt() else 0
+            // 上限：伪造 entsize=1 + size=0x7FFFFFFF 会让循环跑 21 亿次（CPU 占满、不抛异常）
+            val count = if (sec.entsize > 0) {
+                val bySize = sec.size / sec.entsize
+                val byFile = data.size.toLong() / sec.entsize
+                bySize.coerceAtMost(byFile).coerceAtMost(1_000_000L).toInt().coerceAtLeast(0)
+            } else 0
             val dest = if (sec.type == 11L) dynSymbols else symbols
             for (i in 0 until count) {
                 val off = (sec.offset + i * sec.entsize).toInt()
@@ -98,7 +103,12 @@ class ElfParser(private val data: ByteArray) {
                 val linked = sections[sec.link]
                 if (linked.type == 11L) dynSymbols else symbols
             } else allSymbols
-            val count = if (sec.entsize > 0) (sec.size / sec.entsize).toInt() else 0
+            // 上限：伪造 entsize=1 + size=0x7FFFFFFF 会让循环跑 21 亿次（CPU 占满、不抛异常）
+            val count = if (sec.entsize > 0) {
+                val bySize = sec.size / sec.entsize
+                val byFile = data.size.toLong() / sec.entsize
+                bySize.coerceAtMost(byFile).coerceAtMost(1_000_000L).toInt().coerceAtLeast(0)
+            } else 0
             for (i in 0 until count) {
                 val off = (sec.offset + i * sec.entsize).toInt()
                 val relocOffset: Long
@@ -192,7 +202,9 @@ class ElfParser(private val data: ByteArray) {
     private fun sectionBytes(section: SectionInfo): ByteArray {
         if (section.offset < 0 || section.size <= 0) return ByteArray(0)
         val start = section.offset.toInt().coerceIn(0, data.size)
-        val end = min(data.size, start + section.size.toInt())
+        // size 可能大于 Int.MAX_VALUE（u64 读出来的），toInt() 变成负数会让 copyOfRange 抛异常
+        val sizeInt = section.size.coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(0)
+        val end = min(data.size, start + sizeInt)
         return data.copyOfRange(start, end)
     }
 
@@ -255,11 +267,16 @@ class ElfParser(private val data: ByteArray) {
 
     private class Reader(private val bytes: ByteArray, little: Boolean) {
         private val order = if (little) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN
-        fun u8(o: Int): Int = bytes[o].toInt() and 0xff
-        fun u16(o: Int): Int = ByteBuffer.wrap(bytes, o, 2).order(order).short.toInt() and 0xffff
-        fun u32(o: Int): Long = ByteBuffer.wrap(bytes, o, 4).order(order).int.toLong() and 0xffffffffL
-        fun s32(o: Int): Int = ByteBuffer.wrap(bytes, o, 4).order(order).int
-        fun u64(o: Int): Long = ByteBuffer.wrap(bytes, o, 8).order(order).long
-        fun s64(o: Int): Long = ByteBuffer.wrap(bytes, o, 8).order(order).long
+        /** 越界检查：畸形 ELF 的 sh_offset/size 会把读取推到文件外，旧实现直接 IndexOutOfBounds。 */
+        private fun has(o: Int, n: Int): Boolean = o >= 0 && n >= 0 && o <= bytes.size - n
+
+        fun u8(o: Int): Int = if (has(o, 1)) bytes[o].toInt() and 0xff else 0
+        fun u16(o: Int): Int =
+            if (has(o, 2)) ByteBuffer.wrap(bytes, o, 2).order(order).short.toInt() and 0xffff else 0
+        fun u32(o: Int): Long =
+            if (has(o, 4)) ByteBuffer.wrap(bytes, o, 4).order(order).int.toLong() and 0xffffffffL else 0L
+        fun s32(o: Int): Int = if (has(o, 4)) ByteBuffer.wrap(bytes, o, 4).order(order).int else 0
+        fun u64(o: Int): Long = if (has(o, 8)) ByteBuffer.wrap(bytes, o, 8).order(order).long else 0L
+        fun s64(o: Int): Long = if (has(o, 8)) ByteBuffer.wrap(bytes, o, 8).order(order).long else 0L
     }
 }

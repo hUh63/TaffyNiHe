@@ -42,7 +42,10 @@ object LogcatTools {
         val out = proc.inputStream.use { it.readNBytes(2_000_000) }.decodeToString()
         val finished = proc.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)
         if (!finished) proc.destroy()
-        return if (finished) out else out + "\n[logcat 超时截断]"
+        // 特权通道的输出上限由 RootShell/Shizuku 侧保证，这里再兜一层字符上限：
+        // 一次 `logcat -d *:V` 在繁忙设备上可以产出几十 MB，raw + 行列表 + 结果会同时存在。
+        val capped = if (out.length > MAX_RAW_CHARS) out.take(MAX_RAW_CHARS) else out
+        return if (finished) capped else capped + "\n[logcat 超时截断]"
     }
 
     /** 后台采集进程引用 */
@@ -52,6 +55,9 @@ object LogcatTools {
     @Volatile private var captureTag: String = ""
     @Volatile private var captureLevel: String = "V"
     @Volatile private var captureStartedAt: Long = 0L
+
+    /** 单次 logcat 输出上限（字符）。 */
+    private const val MAX_RAW_CHARS = 4_000_000
 
     /** 采集 logcat 日志 */
     val collect: ToolHandler = object : ToolHandler {
@@ -264,6 +270,14 @@ object LogcatTools {
                         val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
                         captureFile = java.io.File(ctx.context.filesDir, "taffy_capture_$stamp.log")
                         captureFile?.delete()
+                        // 清掉更早的录制文件：旧实现只在显式 clear 时删当前文件，
+                        // 历史会话永不回收，最终写满 data 分区。
+                        runCatching {
+                            ctx.context.filesDir.listFiles { f -> f.isFile && f.name.startsWith("taffy_capture_") }
+                                ?.sortedByDescending { it.name }
+                                ?.drop(3)
+                                ?.forEach { it.delete() }
+                        }
                         captureStartedAt = System.currentTimeMillis()
 
                         val cmd = mutableListOf("logcat", "-v", "time")
@@ -372,8 +386,10 @@ object LogcatTools {
             "Unified logcat gateway: collect (recent/search/dump), crash stack extraction, and background capture (start/stop/status/read/clear). Root/Shizuku/ADB needed for system-wide logs. Actions: collect(default) | crash | capture",
             "device", ToolClass.CORE,
         ) { objectSchema(props {
-            "action".oneOf("日志采集", "collect", "crash", "capture")
-            "action" str "collect: recent|search|dump ; crash: 崩溃日志 ; capture: start|stop|status|read|clear"
+            // 同一个 key 被 put 两次时后一个覆盖前一个（enum 会丢），这里合并成一条
+            "action" str "collect(默认) | crash | capture；子动作见 op / captureAction"
+            "op" str "collect 的子动作: recent(默认) | search | dump"
+            "captureAction" str "capture 的子动作: start | stop | status(默认) | read | clear"
             "tag" str "按 tag 过滤"
             "tags" str "多 tag（逗号分隔）"
             "level" str "最低日志级别（V|D|I|W|E|F）"
@@ -386,15 +402,19 @@ object LogcatTools {
         }, required = listOf("action")) }
 
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            var act = args.str("action", "collect")
-
-            val h: ToolHandler? = when (act) {
-                "collect" -> collect
-                "crash" -> crash
-                "capture" -> capture
+            // 旧实现把 action 既当"选哪个 handler"又原样透传给子处理器：
+            // action=capture 会被 capture 处理器当成未知子动作直接报错，capture 完全不可用。
+            val act = args.str("action", "collect")
+            val child = JSONObject(args.toString())
+            val h: ToolHandler? = when {
+                act == "collect" -> { child.put("action", args.str("op", "recent")); collect }
+                act == "crash" -> crash
+                act == "capture" -> { child.put("action", args.str("captureAction", "status")); capture }
+                act in setOf("recent", "search", "dump") -> { child.put("action", act); collect }
+                act in setOf("start", "stop", "status", "read", "clear") -> { child.put("action", act); capture }
                 else -> null
             }
-            return h?.handle(ctx, args) ?: err("UNKNOWN_ACTION", "Unknown taffy_logcat action: $act")
+            return h?.handle(ctx, child) ?: err("UNKNOWN_ACTION", "Unknown taffy_logcat action: $act")
         }
     }
 

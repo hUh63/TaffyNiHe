@@ -97,7 +97,8 @@ object PythonRuntime {
             val proc = pb.redirectErrorStream(true).start()
             proc.outputStream.use { it.write(script.toByteArray(Charsets.UTF_8)); it.flush() }
             proc.outputStream.close()
-            val output = proc.inputStream.readNBytes(16 * 1024 * 1024).decodeToString()
+            // readNBytes 是 API 33 才有的方法，minSdk 26 上会 NoSuchMethodError
+            val output = StreamCompat.readCapped(proc.inputStream, 16 * 1024 * 1024).decodeToString()
             val finished = proc.waitFor(timeoutSec, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) { proc.destroy(); return Result(-1, output, "执行超时(${timeoutSec}s)") }
             Result(proc.exitValue(), output, "")

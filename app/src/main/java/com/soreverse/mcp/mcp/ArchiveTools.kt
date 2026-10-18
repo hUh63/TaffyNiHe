@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.bool
+import com.soreverse.mcp.core.StreamCompat
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -56,7 +57,7 @@ object ArchiveTools {
                 // Try to detect by magic bytes
                 try {
                     // 一次性读取 512 字节（USTAR 魔数 "ustar" 位于偏移 257），避免重复开流与永不命中的死分支。
-                    val magic = File(path).inputStream().use { it.readNBytes(512) }
+                    val magic = File(path).inputStream().use { StreamCompat.readCapped(it, 512) }
                     when {
                         magic.size >= 4 && magic[0] == 0x50.toByte() && magic[1] == 0x4B.toByte() && magic[2] == 0x03.toByte() && magic[3] == 0x04.toByte() -> "zip"
                         magic.size >= 2 && magic[0] == 0x1F.toByte() && magic[1] == 0x8B.toByte() -> "gz"

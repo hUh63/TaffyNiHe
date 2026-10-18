@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.ZipRepack
+import com.soreverse.mcp.core.StreamCompat
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -217,7 +218,7 @@ object AdvancedTools {
                                     if (n <= 0) break
                                     skipped += n
                                 }
-                                val slice = stream.readNBytes(maxLen)
+                                val slice = StreamCompat.readCapped(stream, maxLen)
                                 val hex = slice.joinToString(" ") { "%02X".format(it) }
                                 ok(JSONObject()
                                     .put("action", "read")
@@ -242,7 +243,7 @@ object AdvancedTools {
                             val entry = zf.getEntry(entryName)
                                 ?: return err("ENTRY_NOT_FOUND", "ZIP 条目不存在: $entryName", "entry", entryName)
                             zf.getInputStream(entry).use { stream ->
-                                val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
+                                val guarded = StreamCompat.readCapped(stream, (256L * 1024 * 1024).toInt() + 1)
                                     if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
                                     val allBytes = guarded
                                 val expectedBytes = com.soreverse.mcp.core.HexCodec.bytes(expectedHex.replace(Regex("\\s+"), "")) ?: return err("INVALID_HEX", "expectedHex 含非法字符", "expectedHex", expectedHex)
@@ -273,7 +274,7 @@ object AdvancedTools {
                             // CAS 校验
                             if (expectedHex.isNotBlank()) {
                                 zf.getInputStream(entry).use { stream ->
-                                    val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
+                                    val guarded = StreamCompat.readCapped(stream, (256L * 1024 * 1024).toInt() + 1)
                                     if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
                                     val allBytes = guarded
                                     val expectedBytes = com.soreverse.mcp.core.HexCodec.bytes(expectedHex.replace(Regex("\\s+"), "")) ?: return err("INVALID_HEX", "expectedHex 含非法字符", "expectedHex", expectedHex)
@@ -292,7 +293,7 @@ object AdvancedTools {
                             // 写入: 重建 ZIP
                             val origSize = entry.size
                             zf.getInputStream(entry).use { stream ->
-                                val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
+                                val guarded = StreamCompat.readCapped(stream, (256L * 1024 * 1024).toInt() + 1)
                                     if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
                                     val origBytes = guarded
                                 val newBytes = origBytes.copyOf()

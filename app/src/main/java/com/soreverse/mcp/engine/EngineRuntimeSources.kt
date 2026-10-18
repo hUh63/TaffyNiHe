@@ -168,12 +168,20 @@ internal fun EngineRuntime.openUrl(url: String, outputName: String = "", tempora
     val timeout = SettingsStore(context).requestTimeoutMs
     val conn = (parsed.openConnection() as HttpURLConnection).apply { connectTimeout = timeout.coerceAtMost(30_000); readTimeout = timeout; instanceFollowRedirects = true; requestMethod = "GET" }
     val status = conn.responseCode
-    if (status !in 200..299) return@guarded err("DOWNLOAD_FAILED", "HTTP download failed with status $status", "url", url)
+    if (status !in 200..299) {
+        conn.disconnect()
+        return@guarded err("DOWNLOAD_FAILED", "HTTP download failed with status $status", "url", url)
+    }
     // 上游 1.0.18 借鉴: 下载上限按进程堆内存与存储空间动态调整（而非固定 256MiB）
     val maxBytes = soDownloadMaxBytes()
     val maxMiB = maxBytes / (1024L * 1024L)
     if (conn.contentLengthLong > maxBytes) return@guarded err("DOWNLOAD_TOO_LARGE", "SO download exceeds $maxMiB MiB dynamic limit (heap/storage)", "contentLength", conn.contentLengthLong)
-    val bytes = conn.inputStream.use { input -> java.io.ByteArrayOutputStream().apply { val buf = ByteArray(64 * 1024); var total = 0L; while (true) { val n = input.read(buf); if (n < 0) break; total += n; if (total > maxBytes) return@guarded err("DOWNLOAD_TOO_LARGE", "SO download exceeds $maxMiB MiB dynamic limit (heap/storage)", "url", url); write(buf, 0, n) } }.toByteArray() }
+    // 失败/超限路径也要 disconnect：否则连接对象要等 GC 才释放，连续重试会堆积 socket
+    val bytes = try {
+        conn.inputStream.use { input -> java.io.ByteArrayOutputStream().apply { val buf = ByteArray(64 * 1024); var total = 0L; while (true) { val n = input.read(buf); if (n < 0) break; total += n; if (total > maxBytes) return@guarded err("DOWNLOAD_TOO_LARGE", "SO download exceeds $maxMiB MiB dynamic limit (heap/storage)", "url", url); write(buf, 0, n) } }.toByteArray() }
+    } finally {
+        conn.disconnect()
+    }
     if (bytes.size < 4 || bytes[0] != 0x7f.toByte() || bytes[1] != 'E'.code.toByte() || bytes[2] != 'L'.code.toByte() || bytes[3] != 'F'.code.toByte()) return@guarded err("NOT_ELF_SO", "Downloaded file is not an ELF/SO file", "url", url)
     val rawName = outputName.ifBlank { parsed.path.substringAfterLast('/').substringBefore('?').ifBlank { "downloaded.so" } }
     val safeName = rawName.substringAfterLast('/').substringAfterLast('\\').let { if (it.endsWith(".so", ignoreCase = true)) it else "$it.so" }

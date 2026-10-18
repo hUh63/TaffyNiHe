@@ -35,14 +35,19 @@ object EditSnapshotService {
         if (!file.isFile || file.length() == 0L) return null
         val toolDir = snapshotsDir(ctx, toolName)
         toolDir.mkdirs()
-        val id = "${System.currentTimeMillis()}-${(filePath.hashCode() and 0x7fffffff)}"
+        // 加随机后缀：同一毫秒对同一路径的第二个快照原来会因 mkdirs 失败静默返回 null，
+        // 那次修改就没有任何快照可回滚。
+        val id = "${System.currentTimeMillis()}-${(filePath.hashCode() and 0x7fffffff)}-" +
+            java.util.UUID.randomUUID().toString().take(8)
         val snapDir = File(toolDir, id)
         if (!snapDir.mkdirs()) return null
 
         val origDir = File(snapDir, "orig").apply { mkdirs() }
         val copy = File(origDir, file.name)
         return try {
-            file.copyTo(copy, overwrite = true)
+            val tmp = File(origDir, file.name + ".tmp")
+            file.copyTo(tmp, overwrite = true)
+            com.soreverse.mcp.core.ZipRepack.replaceAtomically(tmp, copy)
             val meta = JSONObject()
                 .put("snapshotId", id)
                 .put("tool", toolName)
@@ -188,7 +193,10 @@ object EditSnapshotService {
                 dest.copyTo(cb, overwrite = true)
                 cb.absolutePath
             } else null
-            origCopy.copyTo(dest, overwrite = true)
+            // 回滚同样要原子替换：中途被杀会让目标文件与原备份一起变成半截
+            val tmp = File(dest.parentFile ?: dest.absoluteFile.parentFile, dest.name + ".rollback.tmp")
+            origCopy.copyTo(tmp, overwrite = true)
+            com.soreverse.mcp.core.ZipRepack.replaceAtomically(tmp, dest)
             JSONObject().put("success", true).put("restored", dest.absolutePath)
                 .put("backupOfCurrent", backupOfCurrent ?: JSONObject.NULL)
                 .put("sha256", sha256(dest))

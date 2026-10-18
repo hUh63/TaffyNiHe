@@ -312,7 +312,7 @@ object AdvancedTools {
                                 // 保留原条目的压缩方式/extra，并对 resources.arsc 与 lib/*.so 做 STORED+对齐：
                                 // 原来一律 DEFLATED 重建，会让 APK 直接装不上（原生库也会加载失败）。
                                 ZipRepack.copyAll(file, tempFile) { name -> if (name == entryName) newBytes else null }
-                                tempFile.copyTo(file, overwrite = true)
+                                com.soreverse.mcp.core.ZipRepack.replaceAtomically(tempFile, file)
                                 tempFile.delete()
                                 ok(JSONObject()
                                     .put("action", "write")

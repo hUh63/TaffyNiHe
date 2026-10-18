@@ -26,7 +26,42 @@ internal object ZipRepack {
 
     /** 需要保证未压缩且 4 字节对齐的条目。 */
     private fun requiresStore(name: String): Boolean =
-        name == "resources.arsc" || (name.startsWith("lib/") && name.endsWith(".so"))
+        name == "resources.arsc" || isNativeLib(name)
+
+    /** native 库：未压缩时必须 4096 页对齐。 */
+    private fun isNativeLib(name: String): Boolean =
+        name.startsWith("lib/") && name.endsWith(".so")
+
+    /**
+     * ZIP 对齐填充块（zipalign 使用的 0xd935 extra），总长 [total] 必须 >= 6。
+     * 直接往 extra 尾部追加裸 0 字节会让 extra 结构里出现残缺的 (id,size) 头。
+     */
+    private fun alignmentExtra(total: Int): ByteArray {
+        val out = ByteArray(total)
+        out[0] = 0x35
+        out[1] = 0xd9.toByte()
+        val size = total - 4
+        out[2] = (size and 0xFF).toByte()
+        out[3] = ((size shr 8) and 0xFF).toByte()
+        return out
+    }
+
+    /**
+     * 用 [src] 原子替换 [dst]（同目录 rename）。旧实现用 copyTo(overwrite=true)，
+     * 写回中途被杀/磁盘满会把用户的原 APK 变成半截文件。
+     */
+    fun replaceAtomically(src: File, dst: File) {
+        runCatching {
+            java.nio.file.Files.move(
+                src.toPath(), dst.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            )
+        }.onFailure {
+            src.copyTo(dst, overwrite = true)
+            runCatching { src.delete() }
+        }
+    }
 
     /**
      * 逐条复制 [input] 到 [output]，[replace] 返回非 null 时用其替换该条目的内容。
@@ -44,24 +79,48 @@ internal object ZipRepack {
                             comment = e.comment
                         }
                         if (store) {
-                            // STORED 必须先知道 size/crc，因此需要整条内容
-                            val data = override ?: zf.getInputStream(e).use { it.readBytes() }
-                            val crc = CRC32().apply { update(data) }
                             entry.method = ZipEntry.STORED
-                            entry.size = data.size.toLong()
-                            entry.compressedSize = data.size.toLong()
-                            entry.crc = crc.value
+                            // 原本就是 STORED 且无需替换：size/crc 已存在，直接流式复制。
+                            // 旧实现无条件 readBytes()，重打包多 ABI 大 APK 时把几十 MB 灌进堆（OOM 风险）。
+                            val streaming = override == null && e.method == ZipEntry.STORED &&
+                                e.size >= 0 && e.crc >= 0
+                            val data: ByteArray? = if (streaming) {
+                                null
+                            } else {
+                                override ?: zf.getInputStream(e).use { it.readBytes() }
+                            }
+                            if (streaming) {
+                                entry.size = e.size
+                                entry.compressedSize = e.size
+                                entry.crc = e.crc
+                            } else {
+                                val d = data ?: ByteArray(0)
+                                entry.size = d.size.toLong()
+                                entry.compressedSize = d.size.toLong()
+                                entry.crc = CRC32().apply { update(d) }.value
+                            }
                             var extra = e.extra ?: ByteArray(0)
-                            if (requiresStore(e.name)) {
-                                // local header 起始偏移 + 30 + nameLen + extraLen 需为 4 的倍数
+                            // resources.arsc 需 4 字节对齐；lib/ 下的 .so 需 4096 页对齐
+                            // （zipalign -p 语义）——旧实现两者都只对齐到 4，未压缩的 so 会失去
+                            // 页对齐，安装器改为解压存放或 mmap 失败。
+                            val align = when {
+                                isNativeLib(e.name) -> 4096
+                                requiresStore(e.name) -> 4
+                                else -> 0
+                            }
+                            if (align > 0) {
                                 zos.flush()
                                 val nameLen = e.name.toByteArray(Charsets.UTF_8).size
-                                val pad = (4 - ((counting.count + 30 + nameLen + extra.size) % 4).toInt() % 4) % 4
-                                if (pad > 0) extra += ByteArray(pad)
+                                val base = counting.count + 30 + nameLen + extra.size
+                                var pad = ((align - (base % align).toInt()) % align)
+                                // 填充必须是合法的 alignment extra 块（id 0xd935），裸追加
+                                // 字节会让严格解析器判定 extra 结构损坏
+                                if (pad in 1..5) pad += align
+                                if (pad > 0) extra += alignmentExtra(pad)
                             }
                             entry.extra = extra
                             zos.putNextEntry(entry)
-                            zos.write(data)
+                            if (data != null) zos.write(data) else zf.getInputStream(e).use { it.copyTo(zos) }
                         } else {
                             entry.method = ZipEntry.DEFLATED
                             if (e.extra != null) entry.extra = e.extra

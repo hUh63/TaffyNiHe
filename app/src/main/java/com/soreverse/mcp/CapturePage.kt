@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -109,8 +110,17 @@ internal fun CapturePage(t: UiText) {
     var tab by rememberSaveable { mutableStateOf("http") }
     var listFilter by rememberSaveable { mutableStateOf("") }
     var methodFilter by rememberSaveable { mutableStateOf("全部") }
-    LaunchedEffect(Unit) {
-        captureServer.addListener { captureEntries = captureServer.snapshot() }
+    val captureListener = remember(captureServer) {
+        { _: HttpCaptureServer.Entry -> captureEntries = captureServer.snapshot() }
+    }
+    LaunchedEffect(captureServer) { captureServer.addListener(captureListener) }
+    DisposableEffect(captureServer) {
+        onDispose {
+            // 离开页面必须停掉代理：否则 acceptLoop 线程继续占用端口、继续拦截流量，
+            // 再进页面 start() 直接失败（端口被占用），且没有任何入口能把它停掉。
+            runCatching { captureServer.removeListener(captureListener) }
+            runCatching { captureServer.stop() }
+        }
     }
     val filteredEntries = captureEntries.filter { e ->
         (methodFilter == "全部" || (methodFilter == "HTTPS" && e.isHttps) || (methodFilter == "HTTP" && !e.isHttps) || e.method == methodFilter) &&

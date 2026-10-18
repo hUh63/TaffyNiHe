@@ -258,7 +258,17 @@ object ManifestEditTools {
                 }
                 if (setMethod != null) {
                     setMethod.invoke(apk.androidManifest, newXml)
-                    apk.writeApk(file)
+                    // 先写同目录临时文件、成功后原子替换。ARSCLib 的 writeApk 是先截断再写，
+                    // 直接写原路径时磁盘满/进程被杀会让用户的 APK 变成半截且无任何副本。
+                    val tmp = File(file.parentFile, "${file.name}.axml.${System.nanoTime()}.tmp")
+                    try {
+                        apk.writeApk(tmp)
+                        val backup = File(file.parentFile, "${file.nameWithoutExtension}.bak.apk")
+                        if (!backup.exists()) runCatching { file.copyTo(backup, overwrite = false) }
+                        com.soreverse.mcp.core.ZipRepack.replaceAtomically(tmp, file)
+                    } finally {
+                        runCatching { tmp.delete() }
+                    }
                     return
                 }
             }

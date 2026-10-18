@@ -120,7 +120,11 @@ class HttpCaptureServer(
     fun start(): Boolean {
         if (running) return true
         return try {
-            serverSocket = ServerSocket(port)
+            // 只监听回环：抓包用的是本机代理（127.0.0.1:port）。绑 0.0.0.0 会让同一网段
+            // 任何设备把本机当开放代理使用，还能借它访问 127.0.0.1 上的其它服务与内网。
+            serverSocket = ServerSocket().apply {
+                bind(java.net.InetSocketAddress("127.0.0.1", port), 64)
+            }
             running = true
             thread(name = "capture-proxy", isDaemon = true) { acceptLoop() }
             true
@@ -137,6 +141,11 @@ class HttpCaptureServer(
 
     fun addListener(l: (Entry) -> Unit) {
         synchronized(lock) { listeners.add(l) }
+    }
+
+    /** 页面退出时必须摘掉监听器：否则每次进页面都留一个指向已销毁组合的闭包。 */
+    fun removeListener(l: (Entry) -> Unit) {
+        synchronized(lock) { listeners.remove(l) }
     }
 
     fun snapshot(): List<Entry> = synchronized(lock) { entries.toList() }
@@ -171,8 +180,53 @@ class HttpCaptureServer(
         }
     }
 
+    /** 单次请求体转发上限：避免异常/恶意客户端把代理变成无底洞。 */
+    private val MAX_BODY_BYTES = 64L * 1024 * 1024
+
+    private fun copyExactly(input: java.io.InputStream, output: java.io.OutputStream, length: Long) {
+        val buf = ByteArray(8192)
+        var remaining = length.coerceAtMost(MAX_BODY_BYTES)
+        while (remaining > 0) {
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+            if (n < 0) break
+            output.write(buf, 0, n)
+            remaining -= n
+        }
+    }
+
+    private fun copyChunkedBody(input: java.io.InputStream, output: java.io.OutputStream) {
+        val buf = ByteArray(8192)
+        var total = 0L
+        while (true) {
+            val sizeLine = readLineRaw(input) ?: return
+            val size = sizeLine.substringBefore(';').trim().toIntOrNull(16) ?: return
+            output.write((sizeLine + "\r\n").toByteArray())
+            if (size == 0) {
+                while (true) {
+                    val l = readLineRaw(input) ?: break
+                    output.write((l + "\r\n").toByteArray())
+                    if (l.isEmpty()) break
+                }
+                return
+            }
+            var remaining = size
+            while (remaining > 0) {
+                val n = input.read(buf, 0, minOf(buf.size, remaining))
+                if (n < 0) return
+                output.write(buf, 0, n)
+                remaining -= n
+                total += n
+                if (total > MAX_BODY_BYTES) return
+            }
+            output.write("\r\n".toByteArray())
+        }
+    }
+
     private fun record(method: String, host: String, path: String, status: String, bytes: Long, elapsedMs: Long, isHttps: Boolean, reqHeaders: String = "", respHeaders: String = "", isWs: Boolean = false) {
-        val e = Entry(formatter.format(Date()), method, host, path, status, bytes, elapsedMs, isHttps, reqHeaders, respHeaders, isWs)
+        // SimpleDateFormat 非线程安全：多个 capture-conn 线程并发 format 会抛
+        // ArrayIndexOutOfBounds/NumberFormatException，该条记录被外层 catch 吞掉后"凭空消失"
+        val timeText = synchronized(formatter) { formatter.format(Date()) }
+        val e = Entry(timeText, method, host, path, status, bytes, elapsedMs, isHttps, reqHeaders, respHeaders, isWs)
         synchronized(lock) {
             entries.addLast(e)
             while (entries.size > 500) entries.removeFirst()
@@ -276,6 +330,19 @@ class HttpCaptureServer(
             headerLines.forEach { sb.append(it).append("\r\n" ) }
             sb.append("Connection: close\r\n\r\n")
             upOut.write(sb.toString().toByteArray())
+            // 请求体必须转发：只写头会让上游按 Content-Length 一直等 body，
+            // 30s 超时后返回 400/超时，抓包期间所有 POST/PUT 都会失败且该条不落库。
+            val reqContentLength = headerLines.firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+                ?.substringAfter(':')?.trim()?.toLongOrNull() ?: -1L
+            val reqChunked = headerLines.any {
+                it.startsWith("Transfer-Encoding:", ignoreCase = true) &&
+                    it.substringAfter(':').trim().contains("chunked", ignoreCase = true)
+            }
+            when {
+                reqChunked -> copyChunkedBody(clientIn, upOut)
+                reqContentLength > 0 -> copyExactly(clientIn, upOut, reqContentLength)
+                else -> Unit
+            }
             upOut.flush()
 
             // 读响应头（字节级行读取，避免 BufferedReader 预读吞掉 body/WS 帧）

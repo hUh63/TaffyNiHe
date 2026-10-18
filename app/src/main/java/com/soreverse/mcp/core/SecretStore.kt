@@ -58,7 +58,8 @@ internal object SecretStore {
         }.isSuccess
         if (!ok) {
             AppLog.w("SecretStore: AndroidKeyStore unavailable, storing '$name' as plain text")
-            prefs(context).edit().putString("$name.plain", value).apply()
+            // 必须同时删掉旧的密文条目：get() 优先读密文，只写 .plain 会让新值永远读不到
+            prefs(context).edit().putString("$name.plain", value).remove(name).apply()
         }
     }
 

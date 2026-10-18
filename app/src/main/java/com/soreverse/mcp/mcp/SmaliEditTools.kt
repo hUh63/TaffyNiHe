@@ -218,7 +218,7 @@ object SmaliEditTools {
                 // 备份原 APK + 替换
                 val backup = File(apk.parentFile, "${apk.nameWithoutExtension}.bak.apk")
                 if (!backup.exists()) apk.copyTo(backup, overwrite = false)
-                tempApk.copyTo(apk, overwrite = true)
+                ZipRepack.replaceAtomically(tempApk, apk)
                 tempApk.delete()
 
                 return ok(JSONObject()
@@ -456,8 +456,7 @@ object SmaliEditTools {
             // 保留原条目压缩方式/extra 并对齐（否则 resources.arsc 与 lib 下的 so 会被重新压缩，产物装不上）
             ZipRepack.copyAll(apk, tempApk) { name -> results[name] }
             if (!backup.exists()) apk.copyTo(backup, overwrite = false)
-            apk.delete()
-            tempApk.copyTo(apk, overwrite = true)
+            ZipRepack.replaceAtomically(tempApk, apk)
             tempApk.delete()
 
             return ok(JSONObject()
@@ -582,7 +581,7 @@ object SmaliEditTools {
                 EditSnapshotService.snapshot(ctx.context, "taffy_smali_edit", apk.absolutePath)
                 val backup = File(apk.parentFile, "${apk.nameWithoutExtension}.bak.apk")
                 if (!backup.exists()) apk.copyTo(backup, overwrite = false)
-                tempApk.copyTo(apk, overwrite = true)
+                ZipRepack.replaceAtomically(tempApk, apk)
                 tempApk.delete()
                 return null
             } catch (e: Throwable) {

@@ -137,8 +137,12 @@ object FullBackup {
                 onProgress("恢复失败，回滚到恢复前快照…")
                 val rollbackOk = runCatching {
                     val preManifest = readManifest(File(pre.path))
-                    restoreFrom(context, File(pre.path), parseRoots(preManifest ?: JSONObject()), {})
-                }.isSuccess
+                    // manifest 读不出来时 restoreFrom 会把每一条都当"未知条目"跳过、
+                    // 一个文件都不写，却仍返回成功 —— 旧实现据此报"已回滚"是假保证。
+                    if (preManifest == null) return@runCatching false
+                    val rr = restoreFrom(context, File(pre.path), parseRoots(preManifest), {})
+                    rr.skipped.none { it.contains("写入失败") || it.contains("非法路径") }
+                }.getOrDefault(false)
                 val tail = if (rollbackOk) {
                     "已回滚到 ${pre.path}"
                 } else {
@@ -500,7 +504,15 @@ object FullBackup {
                 }
                 try {
                     dest.parentFile?.mkdirs()
-                    FileOutputStream(dest).use { out -> zis.copyTo(out, COPY_BUFFER) }
+                    // 逐条目先写临时文件再原子替换：恢复中断（进程被杀/磁盘满）时
+                    // 不会把用户原有文件截成半截。
+                    val tmp = File.createTempFile("restore_", ".tmp", dest.parentFile)
+                    try {
+                        FileOutputStream(tmp).use { out -> zis.copyTo(out, COPY_BUFFER) }
+                        ZipRepack.replaceAtomically(tmp, dest)
+                    } finally {
+                        runCatching { tmp.delete() }
+                    }
                     total++
                     bump(root.category, true)
                 } catch (err: Exception) {

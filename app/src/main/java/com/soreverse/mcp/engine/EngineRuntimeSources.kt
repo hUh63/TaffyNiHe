@@ -75,10 +75,21 @@ internal fun EngineRuntime.open(path: String, temporary: Boolean): JSONObject = 
             val fileName = uri.lastPathSegment?.substringAfterLast('/')?.substringBefore('?')
                 ?: "temp_${System.currentTimeMillis()}.so"
             val safeName = if (fileName.endsWith(".so", ignoreCase = true)) fileName else "$fileName.so"
-            val tempFile = File(context.cacheDir, "picked_$safeName")
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(tempFile).use { output -> input.copyTo(output) }
-            } ?: return@guarded err("SO_NOT_FOUND", "Cannot open content URI: $path", "path", path)
+            // 固定文件名会被同名文件覆盖：不同 APK 里的 libfoo.so 指向同一路径，之后按路径
+            // 回读（写回原文件/签名分析）会操作到另一个文件的字节。同时先写 .part 再改名，
+            // 避免进程被杀时留下半截 .so 被当成完整文件打开。
+            val tempFile = File(
+                context.cacheDir,
+                "picked_${java.util.UUID.randomUUID().toString().take(8)}_$safeName",
+            )
+            val partFile = File(tempFile.absolutePath + ".part")
+            val input = context.contentResolver.openInputStream(uri)
+            if (input == null) {
+                partFile.delete()
+                return@guarded err("SO_NOT_FOUND", "Cannot open content URI: $path", "path", path)
+            }
+            input.use { src -> FileOutputStream(partFile).use { output -> src.copyTo(output) } }
+            if (!partFile.renameTo(tempFile)) error("cannot stage content URI copy: $path")
             tempFile.absolutePath
         } catch (e: Exception) {
             AppLog.e("Failed to copy content URI: ${e.message}")

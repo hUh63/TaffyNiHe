@@ -311,7 +311,11 @@ object AdvancedTools {
                                 if (!bak.exists()) file.copyTo(bak, overwrite = false)
                                 // 保留原条目的压缩方式/extra，并对 resources.arsc 与 lib/*.so 做 STORED+对齐：
                                 // 原来一律 DEFLATED 重建，会让 APK 直接装不上（原生库也会加载失败）。
-                                ZipRepack.copyAll(file, tempFile) { name -> if (name == entryName) newBytes else null }
+                                val applied = ZipRepack.copyAll(file, tempFile) { name -> if (name == entryName) newBytes else null }
+                                if (entryName !in applied) {
+                                    tempFile.delete()
+                                    return err("PATCH_NOT_APPLIED", "ZIP 内没有条目 $entryName，本次写入没有生效（原文件未改动）", "entry", entryName)
+                                }
                                 com.soreverse.mcp.core.ZipRepack.replaceAtomically(tempFile, file)
                                 tempFile.delete()
                                 ok(JSONObject()

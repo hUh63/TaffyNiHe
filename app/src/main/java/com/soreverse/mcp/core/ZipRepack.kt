@@ -67,12 +67,17 @@ internal object ZipRepack {
      * 逐条复制 [input] 到 [output]，[replace] 返回非 null 时用其替换该条目的内容。
      * 调用方负责保证 [output] 与 [input] 不是同一个文件。
      */
-    fun copyAll(input: File, output: File, replace: (String) -> ByteArray?) {
+    fun copyAll(input: File, output: File, replace: (String) -> ByteArray?): Set<String> {
+        // 返回真正被替换的条目名：调用方据此判断"修改是否落到产物上"。
+        // 旧实现无返回值，entryName 与 zip 条目名一旦不一致就整包原样复制，
+        // 工具仍返回 success=true + 新字节数（报告与产物不一致）。
+        val applied = HashSet<String>()
         SavedOffsetOutput(BufferedOutputStream(output.outputStream())).use { counting ->
             ZipOutputStream(counting).use { zos ->
                 ZipFile(input).use { zf ->
                     for (e in zf.entries()) {
                         val override = replace(e.name)
+                        if (override != null) applied.add(e.name)
                         val store = e.method == ZipEntry.STORED || requiresStore(e.name)
                         val entry = ZipEntry(e.name).apply {
                             time = e.time
@@ -136,6 +141,7 @@ internal object ZipRepack {
                 }
             }
         }
+        return applied
     }
 
     private class SavedOffsetOutput(out: OutputStream) : FilterOutputStream(out) {

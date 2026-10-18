@@ -213,7 +213,11 @@ object SmaliEditTools {
 
                 val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
                 // 保留原条目压缩方式/extra 并对齐（否则 resources.arsc 与 lib 下的 so 会被重新压缩，产物装不上）
-                ZipRepack.copyAll(apk, tempApk) { name -> if (name == dexEntryName) newDexBytes else null }
+                val applied = ZipRepack.copyAll(apk, tempApk) { name -> if (name == dexEntryName) newDexBytes else null }
+                if (dexEntryName !in applied) {
+                    tempApk.delete()
+                    return err("PATCH_NOT_APPLIED", "APK 内没有条目 $dexEntryName，本次修改没有落到产物上（原包未改动）", "entry", dexEntryName)
+                }
 
                 // 备份原 APK + 替换
                 val backup = File(apk.parentFile, "${apk.nameWithoutExtension}.bak.apk")
@@ -454,7 +458,11 @@ object SmaliEditTools {
             if (!backup.isFile) EditSnapshotService.snapshot(ctx.context, "taffy_smali_edit", apk.absolutePath)
             val tempApk = File.createTempFile("apk_rstr_", ".apk", apk.parentFile)
             // 保留原条目压缩方式/extra 并对齐（否则 resources.arsc 与 lib 下的 so 会被重新压缩，产物装不上）
-            ZipRepack.copyAll(apk, tempApk) { name -> results[name] }
+            val applied = ZipRepack.copyAll(apk, tempApk) { name -> results[name] }
+            if (applied.isEmpty()) {
+                tempApk.delete()
+                return err("PATCH_NOT_APPLIED", "所有 DEX 的替换都没有落到 APK 条目上（条目名不匹配），原包未改动")
+            }
             if (!backup.exists()) apk.copyTo(backup, overwrite = false)
             ZipRepack.replaceAtomically(tempApk, apk)
             tempApk.delete()
@@ -576,7 +584,10 @@ object SmaliEditTools {
             val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
             try {
                 // 保留原条目压缩方式/extra 并对齐（否则 resources.arsc 与 lib 下的 so 会被重新压缩，产物装不上）
-                ZipRepack.copyAll(apk, tempApk) { name -> if (name == dexEntryName) newDexBytes else null }
+                val applied = ZipRepack.copyAll(apk, tempApk) { name -> if (name == dexEntryName) newDexBytes else null }
+                if (dexEntryName !in applied) {
+                    return err("PATCH_NOT_APPLIED", "APK 内没有条目 $dexEntryName，本次修改没有落到产物上（原包未改动）", "entry", dexEntryName)
+                }
                 // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback), 再留 .bak 双保险
                 EditSnapshotService.snapshot(ctx.context, "taffy_smali_edit", apk.absolutePath)
                 val backup = File(apk.parentFile, "${apk.nameWithoutExtension}.bak.apk")

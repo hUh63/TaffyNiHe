@@ -153,7 +153,11 @@ internal class BatchExecutor(
                     .put("steps", results)
                     .put("executedCount", index + 1)
                     .put("aborted", true)
-                    .put("transactional", transactional)
+                    // 只有真正建立了快照的步骤才可回滚：apk_*/smali_*/manifest_*/file_* 这类
+                    // 没有 workspaceId+editSessionId 的步骤 ensureSnapshot 返回 null，
+                    // 原来仍报 transactional=true + rollback=[]，调用方会误以为已回滚。
+                    .put("transactional", transactional && snapshots.isNotEmpty())
+                    .put("transactionalSupported", snapshots.isNotEmpty())
                     .put("rollback", if (transactional) rollbackSnapshots(snapshots) else JSONArray())
                     .put("hint", "stopOnError=true aborted the pipeline at the first failing step. Pass stopOnError=false to execute every step regardless."))
             }

@@ -108,7 +108,10 @@ object ManifestEditTools {
                     }
 
                     "set_debuggable" -> {
-                        val dbg = args.str("debuggable", "true").toBooleanStrictOrNull() ?: true
+                        // 原来 toBooleanStrictOrNull() ?: true：传 "False"/"0"/"no" 一律回落成 true，
+                        // 于是"关掉 debuggable"反而把它打开，还报 success。
+                        val dbg = parseBool(args.str("debuggable", "true"))
+                            ?: return err("INVALID_ARGUMENT", "debuggable 只接受 true/false", "debuggable", args.str("debuggable"))
                         val xmlText = manifest.toString()
                         val newXml = if (Regex("android:debuggable=\"[^\"]*\"").containsMatchIn(xmlText)) {
                             xmlText.replace(Regex("android:debuggable=\"[^\"]*\""), "android:debuggable=\"$dbg\"")
@@ -137,7 +140,8 @@ object ManifestEditTools {
                             }
                             "set_exported" -> {
                                 val compClass = args.str("exported")
-                                val expVal = args.str("exportedValue", "true").toBooleanStrictOrNull() ?: true
+                                val expVal = parseBool(args.str("exportedValue", "true"))
+                                    ?: return err("INVALID_ARGUMENT", "exportedValue 只接受 true/false", "exportedValue", args.str("exportedValue"))
                                 if (compClass.isBlank()) return err("INVALID_ARGUMENT", "set_exported 需要 exported(组件类名)", "exported", compClass)
                                 setExportedInXml(xmlText, compClass, expVal)
                             }
@@ -233,6 +237,12 @@ object ManifestEditTools {
         }
 
         /** 将修改后的 manifest XML 写回 APK(用 ARSCLib 重新编码 AXML) */
+        private fun parseBool(raw: String): Boolean? = when (raw.trim().lowercase()) {
+            "true", "1", "yes", "on" -> true
+            "false", "0", "no", "off" -> false
+            else -> null
+        }
+
         private fun writeManifestBack(apk: ApkModule, file: File, newXml: String) {
             // ARSCLib: 尝试用内置方法更新 manifest
             // 如果不支持直接写 XML, 则用 ZIP 级替换 + 保留原 AXML 字节降级

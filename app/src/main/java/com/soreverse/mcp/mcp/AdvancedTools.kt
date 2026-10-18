@@ -1,5 +1,6 @@
 package com.soreverse.mcp.mcp
 
+import com.soreverse.mcp.core.ZipRepack
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -208,16 +209,20 @@ object AdvancedTools {
                             val entry = zf.getEntry(entryName)
                                 ?: return err("ENTRY_NOT_FOUND", "ZIP 条目不存在: $entryName", "entry", entryName)
                             zf.getInputStream(entry).use { stream ->
-                                val guarded = stream.readNBytes((256L * 1024 * 1024).toInt() + 1)
-                                    if (guarded.size > (256L * 1024 * 1024).toInt()) return err("FILE_TOO_LARGE", "ZIP 条目超过 256MB 处理上限")
-                                    val allBytes = guarded
-                                val end = if (maxLen > 0) minOf(offset + maxLen, allBytes.size) else allBytes.size
-                                val slice = if (offset < allBytes.size) allBytes.sliceArray(offset until end) else ByteArray(0)
+                                // 流式跳过 offset 再读 maxLen：原来把整条（最大 256MB）读进来
+                                // 只为了取 256 字节，大 APK 上直接 OOM。
+                                var skipped = 0L
+                                while (skipped < offset) {
+                                    val n = stream.skip(offset - skipped)
+                                    if (n <= 0) break
+                                    skipped += n
+                                }
+                                val slice = stream.readNBytes(maxLen)
                                 val hex = slice.joinToString(" ") { "%02X".format(it) }
                                 ok(JSONObject()
                                     .put("action", "read")
                                     .put("entry", entryName)
-                                    .put("entrySize", allBytes.size)
+                                    .put("entrySize", entry.size)
                                     .put("offset", offset)
                                     .put("returnedBytes", slice.size)
                                     .put("hex", hex)
@@ -301,14 +306,9 @@ object AdvancedTools {
                                 val tempFile = File.createTempFile("patch_", ".apk", file.parentFile)
                                 EditSnapshotService.snapshot(ctx.context, "taffy_apk_patch_bytes", file.absolutePath)
                                 file.copyTo(File(file.parentFile, "${file.nameWithoutExtension}.bak.apk"), overwrite = true)
-                                java.util.zip.ZipOutputStream(tempFile.outputStream()).use { zos ->
-                                    zf.entries().toList().forEach { e ->
-                                        zos.putNextEntry(java.util.zip.ZipEntry(e.name))
-                                        if (e.name == entryName) zos.write(newBytes)
-                                        else zf.getInputStream(e).use { it.copyTo(zos) }
-                                        zos.closeEntry()
-                                    }
-                                }
+                                // 保留原条目的压缩方式/extra，并对 resources.arsc 与 lib/*.so 做 STORED+对齐：
+                                // 原来一律 DEFLATED 重建，会让 APK 直接装不上（原生库也会加载失败）。
+                                ZipRepack.copyAll(file, tempFile) { name -> if (name == entryName) newBytes else null }
                                 tempFile.copyTo(file, overwrite = true)
                                 tempFile.delete()
                                 ok(JSONObject()

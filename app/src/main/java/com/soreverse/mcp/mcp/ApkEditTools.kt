@@ -67,23 +67,27 @@ object ApkEditTools {
                         val pkg = args.str("package")
                         if (pkg.isBlank()) return err("INVALID_ARGUMENT", "rename_package 需要 package 参数", "package", "")
                         val oldPkg = Regex("package=\"([^\"]+)\"").find(xml)?.groupValues?.get(1) ?: ""
-                        xml = xml.replaceFirst("package=\"$oldPkg\"", "package=\"$pkg\"")
-                        manifest.writeText(xml)
+                        val renamed = xml.replaceFirst("package=\"$oldPkg\"", "package=\"$pkg\"")
+                        if (renamed == xml) return err("NO_CHANGE", "manifest 中未找到 package=\"$oldPkg\"，未写入", "oldPackage", oldPkg)
+                        manifest.writeText(renamed)
                         ok(JSONObject().put("action", "rename_package").put("oldPackage", oldPkg).put("newPackage", pkg).put("hint", "包名已改,需检查引用旧包名的地方"))
                     }
                     "add_permission" -> {
                         val perm = args.str("permission")
                         if (perm.isBlank()) return err("INVALID_ARGUMENT", "add_permission 需要 permission 参数", "permission", "")
                         if (xml.contains("android:name=\"$perm\"")) return err("ALREADY_EXISTS", "权限已存在: $perm", "permission", perm)
-                        xml = xml.replaceFirst("</manifest>", "    <uses-permission android:name=\"$perm\" />\n</manifest>")
-                        manifest.writeText(xml)
+                        val mutated = xml.replaceFirst("</manifest>", "    <uses-permission android:name=\"$perm\" />\n</manifest>")
+                        // 没命中反而写回同样内容还报 success，客户端会以为权限加上了
+                        if (mutated == xml) return err("NO_CHANGE", "manifest 中未找到 </manifest>，未写入", "permission", perm)
+                        manifest.writeText(mutated)
                         ok(JSONObject().put("action", "add_permission").put("permission", perm))
                     }
                     "remove_permission" -> {
                         val perm = args.str("permission")
                         if (perm.isBlank()) return err("INVALID_ARGUMENT", "remove_permission 需要 permission 参数", "permission", "")
-                        xml = xml.replace(Regex("\\s*<uses-permission android:name=\"$perm\"\\s*/>\\s*\\n?"), "")
-                        manifest.writeText(xml)
+                        val mutated = xml.replace(Regex("\\s*<uses-permission android:name=\"$perm\"\\s*/>\\s*\\n?"), "")
+                        if (mutated == xml) return err("NOT_FOUND", "manifest 中没有该权限: $perm", "permission", perm)
+                        manifest.writeText(mutated)
                         ok(JSONObject().put("action", "remove_permission").put("permission", perm))
                     }
                     "add_component" -> {

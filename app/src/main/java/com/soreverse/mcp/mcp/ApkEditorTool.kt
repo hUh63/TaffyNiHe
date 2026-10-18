@@ -146,6 +146,11 @@ object ApkEditorTool {
             val custom = args.str("output")
             val out = if (custom.isNotBlank()) File(custom) else File(outRoot, defaultName)
             if (out.exists()) {
+                // force 语义原来完全没参与判断：force=false 也先删掉旧产物再覆盖，
+                // 一旦本次构建失败，上一次的结果就被白毁了。
+                if (!args.bool("force", false)) {
+                    throw IllegalStateException("输出已存在且 force=false: ${out.absolutePath}（传 force=true 覆盖）")
+                }
                 if (out.isDirectory) out.deleteRecursively() else out.delete()
             }
             out.parentFile?.mkdirs()

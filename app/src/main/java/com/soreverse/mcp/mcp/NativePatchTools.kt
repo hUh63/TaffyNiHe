@@ -89,9 +89,15 @@ object NativePatchTools {
             }
         }
 
+        /** rzCommand 的输出在 stdout（兼容 text/output）；原来读 "output" 恒为空，导致 CAS 校验永远通过。 */
+        private fun rzStdout(result: JSONObject): String =
+            listOf("stdout", "text", "output")
+                .firstNotNullOfOrNull { k -> result.optString(k).takeIf { it.isNotBlank() } }
+                .orEmpty()
+
         private fun extractHexFromRzOutput(result: JSONObject): String {
             // rizin pxj 返回 JSON 数组
-            val data: String = result.optJSONArray("data")?.toString() ?: result.optString("output", "")
+            val data: String = result.optJSONArray("data")?.toString() ?: rzStdout(result)
             return if (data.startsWith("[")) {
                 // JSON 数组 → hex
                 val arr = JSONArray(data)
@@ -135,7 +141,7 @@ object NativePatchTools {
             if (expectedText.isNotBlank()) {
                 val readLen = expectedText.toByteArray().size + 16 // 多读一点
                 val readResult = engine.rzCommand(ws, "", "ps @ $addr", false)
-                val currentText = readResult.optString("output", "").trim()
+                val currentText = rzStdout(readResult).trim()
                 if (!currentText.startsWith(expectedText)) {
                     return err("CAS_MISMATCH",
                         "expectedText 不匹配当前字符串",

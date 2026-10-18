@@ -1,3 +1,39 @@
+# TaffyNiHe v1.3.114（翻页游标 · 资源关闭链路）
+
+收尾第三轮：把上一轮明确留下、但没说清楚的三处「机制性问题」补完 —— 跨域搜索的游标
+坐标不一致、引擎没有整体关闭入口（切换工作目录就漏一个 SQLite 句柄）、分页缓存只限页数
+不限条数。
+
+## 一、跨域搜索翻页（`taffy_apk_unified_search`）
+
+- **游标语义错了**：原来把「累计匹配数」当游标写回 `nextCursor`，而四个 scope 里只有 `zip`
+  拿它做偏移，`dex / native / resource` 完全不看游标 —— 第 2 页和第一页一样，`hasMore` 永远
+  为真，客户端永远翻不到底。
+- 现在统一成 `<scope>:<该 scope 内已消费的匹配数>`，四个 scope 共用同一套坐标：`all` 模式下
+  已翻完的 scope 整个跳过，当前 scope 从游标位置继续，跨 scope 既不重复也不丢结果。
+- `dex` 分支的 DexKit 查询改为按 `offset + limit + 1` 取，多取的那一条专门用来判断「后面还有
+  没有」，避免「刚好满页」被误判为结束。
+- 返回值补 `returned` 与 `cursorFormat`；`total` 保留但语义改为「本页返回条数」。
+- 游标格式有变：旧游标（纯数字）会被当成第一个 scope 的偏移解析，客户端升级后请丢弃旧游标、
+  从空游标重新开始翻页。
+
+## 二、引擎资源关闭链路
+
+- **工作目录泄漏 SQLite 句柄**：`WorkDirectory` 持有 `ScanCacheStore`（`SQLiteOpenHelper`），
+  但没有任何关闭入口，每切换一次工作目录就漏一个句柄。现在 `WorkDirectory.close()` 负责释放，
+  并在切换前关掉旧实例。
+- **新增整体关闭**：`EngineRuntime.close()`（转发到 `NativeSoEngine.close()` /
+  `EngineProvider.close()`）一次性释放模拟器会话（逐个 `closeSession`）、工作区字节、
+  Frida 会话、分页与搜索缓存、工作目录句柄。
+- 应用真正退出时（`MainActivity.onDestroy`，排除旋转等配置变更）调用，退出后不再滞留
+  SO 副本与 native 会话。
+
+## 三、分页缓存双层上限
+
+- `PageStore` 原来只有 64 页上限，而每个条目持有一份完整 item 列表引用 —— 64 页大列表仍可能
+  驻留几十万条 JSON。新增 `maxItems = 20000`，按「不同列表实例」去重后统计真实驻留条数，
+  超限淘汰最旧页。
+
 # TaffyNiHe v1.3.113（并发与状态机 · 第二轮深挖）
 
 这一轮不再扫样式，而是盯着「两个操作同时发生」和「异常分支」找问题：30 条候选里核实出

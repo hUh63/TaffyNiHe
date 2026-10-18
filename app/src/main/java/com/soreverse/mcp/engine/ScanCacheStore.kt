@@ -143,6 +143,11 @@ class ScanCacheStore(context: Context) : SQLiteOpenHelper(context, "somcp_scan_c
     }
 
     fun putSourceSummary(treeUri: String, path: String, size: Long, modified: Long, summary: CachedSourceSummary) {
+        // 主键含 modified：只 insert 不删旧行，同一 path 每次扫描都写一行永不命中的新记录，
+        // 表随使用无限膨胀（APK 内 SO 的 modified 以前还取的是墙钟时间）。
+        runCatching {
+            writableDatabase.delete("source_summaries", "tree_uri=? AND path=?", arrayOf(treeUri, path))
+        }
         writableDatabase.insertWithOnConflict(
             "source_summaries",
             null,

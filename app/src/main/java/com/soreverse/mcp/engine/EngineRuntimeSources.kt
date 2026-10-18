@@ -105,7 +105,7 @@ internal fun EngineRuntime.open(path: String, temporary: Boolean): JSONObject = 
     val pltStubs = elf.relocations.count { it.section.contains("plt", true) }
     ok(JSONObject()
         .put("workspaceId", ws.id)
-        .put("temporary", temporary)
+        .put("temporary", ws.temporary)
         .put("soFileName", src.name)
         .put("source", src.source)
         .put("inputPath", src.path)
@@ -242,8 +242,19 @@ internal fun EngineRuntime.openWorkspace(path: String, temporary: Boolean): Work
     require(original.size >= 4 && original[0] == 0x7f.toByte() && original[1] == 'E'.code.toByte() && original[2] == 'L'.code.toByte() && original[3] == 'F'.code.toByte()) { "NOT_ELF_INPUT: ${src.path} is not an ELF SO file. Use apk_analyze or an APK MCP tool." }
     val prepared = prepareAnalysisInput(original)
     val ws = Workspace("so-ws-${UUID.randomUUID()}", src, prepared.data, prepared.elf, temporary, sha256(original), prepared.source, prepared.facts)
-    workspaces[ws.id] = ws
-    workspaceBySourceKey[key] = ws.id
+    // 双检登记：两个并发调用同时 miss 时会各建一份，后写者覆盖索引，先建的那个工作区
+    // 就变成没人能关的孤儿（整份 data + ELF 常驻）。这里在锁内重新确认一次。
+    val raced = synchronized(workspaceLock) {
+        val existing = workspaceBySourceKey[key]?.let { id -> workspaces[id] }
+        if (existing != null) {
+            existing
+        } else {
+            workspaces[ws.id] = ws
+            workspaceBySourceKey[key] = ws.id
+            null
+        }
+    }
+    if (raced != null) return raced
     AppLog.i("Opened ${src.path} as ${ws.id}")
     val evicted = evictWorkspacesIfNeeded(ws.id)
     if (evicted.isNotEmpty()) AppLog.i("Evicted ${evicted.size} workspace(s) to stay within memory budget: ${evicted.joinToString()}")
@@ -273,7 +284,9 @@ internal fun EngineRuntime.evictWorkspacesIfNeeded(keepId: String = ""): List<St
         .sortedWith(compareBy({ !it.temporary }, { it.lastAccessAt }))
     for (w in candidates) {
         if (withinLimits()) break
-        if (!w.temporary && now - w.lastAccessAt < recentlyUsedMs) continue
+        // temporary 工作区同样需要最近使用保护：长跑分析（伪 C 批量、深度扫描）中途
+        // 被另一次 open 触发淘汰，会直接以 WORKSPACE_NOT_FOUND 失败并关掉其模拟会话。
+        if (now - w.lastAccessAt < recentlyUsedMs) continue
         workspaces.remove(w.id)
         workspaceBySourceKey.entries.removeAll { it.value == w.id }
         // 绑定在该工作区上的模拟会话必须一起关闭，否则 native VM 与整份 SO 副本继续驻留，
@@ -329,7 +342,7 @@ internal fun EngineRuntime.findSource(rawPath: String): SoSource? {
         val separator = apkUri.indexOf('/')
         if (separator > 0) sources.firstOrNull { it.source == "apk" && it.apkPath?.substringAfterLast('/') == apkUri.substring(0, separator) && it.apkEntry == apkUri.substring(separator + 1) }?.let { return it }
     }
-    return sources.firstOrNull { it.path == rawPath || it.path == path } ?: sources.firstOrNull { it.name == rawPath || it.name == path } ?: sources.firstOrNull { it.apkEntry == rawPath || it.apkEntry == path } ?: sources.firstOrNull { it.path.endsWith("/$path") || it.path.contains(path) }
+    return sources.firstOrNull { it.path == rawPath || it.path == path } ?: sources.firstOrNull { it.name == rawPath || it.name == path } ?: sources.firstOrNull { it.apkEntry == rawPath || it.apkEntry == path } ?: sources.firstOrNull { it.path.endsWith("/$path") }
 }
 
 internal fun EngineRuntime.ensureSources(dir: WorkDirectory): List<SoSource> {

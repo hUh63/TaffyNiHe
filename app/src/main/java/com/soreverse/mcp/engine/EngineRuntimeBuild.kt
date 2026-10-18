@@ -71,7 +71,9 @@ internal fun EngineRuntime.buildMany(workspaceId: String, editSessionId: String,
         val wantReport = entry?.let { if (it.has("writePatchReport")) it.optBoolean("writePatchReport") else (writeReport ?: settings.writePatchReport) } ?: (writeReport ?: settings.writePatchReport)
         val out = resolveOutputFile(name, strategy)
         writeAtomic(out, bytes)
-        val report = if (session != null && wantReport) writePatchReport(workspaceId, session, out) else null
+        // 报告必须与刚写出的字节来自同一份数据：锁外遍历 session.patches/data
+        // 会与并发 editHex 撞成 CME，或产出"补丁集对不上产物"的取证报告。
+        val report = if (session != null && wantReport) synchronized(session.lock) { writePatchReport(workspaceId, session, out) } else null
         val workDirCopy = workDirCopyResult(useWorkDir) {
             writeCopyToWorkDirectory(out.nameWithoutExtension + ".so", bytes)
         }
@@ -100,7 +102,11 @@ private fun EngineRuntime.writeCopyToWorkDirectory(fileName: String, bytes: Byte
     val dir = workDir ?: WorkDirectory(context, tree).also { workDir = it }
     if (!dir.isAccessible()) error("work directory is not accessible: $tree")
     val resolver = context.contentResolver
-    val existing = runCatching { findSource(fileName) }.getOrNull()
+    // 必须精确匹配：findSource 末尾有子串兜底，输出 patched.so 时会命中 my_patched.so
+    // 并把它原地截断覆盖成别的文件内容。
+    val existing = runCatching {
+        sources.firstOrNull { it.path == fileName || it.path == "/$fileName" || it.name == fileName }
+    }.getOrNull()
     if (existing?.treeDocumentUri != null) {
         resolver.openOutputStream(existing.treeDocumentUri, "wt")?.use { it.write(bytes) }
             ?: error("cannot open existing workdir file for write: ${existing.treeDocumentUri}")

@@ -74,12 +74,12 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
 
     fun listSos(options: ScanOptions = ScanOptions()): List<SoSource> {
         val out = mutableListOf<SoSource>()
-        val apkPaths = mutableListOf<Pair<String, Uri>>()
+        val apkPaths = mutableListOf<ApkCandidate>()
         runCatching { walk(treeUri, "", 0, options) { docUri, displayName, relativePath, size, modified ->
             if (displayName.endsWith(".so", ignoreCase = true)) {
                 out += SoSource(relativePath, "filesystem", displayName, size, modified, docUri)
             } else if (options.scanApks && displayName.endsWith(".apk", ignoreCase = true)) {
-                apkPaths += relativePath to docUri
+                apkPaths += ApkCandidate(relativePath, docUri, size, modified)
             }
         } }.onFailure { AppLog.w("Failed to scan work directory: ${it.message}") }
 
@@ -87,8 +87,8 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
         if (apkPaths.isNotEmpty()) {
             val entries = runCatching {
                 kotlinx.coroutines.runBlocking {
-                    apkPaths.map { (relPath, uri) ->
-                        async(Dispatchers.IO) { scanApk(relPath, uri, modified = System.currentTimeMillis()) }
+                    apkPaths.map { c ->
+                        async(Dispatchers.IO) { scanApk(c.relPath, c.uri, c.size, c.modified) }
                     }.awaitAll().flatten()
                 }
             }.getOrElse { emptyList() }
@@ -105,14 +105,14 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
     fun listSosWithFingerprint(options: ScanOptions = ScanOptions()): Pair<List<SoSource>, List<FileFingerprint>> {
         val sources = mutableListOf<SoSource>()
         val fingerprints = mutableListOf<FileFingerprint>()
-        val apkPaths = mutableListOf<Pair<String, Uri>>()
+        val apkPaths = mutableListOf<ApkCandidate>()
 
         runCatching { walk(treeUri, "", 0, options) { docUri, displayName, relativePath, size, modified ->
             if (displayName.endsWith(".so", ignoreCase = true)) {
                 sources += SoSource(relativePath, "filesystem", displayName, size, modified, docUri)
                 fingerprints += FileFingerprint(relativePath, size, modified)
             } else if (options.scanApks && displayName.endsWith(".apk", ignoreCase = true)) {
-                apkPaths += relativePath to docUri
+                apkPaths += ApkCandidate(relativePath, docUri, size, modified)
                 fingerprints += FileFingerprint(relativePath, size, modified)
             }
         } }.onFailure { AppLog.w("Failed to scan work directory: ${it.message}") }
@@ -121,8 +121,8 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
         if (apkPaths.isNotEmpty()) {
             val entries = runCatching {
                 kotlinx.coroutines.runBlocking {
-                    apkPaths.map { (relPath, uri) ->
-                        async(Dispatchers.IO) { scanApk(relPath, uri, modified = System.currentTimeMillis()) }
+                    apkPaths.map { c ->
+                        async(Dispatchers.IO) { scanApk(c.relPath, c.uri, c.size, c.modified) }
                     }.awaitAll().flatten()
                 }
             }.getOrElse { emptyList() }
@@ -338,9 +338,11 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
         resolver.query(doc, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)?.use { it.count >= 0 } == true
     }.getOrDefault(false)
 
+    /** 工作目录里的一个 APK 候选（walk 已经拿到真实 size/mtime，不能再拿墙钟时间凑）。 */
+    private data class ApkCandidate(val relPath: String, val uri: Uri, val size: Long, val modified: Long)
+
     // Shared APK scanning with caching — used by both listSos and listSosWithFingerprint
-    private fun scanApk(relativePath: String, docUri: Uri, modified: Long): List<SoSource> {
-        val size = 0L // size not available at this point; cached path uses the cached value
+    private fun scanApk(relativePath: String, docUri: Uri, size: Long, modified: Long): List<SoSource> {
         return runCatching {
             val cached = runCatching { cache.apkEntries(treeKey, relativePath, size, modified) }.getOrElse {
                 AppLog.w("Failed to read scan cache for $relativePath: ${it.message}")

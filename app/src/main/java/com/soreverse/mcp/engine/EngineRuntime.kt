@@ -26,6 +26,8 @@ internal class EngineRuntime(internal val context: Context) {
     internal val emulatorSessions = ConcurrentHashMap<String, EmulatorSession>()
     internal val searchCache = ConcurrentHashMap<String, List<JSONObject>>()
     internal val workspaces = ConcurrentHashMap<String, Workspace>()
+    /** 工作区创建/索引登记的互斥锁（ConcurrentHashMap 的复合操作不是原子的）。 */
+    internal val workspaceLock = Any()
 
     // 对标 SOMCP Issue #63（启动后渐进 OOM）: 工作区自动淘汰阈值。
     // 每个工作区持有完整 SO 字节 + ELF 解析对象（data 的 2-3 倍），256MB largeHeap 下

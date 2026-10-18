@@ -14,6 +14,9 @@ import org.json.JSONObject
  */
 internal object ExbinSignature {
 
+    /** 串行化 FunctionSignatureAnalyzer 的 setSoPath + analyze（进程级静态状态）。 */
+    private val sigLock = Any()
+
     /**
      * 还原单个函数签名。
      *
@@ -28,13 +31,16 @@ internal object ExbinSignature {
             if (path.isBlank()) return@runCatching null
 
             ExbinSignatureBackend.ensureRegistered()
-            com.exbin.app.elf.FunctionSignatureAnalyzer.setSoPath(path)
 
             val exbinElf = ExbinElfBridge.from(elf, ws.data)
             val fnName = name.ifBlank { "sub_" + java.lang.Long.toHexString(va) }
             val fn = com.exbin.app.elf.FunctionInfo(fnName, va, size, ".text")
-            val res = com.exbin.app.elf.FunctionSignatureAnalyzer
-                .analyze(fn, elf.machine, null, exbinElf) ?: return@runCatching null
+            // setSoPath 是分析器的进程级静态状态：两个工作区并发分析会互相覆盖，
+            // 结果按另一个文件算出来却当成正常签名返回。串行化这一小段。
+            val res = synchronized(sigLock) {
+                com.exbin.app.elf.FunctionSignatureAnalyzer.setSoPath(path)
+                com.exbin.app.elf.FunctionSignatureAnalyzer.analyze(fn, elf.machine, null, exbinElf)
+            } ?: return@runCatching null
 
             JSONObject()
                 .put("signature", res.signature ?: JSONObject.NULL)

@@ -119,29 +119,37 @@ internal class BatchExecutor(
         val results = JSONArray()
         val keyed = HashMap<String, JSONObject>()
         val snapshots = LinkedHashMap<String, String>()
+        // 早退路径（步骤非法 / 快照失败 / 首错中止）同样要释放事务快照，
+        // 否则每次失败都留下整份 SO 字节副本，反复失败即渐进 OOM。
+        fun released(body: JSONObject): JSONObject {
+            if (transactional) releaseSnapshots(snapshots)
+            return body
+        }
         for (index in 0 until steps.length()) {
             val step = steps.optJSONObject(index) ?: continue
             val toolName = step.optString("tool")
             if (toolName.isBlank()) {
                 results.put(JSONObject().put("step", index).put("ok", false).put("error", JSONObject().put("code", "BAD_REQUEST").put("message", "step.tool is required")))
-                if (stopOnError) return ok(JSONObject().put("steps", results).put("executedCount", index).put("aborted", true))
+                if (stopOnError) return released(ok(JSONObject().put("steps", results).put("executedCount", index).put("aborted", true)))
                 continue
             }
             val resolvedArgs = BatchTemplateResolver.substitute(step.optJSONObject("arguments") ?: JSONObject(), keyed)
             val snapshotFailure = if (transactional) ensureSnapshot(resolvedArgs, snapshots) else null
             if (snapshotFailure != null) {
                 results.put(JSONObject().put("step", index).put("tool", toolName).put("arguments", resolvedArgs).put("ok", false).put("result", snapshotFailure))
-                return ok(JSONObject()
+                return released(ok(JSONObject()
                     .put("steps", results)
                     .put("executedCount", index)
                     .put("aborted", true)
                     .put("transactional", true)
                     .put("rollback", rollbackSnapshots(snapshots))
-                    .put("hint", "The transaction was aborted because its rollback snapshot could not be created."))
+                    .put("hint", "The transaction was aborted because its rollback snapshot could not be created.")))
             }
             val resultKey = step.optString("resultKey", "").trim()
             val payload = try {
                 executeTool(toolName, resolvedArgs)
+            } catch (error: java.util.concurrent.CancellationException) {
+                throw error
             } catch (error: Exception) {
                 JSONObject().put("ok", false).put("error", JSONObject().put("code", "STEP_EXCEPTION").put("message", error.message ?: error.javaClass.simpleName))
             }
@@ -149,7 +157,7 @@ internal class BatchExecutor(
             results.put(JSONObject().put("step", index).put("tool", toolName).put("resultKey", resultKey).put("arguments", resolvedArgs).put("ok", succeeded).put("result", payload))
             if (resultKey.matches(Regex("^[a-zA-Z0-9_]+$"))) keyed[resultKey] = payload
             if (!succeeded && stopOnError) {
-                return ok(JSONObject()
+                return released(ok(JSONObject()
                     .put("steps", results)
                     .put("executedCount", index + 1)
                     .put("aborted", true)
@@ -159,7 +167,7 @@ internal class BatchExecutor(
                     .put("transactional", transactional && snapshots.isNotEmpty())
                     .put("transactionalSupported", snapshots.isNotEmpty())
                     .put("rollback", if (transactional) rollbackSnapshots(snapshots) else JSONArray())
-                    .put("hint", "stopOnError=true aborted the pipeline at the first failing step. Pass stopOnError=false to execute every step regardless."))
+                    .put("hint", "stopOnError=true aborted the pipeline at the first failing step. Pass stopOnError=false to execute every step regardless.")))
             }
         }
         if (transactional) releaseSnapshots(snapshots)

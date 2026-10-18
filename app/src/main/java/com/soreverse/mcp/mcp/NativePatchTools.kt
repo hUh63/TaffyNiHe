@@ -19,6 +19,12 @@ import java.util.zip.ZipFile
  * taffy_apk_unified_search: 跨 DEX/Native/资源/ZIP 统一搜索(带分页游标)
  */
 object NativePatchTools {
+    /** rzCommand 的输出在 stdout（兼容 text/output）；原来读 "output" 恒为空，导致 CAS 校验永远通过。 */
+    private fun rzStdout(result: JSONObject): String =
+        listOf("stdout", "text", "output")
+            .firstNotNullOfOrNull { k -> result.optString(k).takeIf { it.isNotBlank() } }
+            .orEmpty()
+
 
     /** Native 指令补丁 — 汇编新指令 + CAS 乐观锁替换 */
     val nativePatchInstructions: ToolHandler = object : ToolHandler {
@@ -88,12 +94,6 @@ object NativePatchTools {
                 writeResult
             }
         }
-
-        /** rzCommand 的输出在 stdout（兼容 text/output）；原来读 "output" 恒为空，导致 CAS 校验永远通过。 */
-        private fun rzStdout(result: JSONObject): String =
-            listOf("stdout", "text", "output")
-                .firstNotNullOfOrNull { k -> result.optString(k).takeIf { it.isNotBlank() } }
-                .orEmpty()
 
         private fun extractHexFromRzOutput(result: JSONObject): String {
             // rizin pxj 返回 JSON 数组

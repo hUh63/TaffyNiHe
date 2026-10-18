@@ -16,7 +16,7 @@ import java.util.zip.ZipOutputStream
  * `ZipEntry(e.name)` 重建条目——默认 DEFLATED，且丢弃原条目的 extra 字段与时间戳。
  * 这对 APK 是致命的：
  *  - `resources.arsc` 必须 STORED 且 4 字节对齐；
- *  - `extractNativeLibs=false` 时 `lib/*.so` 必须 STORED 且页对齐。
+ *  - `extractNativeLibs=false` 时 `lib/` 下的 .so 必须 STORED 且页对齐。
  * 改一个字节就把它们重新压缩，安装器直接拒装（INSTALL_PARSE_FAILED_UNEXPECTED_EXCEPTION）
  * 或原生库加载失败，而工具还返回「字节已写入」。
  *

@@ -215,11 +215,11 @@ internal fun SettingsLinuxPage(t: UiText) {
         }
 
         GlassGroup(
-            title = if (zh) "注入痕迹探针（只读）" else "Injection Trace Probe (read-only)",
-            footer = if (zh) "仅记录不阻断：结果不参与完整性门禁、不影响任何功能。用于自查本包是否被 LSPatch 二次打包或被注入 LSPosed" else "Record only, never blocks: not part of the integrity gate",
+            title = if (zh) "注入与转储环境探针（只读）" else "Injection & Dump-Probe Environment (read-only)",
+            footer = if (zh) "仅记录不阻断：结果不参与完整性门禁、不影响任何功能。用于自查本包是否被二次打包/注入，以及当前设备是否存在 ART/DEX 转储框架" else "Record only, never blocks: not part of the integrity gate",
         ) {
             if (injFindings.isEmpty()) {
-                InlineHint(if (zh) "点「扫描」读取 /proc/self/maps、尝试加载框架类、检查本包 ZIP 条目（全部只读、低成本）" else "Tap Scan for a read-only, low-cost check")
+                InlineHint(if (zh) "点「扫描」读取 /proc/self/maps、尝试加载框架类、检查本包 ZIP 条目、build.prop 与系统库（全部只读、低成本）" else "Tap Scan for a read-only, low-cost check")
             } else {
                 injFindings.forEachIndexed { i, f ->
                     if (i > 0) GroupDivider()
@@ -236,7 +236,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 PrimaryActionButton(
-                    if (zh) "扫描注入痕迹" else "Scan",
+                    if (zh) "扫描痕迹与环境" else "Scan",
                     {
                         if (busy == null) {
                             busy = "injection"

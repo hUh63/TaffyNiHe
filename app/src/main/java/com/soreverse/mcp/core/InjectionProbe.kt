@@ -90,6 +90,10 @@ object InjectionProbe {
         out += runCatching { scanMaps() }.getOrDefault(emptyList())
         out += runCatching { scanClassLoader(context) }.getOrDefault(emptyList())
         out += runCatching { scanSelfApk(context) }.getOrDefault(emptyList())
+        // 运行时 ART/DEX 转储框架（上游 1.0.22 的 ROM 级检测；这里只告知不阻断）
+        out += runCatching {
+            RuntimeDumpProbe.detect().map { Finding(it.kind, it.detail, it.severity) }
+        }.getOrDefault(emptyList())
         out += runCatching { scanFlags(context) }.getOrDefault(emptyList())
 
         cacheFindings = out

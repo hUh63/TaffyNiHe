@@ -202,17 +202,9 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
     val hardFail = r.expected.isNotBlank() && r.actual.isNotEmpty() &&
         r.reason == "application signature mismatch"
     val lastFailure = remember { IntegrityGuard.lastFailure(context.applicationContext) }
-    var remaining by remember { mutableStateOf(10) }
     var proceed by remember { mutableStateOf(false) }
-    // 用户选择"仍然使用"后立即放行，不再倒计时退出
-    LaunchedEffect(proceed, hardFail) {
-        if (proceed || !hardFail) return@LaunchedEffect
-        while (remaining > 0) {
-            delay(1000)
-            remaining--
-        }
-        if (!proceed) activity?.let { IntegrityGuard.terminate(it) }
-    }
+    // 不再倒计时自动退出（对齐上游 1.0.22）：用户没盯着屏幕时，弹窗 10 秒后进程被杀，
+    // 表现出来就是"应用无缘无故闪退"。改为门禁页常驻，由用户显式选择退出或继续使用。
     if (proceed) {
         content()
         return
@@ -229,9 +221,9 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
                             if (hardFail) {
-                                "检测到当前安装包签名与官方发布签名不一致。为保护本地数据、MCP 服务和原生编辑能力，应用将在 $remaining 秒后退出；如为你自行签名/修改的包，可点「仍然使用」。"
+                                "检测到当前安装包签名与官方发布签名不一致。本地数据、MCP 服务和原生编辑能力存在被替换的风险；如果这是你自行签名/修改的包，可以点「仍然使用」继续。"
                             } else {
-                                "完整性校验未通过（原因不是签名不匹配，可能是运行环境或原生库问题）。本次不会自动退出，原因已记录，可点「仍然使用」继续。"
+                                "完整性校验未通过（原因不是签名不匹配，可能是运行环境或原生库问题）。原因已记录，可点「仍然使用」继续。"
                             },
                         )
                         Text("原因: ${r.reason}", style = MaterialTheme.typography.bodySmall)
@@ -247,7 +239,11 @@ private fun IntegrityGate(content: @Composable () -> Unit) {
                 confirmButton = {
                     TextButton(onClick = { proceed = true }) { Text("仍然使用", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) }
                 },
-                dismissButton = {},
+                dismissButton = {
+                    TextButton(onClick = { activity?.let { IntegrityGuard.terminate(it) } }) {
+                        Text("退出应用", color = MaterialTheme.colorScheme.error)
+                    }
+                },
             )
         }
     }

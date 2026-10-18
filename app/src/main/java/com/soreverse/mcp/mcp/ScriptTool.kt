@@ -147,11 +147,20 @@ object ScriptTool {
         if (name == "taffy_script") return failureJson("FORBIDDEN", "不允许在脚本内递归调用 taffy_script")
         val handler = ToolCatalog.byName[name]
             ?: return failureJson("UNKNOWN_TOOL", "未注册的工具: $name")
+        // 与服务端共用同一个 heavy 闸门：脚本里连调重工具必须排队，
+        // 不能绕过限制和外部调用并发操作同一份引擎状态。
+        val heavy = name in ToolCatalog.heavyNames
+        val lease = if (heavy) HeavyGate.acquire(60_000) else 0L
+        if (heavy && lease == 0L) {
+            return failureJson("SERVER_BUSY", "另一个分析任务正在运行，脚本内重工具调用排队超时: $name")
+        }
         return try {
             val argObj = if (argJson.isBlank()) JSONObject() else JSONObject(argJson)
             handler.handle(ctx, argObj).toString()
         } catch (t: Throwable) {
             failureJson("TOOL_FAILED", "工具 $name 执行失败: ${t.javaClass.simpleName}: ${t.message ?: "no message"}")
+        } finally {
+            if (heavy) HeavyGate.release(lease)
         }
     }
 

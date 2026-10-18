@@ -74,12 +74,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
     override val coroutineContext = SupervisorJob() + Dispatchers.Default
     private val startedAt = System.currentTimeMillis()
     private var engine: EmbeddedServer<*, *>? = null
-    @Volatile private var heavyPermits = 1
-    /** 已实际生效的许可数——reconfigure 幂等判断用。 */
-    @Volatile private var heavyAppliedPermits = 1
-    /** 当前被占用的 heavy 名额数：含已超时但仍在后台跑完的任务。 */
-    private val heavyInFlight = java.util.concurrent.atomic.AtomicInteger(0)
-    @Volatile private var heavyGate: Semaphore = Semaphore(1)
+    // heavy 许可统一由进程级 HeavyGate 管理（脚本内调用也走它），这里不再持有本地闸门
 
     /**
      * 工具执行线程池：配合调用级超时使用；daemon 线程不阻止进程退出。
@@ -132,8 +127,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * reconfigure to current settings on every start.
      */
     fun reconfigureHeavyPermits(permits: Int) {
-        heavyPermits = permits.coerceIn(1, 16)
-        applyHeavyPermits()
+        HeavyGate.setPermits(permits)
     }
 
     /**
@@ -141,16 +135,6 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * 否则在跑任务的 finally 会把许可 release 到旧实例上，新实例许可凭空翻倍，
      * heavy 工具就会并发执行、互相踩引擎状态。等名额归零时再切。
      */
-    @Synchronized
-    private fun applyHeavyPermits() {
-        val p = heavyPermits
-        if (p == heavyAppliedPermits) return
-        if (heavyInFlight.get() > 0) return
-        heavyGate = Semaphore(p)
-        heavyAppliedPermits = p
-        AppLog.i("heavy tool gate permits=$p")
-    }
-
     val apkBridge: ApkMcpBridge get() = bridgeHolder ?: ApkMcpBridge(SettingsStore(context)).also { bridgeHolder = it }
     private var bridgeHolder: ApkMcpBridge? = null
     val tunnel: CloudflareTunnelManager get() = tunnelHolder ?: CloudflareTunnelManager(context, SettingsStore(context)).also { tunnelHolder = it }
@@ -746,8 +730,11 @@ $historyRows
             return err("RATE_LIMITED", "Tool $name hit the per-minute rate limit ($rateLimit/min). Retry shortly.")
         }
         val heavy = name in ToolCatalog.heavyNames
-        val acquiredGate = heavyGate
-        if (heavy && !acquiredGate.tryAcquire()) {
+        val timeoutSec = settings.toolCallTimeoutSec.coerceIn(30, 7200)
+        // 租约比调用超时多一点：超时后任务可能仍在后台跑完，租约留给它；
+        // 真的永久阻塞（native 不返回）才由 HeavyGate 的看门狗回收。
+        val heavyHandle = if (heavy) HeavyGate.tryAcquire((timeoutSec + 120L) * 1000L) else 0L
+        if (heavy && heavyHandle == 0L) {
             val busy = err("SERVER_BUSY", "Another analysis task is running. Retry the same call shortly.")
             busy.getJSONObject("error").put("retrySameArguments", true).put("retryAfterMillis", 750)
             busy.put("nextActions", JSONArray(listOf("Retry the exact same tool call after a short delay.")))
@@ -764,26 +751,19 @@ $historyRows
         // future.cancel(true) 打断不了 native 调用；若调用方一超时就释放许可，
         // 另一个 heavy 工具会立刻进来并发操作同一引擎/文件，造成状态竞争。
         val worker = java.util.concurrent.Callable {
-            if (heavy) {
-                heavyInFlight.incrementAndGet()
-                try {
-                    callToolPayload(name, args)
-                } finally {
-                    if (heavyInFlight.decrementAndGet() == 0) applyHeavyPermits()
-                    acquiredGate.release()
-                }
-            } else {
+            try {
                 callToolPayload(name, args)
+            } finally {
+                if (heavy) HeavyGate.release(heavyHandle)
             }
         }
         val future = try {
             toolExecutor.submit(worker)
         } catch (e: java.util.concurrent.RejectedExecutionException) {
-            if (heavy) acquiredGate.release()
+            if (heavy) HeavyGate.release(heavyHandle)
             AppLog.w("Tool $name rejected: tool executor saturated")
             return err("SERVER_BUSY", "Server is saturated; tool '$name' was rejected. Retry shortly.")
         }
-        val timeoutSec = settings.toolCallTimeoutSec.coerceIn(30, 7200)
         return try {
             future.get(timeoutSec.toLong(), TimeUnit.SECONDS)
         } catch (e: java.util.concurrent.TimeoutException) {

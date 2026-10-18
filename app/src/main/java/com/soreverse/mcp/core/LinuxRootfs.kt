@@ -69,6 +69,18 @@ object LinuxRootfs {
     }
 
     /** 内置 proot 二进制是否就绪（无 root 进入 rootfs 的关键）。 */
+    /** 有界读取：代替 API 33 才提供的 InputStream.readNBytes(int)（minSdk 26 上会 NoSuchMethodError）。 */
+    private fun readCapped(input: java.io.InputStream, limit: Int): ByteArray {
+        val buf = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        while (buf.size() < limit) {
+            val n = input.read(chunk, 0, minOf(chunk.size, limit - buf.size()))
+            if (n < 0) break
+            buf.write(chunk, 0, n)
+        }
+        return buf.toByteArray()
+    }
+
     fun prootReady(context: Context): Boolean {
         val dir = ensureProot(context)
         return dir != null && File(dir, "proot").isFile
@@ -352,7 +364,8 @@ object LinuxRootfs {
                 }
                 pb.redirectErrorStream(true)
                 val proc = pb.start()
-                val output = proc.inputStream.readNBytes(16 * 1024 * 1024).decodeToString()
+                // readNBytes(int) 是 API 33 才有的方法，minSdk 26 上会 NoSuchMethodError
+                val output = readCapped(proc.inputStream, 16 * 1024 * 1024).decodeToString()
                 val finished = proc.waitFor(timeoutSec, java.util.concurrent.TimeUnit.SECONDS)
                 if (!finished) {
                     proc.destroy()

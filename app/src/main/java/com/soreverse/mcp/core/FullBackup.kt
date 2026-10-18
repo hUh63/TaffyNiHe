@@ -119,8 +119,14 @@ object FullBackup {
                 throw IllegalStateException("无法创建恢复前快照，已中止恢复: ${e.message.orEmpty()}", e)
             }
 
+            var stagedDirs = emptyList<Pair<File, File>>()
             try {
+                // 恢复前把受影响的目录整体挪到一边：只做覆盖写会让"备份里已删除的文件"复活，
+                // 中断时目标目录也会停在"新旧混合"状态。
+                stagedDirs = stageTargetDirs(context, roots)
                 val result = restoreFrom(context, working, roots, onProgress)
+                // 成功：旧目录整体丢弃
+                stagedDirs.forEach { (_, old) -> runCatching { old.deleteRecursively() } }
                 Summary(
                     path = src.absolutePath,
                     bytes = src.length(),
@@ -131,7 +137,8 @@ object FullBackup {
                     preRestorePath = pre.path,
                 )
             } catch (e: kotlinx.coroutines.CancellationException) {
-                // 用户主动取消不是失败：直接向上抛，不触发回滚，也不包装成"恢复失败"。
+                // 用户主动取消不是失败：不触发回滚，但必须把挪走的原目录还原回去
+                restoreStagedDirs(stagedDirs, keepNew = false)
                 throw e
             } catch (e: Exception) {
                 onProgress("恢复失败，回滚到恢复前快照…")
@@ -143,10 +150,16 @@ object FullBackup {
                     val rr = restoreFrom(context, File(pre.path), parseRoots(preManifest), {})
                     rr.skipped.none { it.contains("写入失败") || it.contains("非法路径") }
                 }.getOrDefault(false)
+                if (rollbackOk) {
+                    // 回滚用 pre 快照重写了目标目录，挪走的旧目录可以丢弃
+                    restoreStagedDirs(stagedDirs, keepNew = true)
+                }
                 val tail = if (rollbackOk) {
                     "已回滚到 ${pre.path}"
                 } else {
-                    "自动回滚失败，请手动导入 ${pre.path}"
+                    val salvage = stagedDirs.joinToString(", ") { it.second.absolutePath }
+                    "自动回滚失败，请手动导入 ${pre.path}" +
+                        if (salvage.isNotBlank()) "；恢复前的原目录已保留在 $salvage" else ""
                 }
                 throw IllegalStateException("恢复失败：${e.message.orEmpty()}；$tail", e)
             }
@@ -416,6 +429,30 @@ object FullBackup {
         add(b.categories)
         val skipped = (a.skipped + b.skipped).toMutableList()
         return RestoreResult(a.entries + b.entries, skipped, counts.map { (k, v) -> CategoryStat(k, v[0], v[1]) })
+    }
+
+    /** 恢复前把受影响的目录挪到一边，返回 (原路径, 备份路径)。 */
+    private fun stageTargetDirs(context: Context, roots: List<Root>): List<Pair<File, File>> {
+        val staged = ArrayList<Pair<File, File>>()
+        val stamp = System.currentTimeMillis()
+        for (root in roots) {
+            val base = runCatching { resolveTarget(context, root.target) }.getOrNull() ?: continue
+            if (!base.isDirectory) continue
+            if (staged.any { it.first.absolutePath == base.absolutePath }) continue
+            val parent = base.parentFile ?: continue
+            val old = File(parent, base.name + ".restore-old-" + stamp)
+            if (runCatching { base.renameTo(old) }.getOrDefault(false)) staged += base to old
+        }
+        return staged
+    }
+
+    /** 取消/回滚后处理被挪走的旧目录：keepNew=false 时先清掉新写入的半成品再还原。 */
+    private fun restoreStagedDirs(staged: List<Pair<File, File>>, keepNew: Boolean) {
+        for ((orig, old) in staged) {
+            if (!keepNew) runCatching { if (orig.exists()) orig.deleteRecursively() }
+            if (!orig.exists()) runCatching { old.renameTo(orig) }
+            runCatching { if (old.exists()) old.deleteRecursively() }
+        }
     }
 
     private fun restorePass(

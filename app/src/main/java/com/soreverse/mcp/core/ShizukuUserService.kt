@@ -74,8 +74,11 @@ class ShizukuUserService() : IShizukuService.Stub() {
         if (command.isNullOrBlank()) return@runBlocking arrayOf("-1", "", "empty command")
         try {
             val process = execProcess(command)
-            val output = async { process.inputStream.readNBytes(16 * 1024 * 1024).decodeToString() }
-            val error = async { process.errorStream.readNBytes(16 * 1024 * 1024).decodeToString() }
+            // InputStream.readNBytes(int) 是 Java 9 API，Android 直到 API 33 才有；
+            // minSdk 26 上直接调会抛 NoSuchMethodError（Error，catch(Exception) 抓不住），
+            // 整个无 root 提权通道在 Android 8–12 上全废。
+            val output = async { readCapped(process.inputStream, 16 * 1024 * 1024).decodeToString() }
+            val error = async { readCapped(process.errorStream, 16 * 1024 * 1024).decodeToString() }
             // 安全加固：waitFor 超时（防悬挂命令永久占用 binder 线程 → 拒绝服务）
             val finished = process.waitFor(600, TimeUnit.SECONDS)
             if (!finished) {
@@ -83,9 +86,21 @@ class ShizukuUserService() : IShizukuService.Stub() {
                 return@runBlocking arrayOf("-1", output.await(), "命令执行超时(600s)已终止")
             }
             arrayOf(process.exitValue().toString(), output.await(), error.await())
-        } catch (e: Exception) {
-            arrayOf("-1", "", e.message ?: "exec failed")
+        } catch (t: Throwable) {
+            arrayOf("-1", "", t.message ?: "exec failed")
         }
+    }
+
+    /** 有界读取：代替 API 33 才提供的 InputStream.readNBytes(int)。 */
+    private fun readCapped(input: java.io.InputStream, limit: Int): ByteArray {
+        val buf = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        while (buf.size() < limit) {
+            val n = input.read(chunk, 0, minOf(chunk.size, limit - buf.size()))
+            if (n < 0) break
+            buf.write(chunk, 0, n)
+        }
+        return buf.toByteArray()
     }
 
     /** 启动持续进程, 返回进程 id。 */

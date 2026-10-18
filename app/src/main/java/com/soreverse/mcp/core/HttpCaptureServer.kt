@@ -114,6 +114,8 @@ class HttpCaptureServer(
     private val entries = ArrayDeque<Entry>()
     private val listeners = mutableListOf<(Entry) -> Unit>()
     private val formatter = SimpleDateFormat("HH:mm:ss", Locale.US)
+    /** 已建立的客户端连接：stop() 必须一起关掉，否则代理在后台继续转发/记录。 */
+    private val activeSockets = java.util.Collections.synchronizedSet(HashSet<Socket>())
 
     fun isRunning(): Boolean = running
 
@@ -137,6 +139,9 @@ class HttpCaptureServer(
         running = false
         runCatching { serverSocket?.close() }
         serverSocket = null
+        val open = synchronized(activeSockets) { activeSockets.toList() }
+        open.forEach { runCatching { it.close() } }
+        activeSockets.clear()
     }
 
     fun addListener(l: (Entry) -> Unit) {
@@ -160,7 +165,10 @@ class HttpCaptureServer(
         while (running) {
             val client = try { serverSocket?.accept() } catch (e: Exception) { null }
             if (client == null) { if (!running) break; continue }
-            thread(name = "capture-conn", isDaemon = true) { handle(client) }
+            activeSockets.add(client)
+            thread(name = "capture-conn", isDaemon = true) {
+                try { handle(client) } finally { activeSockets.remove(client) }
+            }
         }
     }
 

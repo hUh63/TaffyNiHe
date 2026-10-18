@@ -27,7 +27,22 @@ internal class BlutterEmbeddedBackend(
         val libflutter = File(jobDir, "libflutter.so").apply { writeBytes(libraries.libflutter) }
         val output = File(jobDir.parentFile, "runner-result.json").apply { if (exists()) delete() }
         val connection = RunnerConnection(jobId, runner, libraries, libapp, libflutter, output, options)
-        active[jobId] = ActiveJob(connection)
+        val job = ActiveJob(connection)
+        active[jobId] = job
+        // 隔离进程可能既不回调 onProgress 也不回调 onCompleted（吊死），
+        // 那样任务会永远停在 running 且绑定不释放。这里按"无心跳时长"兜底终止。
+        val watchdog = android.os.Handler(android.os.Looper.getMainLooper())
+        val tick = object : Runnable {
+            override fun run() {
+                val current = active[jobId] ?: return
+                if (System.currentTimeMillis() - current.lastBeat > RUNNER_IDLE_TIMEOUT_MS) {
+                    (current.connection as? RunnerConnection)?.interruptByTimeout()
+                    return
+                }
+                watchdog.postDelayed(this, 60_000L)
+            }
+        }
+        watchdog.postDelayed(tick, 60_000L)
         store.update(jobId, "running", "binding_runner")
         val intent = Intent(context, BlutterRunnerService::class.java)
         if (!context.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
@@ -89,7 +104,10 @@ internal class BlutterEmbeddedBackend(
 
         private val callback = object : IBlutterRunnerCallback.Stub() {
             override fun onProgress(callbackJobId: String, stage: String, percent: Int) {
-                if (callbackJobId == jobId && active.containsKey(jobId)) store.update(jobId, "running", stage)
+                if (callbackJobId == jobId && active.containsKey(jobId)) {
+                    active[jobId]?.lastBeat = System.currentTimeMillis()
+                    store.update(jobId, "running", stage)
+                }
             }
 
             override fun onCompleted(callbackJobId: String, exitCode: Int, errorCode: String, message: String, resultBytes: Long, resultSha256: String) {
@@ -102,6 +120,16 @@ internal class BlutterEmbeddedBackend(
                     finishFailure("RUNNER_RESULT_INVALID", error.message ?: "Runner result is invalid", false)
                 }
             }
+        }
+
+        /** 由 watchdog 在长时间无进度时调用（隔离进程吊死）。 */
+        fun interruptByTimeout() {
+            finishFailure(
+                "RUNNER_TIMEOUT",
+                "Blutter runner 超过 ${RUNNER_IDLE_TIMEOUT_MS / 60000} 分钟没有进度回调，已终止（可用更小的输入重试）",
+                true,
+                "timeout",
+            )
         }
 
         private fun commitOutput() {
@@ -178,9 +206,14 @@ internal class BlutterEmbeddedBackend(
         }
     }
 
-    private data class ActiveJob(val connection: ServiceConnection, var runner: IBlutterRunner? = null)
+    private data class ActiveJob(
+        val connection: ServiceConnection,
+        var runner: IBlutterRunner? = null,
+        @Volatile var lastBeat: Long = System.currentTimeMillis(),
+    )
 
     private companion object {
         const val MAX_RESULT_BYTES = 512L * 1024L * 1024L
+        const val RUNNER_IDLE_TIMEOUT_MS = 5 * 60 * 1000L
     }
 }

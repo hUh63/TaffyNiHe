@@ -1051,6 +1051,11 @@ class UnidbgEmulator(private val context: Context) {
 
     private fun writeTemp(bytes: ByteArray, symbolName: String): File {
         val dir = File(context.cacheDir, "unidbg").apply { mkdirs() }
+        // 清理历史残留：deleteOnExit 只在进程正常退出时执行，被系统 kill 时 emu_*.so 会一直堆积
+        runCatching {
+            val cutoff = System.currentTimeMillis() - 2 * 60 * 60 * 1000L
+            dir.listFiles()?.forEach { f -> if (f.isFile && f.lastModified() < cutoff) f.delete() }
+        }
         val safeName = symbolName.filter { it.isLetterOrDigit() || it == '_' }.take(48)
         val f = File(dir, "emu_${System.currentTimeMillis()}_$safeName.so")
         f.writeBytes(bytes)

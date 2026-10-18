@@ -148,14 +148,19 @@ internal fun UnidbgPanel(
     fun runEmulate() {
         val sym = symbol.trim()
         if (sym.isEmpty()) { error = if (zh) "请输入要调用的函数符号（如 JNI_OnLoad）" else "Enter a symbol (e.g. JNI_OnLoad)"; return }
+        // running 原来在协程里才置 true，两次点击都能读到 false → 并发跑两份 native 模拟
+        if (running) return
+        running = true
+        error = ""
+        result = null
         scope.launch {
-            running = true
-            error = ""
-            result = null
-            val json = withContext(Dispatchers.IO) {
-                runCatching { EngineProvider.get(context).emulate(workspaceId, "", sym, parseArgs(argsText), true) }.getOrNull()
+            val json = try {
+                withContext(Dispatchers.IO) {
+                    runCatching { EngineProvider.get(context).emulate(workspaceId, "", sym, parseArgs(argsText), true) }.getOrNull()
+                }
+            } finally {
+                running = false
             }
-            running = false
             if (json == null) { error = if (zh) "模拟执行异常（引擎未初始化？）" else "Emulate failed (engine unavailable)"; return@launch }
             if (json.optBoolean("ok", false)) {
                 backend = listOf(json.optString("backend"), json.optString("emulator"))

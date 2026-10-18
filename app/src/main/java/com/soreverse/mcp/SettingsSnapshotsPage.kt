@@ -59,6 +59,7 @@ internal fun SettingsSnapshotsPage(t: UiText) {
     var snaps by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var detail by remember { mutableStateOf("") }
     var detailTitle by remember { mutableStateOf("") }
+    var rollbackMsg by remember { mutableStateOf("") }
     var pendingRollback by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     fun refresh() {
@@ -95,9 +96,21 @@ internal fun SettingsSnapshotsPage(t: UiText) {
 
     fun doRollback(tool: String, id: String) {
         scope.launch {
-            withContext(Dispatchers.IO) { runCatching { EditSnapshotService.rollback(context, id, tool) } }
+            // 原来把 Result 丢掉、只 refresh 列表：回滚失败时用户看到"什么都没发生"，
+            // 会误以为已经回滚，继续在错误的状态上改文件。
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching { EditSnapshotService.rollback(context, id, tool) }
+            }
+            rollbackMsg = outcome.fold(
+                onSuccess = { if (zh) "已回滚到该快照" else "Rolled back" },
+                onFailure = { (if (zh) "回滚失败: " else "Rollback failed: ") + (it.message ?: it.javaClass.simpleName) },
+            )
             refresh()
         }
+    }
+
+    if (rollbackMsg.isNotBlank()) {
+        InlineHint(rollbackMsg)
     }
 
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -47,6 +47,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -416,7 +419,19 @@ internal fun BusyOverlay(
     message: String,
     onCancel: (() -> Unit)? = null,
 ) {
-    if (!visible) return
+    // 兜底：任何页面的 busy 标志一旦残留，遮罩会永久盖在屏幕上、还会吞掉返回键
+    // （曾出现整页无法操作、只能杀进程）。这里允许在遮盖 90 秒后单独关掉遮罩，
+    // 任务本身不受影响，只是不再挡界面。
+    var locallyHidden by remember(visible) { mutableStateOf(false) }
+    var timedOut by remember(visible) { mutableStateOf(false) }
+    if (!visible || locallyHidden) return
+    LaunchedEffect(visible) {
+        timedOut = false
+        if (visible) {
+            delay(90_000)
+            timedOut = true
+        }
+    }
     Dialog(onDismissRequest = { onCancel?.invoke() }) {
         Surface(
             shape = RoundedCornerShape(AppShape.xl),
@@ -435,6 +450,10 @@ internal fun BusyOverlay(
                 )
                 if (onCancel != null) {
                     TextButton(onClick = onCancel) { Text("取消") }
+                } else if (timedOut) {
+                    TextButton(onClick = { locallyHidden = true }) {
+                        Text("关闭遮罩（任务仍在后台执行）")
+                    }
                 }
             }
         }

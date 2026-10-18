@@ -4033,6 +4033,8 @@ private fun SearchView(
     /** 用 rzCommand 做全文搜索（代码·指令 = rizin /a；立即数 = rizin /v），
      *  只从输出里提取地址，命中多少报多少，绝不伪造结果。 */
     fun runRzSearch(cmd: String, label: String, q: String) {
+        // 连点两次时慢请求会后到并覆盖新结果，表头与列表就不一致了
+        if (busy) return
         busy = true
         header = if (zh) "搜索中…" else "searching…"
         scope.launch {
@@ -4125,6 +4127,14 @@ private fun SearchView(
 
     // 「快速跳转」（⋮ → 快速跳转）带来的预置查询：进入即按函数名搜索（对齐 Exbin setPendingQuery / searchByName）
     LaunchedEffect(ws) {
+        // 切换分析目标后必须清空上一个文件的搜索结果：否则列表还显示 A 的地址，
+        // 点进去会在 B 里打开完全不相干的位置。
+        rows = emptyList()
+        header = ""
+        notice = ""
+        lastQuery = ""
+        undoStack = emptyList()
+        busy = false
         val pending = tools.searchQuery
         if (pending.isNotBlank() && lastQuery.isBlank()) {
             tools.searchQuery = ""

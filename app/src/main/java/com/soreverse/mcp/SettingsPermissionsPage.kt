@@ -31,6 +31,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +80,16 @@ internal fun SettingsPermissionsPage(t: UiText) {
     var dhizukuApp by remember { mutableStateOf(false) }
     var best by remember { mutableStateOf(PermissionManager.Channel.NONE) }
     var readLogs by remember { mutableStateOf(false) }
+    // 从系统设置页授权（adb grant / 授予所有文件访问）返回时自动重查：
+    // 否则页面仍显示"未授予"，用户会以为授权失败反复折腾。
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(refresh) {
         withContext(Dispatchers.IO) {
             rootOk = PermissionManager.isRootAvailable()
@@ -92,10 +104,16 @@ internal fun SettingsPermissionsPage(t: UiText) {
     }
 
     fun runProbe() {
+        if (probing) return
         probing = true; probeText = ""
         scope.launch {
-            val text = withContext(Dispatchers.IO) { PermissionManager.selfTest().toString(2) }
-            probeText = text; probing = false
+            try {
+                probeText = withContext(Dispatchers.IO) { PermissionManager.selfTest().toString(2) }
+            } catch (e: Throwable) {
+                probeText = (if (zh) "自检失败: " else "self-test failed: ") + (e.message ?: e.javaClass.simpleName)
+            } finally {
+                probing = false
+            }
         }
     }
 

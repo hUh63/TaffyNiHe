@@ -177,27 +177,36 @@ internal fun CapturePage(t: UiText) {
     }
 
     fun callTool(action: String, extra: JSONObject.() -> Unit = {}) {
+        // 原来 busy=true 之后没有 try/finally：EngineProvider.get 或工具内部一抛异常，
+        // busy 就永久停在 true，配合无 onCancel 的 BusyOverlay，整页连返回键都失效。
+        if (busy) return
+        busy = true
+        busyMsg = action
         scope.launch {
-            busy = true
-            busyMsg = action
-            val res = withContext(Dispatchers.IO) {
-                val ctx = ToolContext(context, settings, EngineProvider.get(context))
-                CaptureTools.capture.handle(ctx, JSONObject().apply { put("action", action); extra() })
+            try {
+                val res = withContext(Dispatchers.IO) {
+                    val ctx = ToolContext(context, settings, EngineProvider.get(context))
+                    CaptureTools.capture.handle(ctx, JSONObject().apply { put("action", action); extra() })
+                }
+                output = res.toString(2)
+                if (action == "sniff_status") {
+                    sniffing = res.optBoolean("running")
+                    sniffPath = res.optString("pcapPath")
+                }
+                if (action == "sniff_start" && res.optString("status") == "sniffing") {
+                    sniffing = true
+                    sniffPath = res.optString("pcapPath")
+                }
+                if (action == "sniff_stop") sniffing = false
+                if (!res.optBoolean("ok", true)) {
+                    Toast.makeText(context, res.optJSONObject("error")?.optString("message") ?: (if (zh) "执行失败" else "Failed"), Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Throwable) {
+                output = (if (zh) "执行异常: " else "Failed: ") + (e.message ?: e.javaClass.simpleName)
+                Toast.makeText(context, (if (zh) "执行异常: " else "Failed: ") + (e.message ?: e.javaClass.simpleName), Toast.LENGTH_SHORT).show()
+            } finally {
+                busy = false
             }
-            output = res.toString(2)
-            if (action == "sniff_status") {
-                sniffing = res.optBoolean("running")
-                sniffPath = res.optString("pcapPath")
-            }
-            if (action == "sniff_start" && res.optString("status") == "sniffing") {
-                sniffing = true
-                sniffPath = res.optString("pcapPath")
-            }
-            if (action == "sniff_stop") sniffing = false
-            if (!res.optBoolean("ok", true)) {
-                Toast.makeText(context, res.optJSONObject("error")?.optString("message") ?: (if (zh) "执行失败" else "Failed"), Toast.LENGTH_SHORT).show()
-            }
-            busy = false
         }
     }
 
@@ -447,7 +456,11 @@ internal fun CapturePage(t: UiText) {
         )
     }
 
-    BusyOverlay(visible = busy, message = busyMsg.ifBlank { if (zh) "处理中…" else "Working…" })
+    BusyOverlay(
+        visible = busy,
+        message = busyMsg.ifBlank { if (zh) "处理中…" else "Working…" },
+        onCancel = { busy = false },
+    )
 }
 
 private fun methodColor(method: String) = when (method.uppercase()) {

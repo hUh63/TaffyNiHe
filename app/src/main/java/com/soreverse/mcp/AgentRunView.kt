@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -78,8 +79,10 @@ internal fun AgentRunView(
     var roles by remember { mutableStateOf(setOf<String>()) }
     var maxAgents by remember { mutableStateOf(5) }
 
-    var runId by remember { mutableStateOf("") }
-    var statusJson by remember { mutableStateOf("") }
+    // runId/status 用 rememberSaveable：编排是后台 run，离开页面回来不该显示成"还没开始"，
+    // 更不该丢掉「中止」入口（旧实现切一次 tab 就无法中止，run 变成孤儿继续烧 token）。
+    var runId by rememberSaveable { mutableStateOf("") }
+    var statusJson by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var showHistory by remember { mutableStateOf(false) }
@@ -108,11 +111,24 @@ internal fun AgentRunView(
     fun poll(id: String) {
         scope.launch {
             var guard = 0
+            var failures = 0
             while (guard < 1500) {
                 delay(1200)
                 val s = callTool("taffy_agent_run", JSONObject().put("action", "status").put("runId", id))
-                if (s != null) statusJson = s.toString()
-                val st = s?.optString("status").orEmpty()
+                if (s == null) {
+                    // 原来 s == null 时继续空转 1500 次（30 分钟），页面什么都不显示，
+                    // 用户无法判断是没开始、在跑还是已经挂了。
+                    failures++
+                    if (failures >= 3) {
+                        error = if (zh) "状态查询连续失败：AI 未配置或引擎异常" else "Status polling failed (AI not configured?)"
+                        break
+                    }
+                    guard++
+                    continue
+                }
+                failures = 0
+                statusJson = s.toString()
+                val st = s.optString("status").orEmpty()
                 if (st.isNotBlank() && st != "running") break
                 guard++
             }
@@ -141,8 +157,16 @@ internal fun AgentRunView(
             }
             val id = r.optString("runId")
             runId = id
+            // 立刻写一个 running 占位：否则 poll 第一次 delay(1200) 之前 status 为空，
+            // 按钮重新可点，用户再点一次会起第二个 run。
+            statusJson = JSONObject().put("status", "running").put("runId", id).toString()
             poll(id)
         }
+    }
+
+    // 重新进入页面时，如果记得的 run 还在跑，继续轮询把它接回来
+    LaunchedEffect(Unit) {
+        if (runId.isNotBlank() && statusJson.contains("\"running\"")) poll(runId)
     }
 
     /** 从落盘记录续跑：已完成的节点不会重跑，中断的节点带着消息历史继续。 */

@@ -3596,6 +3596,7 @@ private fun FunctionsView(
         tools.sigRestoreDone = 0
         tools.sigRestoreTotal = targets.size
         val acc = HashMap<String, String>(tools.sigCache)
+        try {
         withContext(Dispatchers.IO) {
             targets.forEachIndexed { i, r ->
                 val res = runCatching {
@@ -3619,7 +3620,10 @@ private fun FunctionsView(
                 }
             }
         }
-        tools.sigRestoreTotal = 0
+        } finally {
+            // 被打断（切视图/切工作区）也要复位，否则计数行永久停在 x/40
+            tools.sigRestoreTotal = 0
+        }
     }
     val query = tools.functionQuery
     var sortBy by remember { mutableStateOf("addr") }

@@ -438,7 +438,8 @@ internal fun SettingsEditorPage(t: UiText) {
     var wsPanelExpanded by remember { mutableStateOf(true) }
     var wsTreeExpanded by remember { mutableStateOf(setOf("")) }
     var editorViewport by remember { mutableStateOf(0) }
-    LaunchedEffect(code) { if (code.length > 200_000) viewerMode = true }
+    // 双向：旧实现只置 true，打开过一次大文件后所有文件都变只读（且没有常规退出入口）
+    LaunchedEffect(code) { viewerMode = code.length > 200_000 }
 
     // ── 文本读写原语（须定义在其它局部函数之前：Kotlin 局部函数不支持前向引用）──
     fun setCode(text: String) {

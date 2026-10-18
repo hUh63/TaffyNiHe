@@ -30,7 +30,9 @@ object SandboxTool {
      */
     private fun isSafeIdent(s: String): Boolean =
         s.isNotEmpty() && s.length <= 220 && s.all { c ->
-            c.isLetterOrDigit() || c == '.' || c == '_' || c == '/' || c == '-' || c.code == 36
+            // 不能放行 '$'：命令是未加引号拼进 sh -c/su -c 的，`$IFS` 会被展开成空格，
+            // 从而向 root shell 注入额外参数（内嵌类 Activity 请改传 component）
+            c.isLetterOrDigit() || c == '.' || c == '_' || c == '/' || c == '-'
         }
 
     // 用字符码判断，避免 Kotlin 字符字面量的转义层级出错：

@@ -269,9 +269,14 @@ class McpHttpServer(private val context: Context, private val port: Int, private
     }
 
     fun stop() {
-        apkBridge.stopHealthMonitor()
+        // 不要访问 apkBridge 懒 getter：它会为了"停止"而 new 出一个从未启动过的桥实例
+        bridgeHolder?.stopHealthMonitor()
         engine?.stop(gracePeriodMillis = 400, timeoutMillis = 1_500)
         engine = null
+        // 工具线程池与协程作用域一起回收：旧实现每次改端口/绑定地址都留一套旧线程池，
+        // 旧作用域里 detached 的重任务还会和新实例抢同一个引擎与文件。
+        runCatching { toolExecutor.shutdownNow() }
+        runCatching { (coroutineContext[kotlinx.coroutines.Job] as? kotlinx.coroutines.Job)?.cancel() }
         AppLog.i("Ktor MCP server stopped")
     }
 

@@ -70,14 +70,14 @@ internal fun AgentRunView(
     val scope = rememberCoroutineScope()
     val cs = MaterialTheme.colorScheme
 
-    var goal by remember {
+    var goal by rememberSaveable {
         mutableStateOf(
             if (zh) "查清这个目标：有没有加固与反调试、字符串是否加密、关键函数与调用关系"
             else "Profile this target: protector and anti-debug, string encryption, key functions"
         )
     }
     var roles by remember { mutableStateOf(setOf<String>()) }
-    var maxAgents by remember { mutableStateOf(5) }
+    var maxAgents by rememberSaveable { mutableStateOf(5) }
 
     // runId/status 用 rememberSaveable：编排是后台 run，离开页面回来不该显示成"还没开始"，
     // 更不该丢掉「中止」入口（旧实现切一次 tab 就无法中止，run 变成孤儿继续烧 token）。

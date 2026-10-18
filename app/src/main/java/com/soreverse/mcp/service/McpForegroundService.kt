@@ -50,9 +50,19 @@ class McpForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // START_STICKY 会以 null intent 重投：只有用户确实希望服务运行时才恢复监听。
+        // 否则"我刚把 MCP 关了"在进程被系统回收后会自己又起来（往往还没开鉴权）。
+        if (intent?.action == null && !getSharedPreferences("taffy_service", MODE_PRIVATE)
+                .getBoolean("mcp_should_run", false)) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val action = intent?.action ?: ACTION_START
         when (action) {
             ACTION_START -> {
+                getSharedPreferences("taffy_service", MODE_PRIVATE).edit()
+                    .putBoolean("mcp_should_run", true).apply()
                 // v1.3.9 (上游 v1.0.21 借鉴)：startServer() 返回 false 表示本次启动永远无法被满足
                 // （后台 STICKY 重启时 startForeground 被拒 / 完整性校验拦截 / 服务启动失败）。
                 // 此时必须上报 START_NOT_STICKY，否则系统会无限重投这次启动 —— 旧代码无条件
@@ -61,14 +71,18 @@ class McpForegroundService : Service() {
             }
             ACTION_STOP -> {
                 running = false
+                getSharedPreferences("taffy_service", MODE_PRIVATE).edit()
+                    .putBoolean("mcp_should_run", false).apply()
                 runCatching { server?.tunnel?.requestStop() }
                 val sv = server
                 server = null
                 currentServer = null
-                Thread({
+                val th = Thread({
                     try { sv?.tunnel?.stop() } catch (e: Throwable) { AppLog.e("tunnel.stop() during ACTION_STOP", e) }
                     try { sv?.stop() } catch (e: Throwable) { AppLog.e("server.stop() during ACTION_STOP", e) }
-                }, "mcp-stop").apply { isDaemon = true }.start()
+                }, "mcp-stop").apply { isDaemon = true }
+                teardownThread = th
+                th.start()
                 activePort = -1
                 activeHost = ""
                 val settings = SettingsStore(this)
@@ -157,6 +171,10 @@ class McpForegroundService : Service() {
      *   平台拒绝（API 31+ 抛 ForegroundServiceStartNotAllowedException）。
      */
     private fun startServer(): Boolean {
+        // 停止是在后台线程里做的（server.stop 有 grace 400ms + timeout 1500ms）：
+        // 用户"关掉又马上打开"时旧端口可能还没释放，直接 bind 会失败并 stopSelf，
+        // 表现为"服务启动一下就自己消失"。先等它退干净。
+        teardownThread?.let { t -> runCatching { t.join(2_000) } }
         val settings = SettingsStore(this)
         if (!enterForeground(settings)) return false
         if (!IntegrityGuard.isTrusted(applicationContext)) {
@@ -743,6 +761,8 @@ class McpForegroundService : Service() {
         private const val AUTO_SNAP_DELAY = 3000L
         private const val BUBBLE_SIZE_DP = 36
         @Volatile private var running: Boolean = false
+        /** ACTION_STOP 的后台拆除线程：重启前必须等它释放端口。 */
+        @Volatile private var teardownThread: Thread? = null
         @Volatile var currentServer: McpHttpServer? = null
             private set
 

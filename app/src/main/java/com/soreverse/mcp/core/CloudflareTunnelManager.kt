@@ -437,6 +437,20 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         addEvent("cloudflared 进程已启动 (pid=${soReverseChildPid(p)})")
         val capturedUrl = url
         val startTimeMs = System.currentTimeMillis()
+        // 超时判定不能只放在输出回调里：cloudflared 若既不输出也不退出（DNS/QUIC 黑洞、
+        // 进程被 SIGSTOP），回调一次都不执行，状态会永远停在 STARTING。
+        Thread({
+            runCatching {
+                Thread.sleep(30_000)
+                if (generation.get() == runGeneration && process === p &&
+                    _status.get().state == State.STARTING
+                ) {
+                    addEvent("⏱ 进程启动超时 (30s)，标记为失败（看门狗）")
+                    fail(mode, targetPort, "startup timeout: cloudflared did not register within 30s")
+                    runCatching { p.destroyForcibly() }
+                }
+            }
+        }, "clfl-watchdog").apply { isDaemon = true }.start()
         val t = Thread({
             try {
                 BufferedReader(InputStreamReader(p.inputStream, Charsets.UTF_8)).useLines { lines ->

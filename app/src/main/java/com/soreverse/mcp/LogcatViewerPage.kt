@@ -733,7 +733,9 @@ internal fun LogcatViewerPage(t: UiText) {
     }
 
     // 可见日志：级别 + tag + 关键字 + 包名/PID/正则/崩溃过滤
-    val visible = remember(logs.size, tagFilter, keyword, levelSet, paused, pkgFilter, pidFilter, regexEnabled, caseSensitive, crashOnly) {
+    // 不能只用 size 当 key：缓冲区满 2000 行后 size 恒定，remember 永不失效，
+    // 列表会冻结在那一刻（新日志一条都看不到）。首尾元素参与 key 才能跟随内容变化。
+    val visible = remember(logs.size, logs.lastOrNull(), logs.firstOrNull(), tagFilter, keyword, levelSet, paused, pkgFilter, pidFilter, regexEnabled, caseSensitive, crashOnly) {
         val tags = tagFilter.split(',').map { it.trim() }.filter { it.isNotBlank() }
         val kw = keyword
         // 包名支持逗号分隔多选（应用 tab 多选过滤写入）
@@ -863,7 +865,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 Spacer(Modifier.width(2.dp))
                 Text(if (zh) "保存.log" else "Save .log", fontSize = AppText.label)
             }
-            TextButton(onClick = { exportZip(visible) }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
+            TextButton(onClick = { exportZip(logs) }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
                 Icon(Icons.Default.Archive, null, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(2.dp))
                 Text(if (zh) "导出.zip" else "Export .zip", fontSize = AppText.label)
@@ -1550,7 +1552,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.ContentCopy, contentDescription = if (zh) "复制" else "Copy", modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = { exportZip(visible) }, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { exportZip(logs) }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.FileDownload, contentDescription = if (zh) "导出" else "Export", modifier = Modifier.size(18.dp))
                     }
                 }
@@ -1578,7 +1580,7 @@ internal fun LogcatViewerPage(t: UiText) {
         }
         val logListState = rememberLazyListState()
         // 新日志到达自动滚到底部（暂停时不滚）
-        LaunchedEffect(appLogMode, visible.size, appLogLines.size) {
+        LaunchedEffect(appLogMode, visible.size, visible.lastOrNull(), appLogLines.size) {
             if (!paused) {
                 runCatching {
                     val total = logListState.layoutInfo.totalItemsCount

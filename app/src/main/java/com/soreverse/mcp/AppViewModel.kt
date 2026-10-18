@@ -2,6 +2,8 @@ package com.soreverse.mcp
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.soreverse.mcp.core.DeepAnalysisService
+import com.soreverse.mcp.core.GitHubUpdateManager
 
 /**
  * App 级长生命周期状态容器。

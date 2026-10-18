@@ -38,7 +38,15 @@ if(NOT RIZIN_BUILD_ROOT)
     set(RIZIN_BUILD_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../rizin-build")
 endif()
 set(RIZIN_BUILD_DIR "${RIZIN_BUILD_ROOT}/${RZ_ABI_DIR}")
-set(RIZIN_SHARED_SDK "${CMAKE_CURRENT_LIST_DIR}/../../../../rizin-sdk/${RZ_ABI_DIR}-wsl")
+# rz-ghidra 侧产出的共享 Rizin SDK：tools/build-rz-ghidra-android.sh 装到 rizin-sdk/<abi>，
+# 本地 WSL 流程（build-rizin-ghidra-wsl.ps1）装到 rizin-sdk/<abi>-wsl。两者都认，优先前者。
+# 必须命中共享 SDK：否则 librz_native.so 会退化成静态链接 rizin，而 libcore_ghidra.so 链接的是
+# 动态 librz_*.so —— 同一进程里两份 RzCore/全局状态，pdg 只会崩溃或给出错误结果。
+set(RIZIN_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../rizin-sdk")
+set(RIZIN_SHARED_SDK "${RIZIN_SDK_ROOT}/${RZ_ABI_DIR}")
+if(NOT EXISTS "${RIZIN_SHARED_SDK}/lib/librz_core.so" AND EXISTS "${RIZIN_SDK_ROOT}/${RZ_ABI_DIR}-wsl/lib/librz_core.so")
+    set(RIZIN_SHARED_SDK "${RIZIN_SDK_ROOT}/${RZ_ABI_DIR}-wsl")
+endif()
 
 # --- LIEF build dir ---
 set(LIEF_BUILD_ROOT "" CACHE PATH "Root containing per-ABI LIEF cmake build dirs")

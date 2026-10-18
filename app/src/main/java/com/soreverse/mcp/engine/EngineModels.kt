@@ -16,7 +16,14 @@ data class Workspace(
     val edits: MutableMap<String, EditSession> = ConcurrentHashMap(),
     /** 创建时间戳——用于超限自动淘汰（对标 SOMCP Issue #63 渐进 OOM 模式）。 */
     val createdAt: Long = System.currentTimeMillis(),
-)
+) {
+    /**
+     * 最近一次被工具访问的时间。淘汰时用来跳过「正在被使用」的工作区：
+     * 原来只按 createdAt 淘汰，一次 so_open 就可能把另一个调用正在读的 workspace 删掉。
+     */
+    @Volatile
+    var lastAccessAt: Long = System.currentTimeMillis()
+}
 
 internal data class SourceSummary(
     val architecture: String,

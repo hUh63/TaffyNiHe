@@ -32,7 +32,11 @@ internal fun EngineRuntime.build(workspaceId: String, editSessionId: String, out
     val strategy = (conflictStrategy.ifBlank { settings.outputConflictStrategy }).let { if (it == "overwrite") "overwrite" else "rename" }
     val out = resolveOutputFile(outputName.ifBlank { "patched.so" }, strategy)
     writeAtomic(out, bytes)
-    val report = if (session != null && (writeReport ?: settings.writePatchReport)) writePatchReport(workspaceId, session, out) else null
+    // 报告要遍历 session.patches/session.data：与并发 editHex 不加锁会抛 ConcurrentModificationException，
+    // 或者生成一份和刚写出的 .so 不一致的取证报告。
+    val report = if (session != null && (writeReport ?: settings.writePatchReport)) {
+        synchronized(session.lock) { writePatchReport(workspaceId, session, out) }
+    } else null
     AppLog.i("Built ${out.absolutePath}")
     val requestedWorkDirCopy = writeToWorkDir ?: settings.buildCopyToWorkDir
     val workDirCopy = workDirCopyResult(requestedWorkDirCopy) {
@@ -146,7 +150,8 @@ internal fun EngineRuntime.fixSections(workspaceId: String, editSessionId: Strin
         targetSession != null && targetSession.data.size == fixed.size -> {
             // 安全修复: 加锁防止并发修改。
             synchronized(targetSession.lock) {
-                System.arraycopy(fixed, 0, targetSession.data, 0, fixed.size)
+                // copy-on-write：读线程可能正在 lief.parse 同一份 data
+                targetSession.data = fixed
                 targetSession.undone.clear()
                 targetSession.revision++
                 val firstDiff = diffRanges.optJSONObject(0)

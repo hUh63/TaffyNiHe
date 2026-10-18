@@ -89,7 +89,8 @@ internal fun EngineRuntime.editHex(workspaceId: String, editSessionId: String, l
             record
         }
         if (nextPatches.isNotEmpty()) maybeAutoSnapshot(session, "hex", settings)
-        System.arraycopy(nextData, 0, session.data, 0, session.data.size)
+        // copy-on-write：替换引用而不是就地 arraycopy，避免读线程看到写了一半的 ELF 头/节表
+        session.data = nextData
         if (nextPatches.isNotEmpty()) session.undone.clear()
         session.patches += nextPatches
         if (nextPatches.isNotEmpty()) {
@@ -154,7 +155,8 @@ internal fun EngineRuntime.editHexAt(workspaceId: String, editSessionId: String,
             record
         }
         if (nextPatches.isNotEmpty()) maybeAutoSnapshot(session, "hexAt", settings)
-        System.arraycopy(nextData, 0, session.data, 0, session.data.size)
+        // copy-on-write：替换引用而不是就地 arraycopy，避免读线程看到写了一半的 ELF 头/节表
+        session.data = nextData
         if (nextPatches.isNotEmpty()) session.undone.clear()
         session.patches += nextPatches
         if (nextPatches.isNotEmpty()) { session.revision++; pageStore.clear(); searchCache.clear() }
@@ -194,7 +196,9 @@ internal fun EngineRuntime.editHexVa(workspaceId: String, editSessionId: String,
         maybeAutoSnapshot(session, "hex-va", settings)
         session.undone.clear()
         session.patches += PatchRecord(System.currentTimeMillis(), "hex-va", "va:${hex(va)}", off, PatchByteUtils.hexBytes(old), PatchByteUtils.hexBytes(patch))
-        System.arraycopy(patch, 0, session.data, off, patch.size)
+        val patchedData = session.data.copyOf()
+        System.arraycopy(patch, 0, patchedData, off, patch.size)
+        session.data = patchedData
         session.revision++
         pageStore.clear()
         searchCache.clear()
@@ -285,7 +289,7 @@ internal fun EngineRuntime.editAsm(workspaceId: String, editSessionId: String, l
         if (nextPatches.isNotEmpty()) {
             maybeAutoSnapshot(session, "asm", settings)
             session.undone.clear()
-            System.arraycopy(nextData, 0, session.data, 0, session.data.size)
+            session.data = nextData
             session.patches += nextPatches
             session.revision++
             pageStore.clear()
@@ -377,7 +381,7 @@ internal fun EngineRuntime.editSymbol(workspaceId: String, editSessionId: String
         if (nextPatches.isNotEmpty()) {
             maybeAutoSnapshot(session, "symbol", settings)
             session.undone.clear()
-            System.arraycopy(nextData, 0, session.data, 0, session.data.size)
+            session.data = nextData
             session.patches += nextPatches
             session.revision++
             pageStore.clear()

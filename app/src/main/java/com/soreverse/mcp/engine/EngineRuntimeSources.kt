@@ -260,11 +260,26 @@ internal fun EngineRuntime.evictWorkspacesIfNeeded(keepId: String = ""): List<St
         return workspaces.size <= MAX_WORKSPACES && total <= MAX_WORKSPACE_BYTES
     }
     if (withinLimits()) return evicted
-    val candidates = workspaces.values.filter { !it.temporary && it.id != keepId }.sortedBy { it.createdAt }
+    // 两点修正：
+    // 1) temporary 工作区原来计入预算却排除在淘汰之外 → 临时工作区一堆积，预算永远超标，
+    //    每次 open 都会把持久工作区全部删光（且删完仍然超标）。现在它们同样可淘汰，只是优先级更低。
+    // 2) 增加「最近使用」保护：持久工作区在 30 秒内被访问过就跳过，避免删掉另一个调用正在用的那个。
+    val now = System.currentTimeMillis()
+    val recentlyUsedMs = 30_000L
+    val candidates = workspaces.values
+        .filter { it.id != keepId }
+        .sortedWith(compareBy({ !it.temporary }, { it.lastAccessAt }))
     for (w in candidates) {
         if (withinLimits()) break
+        if (!w.temporary && now - w.lastAccessAt < recentlyUsedMs) continue
         workspaces.remove(w.id)
         workspaceBySourceKey.entries.removeAll { it.value == w.id }
+        // 绑定在该工作区上的模拟会话必须一起关闭，否则 native VM 与整份 SO 副本继续驻留，
+        // 淘汰看上去释放了内存、实际一点没省。
+        emulatorSessions.entries.filter { it.value.workspaceId == w.id }.forEach { (sid, session) ->
+            emulatorSessions.remove(sid)
+            runCatching { session.live?.let { unidbg.closeSession(it) } }
+        }
         evicted.add(w.id)
     }
     return evicted

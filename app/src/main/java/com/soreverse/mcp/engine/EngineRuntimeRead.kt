@@ -492,7 +492,11 @@ internal fun EngineRuntime.resolveWorkspaceId(workspaceId: String, pathHint: Str
         error("Workspace not found: $workspaceId")
     }
 
-internal fun EngineRuntime.workspace(id: String): Workspace = workspaces[id] ?: error("Workspace not found: $id")
+internal fun EngineRuntime.workspace(id: String): Workspace =
+    (workspaces[id] ?: error("Workspace not found: $id")).apply {
+        // 读取即视为使用：淘汰逻辑据此跳过最近被访问的工作区
+        lastAccessAt = System.currentTimeMillis()
+    }
 
 internal fun EngineRuntime.dataFor(workspaceId: String, editSessionId: String): ByteArray = if (editSessionId.isBlank()) workspace(workspaceId).data else workspace(workspaceId).edits[editSessionId]?.data ?: error("Edit session not found")
 

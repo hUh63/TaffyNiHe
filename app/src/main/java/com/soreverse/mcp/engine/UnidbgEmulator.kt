@@ -384,6 +384,13 @@ class UnidbgEmulator(private val context: Context) {
     fun sessionCall(live: LiveSession, symbolName: String, argsJson: JSONArray, enableTrace: Boolean): JSONObject = runCatching {
         val result = JSONObject()
         synchronized(live.lock) {
+            // 会话可能已被 so_close / clear_caches 关闭，对已释放的 native emulator 发调用会直接 SIGSEGV
+            if (live.closed.get()) {
+                return@runCatching JSONObject().put("ok", false).put(
+                    "error",
+                    JSONObject().put("code", "SESSION_CLOSED").put("message", "emulator session already closed"),
+                )
+            }
             runCatching { doLiveCall(live, symbolName, argsJson, enableTrace, result) }
                 .onFailure { e ->
                     val root = rootCause(e)
@@ -833,20 +840,30 @@ class UnidbgEmulator(private val context: Context) {
         val backendFactory = addUnicorn2Backend(builder)
         out.put("backendFactory", backendFactory)
         val emulator = emulatorBuilderCls.getDeclaredMethod("build").invoke(builder)!!
-        out.put("stage", "resolver")
-        setAndroidResolver(emulator)
-        out.put("stage", "createDalvikVM")
-        val backend = emulator.javaClass.getMethod("getBackend").invoke(emulator)
-        out.put("backend", backend?.javaClass?.name ?: JSONObject.NULL)
-        val vm = emulator.javaClass.getMethod("createDalvikVM").invoke(emulator)
-        out.put("stage", "loadLibrary")
-        val file = writeTemp(bytes, "session")
-        val dalvikModule = vm?.javaClass?.methods?.firstOrNull { it.name == "loadLibrary" && it.parameterCount >= 2 }?.invoke(vm, file, false)
-        val module = dalvikModule?.javaClass?.getMethod("getModule")?.invoke(dalvikModule)
-            ?: throw IllegalStateException("Unidbg failed to load SO")
-        val live = LiveSession(emulator, vm, module, backend, arch, file, backendFactory)
-        if (callJniOnLoad) callJniOnLoad(live)
-        return live
+        var tempFile: java.io.File? = null
+        try {
+            out.put("stage", "resolver")
+            setAndroidResolver(emulator)
+            out.put("stage", "createDalvikVM")
+            val backend = emulator.javaClass.getMethod("getBackend").invoke(emulator)
+            out.put("backend", backend?.javaClass?.name ?: JSONObject.NULL)
+            val vm = emulator.javaClass.getMethod("createDalvikVM").invoke(emulator)
+            out.put("stage", "loadLibrary")
+            val file = writeTemp(bytes, "session")
+            tempFile = file
+            val dalvikModule = vm?.javaClass?.methods?.firstOrNull { it.name == "loadLibrary" && it.parameterCount >= 2 }?.invoke(vm, file, false)
+            val module = dalvikModule?.javaClass?.getMethod("getModule")?.invoke(dalvikModule)
+                ?: throw IllegalStateException("Unidbg failed to load SO")
+            val live = LiveSession(emulator, vm, module, backend, arch, file, backendFactory)
+            if (callJniOnLoad) callJniOnLoad(live)
+            return live
+        } catch (e: Throwable) {
+            // 建 VM 之后才失败（反模拟/加壳 SO 常见）时，若不清理会每次失败都泄漏一份
+            // native emulator + unicorn 后端 + 临时 .so；这里按失败路径主动释放。
+            runCatching { emulator.javaClass.getMethod("close").invoke(emulator) }
+            runCatching { tempFile?.delete() }
+            throw e
+        }
     }
 
     private fun callJniOnLoad(live: LiveSession) {

@@ -182,7 +182,7 @@ object AdvancedTools {
                 "path" str "APK 文件路径"
                 "entry" str "ZIP 条目名(如 classes.dex, lib/arm64-v8a/libnative.so)"
                 "offset" int "字节偏移(默认0)"
-                "length" int "读取长度(默认全部, 最大65536)"
+                "length" int "读取长度(默认 256 字节, 最大 65536)。注意 hex 输出体积是字节数的 3 倍"
                 "hex" str "write: 写入的十六进制字节(如 '90 31 FF 6B')"
                 "expectedHex" str "write: CAS 乐观锁 — 当前偏移处的原始字节(十六进制), 为空则跳过校验直接写入(不推荐)"
             })
@@ -201,7 +201,9 @@ object AdvancedTools {
                 when (action) {
                     "read" -> {
                         val offset = args.intValue("offset", 0).coerceAtLeast(0)
-                        val maxLen = args.intValue("length", 0).coerceAtMost(65536)
+                        // 默认值必须是有限长度：默认 0 时 end 会取整个条目，
+                        // 一个 classes.dex 就能把 3 倍体积的 hex 串拼进内存直接 OOM。
+                        val maxLen = args.intValue("length", 256).coerceIn(1, 65536)
                         ZipFile(file).use { zf ->
                             val entry = zf.getEntry(entryName)
                                 ?: return err("ENTRY_NOT_FOUND", "ZIP 条目不存在: $entryName", "entry", entryName)

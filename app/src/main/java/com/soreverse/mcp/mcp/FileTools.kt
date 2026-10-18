@@ -282,8 +282,8 @@ object FileTools {
     // ── taffy_file_replace ──
     val replace = EngineToolHandler(
         ToolMeta("taffy_file_replace",
-            "【文件内容替换】在文本文件中查找并替换文本。支持正则捕获组替换（如 $1）。mode=all 替换所有匹配; mode=first 替换第一个; mode=lines 只替换指定行号。",
-            "Find and replace text in a file. Supports regex capture groups ($1). mode=all replaces all matches; mode=first replaces only the first; mode=lines replaces on specific line numbers.",
+            "【文件内容替换】在文本文件中查找并替换文本。支持正则捕获组替换（如 $1）。mode=all 替换所有匹配; mode=first 只替换第一个匹配。",
+            "Find and replace text in a file. Supports regex capture groups ($1). mode=all replaces all matches; mode=first replaces only the first match.",
             "file", ToolClass.EXTRA,
         ) {
             objectSchema(props {

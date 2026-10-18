@@ -239,8 +239,12 @@ object ManifestEditTools {
             runCatching {
                 // 尝试方法1: ARSCLib 的 manifest 直接设置
                 val manifestClass = apk.androidManifest.javaClass
+                // 只接受语义明确的 manifest 文本 setter。原来"名字含 set 且有 String 参数"是随机命中：
+                // 一旦挑到 setPackageName，整段 XML 会被写进包名字段，APK 直接损坏。
+                val allowedSetterNames = setOf("setmanifest", "setmanifestxml", "setxml", "setrawxml")
                 val setMethod = manifestClass.methods.firstOrNull {
-                    it.name.contains("set") && it.parameterTypes.any { t -> t == String::class.java }
+                    it.name.lowercase() in allowedSetterNames &&
+                        it.parameterTypes.size == 1 && it.parameterTypes[0] == String::class.java
                 }
                 if (setMethod != null) {
                     setMethod.invoke(apk.androidManifest, newXml)

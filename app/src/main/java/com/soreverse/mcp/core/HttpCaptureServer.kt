@@ -156,12 +156,17 @@ class HttpCaptureServer(
     }
 
     /** 字节级 CRLF 行读取（不预读缓冲，保证后续 body/WS 帧字节不丢失）。 */
+    /** 单行上限：正常请求行/头行都远小于此值。 */
+    private val MAX_LINE_BYTES = 16 * 1024
+
     private fun readLineRaw(input: java.io.InputStream): String? {
         val baos = java.io.ByteArrayOutputStream()
         while (true) {
             val b = input.read()
             if (b < 0) return if (baos.size() == 0) null else baos.toString("UTF-8")
             if (b == 10) return baos.toString("UTF-8").trimEnd('\r')
+            // 单行上限：正常请求行/头行都远小于 16KB，无上限时一条不含 CRLF 的流就能把堆灌满
+            if (baos.size() >= MAX_LINE_BYTES) return baos.toString("UTF-8").trimEnd('\r')
             baos.write(b)
         }
     }

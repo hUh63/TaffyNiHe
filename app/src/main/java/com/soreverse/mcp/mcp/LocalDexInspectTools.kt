@@ -28,20 +28,28 @@ object LocalDexInspectTools {
     /** 把 content:// URI / 绝对路径 / APK / dex 路径统一处理为 dex 文件列表（APK 会解压提取所有 classes*.dex）。 */
     private data class InspectSources(val dexFiles: List<File>, val originLabel: String, val fromUri: Boolean)
 
+    /**
+     * 本次调用的工作目录。每次进入都先清空上一次的残留：这些中间文件此前写到源 APK 同目录，
+     * 既污染用户可见目录，又因为各条提前 return 分支没有 finally 而永久累积。
+     */
+    private fun workDir(ctx: android.content.Context): File =
+        File(ctx.cacheDir, "dexinspect_work").apply { deleteRecursively(); mkdirs() }
+
     private fun resolveSources(ctx: android.content.Context, path: String): InspectSources {
+        val work = workDir(ctx)
         // content:// URI → 复制到缓存
         if (path.startsWith("content://")) {
-            val tmp = File(ctx.cacheDir, "dexinspect_${System.currentTimeMillis()}.bin")
+            val tmp = File(work, "source.bin")
             ctx.contentResolver.openInputStream(android.net.Uri.parse(path))?.use { input ->
                 FileOutputStream(tmp).use { output -> input.copyTo(output) }
             } ?: throw IllegalStateException("Cannot open content URI: $path")
             val label = path
-            return resolveFromFile(tmp, label, fromUri = true)
+            return resolveFromFile(tmp, label, fromUri = true, work = work)
         }
-        return resolveFromFile(File(path), path, fromUri = false)
+        return resolveFromFile(File(path), path, fromUri = false, work = work)
     }
 
-    private fun resolveFromFile(file: File, label: String, fromUri: Boolean): InspectSources {
+    private fun resolveFromFile(file: File, label: String, fromUri: Boolean, work: File): InspectSources {
         if (!file.exists()) throw IllegalStateException("文件不存在: $label")
         val name = file.name.lowercase()
         if (name.endsWith(".dex")) return InspectSources(listOf(file), label, fromUri)
@@ -50,7 +58,7 @@ object LocalDexInspectTools {
             ZipFile(file).use { zip ->
                 val entries = zip.entries().toList().filter { it.name.endsWith(".dex") && !it.isDirectory }
                 for (e in entries) {
-                    val out = File(file.parentFile ?: file.absoluteFile.parentFile ?: file.absoluteFile, "_dx_${e.name.replace('/', '_')}")
+                    val out = File(work, e.name.replace('/', '_'))
                     zip.getInputStream(e).use { input ->
                         FileOutputStream(out).use { output -> input.copyTo(output) }
                     }
@@ -202,6 +210,7 @@ object LocalDexInspectTools {
             val path = args.str("path")
             if (path.isBlank()) return err("INVALID_ARGUMENT", "需要 path 参数（APK 或 dex 路径）", "action", action)
             val limit = args.intValue("limit", 500).coerceIn(1, 10000)
+            com.soreverse.mcp.core.TempJanitor.sweep(ctx.context, listOf("dexinspect_"))
             return runCatching {
                 val sources = resolveSources(ctx.context, path)
                 val dexes = loadDexFiles(sources.dexFiles)

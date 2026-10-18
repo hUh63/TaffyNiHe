@@ -9,6 +9,21 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
+/**
+ * 原子写出产物：先写同目录隐藏临时文件再 rename。
+ * 直接 `writeBytes` 会先截断目标文件，进程在写入中途被杀就得到一个 0 字节或半截的 .so，
+ * 而且同名的旧文件也一并被毁。
+ */
+private fun writeAtomic(target: java.io.File, bytes: ByteArray) {
+    val dir = target.parentFile
+    val tmp = java.io.File(dir, "." + target.name + ".tmp")
+    tmp.writeBytes(bytes)
+    if (!tmp.renameTo(target)) {
+        target.writeBytes(bytes)
+        tmp.delete()
+    }
+}
+
 internal fun EngineRuntime.build(workspaceId: String, editSessionId: String, outputName: String, conflictStrategy: String = "", writeReport: Boolean? = null, writeToWorkDir: Boolean? = null): JSONObject = guarded {
     val session = workspaces[workspaceId]?.edits?.get(editSessionId)
     // 安全修复: 加锁复制数据，防止并发编辑时写出半修改的文件。
@@ -16,7 +31,7 @@ internal fun EngineRuntime.build(workspaceId: String, editSessionId: String, out
     val settings = SettingsStore(context)
     val strategy = (conflictStrategy.ifBlank { settings.outputConflictStrategy }).let { if (it == "overwrite") "overwrite" else "rename" }
     val out = resolveOutputFile(outputName.ifBlank { "patched.so" }, strategy)
-    out.writeBytes(bytes)
+    writeAtomic(out, bytes)
     val report = if (session != null && (writeReport ?: settings.writePatchReport)) writePatchReport(workspaceId, session, out) else null
     AppLog.i("Built ${out.absolutePath}")
     val requestedWorkDirCopy = writeToWorkDir ?: settings.buildCopyToWorkDir
@@ -51,7 +66,7 @@ internal fun EngineRuntime.buildMany(workspaceId: String, editSessionId: String,
         val useWorkDir = entry?.optBoolean("writeToWorkDir", writeToWorkDir ?: settings.buildCopyToWorkDir) ?: (writeToWorkDir ?: settings.buildCopyToWorkDir)
         val wantReport = entry?.let { if (it.has("writePatchReport")) it.optBoolean("writePatchReport") else (writeReport ?: settings.writePatchReport) } ?: (writeReport ?: settings.writePatchReport)
         val out = resolveOutputFile(name, strategy)
-        out.writeBytes(bytes)
+        writeAtomic(out, bytes)
         val report = if (session != null && wantReport) writePatchReport(workspaceId, session, out) else null
         val workDirCopy = workDirCopyResult(useWorkDir) {
             writeCopyToWorkDirectory(out.nameWithoutExtension + ".so", bytes)

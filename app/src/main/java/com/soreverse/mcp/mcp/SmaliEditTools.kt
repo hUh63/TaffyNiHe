@@ -4,6 +4,7 @@ import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.smali.Smali
 import com.android.tools.smali.smali.SmaliOptions
+import com.soreverse.mcp.core.ZipRepack
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok

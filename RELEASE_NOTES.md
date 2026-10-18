@@ -1,3 +1,55 @@
+# TaffyNiHe v1.3.110（系统体检 · 安全收口 · 状态保活）
+
+这一版没有新功能，是把整个工程从头到尾查了一遍之后的修补：312 个 Kotlin 文件、188 个 MCP 工具，
+按安全、数据完整性、工具健壮性、界面与操作四条线走，该封的封、该保的保。
+
+## 一、安全（最要紧的三处）
+
+MCP 服务默认绑定 `0.0.0.0` 而鉴权默认关闭——这意味着同一 Wi-Fi 下的任何设备都能直接调用全部工具，
+包括 shell。默认值改成：鉴权开启、token 为空一律拒绝（fail-closed）。`taffy_app_config` 也不再有
+`maskSecrets=false` 这个后门，远程拿不到明文 token；token 与 AI API Key 改为 AndroidKeyStore
+AES-256-GCM 加密落盘，旧明文自动迁移。插件运行时不再默认拿到宿主 token，需要 `meta.json`
+里显式写 `mcpAccess: true`——否则一个插件就能绕过自身的 permissions 调用全部工具。
+
+另外补了两处命令注入闸门：`taffy_sandbox` 的 packageName/activity/apkPath、`taffy_so_addr_map`
+的 address（后者能借 rizin 的 `!` 前缀执行 shell）。工作区路径白名单补上了
+`inputApk / outputApk / apkPath / dexPath / outDex` 这些一直缺席的键，不再整体绕过校验。
+`BootReceiver` 改为 `exported=false`，MCP 会话表加了 512 上限，CORS 预检改为回显具体来源。
+
+> 行为变更：新装用户首次启动服务时，URL 需要带上 `?token=`（首页与设置页本来就会自动拼接）。
+> 老用户 prefs 里的设置不受影响。
+
+## 二、数据完整性
+
+备份的未加密分支原来直接写最终文件名，而 manifest 是最后才写进 zip 的——备份途中被杀就留下一个
+「成功但缺 manifest」的包，恢复时才报错。现在全部走 `tmp + rename`；加密/解密加了 200MB 内存闸门
+（整包读入 + Base64 字符串 + 密文约等于 3 倍内存）；取消恢复不再被当成失败去回滚。
+
+`taffy_apk_replace_native` 的同文件判断从 `absolutePath` 改成 `canonicalPath`：原来传 `./a.apk`
+就能绕过检查，然后把原 APK 截断成 0 字节。APK 产物改为原子写出；`taffy_manifest_xml_edit` 在无法
+编码 AXML 时明确报错，不再返回「成功」却零改动。
+
+## 三、工具与引擎
+
+`taffy_apk_patch_bytes` 的 read 默认长度从「整个条目」收到 256 字节（原来一个 `classes.dex`
+就能拼出数倍体积的 hex 串直接 OOM）。抓包代理补了 10 秒 connect 超时与 16KB 单行上限。
+Blutter 的隔离 runner 加了无进度 watchdog，进程吊死时不会再永远停在 running。
+dex/smali 的中间产物统一由 `TempJanitor` 回收，不再散落在源 APK 同目录。
+
+`taffy_file_replace` 的描述去掉了从未实现的 `mode=lines`；`taffy_manifest_xml_edit` 的反射
+setter 改为方法名白名单（原来按「名字含 set 且有 String 参数」随机挑，命中 `setPackageName`
+就会把整段 XML 写进包名）。
+
+## 四、界面与操作
+
+最大的一条是状态保活：分析结果、AI 对话、当前工作区原来都挂在 `remember` 上，而 MainActivity
+没有 `configChanges`——旋转一次屏幕就全清空，得重新选文件重跑。现在这些对象进了 ViewModel，
+tab、设置子页、62 处输入框、抓包筛选条件改用 `rememberSaveable`。
+
+顺带修了几处看得见的小毛病：深色模式下状态栏仍是浅灰（XML 写死且代码从未动态改写）、
+App 字号设置对显式 `fontSize` 的文本完全不生效、智能体编排动作行在窄屏被挤出屏幕、
+结果卡片关闭按钮只有 22dp、AI 对话输入框被软键盘遮住、编辑器语法高亮跟的是系统主题而不是 App 主题。
+
 # TaffyNiHe v1.3.109（运行恢复 · MCP 传输层保护 · 统一插件平台）
 
 上一版把编排做出来了，这一版补的是「跑起来之后」的三件事：中断了能不能接上、

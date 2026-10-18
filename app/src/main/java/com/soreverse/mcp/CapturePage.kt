@@ -82,7 +82,7 @@ internal fun CapturePage(t: UiText) {
     var busy by remember { mutableStateOf(false) }
     var busyMsg by remember { mutableStateOf("") }
     var ifaceInput by remember { mutableStateOf("any") }
-    var filterInput by remember { mutableStateOf("") }
+    var filterInput by rememberSaveable { mutableStateOf("") }
     var sniffing by remember { mutableStateOf(false) }
     var sniffPath by remember { mutableStateOf("") }
     var tcpdumpOk by remember { mutableStateOf(false) }

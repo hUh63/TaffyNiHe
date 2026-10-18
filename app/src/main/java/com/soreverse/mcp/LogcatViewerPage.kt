@@ -63,6 +63,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -209,12 +210,12 @@ internal fun LogcatViewerPage(t: UiText) {
     var running by remember { mutableStateOf(false) }
     // 暂停状态跨"离开页面→重进"保持（页面级单例）；persistedPaused=true 时重进不自动采集
     var paused by remember { mutableStateOf(persistedPaused) }
-    var tagFilter by remember { mutableStateOf("") }
-    var keyword by remember { mutableStateOf("") }
+    var tagFilter by rememberSaveable { mutableStateOf("") }
+    var keyword by rememberSaveable { mutableStateOf("") }
     var levelSet by remember { mutableStateOf(setOf("V", "D", "I", "W", "E", "F")) }
     // ── LogFox 实时过滤增强 ──
-    var pkgFilter by remember { mutableStateOf("") }
-    var pidFilter by remember { mutableStateOf("") }
+    var pkgFilter by rememberSaveable { mutableStateOf("") }
+    var pidFilter by rememberSaveable { mutableStateOf("") }
     var regexEnabled by remember { mutableStateOf(false) }
     var caseSensitive by remember { mutableStateOf(false) }
     var crashOnly by remember { mutableStateOf(false) }
@@ -255,7 +256,7 @@ internal fun LogcatViewerPage(t: UiText) {
     val crashLogs = remember { mutableStateListOf<LogLine>() }
     // 录制
     var recording by remember { mutableStateOf(false) }
-    var recordName by remember { mutableStateOf("") }
+    var recordName by rememberSaveable { mutableStateOf("") }
     var recordFile by remember { mutableStateOf<File?>(null) }
     var recordWriter by remember { mutableStateOf<FileWriter?>(null) }
     // 崩溃/ANR 通知去重签名
@@ -265,13 +266,13 @@ internal fun LogcatViewerPage(t: UiText) {
     // ── 过滤器预设（保存/管理）──
     val filterPrefs = remember { context.getSharedPreferences("logcat_filters", Context.MODE_PRIVATE) }
     var filterPresets by remember { mutableStateOf(filterPrefs.all.keys.filter { it.startsWith("preset_") }.sorted()) }
-    var presetNameInput by remember { mutableStateOf("") }
+    var presetNameInput by rememberSaveable { mutableStateOf("") }
     // 实时过滤面板折叠状态（LogFox: 默认折叠，展开显示完整过滤条件）
     var filterExpanded by remember { mutableStateOf(false) }
     // READ_LOGS 授权引导对话框
     var showReadLogsDialog by remember { mutableStateOf(false) }
     // ── 应用 tab（LogFox 样式：应用列表按包名过滤日志）──
-    var appSearch by remember { mutableStateOf("") }
+    var appSearch by rememberSaveable { mutableStateOf("") }
     var appList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // (label, packageName)
     // 应用多选（长按进入，点选切换，再点选中项取消；全选/取消/过滤所选）
     var appSelectMode by remember { mutableStateOf(false) }

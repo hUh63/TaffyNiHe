@@ -53,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -529,7 +530,7 @@ private fun ToolDetailDialog(handler: ToolHandler, zh: Boolean, onDismiss: () ->
 internal fun McpToolListView(zh: Boolean, category: String?, onClose: () -> Unit) {
     val metrics = LocalUiMetrics.current
     val context = LocalContext.current
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     // 分类筛选：从外部传入的卫星分类初始化，用户可在页内切换；null = 全部
     var picked by remember(category) { mutableStateOf(category) }
     // 点击一行 → 打开工具详情（参数表），不再是"点一下只复制个名字"

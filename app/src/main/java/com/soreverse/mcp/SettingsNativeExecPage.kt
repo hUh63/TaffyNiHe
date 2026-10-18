@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,7 +77,7 @@ internal fun SettingsNativeExecPage(t: UiText) {
     var outputTitle by remember { mutableStateOf("") }
     var procs by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var target by remember { mutableStateOf<JSONObject?>(null) }
-    var argText by remember { mutableStateOf("") }
+    var argText by rememberSaveable { mutableStateOf("") }
     var timeoutText by remember { mutableStateOf("30") }
     var pendingKill by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }

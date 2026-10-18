@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,7 +78,7 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
     var boreUrl by remember { mutableStateOf(BoreTunnelService.getTunnelUrl(context)) }
     var showExport by remember { mutableStateOf(false) }
     var showImport by remember { mutableStateOf(false) }
-    var importText by remember { mutableStateOf("") }
+    var importText by rememberSaveable { mutableStateOf("") }
 
     // 状态轮询
     LaunchedEffect(tunnelType) {

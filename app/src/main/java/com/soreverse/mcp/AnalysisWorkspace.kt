@@ -130,6 +130,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -606,7 +607,7 @@ private fun ConsoleToolPickerDialog(
     onDismiss: () -> Unit,
     onPick: (String) -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val all = remember(zh) { consoleToolEntries(zh) }
     val shown = filterToolEntries(all, query)
 
@@ -902,7 +903,7 @@ private fun shortSoLabel(raw: String): String {
 private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
     val tools = state.tools; val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
-    var manualPath by remember { mutableStateOf("") }
+    var manualPath by rememberSaveable { mutableStateOf("") }
     var manualError by remember { mutableStateOf("") }
 
     fun openWorkspaceFile(path: String, fallbackName: String) {
@@ -2836,8 +2837,8 @@ private fun CalcView(zh: Boolean, context: android.content.Context) {
 private fun IappView(zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    var apkPath by remember { mutableStateOf("") }
-    var soPath by remember { mutableStateOf("") }
+    var apkPath by rememberSaveable { mutableStateOf("") }
+    var soPath by rememberSaveable { mutableStateOf("") }
     var result by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
@@ -3177,7 +3178,7 @@ private fun ElfMetaView(
     var loading by remember(ws, tick) { mutableStateOf(false) }
     var error by remember(ws, tick) { mutableStateOf("") }
     var loaded by remember(ws, tick) { mutableStateOf<List<Pair<MetaSection, Any?>>>(emptyList()) }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) { loaded = emptyList(); return@LaunchedEffect }
@@ -4017,7 +4018,7 @@ private fun SearchView(
     val scope = rememberCoroutineScope()
     var typeIdx by remember { mutableStateOf(1) }
     var methodIdx by remember { mutableStateOf(1) }
-    var formQuery by remember { mutableStateOf("") }
+    var formQuery by rememberSaveable { mutableStateOf("") }
     var caseSensitive by remember { mutableStateOf(false) }
     var useRegex by remember { mutableStateOf(false) }
     var dialogOpen by remember { mutableStateOf(false) }
@@ -4488,7 +4489,7 @@ private fun FuncXRefView(
     // 默认「外部引用」列表页（对齐 Exbin XRefTabFragment：currentTab = TAB_EXTERNAL），
     // 旧实现默认图形化 —— 图形化在无邻域时只显示一屏空态，看起来就是「看不到调用」。
     var tab by remember { mutableStateOf("external") }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     var ext by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
     var int by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
     var data by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
@@ -4912,7 +4913,7 @@ private fun DisasmView(
     val addr = obj?.optString("addr").orEmpty()
     val count = obj?.optInt("instructionCount", lines.size) ?: lines.size
     val parsed = remember(lines) { lines.map { splitDisasmLine(it) } }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     var selecting by remember { mutableStateOf(false) }
     var sel by remember { mutableStateOf(emptySet<Int>()) }
     val shown = remember(parsed, query) {
@@ -6427,7 +6428,7 @@ private fun ListScaffold(
         loadListCache(context, tools, view, ws, cacheKey, limit)
     }
     val rows = remember(tools.viewCache[cacheKey]) { rowsFromJson(tools.viewCache[cacheKey]) }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val filtered = remember(rows, query) {
         if (query.isBlank()) rows
         else rows.filter {
@@ -6841,7 +6842,7 @@ private fun ToolsPane(
 private fun DemangleView(zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
     var result by remember { mutableStateOf("") }
     var original by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
@@ -7003,7 +7004,7 @@ private fun parseBaseValue(raw: String, base: Int): java.math.BigInteger? {
 @Composable
 private fun BaseConvertView(zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
     var base by remember { mutableStateOf(0) } // 0=自动
     val parsed = remember(input, base) { parseBaseValue(input, base) }
 
@@ -7147,7 +7148,7 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
     val scope = rememberCoroutineScope()
     val ws = tools.sharedWorkspaceId
 
-    var asm by remember { mutableStateOf("") }
+    var asm by rememberSaveable { mutableStateOf("") }
     var arch by remember { mutableStateOf("arm64") }
     var addrText by remember { mutableStateOf("0x1000") }
 
@@ -7158,7 +7159,7 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
     var working by remember { mutableStateOf(false) }
 
     // 写回编辑会话
-    var locator by remember { mutableStateOf("") }
+    var locator by rememberSaveable { mutableStateOf("") }
     var sessionId by remember { mutableStateOf("") }
     var patchMsg by remember { mutableStateOf("") }
     var patchErr by remember { mutableStateOf("") }
@@ -7521,7 +7522,7 @@ private fun RzViewScaffold(
     }
     val kv: JSONObject? = remember(data) { data as? JSONObject }
     val count = if (rows.isNotEmpty()) rows.size else strList.size
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val fRows = remember(rows, query) { if (query.isBlank()) rows else rows.filter { o -> o.toString().contains(query, true) } }
     val fStrs = remember(strList, query) { if (query.isBlank()) strList else strList.filter { it.contains(query, true) } }
 
@@ -8011,8 +8012,8 @@ private fun xorTransform(data: ByteArray, key: ByteArray, scheme: String): ByteA
 @Composable
 private fun XorDecryptView(zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
-    var input by remember { mutableStateOf("") }
-    var keyText by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
+    var keyText by rememberSaveable { mutableStateOf("") }
     var keyMode by remember { mutableStateOf("hex") }
     var scheme by remember { mutableStateOf("repeat") }
 
@@ -8265,7 +8266,7 @@ private fun decodeUnicodeEscapes(s: String): String? {
 
 @Composable
 private fun StringDecodeView(zh: Boolean, context: android.content.Context) {
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
 
     val trimmed = input.trim()
     val hexText = remember(trimmed) { if (trimmed.isNotBlank()) decodeHexToText(trimmed) else null }
@@ -9149,7 +9150,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
     var error by remember(ws, tick) { mutableStateOf("") }
     var lastQuery by remember { mutableStateOf("") }
     var dialogOpen by remember { mutableStateOf(false) }
-    var formQuery by remember { mutableStateOf("") }
+    var formQuery by rememberSaveable { mutableStateOf("") }
     var expanded by remember { mutableStateOf(setOf<String>()) }
     var generatedHeader by remember { mutableStateOf("") }
     var exporting by remember { mutableStateOf(false) }
@@ -9556,7 +9557,7 @@ private fun RefBlock(
 private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
-    var addr by remember { mutableStateOf("") }
+    var addr by rememberSaveable { mutableStateOf("") }
     var mode by remember { mutableStateOf("code") }
     var lines by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
@@ -9830,7 +9831,7 @@ private fun hexOrLong(v: Any?): Long? = when (v) {
 private fun FuncSigView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
-    var locator by remember { mutableStateOf("") }
+    var locator by rememberSaveable { mutableStateOf("") }
     var count by remember { mutableStateOf("12") }
     var sigs by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
@@ -10002,7 +10003,7 @@ private fun JniRegView(tools: ToolPagesState, zh: Boolean, context: android.cont
     var data by remember(ws, tick) { mutableStateOf<JSONObject?>(null) }
     var loading by remember(ws, tick) { mutableStateOf(false) }
     var error by remember(ws, tick) { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(ws, tick) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -10312,7 +10313,7 @@ private fun GlobalXRefView(
     var loading by remember(ws, tick) { mutableStateOf(false) }
     var error by remember(ws, tick) { mutableStateOf("") }
     var note by remember(ws, tick) { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     var xTab by remember { mutableStateOf("overview") }
     var drillRoot by remember { mutableStateOf("") }
     var exportSheet by remember { mutableStateOf(false) }
@@ -11092,11 +11093,11 @@ private fun UnpackView(tools: ToolPagesState, zh: Boolean, context: android.cont
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    var module by remember { mutableStateOf("") }
+    var module by rememberSaveable { mutableStateOf("") }
     var outPath by remember { mutableStateOf("/data/local/tmp") }
     var dumpAll by remember { mutableStateOf(false) }
     var script by remember { mutableStateOf("") }
-    var pkg by remember { mutableStateOf("") }
+    var pkg by rememberSaveable { mutableStateOf("") }
     var findings by remember(ws) { mutableStateOf<List<HardFinding>>(emptyList()) }
     var entropy by remember(ws) { mutableStateOf(-1.0) }
     var scanning by remember(ws) { mutableStateOf(false) }
@@ -11262,7 +11263,7 @@ private fun DataView(tools: ToolPagesState, zh: Boolean, context: android.conten
     var data by remember(ws, tick, action) { mutableStateOf<JSONObject?>(null) }
     var loading by remember(ws, tick, action) { mutableStateOf(false) }
     var error by remember(ws, tick, action) { mutableStateOf("") }
-    var filter by remember { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(ws, tick, action) {
         if (ws.isBlank()) return@LaunchedEffect
@@ -11911,7 +11912,7 @@ private fun tarjanScc(nodes: List<String>, edges: List<Pair<String, String>>): L
 private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
-    var locator by remember { mutableStateOf("") }
+    var locator by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var ran by remember { mutableStateOf(false) }
@@ -12090,9 +12091,9 @@ private object AnalysisComments {
 private fun CommentsView(tools: ToolPagesState, zh: Boolean, context: android.content.Context, onRefresh: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var items by remember { mutableStateOf(AnalysisComments.load(context)) }
-    var target by remember { mutableStateOf("") }
-    var body by remember { mutableStateOf("") }
-    var filter by remember { mutableStateOf("") }
+    var target by rememberSaveable { mutableStateOf("") }
+    var body by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(tools.reloadTick) { items = AnalysisComments.load(context) }
     LaunchedEffect(tools.sharedWorkspaceId) {
@@ -12462,8 +12463,8 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
     val scope = rememberCoroutineScope()
     var count by remember { mutableStateOf("5") }
     var startIndex by remember { mutableStateOf("0") }
-    var filter by remember { mutableStateOf("") }
-    var outFile by remember { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("") }
+    var outFile by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var text by remember { mutableStateOf("") }
@@ -13362,7 +13363,7 @@ private fun CallGraphGraphPane(
     var graphMode by remember { mutableStateOf("hot") }
     var depthText by remember { mutableStateOf("2") }
     var maxText by remember { mutableStateOf("120") }
-    var root by remember { mutableStateOf("") }
+    var root by rememberSaveable { mutableStateOf("") }
     var rebuild by remember { mutableStateOf(0) }
     var optionsOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf(findQ) }

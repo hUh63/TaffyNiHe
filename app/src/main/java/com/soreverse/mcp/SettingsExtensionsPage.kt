@@ -49,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -179,8 +180,8 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
     var showNewDialog by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<File?>(null) }
     var settingsTarget by remember { mutableStateOf<File?>(null) }
-    var newId by remember { mutableStateOf("") }
-    var newName by remember { mutableStateOf("") }
+    var newId by rememberSaveable { mutableStateOf("") }
+    var newName by rememberSaveable { mutableStateOf("") }
     var pluginQuery by remember { mutableStateOf("") }
     var marketQuery by remember { mutableStateOf("") }
     // 市场状态

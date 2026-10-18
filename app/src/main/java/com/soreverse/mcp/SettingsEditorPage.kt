@@ -56,6 +56,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -411,8 +412,8 @@ internal fun SettingsEditorPage(t: UiText) {
     val consoleScroll = rememberScrollState()
     // 查找/替换
     var showFind by remember { mutableStateOf(false) }
-    var findQuery by remember { mutableStateOf("") }
-    var replaceQuery by remember { mutableStateOf("") }
+    var findQuery by rememberSaveable { mutableStateOf("") }
+    var replaceQuery by rememberSaveable { mutableStateOf("") }
     var findRegex by remember { mutableStateOf(false) }
     var findCaseSensitive by remember { mutableStateOf(true) }
     var replaceExpanded by remember { mutableStateOf(false) }
@@ -423,7 +424,7 @@ internal fun SettingsEditorPage(t: UiText) {
     val editorScroll = rememberScrollState()
     val editorLineCount = remember(code) { code.count { c -> c == '\n' } + 1 }
     var showJump by remember { mutableStateOf(false) }
-    var jumpText by remember { mutableStateOf("") }
+    var jumpText by rememberSaveable { mutableStateOf("") }
     var showLineNumbers by remember { mutableStateOf(true) }
     var readOnly by remember { mutableStateOf(false) }
     var showExtraKeys by remember { mutableStateOf(true) }
@@ -432,7 +433,7 @@ internal fun SettingsEditorPage(t: UiText) {
     // 面板 / 命令面板
     var panel by remember { mutableStateOf<EditorPanel?>(null) }
     var showCommandPalette by remember { mutableStateOf(false) }
-    var cmdQuery by remember { mutableStateOf("") }
+    var cmdQuery by rememberSaveable { mutableStateOf("") }
     var toolbarVersion by remember { mutableIntStateOf(0) }   // 工具条顺序变更后重读
     var wsPanelExpanded by remember { mutableStateOf(true) }
     var wsTreeExpanded by remember { mutableStateOf(setOf("")) }
@@ -2260,7 +2261,7 @@ internal fun SettingsEditorPage(t: UiText) {
 
     // 语法包管理
     if (showPackManager) {
-        var packJson by remember { mutableStateOf("") }
+        var packJson by rememberSaveable { mutableStateOf("") }
         var packMsg by remember { mutableStateOf("") }
         val packs = com.soreverse.mcp.core.EditorSyntaxPacks.packs
         AlertDialog(

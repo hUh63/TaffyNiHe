@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,7 +76,7 @@ internal fun SettingsTerminalPage(t: UiText) {
     val zh = t.zh
     val marker = "__TAFFY_END__"
 
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
     var sessionProc by remember { mutableStateOf<Process?>(null) }
     var sessionOutput by remember { mutableStateOf("") }
     var sessionChannel by remember { mutableStateOf("") }

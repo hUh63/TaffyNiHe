@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,8 +88,8 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
     val scope = rememberCoroutineScope()
     var includeSecrets by remember { mutableStateOf(false) }
     var encryptEnabled by remember { mutableStateOf(false) }
-    var encryptPassword by remember { mutableStateOf("") }
-    var encryptConfirm by remember { mutableStateOf("") }
+    var encryptPassword by rememberSaveable { mutableStateOf("") }
+    var encryptConfirm by rememberSaveable { mutableStateOf("") }
     var resultMessage by remember { mutableStateOf<String?>(null) }
     var resultOk by remember { mutableStateOf(false) }
 
@@ -97,7 +98,7 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
 
     // Decrypt dialog state (for import)
     var decryptDialogVisible by remember { mutableStateOf(false) }
-    var decryptPassword by remember { mutableStateOf("") }
+    var decryptPassword by rememberSaveable { mutableStateOf("") }
     var decryptError by remember { mutableStateOf<String?>(null) }
     var pendingEncryptedBytes by remember { mutableStateOf<ByteArray?>(null) }
 
@@ -172,9 +173,9 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
     var fullResult by remember { mutableStateOf<FullBackup.Summary?>(null) }
     var fullError by remember { mutableStateOf<String?>(null) }
     var fullPasswordDialog by remember { mutableStateOf(false) }
-    var fullPassword by remember { mutableStateOf("") }
+    var fullPassword by rememberSaveable { mutableStateOf("") }
     var restorePasswordDialog by remember { mutableStateOf(false) }
-    var restorePassword by remember { mutableStateOf("") }
+    var restorePassword by rememberSaveable { mutableStateOf("") }
     var pendingRestorePath by remember { mutableStateOf<String?>(null) }
 
     val fullBackupRunner: (String?) -> Unit = { pwd ->

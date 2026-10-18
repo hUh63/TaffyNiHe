@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -66,12 +67,12 @@ internal fun SettingsApkEditPage(t: UiText) {
     var showXml by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf("") }
 
-    var newPackage by remember { mutableStateOf("") }
-    var permInput by remember { mutableStateOf("") }
+    var newPackage by rememberSaveable { mutableStateOf("") }
+    var permInput by rememberSaveable { mutableStateOf("") }
     var compType by remember { mutableStateOf("activity") }
-    var compInput by remember { mutableStateOf("") }
-    var metaName by remember { mutableStateOf("") }
-    var metaValue by remember { mutableStateOf("") }
+    var compInput by rememberSaveable { mutableStateOf("") }
+    var metaName by rememberSaveable { mutableStateOf("") }
+    var metaValue by rememberSaveable { mutableStateOf("") }
 
     var pendingConfirm by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pendingMsg by remember { mutableStateOf("") }

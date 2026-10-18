@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,7 +143,7 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
     var bodyFields by remember { mutableStateOf(parseRequestFields(settings.aiCustomBodyJson)) }
     var systemPrompt by remember { mutableStateOf(settings.aiSystemPrompt) }
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
-    var modelQuery by remember { mutableStateOf("") }
+    var modelQuery by rememberSaveable { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var loadingModels by remember { mutableStateOf(false) }
 

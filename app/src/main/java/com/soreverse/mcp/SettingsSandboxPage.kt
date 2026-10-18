@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,7 +56,7 @@ internal fun SettingsSandboxPage(t: UiText) {
     var refreshTick by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var busyMsg by remember { mutableStateOf("") }
-    var pkg by remember { mutableStateOf("") }
+    var pkg by rememberSaveable { mutableStateOf("") }
     var result by remember { mutableStateOf("") }
     var watchSec by remember { mutableStateOf("10") }
     var watchInterval by remember { mutableStateOf("2") }

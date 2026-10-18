@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,7 +70,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
     val scope = rememberCoroutineScope()
     var logPaused by remember { mutableStateOf(false) }
     var logFilter by remember { mutableStateOf("all") }
-    var searchText by remember { mutableStateOf("") }
+    var searchText by rememberSaveable { mutableStateOf("") }
     var contentVersion by remember { mutableStateOf(0L) }
     val logs = remember { mutableStateListOf<String>().also { list -> list.addAll(AppLog.snapshot().takeLast(120)) } }
 

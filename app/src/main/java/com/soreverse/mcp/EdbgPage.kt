@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,10 +103,10 @@ internal fun EdbgPage(t: UiText) {
     var env by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }
     var busyMsg by remember { mutableStateOf("") }
-    var pkgInput by remember { mutableStateOf("") }
-    var libInput by remember { mutableStateOf("") }
-    var brkInput by remember { mutableStateOf("") }
-    var cmdInput by remember { mutableStateOf("") }
+    var pkgInput by rememberSaveable { mutableStateOf("") }
+    var libInput by rememberSaveable { mutableStateOf("") }
+    var brkInput by rememberSaveable { mutableStateOf("") }
+    var cmdInput by rememberSaveable { mutableStateOf("") }
     var output by remember { mutableStateOf("") }
     var sessionActive by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf("session") }

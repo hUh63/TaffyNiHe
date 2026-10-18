@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,7 +130,7 @@ internal fun RizinPage(t: UiText) {
     var disasmText by remember { mutableStateOf("") }
     var pseudoText by remember { mutableStateOf("") }
     var disasmTitle by remember { mutableStateOf("") }
-    var cmdInput by remember { mutableStateOf("") }
+    var cmdInput by rememberSaveable { mutableStateOf("") }
     var cmdOutput by remember { mutableStateOf("") }
 
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->

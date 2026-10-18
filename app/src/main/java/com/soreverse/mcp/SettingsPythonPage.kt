@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,12 +65,12 @@ internal fun SettingsPythonPage(t: UiText) {
     val fg = Color(0xFFD6E2F0)
     val marker = "__TAFFY_END__"
 
-    var code by remember { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
     var output by remember { mutableStateOf("") }
     var sessionProc by remember { mutableStateOf<Process?>(null) }
     var sessionActive by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var replInput by remember { mutableStateOf("") }
+    var replInput by rememberSaveable { mutableStateOf("") }
     var lastSaved by remember { mutableStateOf<String?>(null) }
     val consoleScroll = rememberScrollState()
 

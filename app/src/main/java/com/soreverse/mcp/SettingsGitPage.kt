@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -68,8 +69,8 @@ internal fun SettingsGitPage(t: UiText) {
     }
     var repoInput by remember { mutableStateOf(repoPath) }
     var refreshTick by remember { mutableIntStateOf(0) }
-    var remoteUrl by remember { mutableStateOf("") }
-    var commitMsg by remember { mutableStateOf("") }
+    var remoteUrl by rememberSaveable { mutableStateOf("") }
+    var commitMsg by rememberSaveable { mutableStateOf("") }
     var output by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var runMsg by remember { mutableStateOf("") }

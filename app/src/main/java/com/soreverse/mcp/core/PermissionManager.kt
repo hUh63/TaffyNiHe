@@ -167,8 +167,27 @@ object PermissionManager {
      * 通过特权通道启动一个持续运行的命令流（如 logcat 实时流），返回可读的 Process。
      * 优先级 root → shizuku → dhizuku；无可用通道返回 null（调用方应降级为普通进程）。
      */
+    /**
+     * 双引号包裹单个 shell 参数，并转义 " $ \ ` 四个字符（用字符码，避免多层转义出错）。
+     * 原实现 joinToString(" ") 遇到带空格/引号的参数会散架或执行意外命令。
+     */
+    private fun quoteArg(arg: String): String {
+        val sb = StringBuilder()
+        sb.append(34.toChar())
+        for (c in arg) {
+            val code = c.code
+            if (code == 34 || code == 36 || code == 92 || code == 96) sb.append(92.toChar())
+            sb.append(c)
+        }
+        sb.append(34.toChar())
+        return sb.toString()
+    }
+
+    private fun needsQuote(arg: String): Boolean =
+        arg.any { c -> c.isWhitespace() || !(c.isLetterOrDigit() || c in "-_./:=@,+%") }
+
     fun startPrivilegedStream(command: String, args: List<String>): Process? {
-        val full = (listOf(command) + args).joinToString(" ")
+        val full = (listOf(command) + args).joinToString(" ") { if (needsQuote(it)) quoteArg(it) else it }
         if (isRootAvailable()) {
             return runCatching {
                 ProcessBuilder("su", "-c", full).redirectErrorStream(true).start()
@@ -197,7 +216,7 @@ object PermissionManager {
         val service = ensureShizukuService()
             ?: return RootShell.Result(-1, "", "Shizuku UserService not available")
         return runCatching {
-            val r = service.executeNow("sh -c \"$command\"")
+            val r = service.executeNow("sh -c " + quoteArg(command))
             val code = r.getOrNull(0)?.toIntOrNull() ?: -1
             RootShell.Result(code, r.getOrNull(1)?.trim() ?: "", r.getOrNull(2)?.trim() ?: "")
         }.getOrElse { RootShell.Result(-1, "", it.message ?: "Shizuku exec failed") }

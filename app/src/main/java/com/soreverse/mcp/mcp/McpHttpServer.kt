@@ -94,6 +94,8 @@ class McpHttpServer(private val context: Context, private val port: Int, private
 
     // v2.1.0: Session management for Streamable HTTP transport
     private val sessions = ConcurrentHashMap<String, Long>() // sessionId -> createdAt
+    // 无上限的会话表 = 一个不带 session id 的循环请求就能把内存打满（默认无鉴权时谁都能发）。
+    private val MAX_SESSIONS = 512
     private val SESSION_TIMEOUT_MS = 30 * 60 * 1000L // 30 minutes
 
     /**
@@ -174,7 +176,9 @@ class McpHttpServer(private val context: Context, private val port: Int, private
                 // v2.1.0: CORS preflight OPTIONS handler
                 options("/mcp") {
                     call.response.headers.apply {
-                        append("Access-Control-Allow-Origin", "*")
+                        // 回显具体来源而不是 *：POST 本来就校验 Origin，预检保持一致。
+                        append("Access-Control-Allow-Origin", call.request.header("Origin") ?: "null")
+                        append("Vary", "Origin")
                         append("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
                         append("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id, Accept")
                         append("Access-Control-Max-Age", "86400")
@@ -275,6 +279,10 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         // v2.1.0: SSE long connection with 15s heartbeat
         val sessionId = UUID.randomUUID().toString()
         sessions[sessionId] = System.currentTimeMillis()
+        if (sessions.size > MAX_SESSIONS) {
+            // 超限时按创建时间淘汰最旧的一批，避免无鉴权下会话表无限增长
+            sessions.entries.sortedBy { it.value }.take(sessions.size - MAX_SESSIONS).forEach { sessions.remove(it.key) }
+        }
         AppLog.i("SSE connection established: session=$sessionId")
 
         call.response.headers.apply {
@@ -365,6 +373,10 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         val existingSessionId = call.request.header("Mcp-Session-Id")
         val sessionId = existingSessionId ?: UUID.randomUUID().toString()
         sessions[sessionId] = System.currentTimeMillis()
+        if (sessions.size > MAX_SESSIONS) {
+            // 超限时按创建时间淘汰最旧的一批，避免无鉴权下会话表无限增长
+            sessions.entries.sortedBy { it.value }.take(sessions.size - MAX_SESSIONS).forEach { sessions.remove(it.key) }
+        }
         call.response.headers.append("Mcp-Session-Id", sessionId)
 
         // Clean up expired sessions

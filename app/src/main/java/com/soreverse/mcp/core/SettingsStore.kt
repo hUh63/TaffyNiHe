@@ -137,11 +137,21 @@ class SettingsStore(context: Context) {
 
     var accessToken: String
         get() {
-            val existing = sanitizeCredential(prefs.getString("accessToken", "").orEmpty())
-            if (existing.isNotBlank()) return existing
+            // 不再明文落 shared_prefs：同 uid 的插件进程或取证镜像可直接读，token 泄漏等于整个服务失守。
+            SecretStore.get(appContext, "accessToken")?.takeIf { it.isNotBlank() }?.let { return it }
+            // 旧版明文 token 一次性迁移后抹掉
+            val legacy = sanitizeCredential(prefs.getString("accessToken", "").orEmpty())
+            if (legacy.isNotBlank()) {
+                SecretStore.put(appContext, "accessToken", legacy)
+                prefs.edit().remove("accessToken").apply()
+                return legacy
+            }
             return resetAccessToken()
         }
-        set(value) = prefs.edit().putString("accessToken", sanitizeCredential(value)).apply()
+        set(value) {
+            SecretStore.put(appContext, "accessToken", sanitizeCredential(value))
+            prefs.edit().remove("accessToken").apply()
+        }
 
     var floatingEnabled: Boolean
         get() = prefs.getBoolean("floatingEnabled", false)
@@ -706,8 +716,20 @@ class SettingsStore(context: Context) {
         set(value) = prefs.edit().putString("aiEndpoint", value.trim().trimEnd('/')).apply()
 
     var aiApiKey: String
-        get() = sanitizeCredential(prefs.getString("aiApiKey", "").orEmpty())
-        set(value) = prefs.edit().putString("aiApiKey", sanitizeCredential(value)).apply()
+        get() {
+            SecretStore.get(appContext, "aiApiKey")?.takeIf { it.isNotBlank() }?.let { return it }
+            val legacy = sanitizeCredential(prefs.getString("aiApiKey", "").orEmpty())
+            if (legacy.isNotBlank()) {
+                SecretStore.put(appContext, "aiApiKey", legacy)
+                prefs.edit().remove("aiApiKey").apply()
+                return legacy
+            }
+            return ""
+        }
+        set(value) {
+            SecretStore.put(appContext, "aiApiKey", sanitizeCredential(value))
+            prefs.edit().remove("aiApiKey").apply()
+        }
 
     var aiModel: String
         get() = prefs.getString("aiModel", "gpt-4.1-mini") ?: "gpt-4.1-mini"
@@ -744,7 +766,8 @@ class SettingsStore(context: Context) {
         val bytes = ByteArray(18)
         SecureRandom().nextBytes(bytes)
         val token = bytes.joinToString("") { "%02x".format(it) }
-        prefs.edit().putString("accessToken", token).apply()
+        SecretStore.put(appContext, "accessToken", token)
+        prefs.edit().remove("accessToken").apply()
         return token
     }
 

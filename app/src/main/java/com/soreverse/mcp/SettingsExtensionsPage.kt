@@ -369,11 +369,10 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                 "TAFFY_PLUGIN_DIR" to dir.absolutePath,
                 "TAFFY_SUPPORT" to File(cli).parentFile.absolutePath,
                 "TAFFY_MCP_URL" to "http://127.0.0.1:${settings.port}/mcp",
-                "TAFFY_TOKEN" to settings.accessToken,
                 "TAFFY_SANDBOX" to "1",
                 "TAFFY_SANDBOX_WRITE" to sandboxWrite,
                 "TAFFY_SANDBOX_NET" to "127.0.0.1:${settings.port}",
-            ) + run {
+            ) + (if (metaObj.optBoolean("mcpAccess", false)) mapOf("TAFFY_TOKEN" to settings.accessToken) else emptyMap<String, String>()) + run {
                 // 声明式设置项 → 环境变量（扩展在 Python 里读 os.environ 即可）
                 val out = LinkedHashMap<String, String>()
                 val arr = metaObj.optJSONArray("settings")

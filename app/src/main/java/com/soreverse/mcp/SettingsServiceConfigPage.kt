@@ -223,13 +223,18 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
             // v1.3.7: 原「MCP 访问控制」独立页与本分组完全重复，已合并到此处；保留其「谁能连接」说明
             Text(
                 when {
+                    !authEnabled && bindHost != "127.0.0.1" -> if (t.zh)
+                        "⚠ 访问 Token 未启用：当前局域网内任何设备都能无凭证调用全部工具（含 root / shell）。仅在可信网络使用，或开启上方开关。"
+                    else
+                        "⚠ Access token is off: any device on this LAN can call all tools without credentials (including root/shell). Use only on trusted networks."
                     settings.tunnelMode != "off" -> if (t.zh) "Cloudflare 隧道已配置：公网访问必须启用 Token。" else "Cloudflare Tunnel configured: public access requires a token."
                     bindHost == "127.0.0.1" -> if (t.zh) "仅本机连接：Token 可选，适合本机客户端或 adb forward。" else "Local only: token is optional for local clients or adb forward."
                     else -> if (t.zh) "局域网连接：强烈建议启用 Token。" else "LAN access: enabling a token is strongly recommended."
                 },
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (!authEnabled && bindHost != "127.0.0.1") MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ToggleRow(if (t.zh) "启用访问 Token" else "Require access token", authEnabled) {
                 authEnabled = it
@@ -250,6 +255,9 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 value = accessToken,
                 onValueChange = { accessToken = it; settings.accessToken = it },
                 label = { Text(if (t.zh) "访问 Token" else "Access token") },
+                supportingText = if (!authEnabled) {
+                    { Text(if (t.zh) "未启用 Token 校验，此项当前不生效" else "Token is not enforced while the switch above is off") }
+                } else null,
                 singleLine = true,
                 shape = RoundedCornerShape(AppShape.md),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),

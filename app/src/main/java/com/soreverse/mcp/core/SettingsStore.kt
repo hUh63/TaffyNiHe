@@ -124,9 +124,10 @@ class SettingsStore(context: Context) {
         set(value) = prefs.edit().putString("bindHost", if (value == "0.0.0.0") "0.0.0.0" else "127.0.0.1").apply()
 
     var authEnabled: Boolean
-        // 默认开启：服务默认绑定 0.0.0.0（同网段可达），无鉴权等于把 root shell 交给整个局域网。
-        // 老用户 prefs 里已写入的值不受影响，仍可在设置页显式关闭。
-        get() = prefs.getBoolean("authEnabled", true)
+        // 默认关闭：MCP 客户端大多不支持带 token 的 URL，默认开启会让首次连接直接 401。
+        // 代价是服务绑定 0.0.0.0 时同网段任何人都能无凭证调用工具——UI 会在这种组合下
+        // 常驻一条警示（见 SettingsServiceConfigPage），把风险显式告诉用户而不是静默处理。
+        get() = prefs.getBoolean("authEnabled", false)
         set(value) {
             val wasEnabled = prefs.getBoolean("authEnabled", false)
             prefs.edit().putBoolean("authEnabled", value).apply()

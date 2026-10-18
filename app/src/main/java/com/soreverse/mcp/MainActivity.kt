@@ -162,6 +162,15 @@ class MainActivity : ComponentActivity() {
             IntegrityGate { SoReverseApp(widthSizeClass = windowSizeClass.widthSizeClass) }
         }
     }
+
+    override fun onDestroy() {
+        // 用户真正退出（而非旋转/配置变更）时释放引擎持有的 SO 副本、模拟器/Frida 会话、
+        // 分页缓存与工作目录的 SQLite 句柄。
+        if (isFinishing && !isChangingConfigurations) {
+            runCatching { com.soreverse.mcp.core.EngineProvider.close(this) }
+        }
+        super.onDestroy()
+    }
 }
 
 @Composable

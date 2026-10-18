@@ -17,6 +17,8 @@ import java.util.UUID
 
 internal fun EngineRuntime.setWorkDirectory(uri: Uri) {
     if (workDirUri == uri && workDir != null) return
+    // 旧目录持有的 SQLite 句柄必须先关掉，否则每次切换都泄漏一个 ScanCacheStore
+    runCatching { workDir?.close() }
     workDirUri = uri
     workDir = WorkDirectory(context, uri)
     sources = emptyList()

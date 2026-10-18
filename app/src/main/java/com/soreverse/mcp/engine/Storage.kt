@@ -54,6 +54,14 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
     private val cache = ScanCacheStore(context.applicationContext)
     private val treeKey = treeUri.toString()
 
+    /**
+     * 释放工作目录持有的 SQLite 句柄（ScanCacheStore）。
+     * 切换工作目录时必须调用，否则每次切换都会泄漏一个 SQLiteOpenHelper。
+     */
+    fun close() {
+        runCatching { cache.close() }.onFailure { AppLog.w("Failed to close scan cache: ${it.message}") }
+    }
+
     fun fingerprint(options: ScanOptions): List<FileFingerprint> {
         val out = mutableListOf<FileFingerprint>()
         runCatching { walk(treeUri, "", 0, options) { _, displayName, relativePath, size, modified ->

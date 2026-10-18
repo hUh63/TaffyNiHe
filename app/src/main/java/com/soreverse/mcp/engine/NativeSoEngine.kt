@@ -50,6 +50,9 @@ class NativeSoEngine(context: Context) {
     fun listWorkspaces(): JSONObject = runtime.listWorkspaces()
     fun close(workspaceId: String): JSONObject = runtime.close(workspaceId)
     fun clearCaches() = runtime.clearCaches()
+
+    /** 释放引擎独占的全部进程级资源（工作区字节、模拟器/ Frida 会话、分页缓存、SQLite 句柄）。 */
+    fun close() = runtime.close()
     fun list(workspaceId: String, editSessionId: String, view: String, prefix: String, limit: Int, pathHint: String = "", cursor: String = ""): JSONObject = runtime.list(workspaceId, editSessionId, view, prefix, limit, pathHint, cursor)
     fun readElf(workspaceId: String, editSessionId: String, pathHint: String = ""): JSONObject = runtime.readElf(workspaceId, editSessionId, pathHint)
     fun hexdump(workspaceId: String, editSessionId: String, locator: String, byteOffset: Int, maxBytes: Int): JSONObject = runtime.hexdump(workspaceId, editSessionId, locator, byteOffset, maxBytes)

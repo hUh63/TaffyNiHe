@@ -208,7 +208,7 @@ object NativePatchTools {
                 "keyword" str "搜索关键字"
                 "scope".oneOf("搜索范围: all(全部) | dex(仅DEX) | native(仅SO) | resource(仅资源) | zip(仅ZIP条目)", "all", "dex", "native", "resource", "zip")
                 "limit" int "每页条数(默认 50, 最大 200)"
-                "cursor" str "分页游标(首次为空, 翻页时传入上次返回的 nextCursor)"
+                "cursor" str "分页游标(首次为空, 翻页时原样传回上次返回的 nextCursor; 格式 <scope>:<scope内偏移>)"
             })
         }
 
@@ -223,111 +223,67 @@ object NativePatchTools {
             val limit = args.intValue("limit", 50).coerceIn(1, 200)
             val cursor = args.str("cursor")
 
-            // 解析游标: "scope:lastIndex"
-            val (cursorScope, cursorIdx) = if (cursor.isNotBlank()) {
-                val parts = cursor.split(":", limit = 2)
-                (parts.getOrNull(0) ?: "") to (parts.getOrNull(1)?.toIntOrNull() ?: 0)
-            } else {
-                "" to 0
-            }
+            // 游标统一为 "<scope>:<该 scope 内已消费的匹配数>"。
+            // 原实现把 total（累计匹配数）当游标、且只有 zip 分支用到：翻页会重复第一页，
+            // 跨 scope 的结果还会永久丢失。
+            val cursorScope = if (cursor.isNotBlank()) cursor.substringBefore(':') else ""
+            val cursorOffset = if (cursor.isNotBlank()) {
+                cursor.substringAfter(':', "").toIntOrNull()?.coerceAtLeast(0) ?: 0
+            } else 0
+            val scopes = if (scope == "all") listOf("dex", "native", "resource", "zip") else listOf(scope)
+            val cursorIndex = scopes.indexOf(cursorScope)
 
             val results = JSONArray()
-            var total = 0
             var nextCursor: String? = null
-            val scopes = if (scope == "all") listOf("dex", "native", "resource", "zip") else listOf(scope)
+            var scanned = 0
 
             ZipFile(file).use { zf ->
-                for (sc in scopes) {
-                    if (results.length() >= limit) {
-                        nextCursor = "$sc:${total}"
+                for ((scopePos, sc) in scopes.withIndex()) {
+                    if (results.length() >= limit) break
+                    // 游标之前的 scope 已整段翻过，直接跳过
+                    if (cursorIndex >= 0 && scopePos < cursorIndex) continue
+                    val offsetInScope = if (sc == cursorScope) cursorOffset else 0
+
+                    // 每个 scope 先得到「与关键字匹配的完整序列」。zip/native/resource 遍历条目成本很低；
+                    // dex 交给 DexKit，只取到 offset+limit+1 条，多取的那一条用来判断后面还有没有。
+                    val matches: List<JSONObject> = when (sc) {
+                        "dex" -> dexMatches(file, keyword, offsetInScope + limit + 1)
+                        "native" -> zf.entries().toList()
+                            .filter { it.name.endsWith(".so") && it.name.contains(keyword, ignoreCase = true) }
+                            .map { e ->
+                                JSONObject().put("scope", "native").put("type", "so_file")
+                                    .put("name", e.name).put("size", e.size)
+                            }
+                        "resource" -> zf.entries().toList()
+                            .filter {
+                                (it.name.startsWith("res/") || it.name.startsWith("assets/")) &&
+                                    it.name.contains(keyword, ignoreCase = true)
+                            }
+                            .map { e ->
+                                JSONObject().put("scope", "resource").put("type", "resource_file")
+                                    .put("name", e.name).put("size", e.size)
+                            }
+                        "zip" -> zf.entries().toList()
+                            .filter { it.name.contains(keyword, ignoreCase = true) }
+                            .map { e ->
+                                JSONObject().put("scope", "zip").put("type", "zip_entry")
+                                    .put("name", e.name).put("size", e.size)
+                                    .put("compressedSize", e.compressedSize)
+                            }
+                        else -> emptyList()
+                    }
+
+                    val from = offsetInScope.coerceAtMost(matches.size)
+                    val take = (limit - results.length()).coerceAtLeast(0)
+                    val page = matches.drop(from).take(take)
+                    page.forEach { results.put(it) }
+                    scanned += page.size
+                    if (from + page.size < matches.size) {
+                        // 这个 scope 还没翻完，下一页从它的这个位置继续
+                        nextCursor = "$sc:${from + page.size}"
                         break
                     }
-                    when (sc) {
-                        "dex" -> {
-                            // 用 DexKit 搜索类名/方法名/字符串
-                            try {
-                                val dexMatches = JSONArray()
-                                org.luckypray.dexkit.DexKitBridge.create(file.absolutePath).use { bridge ->
-                                    // 搜索使用某字符串的方法
-                                    val findMethods = org.luckypray.dexkit.query.FindMethod.create()
-                                        .matcher(org.luckypray.dexkit.query.matchers.MethodMatcher.create()
-                                            .usingStrings(listOf(keyword),
-                                                org.luckypray.dexkit.query.enums.StringMatchType.Contains, true))
-                                    bridge.findMethod(findMethods).take(limit).forEach { m ->
-                                        dexMatches.put(JSONObject()
-                                            .put("scope", "dex")
-                                            .put("type", "method_using_string")
-                                            .put("class", m.className)
-                                            .put("method", m.methodName)
-                                            .put("descriptor", m.descriptor))
-                                    }
-                                    // 按类名搜
-                                    val findClasses = org.luckypray.dexkit.query.FindClass.create()
-                                        .matcher(org.luckypray.dexkit.query.matchers.ClassMatcher.create()
-                                            .className(keyword, org.luckypray.dexkit.query.enums.StringMatchType.Contains, true))
-                                    bridge.findClass(findClasses).take(limit).forEach { c ->
-                                        dexMatches.put(JSONObject()
-                                            .put("scope", "dex")
-                                            .put("type", "class_name")
-                                            .put("class", c.name))
-                                    }
-                                }
-                                total += dexMatches.length()
-                                for (i in 0 until dexMatches.length()) {
-                                    if (results.length() >= limit) { nextCursor = "dex:$total"; break }
-                                    results.put(dexMatches.get(i))
-                                }
-                            } catch (e: Exception) { com.soreverse.mcp.core.AppLog.w("silent-catch: ${e.message}") }
-                        }
-
-                        "native" -> {
-                            // 搜索 ZIP 中所有 .so 文件名 + ELF 符号(通过 rizin)
-                            zf.entries().toList().filter { it.name.endsWith(".so") }.forEach { entry ->
-                                if (results.length() >= limit) { nextCursor = "native:${total}"; return@forEach }
-                                if (entry.name.contains(keyword, ignoreCase = true)) {
-                                    results.put(JSONObject()
-                                        .put("scope", "native")
-                                        .put("type", "so_file")
-                                        .put("name", entry.name)
-                                        .put("size", entry.size))
-                                    total++
-                                }
-                            }
-                        }
-
-                        "resource" -> {
-                            // 搜索资源文件名
-                            zf.entries().toList()
-                                .filter { it.name.startsWith("res/") || it.name.startsWith("assets/") }
-                                .filter { it.name.contains(keyword, ignoreCase = true) }
-                                .take(limit)
-                                .forEach { entry ->
-                                    results.put(JSONObject()
-                                        .put("scope", "resource")
-                                        .put("type", "resource_file")
-                                        .put("name", entry.name)
-                                        .put("size", entry.size))
-                                    total++
-                                }
-                        }
-
-                        "zip" -> {
-                            // 搜索所有 ZIP 条目名
-                            zf.entries().toList()
-                                .filter { it.name.contains(keyword, ignoreCase = true) }
-                                .drop(cursorIdx)
-                                .take(limit - results.length())
-                                .forEach { entry ->
-                                    results.put(JSONObject()
-                                        .put("scope", "zip")
-                                        .put("type", "zip_entry")
-                                        .put("name", entry.name)
-                                        .put("size", entry.size)
-                                        .put("compressedSize", entry.compressedSize))
-                                    total++
-                                }
-                        }
-                    }
+                    // 整个 scope 消费完，接着下一个
                 }
             }
 
@@ -335,12 +291,46 @@ object NativePatchTools {
                 .put("action", "taffy_apk_unified_search")
                 .put("keyword", keyword)
                 .put("scope", scope)
-                .put("total", total)
+                // total 保留兼容，语义改为「本页返回条数」；真实翻页状态看 hasMore/nextCursor
+                .put("total", scanned)
                 .put("returned", results.length())
                 .put("hasMore", nextCursor != null)
                 .put("nextCursor", nextCursor ?: JSONObject.NULL)
+                .put("cursorFormat", "scope:offset")
                 .put("results", results))
         }
+    }
+
+    /** DexKit 搜索：类名 + 使用该字符串的方法。cap 用于分页判定（会多取一条）。 */
+    private fun dexMatches(file: File, keyword: String, cap: Int): List<JSONObject> {
+        val out = ArrayList<JSONObject>(cap.coerceAtMost(256))
+        runCatching {
+            org.luckypray.dexkit.DexKitBridge.create(file.absolutePath).use { bridge ->
+                val findMethods = org.luckypray.dexkit.query.FindMethod.create()
+                    .matcher(
+                        org.luckypray.dexkit.query.matchers.MethodMatcher.create()
+                            .usingStrings(
+                                listOf(keyword),
+                                org.luckypray.dexkit.query.enums.StringMatchType.Contains, true,
+                            )
+                    )
+                bridge.findMethod(findMethods).take(cap).forEach { m ->
+                    out += JSONObject().put("scope", "dex").put("type", "method_using_string")
+                        .put("class", m.className).put("method", m.methodName).put("descriptor", m.descriptor)
+                }
+                if (out.size < cap) {
+                    val findClasses = org.luckypray.dexkit.query.FindClass.create()
+                        .matcher(
+                            org.luckypray.dexkit.query.matchers.ClassMatcher.create()
+                                .className(keyword, org.luckypray.dexkit.query.enums.StringMatchType.Contains, true)
+                        )
+                    bridge.findClass(findClasses).take(cap - out.size).forEach { c ->
+                        out += JSONObject().put("scope", "dex").put("type", "class_name").put("class", c.name)
+                    }
+                }
+            }
+        }.onFailure { com.soreverse.mcp.core.AppLog.w("unified_search dex failed: ${it.message}") }
+        return out
     }
 
     val ALL = listOf(nativePatchInstructions, nativePatchString, apkUnifiedSearch)

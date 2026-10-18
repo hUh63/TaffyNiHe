@@ -27,6 +27,18 @@ object EngineProvider {
         }
     }
 
+    /**
+     * 释放引擎与二进制引擎持有的进程级资源，并把单例置空（下次 get 会重建）。
+     * 应用真正退出时调用，避免 SO 副本、模拟器会话、Frida 会话与 SQLite 句柄滞留。
+     */
+    fun close(context: Context) {
+        synchronized(this) {
+            runCatching { engine?.close() }.onFailure { AppLog.w("Failed to close engine: ${it.message}") }
+            engine = null
+            binaryEngine = null
+        }
+    }
+
     fun restoreWorkDirectory(context: Context) {
         SettingsStore(context.applicationContext).treeUri?.let { uri ->
             runCatching { get(context).setWorkDirectory(uri) }

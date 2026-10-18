@@ -25,8 +25,24 @@ internal class PageStore {
      */
     private val lock = Any()
     private val maxPages = 64
+    /**
+     * 所有缓存页实际持有的 item 引用数上限。
+     * [maxPages] 只限页数，64 页各自持有一份大列表时仍会驻留几十万条 JSON；
+     * 这里按「不同列表实例」的真实条数再兜一层。
+     */
+    private val maxItems = 20_000
     private val pages = object : LinkedHashMap<String, PageState>(16, 0.75f, false) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PageState>?): Boolean = size > maxPages
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PageState>?): Boolean {
+            if (size > maxPages) return true
+            // items 在多页间是共享引用，按实例去重后才等于真实驻留量
+            val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<List<JSONObject>, Boolean>())
+            var total = 0
+            for (v in values) {
+                if (seen.add(v.items)) total += v.items.size
+                if (total > maxItems) return true
+            }
+            return false
+        }
     }
 
     fun first(field: String, items: List<JSONObject>, limit: Int): PageSlice = synchronized(lock) {

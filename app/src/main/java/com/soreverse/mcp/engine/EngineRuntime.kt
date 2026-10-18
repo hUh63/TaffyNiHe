@@ -33,6 +33,27 @@ internal class EngineRuntime(internal val context: Context) {
     internal val MAX_WORKSPACES = 16
     internal val MAX_WORKSPACE_BYTES = 96L * 1024 * 1024
 
+    /**
+     * 释放引擎持有的全部进程级资源：模拟器会话、工作区字节、Frida 会话、分页缓存、
+     * 搜索缓存与工作目录的 SQLite 句柄。进程退出或需要彻底重置时调用。
+     */
+    internal fun close() {
+        runCatching { emulatorSessions.values.forEach { s -> s.live?.let { live -> unidbg.closeSession(live) } } }
+        emulatorSessions.clear()
+        runCatching { frida.closeAll() }.onFailure { AppLog.w("Failed to close frida sessions: ${it.message}") }
+        workspaces.clear()
+        workspaceBySourceKey.clear()
+        sourceSummaryCache.clear()
+        sources = emptyList()
+        sourceFingerprint = emptyList()
+        searchCache.clear()
+        pageStore.clear()
+        runCatching { workDir?.close() }
+        workDir = null
+        workDirUri = null
+        AppLog.i("EngineRuntime closed (all sessions and caches released)")
+    }
+
     internal fun guarded(block: () -> JSONObject): JSONObject = try {
         block()
     } catch (error: CancellationException) {

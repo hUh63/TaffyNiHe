@@ -508,7 +508,20 @@ object FullBackup {
                     // 不会把用户原有文件截成半截。
                     val tmp = File.createTempFile("restore_", ".tmp", dest.parentFile)
                     try {
-                        FileOutputStream(tmp).use { out -> zis.copyTo(out, COPY_BUFFER) }
+                        // 上限按 zip 条目声明大小放宽 1 倍：畸形备份包（解压炸弹）不能写满磁盘，
+                        // 而回滚本身也需要空间。
+                        val ceiling = if (e.size > 0) e.size * 2 + 1_000_000L else 512L * 1024 * 1024
+                        FileOutputStream(tmp).use { out ->
+                            val buf = ByteArray(COPY_BUFFER)
+                            var written = 0L
+                            while (true) {
+                                val n = zis.read(buf)
+                                if (n < 0) break
+                                written += n
+                                if (written > ceiling) error("entry too large (possible zip bomb): $name")
+                                out.write(buf, 0, n)
+                            }
+                        }
                         ZipRepack.replaceAtomically(tmp, dest)
                     } finally {
                         runCatching { tmp.delete() }

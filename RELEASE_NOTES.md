@@ -1,3 +1,36 @@
+# TaffyNiHe v1.3.112（pdg 单一 Rizin · 门禁不再闪退 · 转储环境检测）
+
+## 一、pdg 伪 C 的真正修复
+
+上一轮查到「APK 里没有 libcore_ghidra.so」，核实后是另一回事：这个 .so 一直在包内，
+问题在于它和宿主用的是**两份 rizin**。
+
+`tools/build-rz-ghidra-android.sh` 把共享 Rizin SDK 装到 `rizin-sdk/<abi>`，
+而 `CMakeLists.txt` 找的是 `rizin-sdk/<abi>-wsl`（本地 WSL 流程留下的命名）。路径对不上，
+`librz_native.so` 就一直走静态归档分支：宿主里是一份静态编译的 rizin，插件链接的却是动态
+`librz_*.so`，同一个进程里存在两套 RzCore 与全局状态。pdg 在这种结构下只会崩溃或给出错误结果。
+
+- `CMakeLists` 改为优先 `rizin-sdk/<abi>`，回退 `<abi>-wsl`
+- CI 增加硬门禁：`readelf -d librz_native.so` 必须出现 `librz_core.so`，否则直接 fail
+  （只验证"编译通过"发现不了这个问题，必须看动态依赖）
+
+## 二、完整性门禁不再「无提示闪退」
+
+签名不匹配时原来的行为是：弹窗 10 秒倒计时 → `exitProcess(173)`。用户没盯着屏幕，
+看到的就是应用无缘无故消失。现在门禁页常驻，两个按钮：「仍然使用」与「退出应用」，
+由用户显式决定（对齐上游 1.0.22 的做法）。所有失败原因照旧落日志与 `lastFailure`，可从弹窗查看。
+
+## 三、新增运行时 ART/DEX 转储检测
+
+上游 1.0.22 加的「ROM 级脱壳环境检测」，补进 `InjectionProbe`（设置 → Linux 环境 → 扫描注入痕迹）：
+
+- `build.prop` 中的 `arkos / fart / dumpdex / youpk / blackdex` 标识
+- 系统库目录里的转储框架 `.so`（`libfart* / libdexdump* / libyoupk*`）
+- `/proc/self/maps` 中从可写目录（`/data/local/tmp`、`/sdcard`、`/storage/emulated`）加载的 `.so`
+
+特征刻意保守：上游自己踩过坑——早期把 `gadget`、`lsposed` 这类子串放进 maps 特征表，
+正常设备也会误报，最后整段删掉。这些结果只做告知，不进完整性判定、不杀进程、不阻断服务。
+
 # TaffyNiHe v1.3.111（Token 默认关闭 · 风险显式化）
 
 上一版把 MCP 鉴权改成默认开启，实际用起来反而挡路：多数 MCP 客户端不会在 URL 里带 token，

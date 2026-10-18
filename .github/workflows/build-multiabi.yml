@@ -148,8 +148,9 @@ jobs:
           # 门禁：librz_native.so 必须动态依赖 librz_core.so（共享 SDK）。
           # 一旦退回静态链接，进程里会同时存在两份 rizin（宿主静态 + libcore_ghidra.so 动态），
           # pdg 的伪 C 要么崩溃要么给出错误结果，而 CI 只看编译成功是发现不了的。
-          if command -v llvm-readelf >/dev/null 2>&1; then
-            if ! llvm-readelf -d "app/src/main/jniLibs/${{ matrix.abi }}/librz_native.so" | grep -q "librz_core.so"; then
+          READELF="$(command -v readelf || command -v llvm-readelf || true)"
+          if [ -n "$READELF" ]; then
+            if ! "$READELF" -d "app/src/main/jniLibs/${{ matrix.abi }}/librz_native.so" | grep -q "librz_core.so"; then
               echo "::error::librz_native.so 未链接共享 Rizin SDK（DT_NEEDED 里没有 librz_core.so）"
               exit 1
             fi

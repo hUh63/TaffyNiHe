@@ -86,6 +86,7 @@ internal fun SettingsGitPage(t: UiText) {
     fun gitRun(script: String, timeoutSec: Long = 90, onDone: (LinuxRootfs.ExecResult) -> Unit) {
         running = true
         scope.launch {
+            try {
             val r = withContext(Dispatchers.IO) {
                 val ws = repoPath.trim()
                 val binds = if (ws.isNotBlank()) listOf(ws to "/mnt/ws") else emptyList()
@@ -101,8 +102,15 @@ internal fun SettingsGitPage(t: UiText) {
                     timeoutSec, binds,
                 )
             }
-            running = false
             if (r == null) appendOut("[通道不可用: 请先在「Linux 环境」解压 $distro]") else onDone(r)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                appendOut("[执行失败] ${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                // 通道异常/页面被销毁时如果不复位，Git 页所有按钮会永久禁用
+                running = false
+            }
         }
     }
 

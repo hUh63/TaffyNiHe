@@ -56,6 +56,9 @@ class ToolPagesState {
     var cfgVisible by mutableStateOf(false)
     /** 最近一次 CFG 查询目标（函数名/地址），用于画布标题。 */
     var cfgTarget by mutableStateOf("")
+    /** 当前 CFG 的请求键（"workspaceId|target"）与请求令牌：防止旧请求晚到覆盖新目标的图。 */
+    var cfgKey by mutableStateOf("")
+    var cfgReqToken by mutableStateOf("")
 
     // ---- 回编页 ----
     var rebuildCheck by mutableStateOf("")
@@ -189,6 +192,24 @@ class ToolPagesState {
         pseudoKey = ""
         cfgJson = ""
         cfgTarget = ""
+        cfgKey = ""
+        cfgReqToken = ""
+        sigCache = emptyMap()
+        sigRestoreWs = ""
+        sigRestoreDone = 0
+        sigRestoreTotal = 0
+    }
+
+    /**
+     * 打开新文件后清掉所有"属于上一个文件"的分析状态。
+     * 旧实现只换 workspaceId：选中的函数名、CFG、签名缓存全部残留，新文件里遇到同名
+     * （sub_xxxx/JNI_OnLoad）会直接显示上一个文件的控制流与签名。
+     */
+    fun resetForNewWorkspace() {
+        clearViewCaches()
+        selectedFunctionName = ""
+        selectedFunctionVa = ""
+        functionQuery = ""
     }
 
     // ---- 模拟页 (Unidbg) 状态在 UnidbgPanel 内部；此处仅共享工作区 ----

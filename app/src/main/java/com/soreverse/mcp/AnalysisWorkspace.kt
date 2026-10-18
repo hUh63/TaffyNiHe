@@ -227,6 +227,7 @@ internal suspend fun resumeTaskWorkspace(
     tools.sharedWorkspaceId = opened.optString("workspaceId")
     tools.sharedSoName = opened.optString("soFileName").ifBlank { opened.optString("fileName") }.ifBlank { task.mainName }
     tools.clearTabs()
+    tools.resetForNewWorkspace()
     state.continueTask(taskId)
     return null
 }
@@ -915,6 +916,7 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
                 val fname = tools.sharedSoName.ifBlank { fallbackName }
                 state.createTask(fname, if (fname.endsWith(".apk", true)) "apk" else "so", path, fname)
                 tools.opening = false; tools.clearTabs()
+                tools.resetForNewWorkspace()
             } else { tools.opening = false; tools.openError = r?.optString("error").orEmpty().ifBlank { if (zh) "打开失败" else "Open failed" } }
         }
     }
@@ -2624,6 +2626,10 @@ private fun loadCfg(
 ) {
     val ws = tools.sharedWorkspaceId
     if (ws.isBlank() || target.isBlank()) return
+    val key = "$ws|$target"
+    val token = java.util.UUID.randomUUID().toString()
+    tools.cfgReqToken = token
+    tools.cfgKey = key
     tools.cfgTarget = target
     tools.cfgVisible = true
     scope.launch {
@@ -2632,6 +2638,9 @@ private fun loadCfg(
         val r = withContext(Dispatchers.IO) {
             runCatching { EngineProvider.get(context).rzCfg(ws, "", target) }.getOrNull()
         }
+        // 只有最新的请求能回写：连点两个函数时 A 的请求可能晚于 B 完成，
+        // 旧实现会把 A 的图写进 B 的页面，而且"是否需要重取"的判定还会因此成立而不再自愈。
+        if (tools.cfgReqToken != token) return@launch
         tools.cfgLoading = false
         tools.cfgJson = r?.toString()
             ?: errJson(if (zh) "CFG 查询失败：引擎无响应" else "CFG query failed: engine did not respond")
@@ -5762,7 +5771,9 @@ private fun CfgView(
     // 否则会沿用上一位目标留下的 CFG（典型症状：函数详情 0x16c8 的控制流却显示别的块 loc_d30）。
     LaunchedEffect(ws, target, tools.reloadTick) {
         if (ws.isBlank() || target.isBlank()) return@LaunchedEffect
-        val same = tools.cfgTarget == target && tools.cfgJson.isNotBlank() && errMessageOf(tools.cfgJson).isBlank()
+        // 判定必须带 workspaceId：不同 SO 里同名同址函数（sub_xxxx/JNI_OnLoad）会命中
+        // 上一个文件的 CFG，且之后不会自愈。
+        val same = tools.cfgKey == "$ws|$target" && tools.cfgJson.isNotBlank() && errMessageOf(tools.cfgJson).isBlank()
         if (!same) loadCfg(context, tools, zh, scope, target)
     }
     // 块级指令（pdfj）：画布「汇编块」模式要用它，控制流「节点列表」的「N 条指令」也要用它

@@ -80,9 +80,16 @@ internal fun SettingsLinuxPage(t: UiText) {
         if (busy != null) return
         busy = tag
         scope.launch {
-            withContext(Dispatchers.IO) { block() }
-            busy = null
-            refreshTick++
+            try {
+                withContext(Dispatchers.IO) { block() }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                output = (output + "\n[错误] " + (e.message ?: e.javaClass.simpleName)).trim()
+            } finally {
+                busy = null
+                refreshTick++
+            }
         }
     }
 
@@ -92,10 +99,17 @@ internal fun SettingsLinuxPage(t: UiText) {
         execInfo = if (zh) "执行中…" else "Running…"
         busy = "exec"
         scope.launch {
-            val r = withContext(Dispatchers.IO) { LinuxRootfs.exec(context, distro, script, timeoutSec = 60) }
-            output = r?.output ?: (if (zh) "执行失败（$distro 未就绪，先安装）" else "failed ($distro not ready)")
-            execInfo = r?.let { "exit=${it.code}  channel=${it.channel}" } ?: ""
-            busy = null
+            try {
+                val r = withContext(Dispatchers.IO) { LinuxRootfs.exec(context, distro, script, timeoutSec = 60) }
+                output = r?.output ?: (if (zh) "执行失败（$distro 未就绪，先安装）" else "failed ($distro not ready)")
+                execInfo = r?.let { "exit=${it.code}  channel=${it.channel}" } ?: ""
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                output = "[错误] " + (e.message ?: e.javaClass.simpleName)
+            } finally {
+                busy = null
+            }
         }
     }
 

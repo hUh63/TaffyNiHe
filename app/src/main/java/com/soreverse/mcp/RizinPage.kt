@@ -171,11 +171,20 @@ internal fun RizinPage(t: UiText) {
         scope.launch {
             busy = true
             busyMsg = "rz $c"
-            cmdOutput = withContext(Dispatchers.IO) {
-                val r = engine.rzCommand(workspaceId, "", c, false)
-                r.optString("stdout", r.toString(2)).ifBlank { r.toString(2) }
+            // 引擎异常会逃到 scope 的协程里（无 handler 时直接崩进程），
+            // 即便不崩 busy 也会永久为 true、整页按钮全灰。
+            try {
+                cmdOutput = withContext(Dispatchers.IO) {
+                    val r = engine.rzCommand(workspaceId, "", c, false)
+                    r.optString("stdout", r.toString(2)).ifBlank { r.toString(2) }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                errMsg = e.message ?: e.javaClass.simpleName
+            } finally {
+                busy = false
             }
-            busy = false
         }
     }
 
@@ -184,13 +193,20 @@ internal fun RizinPage(t: UiText) {
         scope.launch {
             busy = true
             busyMsg = if (zh) "反汇编 $locator" else "Disassembling $locator"
-            val r = withContext(Dispatchers.IO) { rzDisasmOf(engine, workspaceId, locator, 500) }
-            disasmText = r.first
-            pseudoText = r.second
-            disasmTitle = r.third
-            if (r.first.isBlank() && r.third.isNotBlank() && r.third != locator) errMsg = r.third
-            tab = RzTab.Disasm
-            busy = false
+            try {
+                val r = withContext(Dispatchers.IO) { rzDisasmOf(engine, workspaceId, locator, 500) }
+                disasmText = r.first
+                pseudoText = r.second
+                disasmTitle = r.third
+                if (r.first.isBlank() && r.third.isNotBlank() && r.third != locator) errMsg = r.third
+                tab = RzTab.Disasm
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                errMsg = e.message ?: e.javaClass.simpleName
+            } finally {
+                busy = false
+            }
         }
     }
 
@@ -199,8 +215,15 @@ internal fun RizinPage(t: UiText) {
         scope.launch {
             busy = true
             busyMsg = if (zh) "提取字符串…" else "Extracting strings…"
-            strings = withContext(Dispatchers.IO) { rzStringsOf(engine, workspaceId, 1000) }
-            busy = false
+            try {
+                strings = withContext(Dispatchers.IO) { rzStringsOf(engine, workspaceId, 1000) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                errMsg = e.message ?: e.javaClass.simpleName
+            } finally {
+                busy = false
+            }
         }
     }
 

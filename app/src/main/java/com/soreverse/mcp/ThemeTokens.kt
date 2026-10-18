@@ -3,6 +3,9 @@ package com.soreverse.mcp
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -47,12 +50,25 @@ internal object AppShape {
 
 /** 文字尺寸 token：收敛原先 8~24sp 共 11 档为 6 档语义层级。 */
 internal object AppText {
-    val label = 11.sp        // 辅助标签/说明
-    val body = 12.sp         // 正文
-    val bodyStrong = 13.sp   // 强调正文/次级标题
-    val title = 15.sp        // 区块标题
-    val headline = 18.sp     // 页面标题
-    val display = 22.sp      // 数字/大标题
+    // sp 本身已经随系统字体缩放；这里再乘 App 设置里的字号系数。
+    // 用 State 承载，切换字号后所有读到 AppText 的界面才会真的重组（原来字号设置只影响 typography，
+    // 而这些显式 fontSize 的文本完全不变，界面层级会错乱）。
+    private var scaleState by mutableStateOf(1f)
+
+    var scale: Float
+        get() = scaleState
+        set(value) {
+            if (value > 0f && value != scaleState) scaleState = value
+        }
+
+    private fun scaled(base: Float) = (base * scaleState).sp
+
+    val label get() = scaled(11f)        // 辅助标签/说明
+    val body get() = scaled(12f)         // 正文
+    val bodyStrong get() = scaled(13f)   // 强调正文/次级标题
+    val title get() = scaled(15f)        // 区块标题
+    val headline get() = scaled(18f)     // 页面标题
+    val display get() = scaled(22f)      // 数字/大标题
 }
 
 internal data class UiMetrics(

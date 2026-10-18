@@ -427,6 +427,8 @@ private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeC
     }
     val metrics = remember(uiDensity, cornerStyle) { uiMetrics(uiDensity, cornerStyle) }
     val typography = remember(textScale) { scaledTypography(textScaleFactor(textScale)) }
+    // 让显式写 fontSize = AppText.xx 的文本也跟随 App 字号设置
+    SideEffect { AppText.scale = textScaleFactor(textScale) }
     val reduceMotion = when (motionMode) {
         "reduced" -> true
         "full" -> false

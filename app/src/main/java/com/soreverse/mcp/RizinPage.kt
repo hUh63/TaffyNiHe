@@ -381,7 +381,8 @@ private fun RzListTab(
                             subtitle = subtitleOf(item),
                             meta = metaOf(item),
                             onClick = if (onClick != null) ({ onClick.invoke(item) }) else null,
-                            onLongClick = if (onClick != null) ({ onClick.invoke(item) }) else null,
+                            // 长按原来绑的是同一个动作，用户以为能出上下文菜单，实际只是重复跳转
+                            onLongClick = null,
                         )
                     }
                 }

@@ -1887,8 +1887,9 @@ private fun WbTab(label: String, selected: Boolean, onClose: (() -> Unit)? = nul
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (onClose != null) {
-                IconButton(onClick = onClose, modifier = Modifier.size(22.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(11.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                // 22dp 的点击区手指基本点不中，放大到 40dp（图标仍保持小尺寸）
+                IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "close", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

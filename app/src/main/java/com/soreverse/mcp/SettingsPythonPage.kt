@@ -212,8 +212,8 @@ internal fun SettingsPythonPage(t: UiText) {
                 modifier = Modifier.weight(1f),
             )
             if (sessionActive) {
-                SecondaryActionButton(if (zh) "重启" else "Restart", { startSession() }, Modifier.width(72.dp).height(36.dp))
-                SecondaryActionButton(if (zh) "结束" else "Stop", { stopSession() }, Modifier.width(72.dp).height(36.dp))
+                SecondaryActionButton(if (zh) "重启" else "Restart", { startSession() }, Modifier.width(76.dp).height(44.dp))
+                SecondaryActionButton(if (zh) "结束" else "Stop", { stopSession() }, Modifier.width(76.dp).height(44.dp))
             }
         }
 
@@ -240,7 +240,7 @@ internal fun SettingsPythonPage(t: UiText) {
             )
             // 操作按钮行
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                PrimaryActionButton(if (zh) "运行" else "Run", { runEditor() }, Modifier.weight(1f).height(40.dp), leading = Icons.Default.PlayArrow)
+                PrimaryActionButton(if (zh) "运行" else "Run", { runEditor() }, Modifier.weight(1f).height(44.dp), leading = Icons.Default.PlayArrow)
                 IconButton(onClick = { saveScript() }, enabled = code.isNotBlank()) {
                     Icon(Icons.Default.Save, "保存", tint = MaterialTheme.colorScheme.primary)
                 }

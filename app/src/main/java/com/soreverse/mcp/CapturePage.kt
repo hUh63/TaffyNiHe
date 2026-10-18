@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,9 +105,10 @@ internal fun CapturePage(t: UiText) {
     var capturing by remember { mutableStateOf(false) }
     var captureEntries by remember { mutableStateOf<List<HttpCaptureServer.Entry>>(emptyList()) }
     var pendingClearCapture by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf("http") }
-    var listFilter by remember { mutableStateOf("") }
-    var methodFilter by remember { mutableStateOf("全部") }
+    // 抓包页的筛选条件属于"用户意图"，旋转/深色切换后不该被清空
+    var tab by rememberSaveable { mutableStateOf("http") }
+    var listFilter by rememberSaveable { mutableStateOf("") }
+    var methodFilter by rememberSaveable { mutableStateOf("全部") }
     LaunchedEffect(Unit) {
         captureServer.addListener { captureEntries = captureServer.snapshot() }
     }

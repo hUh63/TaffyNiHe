@@ -354,8 +354,10 @@ private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeC
     val context = LocalContext.current
     val settings = remember { SettingsStore(context) }
     val appScope = rememberCoroutineScope()
-    val deepService = remember { DeepAnalysisService(context.applicationContext) }
-    val updateManager = remember { GitHubUpdateManager(context.applicationContext) }
+    // App 级状态放进 ViewModel：Activity 重建（旋转/深色/字号）时不再清空分析结果与 AI 对话
+    val appViewModel = androidx.lifecycle.ViewModelProvider(context as ComponentActivity)[AppViewModel::class.java]
+    val deepService = appViewModel.deepService
+    val updateManager = appViewModel.updateManager
     var availableRelease by remember { mutableStateOf<GitHubRelease?>(null) }
     var showUpdatePrompt by remember { mutableStateOf(false) }
     // App 未声明 configChanges，屏幕旋转 / 深色切换 / 字体缩放都会重建 Activity，
@@ -381,7 +383,7 @@ private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeC
     var textScale by remember { mutableStateOf(settings.textScale) }
     var predictiveBack by remember { mutableStateOf(settings.predictiveBackEnabled) }
     var disclaimerAccepted by remember { mutableStateOf(settings.disclaimerAccepted) }
-    val analyzeState = remember { AnalyzeUiState() }
+    val analyzeState = appViewModel.analyzeState
     var pendingDeepLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
     var backProgress by remember { mutableStateOf(0f) }
     var toolCategory by remember { mutableStateOf<String?>(null) }
@@ -389,7 +391,7 @@ private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeC
     var mcpToolCategory by remember { mutableStateOf<String?>(null) }
     var showLogs by remember { mutableStateOf(false) }
     val toolState = remember { ToolPagesState() }
-    val workspaceState = remember { WorkspaceState(context.applicationContext) }
+    val workspaceState = appViewModel.workspaceState
     val t = textFor(language, context)
     val dark = when (themeMode) {
         "dark" -> true

@@ -1,4 +1,6 @@
 package com.soreverse.mcp.mcp
+import java.io.File
+
 
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.RootShell

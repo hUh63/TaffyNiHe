@@ -79,6 +79,12 @@ Java.perform(function () {
 
     private fun placeLogic(dir: File, args: JSONObject): JSONObject {
         val abi = args.str("abi", "arm64-v8a")
+        // abi 直接拼进 lib/<abi> 路径且不在 WorkspacePolicy.PATH_KEYS 里：
+        // 传 "../../.." 可在 APK 目录之外建目录并落文件
+        val validAbis = setOf("arm64-v8a", "armeabi-v7a", "armeabi", "x86", "x86_64")
+        if (abi !in validAbis) {
+            return err("INVALID_ARGUMENT", "abi 必须是 ${validAbis.joinToString()} 之一", "abi", abi)
+        }
         val gadgetSrc = args.str("gadget")
         if (gadgetSrc.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 gadget（frida-gadget.so 路径或下载直链）", "gadget", "")
         val libDir = File(dir, "lib/$abi").apply { mkdirs() }
@@ -121,13 +127,19 @@ Java.perform(function () {
         if (manifest.isFile) {
             var xml = manifest.readText()
             if (!xml.contains("extractNativeLibs")) {
+                val before = xml
                 xml = xml.replaceFirst("<application", "<application\n    android:extractNativeLibs=\"true\"")
-                manifest.writeText(xml)
-                manifestChanged = true
+                if (xml != before) {
+                    writeTextAtomically(manifest, xml)
+                    manifestChanged = true
+                }
             } else if (xml.contains("android:extractNativeLibs=\"false\"")) {
+                val before = xml
                 xml = xml.replace("android:extractNativeLibs=\"false\"", "android:extractNativeLibs=\"true\"")
-                manifest.writeText(xml)
-                manifestChanged = true
+                if (xml != before) {
+                    writeTextAtomically(manifest, xml)
+                    manifestChanged = true
+                }
             }
         }
 
@@ -229,6 +241,17 @@ Java.perform(function () {
             .put("method", lines[insertAt].trim())
             .put("injected", "System.loadLibrary(\"frida-gadget\")")
             .put("hint", "入口已注入 → taffy_apk_rebuild(build) 回编 → taffy_apk_sign 签名 → 安装即自动加载 hook"))
+    }
+
+    /** 原子写文本文件：先写同目录临时文件再改名，避免进程被杀留下半截 manifest。 */
+    private fun writeTextAtomically(target: File, text: String) {
+        val parent = target.parentFile ?: target.absoluteFile.parentFile
+        val tmp = File(parent, target.name + ".tmp")
+        tmp.writeText(text, Charsets.UTF_8)
+        if (!tmp.renameTo(target)) {
+            target.writeText(text, Charsets.UTF_8)
+            tmp.delete()
+        }
     }
 
     val ALL = listOf(fridaGadget)

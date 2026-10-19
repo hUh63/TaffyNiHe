@@ -24,6 +24,7 @@ object RootShell {
     }
 
     @Volatile private var cachedRoot: Boolean? = null
+    @Volatile private var cachedRootAt: Long = 0L
 
     /** 单次执行的输出上限（字符）：`logcat -d` / `dumpsys` 这类命令可以刷出几十 MB。 */
     private const val MAX_OUTPUT_CHARS = 4 * 1024 * 1024
@@ -65,12 +66,17 @@ object RootShell {
 
     /** 检测 root 是否可用(缓存结果)。 */
     fun isRootAvailable(): Boolean {
-        cachedRoot?.let { return it }
+        // 失败结果只缓存 30 秒：开机早期 / 授权弹窗未响应时首次检测失败，
+        // 旧实现会把它缓存整个进程生命周期，之后所有 root 操作都静默降级到 Shizuku
+        cachedRoot?.let { cached ->
+            if (cached || System.currentTimeMillis() - cachedRootAt < 30_000L) return cached
+        }
         val ok = runCatching {
             val r = exec("id", timeoutSec = 8)
             r.success && r.stdout.contains("uid=0")
         }.getOrDefault(false)
         cachedRoot = ok
+        cachedRootAt = System.currentTimeMillis()
         return ok
     }
 
@@ -110,7 +116,13 @@ object RootShell {
             }
             outThread.join(2000); errThread.join(2000)
             val tail = if (out.truncated || err.truncated) "\n[output truncated at ${MAX_OUTPUT_CHARS} chars]" else ""
-            Result(process.exitValue(), (out.text().trim() + tail).trim(), (err.text().trim() + tail).trim())
+            val code = process.exitValue()
+            val errText = err.text().trim()
+            // root 被撤销 / su 失效：立刻让缓存失效，别把错误状态固化成整进程
+            if (code != 0 && (errText.contains("Permission denied") || errText.contains("not found"))) {
+                invalidateRootCache()
+            }
+            Result(code, (out.text().trim() + tail).trim(), (errText + tail).trim())
         }.getOrElse { e ->
             Result(-1, "", e.message ?: e.javaClass.simpleName)
         }

@@ -60,7 +60,25 @@ class ShizukuUserService() : IShizukuService.Stub() {
         return if (trimmed.startsWith("sh -c ")) {
             var script = trimmed.removePrefix("sh -c ").trim()
             if (script.length >= 2 && script.startsWith("\"") && script.endsWith("\"")) {
-                script = script.substring(1, script.length - 1)
+                // quoteArg 做过 \\ / \$ / \" / \` 转义；只剥外层引号会让 sh 看到字面的反斜杠，
+                // 变量不展开、退出码判断走错（LinuxRootfs 的 rc=\$? 就是这样坏掉的）
+                val inner = script.substring(1, script.length - 1)
+                val sb = StringBuilder(inner.length)
+                var i = 0
+                while (i < inner.length) {
+                    val ch = inner[i]
+                    if (ch == '\\' && i + 1 < inner.length) {
+                        val next = inner[i + 1]
+                        if (next == '\\' || next == '$' || next == '"' || next == '`') {
+                            sb.append(next)
+                            i += 2
+                            continue
+                        }
+                    }
+                    sb.append(ch)
+                    i++
+                }
+                script = sb.toString()
             }
             Runtime.getRuntime().exec(arrayOf("sh", "-c", script))
         } else {

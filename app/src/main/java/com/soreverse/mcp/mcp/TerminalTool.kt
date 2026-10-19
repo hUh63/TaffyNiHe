@@ -113,10 +113,22 @@ object TerminalTool {
             val builtinPy = com.soreverse.mcp.core.PythonRuntime.pythonPath(ctx.context)
             // 内置 Python 优先（零依赖，无需 root）
             if (wantPython && builtinPy != null) {
-                val pyResult = if (script.isNotBlank()) {
-                    com.soreverse.mcp.core.PythonRuntime.run(ctx.context, script, timeoutSec = timeout.toLong())
-                } else {
-                    com.soreverse.mcp.core.PythonRuntime.run(ctx.context, "import subprocess,sys\nsys.exit(subprocess.call([\"sh\",\"-c\",\"$command\"]))", timeoutSec = timeout.toLong())
+                // command 里出现双引号/反斜杠会把 Python 源码本身弄坏（语法错误），
+                // 统一落临时文件后由 sh 执行文件，不再做任何内插。
+                val cmdFile = File(ctx.context.cacheDir, "taffy_cmd_${System.currentTimeMillis()}.sh")
+                val pyResult = try {
+                    if (script.isNotBlank()) {
+                        com.soreverse.mcp.core.PythonRuntime.run(ctx.context, script, timeoutSec = timeout.toLong())
+                    } else {
+                        cmdFile.writeText(command, Charsets.UTF_8)
+                        com.soreverse.mcp.core.PythonRuntime.run(
+                            ctx.context,
+                            "import subprocess,sys\nsys.exit(subprocess.call(['sh','" + cmdFile.absolutePath.replace("'", "") + "']))",
+                            timeoutSec = timeout.toLong(),
+                        )
+                    }
+                } finally {
+                    runCatching { cmdFile.delete() }
                 }
                 return ok(JSONObject()
                     .put("action", "run")
@@ -159,7 +171,14 @@ object TerminalTool {
                 val writeR = PermissionManager.exec("echo $b64 | base64 -d > $tmp && chmod 755 $tmp 2>/dev/null; env ${termuxEnv()} \"$runtimeBin\" $tmp 2>&1; rm -f $tmp", timeoutSec = timeout.toLong())
                 writeR
             } else {
-                PermissionManager.exec("env ${termuxEnv()} \"$runtimeBin\" -c \"$command\" 2>&1", timeoutSec = timeout.toLong())
+                // command 里的双引号会提前闭合 -c "..."，$变量/反引号还会被本层 shell 展开。
+                // 统一 base64 → 临时文件 → sh 执行文件；command 本来就是 shell 命令，不再套 runtime。
+                val tmp = "/data/local/tmp/taffy_cmd_${System.currentTimeMillis()}.sh"
+                val b64 = java.util.Base64.getEncoder().encodeToString(command.toByteArray(Charsets.UTF_8))
+                PermissionManager.exec(
+                    "echo $b64 | base64 -d > $tmp && chmod 700 $tmp; env ${termuxEnv()} \"$TERMUX_PREFIX/bin/sh\" $tmp 2>&1; rm -f $tmp",
+                    timeoutSec = timeout.toLong(),
+                )
             }
 
             val truncated = exec.stdout.length > 20000

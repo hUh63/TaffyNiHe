@@ -334,13 +334,30 @@ object DeviceTools {
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             val pkg = args.str("packageName")
             if (pkg.isBlank()) return err("INVALID_ARGUMENT", "packageName 不能为空", "packageName", pkg)
+            // pkg 会拼进 shell 命令：只允许包名字符
+            if (!pkg.matches(Regex("^[A-Za-z0-9_.]{1,200}$"))) {
+                return err("INVALID_ARGUMENT", "packageName 含非法字符", "packageName", pkg)
+            }
             return try {
-                val am = ctx.context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                am.killBackgroundProcesses(pkg)
-                ok(JSONObject()
-                    .put("packageName", pkg)
-                    .put("mode", "app")
-                    .put("note", "已尝试 killBackgroundProcesses（需系统权限才能真正强制停止）"))
+                val privileged = com.soreverse.mcp.core.PermissionManager.isRootAvailable() ||
+                    com.soreverse.mcp.core.PermissionManager.isShizukuGranted()
+                if (privileged) {
+                    // 有特权就真 force-stop：killBackgroundProcesses 只杀后台进程，
+                    // 旧实现却一律报成功，"停应用再抓包/再启动"的流程会假成功
+                    val r = com.soreverse.mcp.core.PermissionManager.exec("am force-stop $pkg", timeoutSec = 10)
+                    ok(JSONObject()
+                        .put("packageName", pkg)
+                        .put("mode", "force-stop")
+                        .put("exitCode", r.code)
+                        .put("output", r.stdout.take(300)))
+                } else {
+                    val am = ctx.context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    am.killBackgroundProcesses(pkg)
+                    ok(JSONObject()
+                        .put("packageName", pkg)
+                        .put("mode", "best-effort")
+                        .put("note", "无 root/Shizuku：只调用了 killBackgroundProcesses（仅对后台进程生效，可能无效）"))
+                }
             } catch (e: Exception) {
                 err("IO_ERROR", "操作失败: ${e.message}", "packageName", pkg)
             }
@@ -616,10 +633,12 @@ object DeviceTools {
                 conn.instanceFollowRedirects = true
                 val file = File(path)
                 file.parentFile?.mkdirs()
+                // 先写 .part：网络中断时不会把半截文件留在目标路径（调用方会当成完整 APK/SO 继续处理）
+                val part = File(file.absolutePath + ".part")
                 var total = 0L
                 val maxDownload = 512L * 1024 * 1024
                 conn.inputStream.use { input ->
-                    file.outputStream().use { out ->
+                    part.outputStream().use { out ->
                         val buf = ByteArray(8192)
                         while (true) {
                             val n = input.read(buf); if (n < 0) break
@@ -627,7 +646,7 @@ object DeviceTools {
                             // 安全加固：下载磁盘配额，防写满存储
                             if (total > maxDownload) {
                                 out.close()
-                                file.delete()
+                                part.delete()
                                 return err("DOWNLOAD_TOO_LARGE", "下载超过 512MB 配额已中止", "url", urlStr)
                             }
                             out.write(buf, 0, n)
@@ -635,12 +654,18 @@ object DeviceTools {
                     }
                 }
                 conn.disconnect()
+                if (!part.renameTo(file)) {
+                    part.copyTo(file, overwrite = true)
+                    part.delete()
+                }
                 ok(JSONObject()
                     .put("url", urlStr)
                     .put("path", path)
                     .put("bytesDownloaded", total)
                     .put("fileSize", file.length()))
             } catch (e: Exception) {
+                // 失败必须删掉半成品，否则目标路径上会留一个被截断的文件
+                runCatching { File(path + ".part").delete() }
                 err("NETWORK_ERROR", "下载失败: ${e.message}", "url", urlStr)
             }
         }

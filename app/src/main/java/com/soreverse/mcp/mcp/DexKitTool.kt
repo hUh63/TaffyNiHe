@@ -234,11 +234,11 @@ object DexKitTool {
                 .put("className", className)
                 .put("method", method)
                 .put("stringCount", strings.size)
-                .put("strings", JSONArray(strings.take(limit * 2)))
+                .put("strings", JSONArray(strings.take(limit)))
                 .put("constantCount", constants.size)
-                .put("constants", JSONArray(constants.take(limit * 2)))
+                .put("constants", JSONArray(constants.take(limit)))
                 .put("callCount", calls.size)
-                .put("calls", JSONArray(calls.take(limit * 2)))
+                .put("calls", JSONArray(calls.take(limit)))
                 .put("hint", "method_strings 列出方法引用的字符串/常量/调用, 配合 taffy_smali_edit action=patch_instruction 精准改指令"))
         }
 

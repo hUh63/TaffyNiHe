@@ -1,3 +1,88 @@
+# TaffyNiHe v1.3.116（第五轮深挖 · 连上一轮留下的四条一起补完）
+
+这一轮先补上一轮明确留下的 4 条已知风险，再往下查了三个没审过的域（多智能体 / blutter
+隔离进程 / 权限与 ELF 回退解析），共修 30 处。其中 2 处会让整个功能在 Android 8–12 上
+直接崩，1 处让「续跑」100% 失效。
+
+## 一、上一轮留下的 4 条（已全部修掉）
+
+- **heavy 许可会被永不返回的 native 调用永久锁死**：`future.cancel` 打不断 native，
+  许可由任务自身在「真正结束」时释放，一旦真的阻塞就再也回不来（所有重工具恒
+  `SERVER_BUSY`，只能重启）。现在改为进程级 `HeavyGate`：每次获取登记租约，看门狗每 15s
+  回收超期槽位并计入 `leaked`；任务之后若真的返回，release 不会重复释放（许可不会凭空变多）。
+- **脚本绕过并发限制**：`taffy_script` 里的工具调用原来直接调 handler，与外部调用并发
+  操作同一份引擎状态。现在与服务端共用同一个 `HeavyGate`（等不到就返回 `SERVER_BUSY`）。
+- **备份恢复不清空目标目录**：只做覆盖写会让「备份里已删除的文件」在恢复后复活，中断时目标
+  目录还会停在「新旧混合」状态。现在恢复前把受影响的目录整体挪到 `<name>.restore-old-*`，
+  成功丢弃、取消/失败还原（回滚失败时保留原目录并在错误里给出路径）。
+- **抓包 stop 不关已建立连接**：`ServerSocket` 关了但连接线程还在转发/记录。现在维护
+  `activeSockets`，停止时逐个关闭。
+
+## 二、Android 8–12 上整条提权通道直接崩（新发现，最严重）
+
+- `InputStream.readNBytes(int)` 是 Java 9 API，Android **直到 API 33** 才提供，而 minSdk 26。
+  代码里有 7 处调用（Shizuku 执行、LinuxRootfs、内置 Python、解包魔数、抓包输出、字节补丁
+  读取）—— 在 Android 8–12 上抛 `NoSuchMethodError`（是 `Error`，`catch (Exception)` 抓不住），
+  等于无 root 提权、解包、Python、抓包一起失效。统一改为 `StreamCompat.readCapped`，
+  Shizuku 的 catch 也改为 `Throwable`。
+
+## 三、多智能体编排（5 处，含「续跑永远失败」）
+
+- **两套 runId**：返回给客户端的 id 与落盘目录的 id 是两个不同来源 → `resume` 必然
+  `NOT_FOUND`，「继续上次」100% 不可用；`list` 里同一次运行还会出现两条。现在只有一个 id 来源。
+- **取消/进程被杀时整次编排记录丢失**：`run.json` 只在正常结束时写，取消后已跑完的节点结论
+  全丢、历史里也看不到。现在取消也落盘（`status=cancelled`，已完成节点可续跑）。
+- **`run.json` 非原子写**：写到一半被杀会留下截断 JSON，`loadRun` 静默返回 null。改 tmp+rename。
+- **事件并发写同一个 `JSONObject`**：并行节点同时追加正文/工具列表会互相覆盖，`status()`
+  并发序列化还可能抛 `ConcurrentModificationException`。读写共用同一把锁。
+- **默认预算 5 < 计划 6 个节点**：汇总（report）节点必然 `skipped_budget`，「交叉印证 + 结论」
+  一次都跑不到。预算改为至少覆盖全部节点。
+- 终态快照会把整份节点正文（几 MB～几十 MB）长期留在内存，现在收尾丢掉 `record`、10 分钟后清理。
+
+## 四、解析与权限
+
+- **ELF 回退解析没有边界检查**：LIEF 解析失败（畸形/加固 SO）才会走这里，而它每个
+  `bytes[o]` 都无边界、重定位循环也不判越界 → 崩溃；伪造 `entsize=1,size=0x7FFFFFFF`
+  还能让循环跑 21 亿次（CPU 占满、不抛异常）。现在访问器全部有界返回、循环数按文件大小与
+  100 万条双重封顶、`sectionBytes` 的 `size.toInt()` 负数也做了保护。
+- **Shizuku 剥引号不反转义**：`quoteArg` 转义过的 `\$`/`\"` 被原样交给 sh，变量不展开、
+  退出码判断走错（LinuxRootfs 的清理分支因此失效）。现在剥引号后按 `\ \$ \" \`` 还原。
+- **root 判定失败会缓存整个进程生命周期**：开机早期首次 `id` 超时后，之后所有 root 操作
+  都静默降级到 Shizuku。失败结果现在只缓存 30s，且 `exec` 命中 `Permission denied` 时立刻失效。
+- **`/data/local/tmp` 无条件进白名单**：无隧道/无 root 时它是全局可写投放点。现在只在开隧道
+  或有 root 时放行；应用私有目录根统一 `canonicalPath`（`/data/data` ↔ `/data/user/0` 不再误拒）。
+
+## 五、工具层
+
+- **logcat 网关完全不可用**：schema 里 `action` 被 put 两次（枚举被覆盖），且 `action=capture`
+  被原样透传给子处理器（必然 `UNKNOWN_ACTION`）。现在拆成 `op` / `captureAction`，也接受
+  直接子动作。
+- **logcat / root 输出无上限**：`logcat -d *:V` 能产出几十 MB，raw + 行列表 + 结果同时驻留
+  → OOM。root 通道改为有界 sink（4MB 后继续排空但丢弃，标记 truncated），logcat 侧再兜一层。
+- **后台录制文件无限增长**：启动时清理更早的会话文件（保留最近 3 个）。
+- **终端命令被双层解释**：`-c "$command"` 里的引号会提前闭合、`$变量`/反引号被本层 shell
+  展开；内置 Python 分支还会因命令里的引号直接语法错误。统一 base64 → 临时文件 → 执行文件。
+- **frida 注入的 `abi` 未校验**：直接拼进 `lib/<abi>`，传 `../..` 可在 APK 目录外建目录落文件。
+  加 ABI 白名单；manifest 改写改为「命中校验 + 原子写」（原来直写、替换失败也报成功）。
+- **`taffy_web_download` 中途失败留半截文件**：改为 `.part` + rename，失败删除。
+- **`taffy_stop_app` 恒报成功**：无 root 时 `killBackgroundProcesses` 实际无效却报成功。
+  现在有特权走 `am force-stop`，否则标 `best-effort` 并说明。
+- **`taffy_dex_search` 的 limit 与文档不符**（内部 `limit*2`）→ 按文档返回。
+- **blutter 取消不回调**：排队中被取消的任务体永不执行，调用方永远停在 running、10% 不动。
+  现在取消/早退都主动回调并 `stopSelf`。
+
+## 六、界面与安全
+
+- **Markdown 链接未校验 scheme**：模型输出 `intent://` / `file://` 时点一下直接崩 App
+  （`ActivityNotFoundException` / `FileUriExposedException`）。只放行 http/https/mailto。
+- **A2UI chip 是空点击**：有涟漪、有可点击语义，点下去毫无反应；列表项也没 key。已回传
+  `onAction("chip", …)` 并补稳定 key。
+- **完整性门禁的 fail-open 死分支**：注释写 fail-closed，代码是 `trusted = true`。改为拒绝。
+- **签名密钥库口令明文存 SharedPreferences**：与 accessToken 同等级敏感，改走 `SecretStore`
+  加密并迁移旧值。
+- **native 探针 `matches()` 缺 loaded 守卫**：`.so` 加载失败时直接调 JNI 会抛
+  `UnsatisfiedLinkError`（Error，`catch (Exception)` 拦不住）。改走带守卫的入口。
+
 # TaffyNiHe v1.3.115（第四轮深挖 · 会毁文件的那一类）
 
 这一轮换了审法：把「写回用户文件」和「跨线程共享状态」两条路径逐行重读。查出 26 处真缺陷，

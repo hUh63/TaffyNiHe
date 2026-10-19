@@ -298,8 +298,12 @@ private fun inlineHtml(element: Element) = buildAnnotatedString {
                 ) { node.childNodes().forEach(::appendNode) }
                 "a" -> {
                     val href = node.attr("href")
-                    if (href.isNotBlank()) {
-                        withLink(LinkAnnotation.Url(href)) {
+                    // 只放行 http/https/mailto：模型输出里的 intent:// 或 file:// 会让 Compose 默认
+                    // UriHandler 直接 startActivity 抛 ActivityNotFoundException / FileUriExposedException
+                    val scheme = href.substringBefore(':').lowercase()
+                    val safeHref = href.takeIf { scheme in setOf("http", "https", "mailto") }
+                    if (!safeHref.isNullOrBlank()) {
+                        withLink(LinkAnnotation.Url(safeHref)) {
                             withStyle(
                                 SpanStyle(
                                     color = Color(0xFF007AFF),

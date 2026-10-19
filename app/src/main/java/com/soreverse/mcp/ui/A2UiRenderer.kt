@@ -230,7 +230,8 @@ internal fun SurfaceNodeView(node: SurfaceNode, onAction: (String, JSONObject) -
             ) {
                 for (i in 0 until items.length().coerceAtMost(50)) {
                     AssistChip(
-                        onClick = { },
+                        // 旧实现是空实现：chip 有涟漪、有可点击语义，点下去毫无反应
+                        onClick = { onAction("chip", JSONObject().put("value", cellText(items, i))) },
                         label = {
                             Text(
                                 text = cellText(items, i),
@@ -306,7 +307,7 @@ internal fun SurfaceNodeView(node: SurfaceNode, onAction: (String, JSONObject) -
             }
             if (rows.isNotEmpty()) {
                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = LIST_HEIGHT_MAX_DP.dp)) {
-                    items(rows.size) { index ->
+                    items(rows.size, key = { index -> rows[index].txt("title") + "#" + index }) { index ->
                         val item = rows[index]
                         val subtitle = item.txt("subtitle")
                         val meta = item.txt("meta")

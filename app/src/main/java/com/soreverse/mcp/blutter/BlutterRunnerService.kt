@@ -21,6 +21,7 @@ class BlutterRunnerService : Service() {
         override fun run(jobId: String, libraryName: String, libapp: ParcelFileDescriptor, libflutter: ParcelFileDescriptor, result: ParcelFileDescriptor, optionsJson: String, callback: IBlutterRunnerCallback) {
             val token = nextToken.getAndIncrement()
             val job = RunnerJob(token, libapp, libflutter, result)
+            job.callback = callback
             jobs[jobId] = job
             val future = executor.submit {
                 var exitCode = -1
@@ -29,8 +30,10 @@ class BlutterRunnerService : Service() {
                 try {
                     job.started.set(true)
                     if (job.cancelled.get()) {
-                        errorCode = "CANCELLED"
-                        message = "Job was cancelled before execution"
+                        // 被取消的任务体提前退出时也必须回调，否则调用方永远停在 running
+                        job.closeDescriptors()
+                        runCatching { callback.onCompleted(jobId, -1, "CANCELLED", "Job was cancelled before execution", 0L, "") }
+                        stopSelf()
                         return@submit
                     }
                     callback.onProgress(jobId, "running", 10)
@@ -55,6 +58,12 @@ class BlutterRunnerService : Service() {
             job.cancelled.set(true)
             if (!job.started.get() && job.future?.cancel(false) == true) {
                 job.closeDescriptors()
+                // 排队中的 FutureTask 被取消后任务体永远不会执行：这里主动回调，
+                // 否则调用方收不到任何完成通知（UI 卡在 running，10% 不动）
+                runCatching {
+                    job.callback?.onCompleted(jobId, -1, "CANCELLED", "Job was cancelled before execution", 0L, "")
+                }
+                stopSelf()
             } else {
                 NativeBlutterBridge.cancel(job.token)
             }
@@ -85,7 +94,8 @@ class BlutterRunnerService : Service() {
     ) {
         val cancelled = AtomicBoolean(false)
         val started = AtomicBoolean(false)
-        var future: Future<*>? = null
+        @Volatile var future: Future<*>? = null
+        @Volatile var callback: IBlutterRunnerCallback? = null
         private val closed = AtomicBoolean(false)
 
         fun closeDescriptors() {

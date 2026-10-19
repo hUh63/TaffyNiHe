@@ -240,7 +240,7 @@ object IntegrityGuard {
             } else if (expected.isBlank()) {
                 // 对齐 SOMCP v1.0.22：pin 缺失 / 解码失败 = “无法判定是否可信” → fail-closed。
                 //（旧实现返回 trusted=true 是 fail-open，会让门禁被静默绕过，这里改为按不安全处理。）
-                Result(true, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
+                Result(false, "no release signer pin configured", expected, actual, integrityCode = integrityCode)
             } else {
                 val signerTrusted = actual.any { it == expected }
                 Result(

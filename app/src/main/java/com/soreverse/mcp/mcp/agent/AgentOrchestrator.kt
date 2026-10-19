@@ -122,10 +122,15 @@ internal object AgentOrchestrator {
         wallClockMs: Long = 8 * 60_000L,
         maxStepsPerNode: Int = 14,
         zh: Boolean = true,
+        /** 由调用方（AgentRuntime）提供的运行 id。空则自造——两套 id 会让 resume 永远找不到记录。 */
+        runId: String = "",
         onEvent: (AgentEvent) -> Unit = {},
     ): AgentRunRecord {
-        val runId = newRunId()
-        val budget = newBudget(maxSubAgents, maxToolCalls, wallClockMs)
+        val rid = runId.ifBlank { newRunId() }
+        val plannedNodes = plan(goal, roles)
+        // 默认 5 个子代理会被 6 个节点（含汇总 report）挤掉汇总节点：
+        // 预算至少覆盖全部节点，否则"多智能体编排"永远不产出交叉印证的结论。
+        val budget = newBudget(maxOf(maxSubAgents, plannedNodes.size), maxToolCalls, wallClockMs)
 
         // 工作区：优先用传入的；否则用 path 打开（避免让模型去 open，浪费一轮）
         var ws = workspaceId
@@ -136,11 +141,11 @@ internal object AgentOrchestrator {
 
         return execute(
             ctx = ctx,
-            runId = runId,
+            runId = rid,
             goal = goal,
             ws = ws,
             startedAt = System.currentTimeMillis(),
-            nodes = plan(goal, roles),
+            nodes = plannedNodes,
             preDone = emptyMap(),
             budget = budget,
             zh = zh,
@@ -348,9 +353,66 @@ internal object AgentOrchestrator {
         runCatching {
             val dir = File(File(ctx.context.filesDir, "agent-runs"), record.runId)
             if (!dir.exists()) dir.mkdirs()
-            File(dir, "run.json").writeText(record.toJson().toString(2), Charsets.UTF_8)
-            File(dir, "conclusion.md").writeText(record.conclusion, Charsets.UTF_8)
+            // 原子写：写到一半被杀会留下截断 JSON，loadRun 静默返回 null（运行记录"消失"）
+            val json = File(dir, "run.json")
+            val jsonTmp = File(dir, "run.json.tmp")
+            jsonTmp.writeText(record.toJson().toString(2), Charsets.UTF_8)
+            if (!jsonTmp.renameTo(json)) {
+                json.writeText(record.toJson().toString(2), Charsets.UTF_8)
+                jsonTmp.delete()
+            }
+            val md = File(dir, "conclusion.md")
+            val mdTmp = File(dir, "conclusion.md.tmp")
+            mdTmp.writeText(record.conclusion, Charsets.UTF_8)
+            if (!mdTmp.renameTo(md)) {
+                md.writeText(record.conclusion, Charsets.UTF_8)
+                mdTmp.delete()
+            }
         }.onFailure { AppLog.w("agent[${record.runId}] persist record failed: ${it.message}") }
+    }
+
+    /**
+     * 编排被取消/中断时把「已完成节点」落盘。
+     * 旧实现只在正常跑完时写 run.json：取消或进程被杀后已跑完的结论全部丢失，
+     * 历史里也看不到这次运行。
+     */
+    fun persistCancelled(
+        ctx: ToolContext,
+        runId: String,
+        goal: String,
+        workspaceId: String,
+        startedAt: Long,
+        snapshot: JSONObject,
+    ) {
+        runCatching {
+            val planned = plan(goal, null)
+            val snapNodes = snapshot.optJSONObject("nodes") ?: JSONObject()
+            val results = planned.mapNotNull { n ->
+                val s = snapNodes.optJSONObject(n.id) ?: return@mapNotNull null
+                NodeResult(
+                    nodeId = n.id,
+                    role = n.roleId,
+                    task = n.task,
+                    status = s.optString("status", "cancelled"),
+                    text = s.optString("text"),
+                )
+            }
+            persistRecord(
+                ctx,
+                AgentRunRecord(
+                    runId = runId,
+                    goal = goal,
+                    workspaceId = workspaceId,
+                    startedAt = startedAt,
+                    finishedAt = System.currentTimeMillis(),
+                    status = "cancelled",
+                    conclusion = "运行被中断/取消，已完成节点已保存，可用 resume 继续。",
+                    plan = planned,
+                    results = results,
+                    budget = JSONObject(),
+                ),
+            )
+        }.onFailure { AppLog.w("agent[$runId] persist cancelled record failed: ${it.message}") }
     }
 
     /** 列出历史运行（按目录名倒序，最新在前）。 */

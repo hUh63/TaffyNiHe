@@ -77,14 +77,22 @@ object WorkspacePolicy {
             val app = Class.forName("android.app.ActivityThread")
                 .getMethod("currentApplication").invoke(null) as? Context
             if (app != null) {
-                roots += app.dataDir.absolutePath
-                roots += app.cacheDir.absolutePath
-                roots += app.filesDir.absolutePath
-                roots += "/data/user/0/${app.packageName}"
-                roots += "/data/data/${app.packageName}"
+                // 入表前统一 canonicalPath：/data/data/<pkg> 常是 /data/user/0/<pkg> 的符号链接，
+                // 不规范化会让应用私有目录内的合法路径被判成 PATH_OUTSIDE_WORKSPACE
+                listOf(
+                    app.dataDir.absolutePath,
+                    app.cacheDir.absolutePath,
+                    app.filesDir.absolutePath,
+                    "/data/user/0/${app.packageName}",
+                    "/data/data/${app.packageName}",
+                ).forEach { p -> roots += runCatching { File(p).canonicalPath }.getOrDefault(p) }
             }
         }
-        roots += "/data/local/tmp"
+        // 共享暂存目录是全局可写的投放点：只在开了隧道（需要投放文件）或有 root 时放行，
+        // 否则无隧道会话也能在这里读写任意文件
+        if (isTunnelActive(context) || runCatching { RootShell.isRootAvailable() }.getOrDefault(false)) {
+            roots += "/data/local/tmp"
+        }
         System.getProperty("java.io.tmpdir", "/tmp")?.let { roots += it }
         workDirPath(context)?.let {
             runCatching { roots += File(it).canonicalPath }

@@ -77,8 +77,22 @@ class SettingsStore(context: Context) {
         set(value) = prefs.edit().putString("apkSignKeystoreAlias", value).apply()
 
     var apkSignKeystorePass: String
-        get() = prefs.getString("apkSignKeystorePass", "") ?: ""
-        set(value) = prefs.edit().putString("apkSignKeystorePass", value).apply()
+        // 口令必须加密存：SharedPreferences 明文可被 root / 同 uid 插件 / 取证镜像读到，
+        // 等于把自定义签名密钥的使用权外泄（accessToken 早已迁到 SecretStore）
+        get() {
+            val legacy = prefs.getString("apkSignKeystorePass", "").orEmpty()
+            if (legacy.isNotBlank()) {
+                // 一次性迁移旧明文
+                SecretStore.put(appContext, "apkSignKeystorePass", legacy)
+                prefs.edit().remove("apkSignKeystorePass").apply()
+                return legacy
+            }
+            return SecretStore.get(appContext, "apkSignKeystorePass") ?: ""
+        }
+        set(value) {
+            SecretStore.put(appContext, "apkSignKeystorePass", value)
+            prefs.edit().remove("apkSignKeystorePass").apply()
+        }
 
     /** 签名方案：v1v2v3 | v1v2 | v1v3 | v1 | v2v3 | v2 | v3。 */
     var apkSignScheme: String

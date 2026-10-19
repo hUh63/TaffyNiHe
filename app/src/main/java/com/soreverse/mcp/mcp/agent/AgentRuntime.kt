@@ -56,6 +56,7 @@ internal object AgentRuntime {
         val snapshot = JSONObject()
             .put("runId", runId)
             .put("goal", goal)
+            .put("workspaceId", workspaceId)
             .put("status", "running")
             .put("startedAt", System.currentTimeMillis())
             .put("plan", JSONArray())
@@ -76,6 +77,9 @@ internal object AgentRuntime {
                     wallClockMs = wallClockMs,
                     maxStepsPerNode = maxStepsPerNode,
                     zh = zh,
+                    // 必须把自己的 runId 传下去：否则落盘目录用的是另一套 id，
+                    // 客户端拿到的 id 去 resume 永远 NOT_FOUND
+                    runId = runId,
                 ) { ev -> applyEvent(snapshot, ev, runId) }
                 snapshot
                     .put("status", record.status)
@@ -84,6 +88,15 @@ internal object AgentRuntime {
                     .put("record", record.toJson())
             } catch (e: kotlinx.coroutines.CancellationException) {
                 snapshot.put("status", "cancelled").put("finishedAt", System.currentTimeMillis())
+                // 取消也要落盘：否则已跑完的节点结论全丢、历史里也看不到这次运行
+                AgentOrchestrator.persistCancelled(
+                    ctx,
+                    runId,
+                    snapshot.optString("goal"),
+                    snapshot.optString("workspaceId"),
+                    snapshot.optLong("startedAt"),
+                    snapshot,
+                )
                 throw e
             } catch (e: Throwable) {
                 AppLog.e("agent[$runId] orchestration failed", e)
@@ -93,6 +106,8 @@ internal object AgentRuntime {
                     .put("error", e.message ?: e.javaClass.simpleName)
             } finally {
                 jobs.remove(runId)
+                live[runId]?.let { s -> synchronized(s) { s.remove("record") } }
+                pruneFinished()
             }
         }
         jobs[runId] = job
@@ -139,6 +154,7 @@ internal object AgentRuntime {
         val snapshot = JSONObject()
             .put("runId", runId)
             .put("goal", saved.optString("goal"))
+            .put("workspaceId", saved.optString("workspaceId"))
             .put("status", "running")
             .put("resumed", true)
             .put("startedAt", saved.optLong("startedAt", System.currentTimeMillis()))
@@ -174,6 +190,15 @@ internal object AgentRuntime {
                     .put("record", record.toJson())
             } catch (e: kotlinx.coroutines.CancellationException) {
                 snapshot.put("status", "cancelled").put("finishedAt", System.currentTimeMillis())
+                // 取消也要落盘：否则已跑完的节点结论全丢、历史里也看不到这次运行
+                AgentOrchestrator.persistCancelled(
+                    ctx,
+                    runId,
+                    snapshot.optString("goal"),
+                    snapshot.optString("workspaceId"),
+                    snapshot.optLong("startedAt"),
+                    snapshot,
+                )
                 throw e
             } catch (e: Throwable) {
                 AppLog.e("agent[$runId] resume failed", e)
@@ -183,6 +208,8 @@ internal object AgentRuntime {
                     .put("error", e.message ?: e.javaClass.simpleName)
             } finally {
                 jobs.remove(runId)
+                live[runId]?.let { s -> synchronized(s) { s.remove("record") } }
+                pruneFinished()
             }
         }
         jobs[runId] = job
@@ -191,6 +218,8 @@ internal object AgentRuntime {
 
     /** 事件 → 进度快照。节点状态在快照里增量更新，UI 轮询即可看到实时进度。 */
     private fun applyEvent(snapshot: JSONObject, ev: AgentEvent, runId: String) {
+        // 并行节点会同时回写同一份快照：JSONObject 非线程安全，读改写会互相覆盖（正文缺段、工具丢失）
+        synchronized(snapshot) {
         runCatching {
             val nodes = snapshot.optJSONObject("nodes") ?: JSONObject().also { snapshot.put("nodes", it) }
             when (ev) {
@@ -223,18 +252,29 @@ internal object AgentRuntime {
                 }
             }
         }
+        }
     }
 
     fun status(runId: String): JSONObject? {
-        live[runId]?.let { return JSONObject(it.toString()) }
-        return null
+        val s = live[runId] ?: return null
+        // 与 applyEvent 的写共用同一把锁：并发 toString 会抛 ConcurrentModificationException
+        return synchronized(s) { runCatching { JSONObject(s.toString()) }.getOrNull() }
     }
 
     fun cancel(runId: String): Boolean {
         val job = jobs[runId] ?: return false
         job.cancel()
-        live[runId]?.put("status", "cancelled")
+        live[runId]?.let { s -> synchronized(s) { s.put("status", "cancelled") } }
         return true
+    }
+
+    /** 终态快照只保留状态：record 里是全部节点正文（几 MB～几十 MB），不能长期驻留。 */
+    private fun pruneFinished() {
+        val now = System.currentTimeMillis()
+        live.entries.removeAll { (_, s) ->
+            val st = synchronized(s) { s.optString("status") }
+            st != "running" && now - s.optLong("finishedAt", now) > 10 * 60_000L
+        }
     }
 
     fun runningIds(): List<String> = jobs.keys.toList()

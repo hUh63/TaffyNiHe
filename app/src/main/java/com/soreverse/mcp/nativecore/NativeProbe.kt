@@ -213,7 +213,8 @@ object NativeProbe {
      *         the check fails or no pinned digest is configured
      */
     fun matches(context: Context): Boolean {
-        val expected = nativeGetPinnedFingerprint().let { normalizeFingerprint(it) }
+        // 必须走带 loaded 守卫的入口：直接调 JNI 在 .so 加载失败时会抛 UnsatisfiedLinkError（Error）
+        val expected = normalizeFingerprint(pinnedFingerprint())
         if (expected.isBlank()) {
             AppLog.i("NativeProbe: no pinned identity configured, skipping native probe")
             return true // no pin configured, skip

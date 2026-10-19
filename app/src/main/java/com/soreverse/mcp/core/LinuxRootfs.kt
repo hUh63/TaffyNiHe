@@ -322,6 +322,7 @@ object LinuxRootfs {
         // 脚本写入 rootfs 内 /tmp（chroot 与 proot 均可访问）
         val tmpDir = File(rootfs, "tmp").apply { mkdirs() }
         val scriptFile = File(tmpDir, "taffy_${System.currentTimeMillis()}.sh")
+        var chrootMounted = false
         return try {
             scriptFile.writeText(script)
             val rel = "tmp/${scriptFile.name}"
@@ -332,12 +333,12 @@ object LinuxRootfs {
                     "mount -t proc proc \"$rootfs/proc\" 2>/dev/null; " +
                     "mount -t sysfs sysfs \"$rootfs/sys\" 2>/dev/null; " +
                     "mount -o bind /dev \"$rootfs/dev\" 2>/dev/null; " +
-                    "chroot \"$rootfs\" /bin/sh \"$rel\" 2>&1; rc=\$?; " +
-                    "umount \"$rootfs/proc\" 2>/dev/null; umount \"$rootfs/sys\" 2>/dev/null; " +
-                    "umount \"$rootfs/dev\" 2>/dev/null; " +
-                    umountCmds.toString() + "exit \$rc",
+                    "chroot \"$rootfs\" /bin/sh \"$rel\" 2>&1",
                     timeoutSec = timeoutSec,
                 )
+                // 卸载不再和执行写在同一串里：超时/被杀时后半段不会执行，
+                // 挂载点会永久残留在 rootfs 内（后续 umount busy、重解 rootfs 失败）
+                chrootMounted = true
                 ExecResult(r.code, r.stdout, "chroot")
             } else {
                 // 无 root 通道: 内置 proot（用户态模拟）
@@ -378,7 +379,16 @@ object LinuxRootfs {
             AppLog.e("LinuxRootfs: exec failed", e)
             ExecResult(-1, "执行异常: ${e.message}", ch)
         } finally {
-            scriptFile.delete()
+            runCatching { scriptFile.delete() }
+            if (chrootMounted) {
+                runCatching {
+                    PermissionManager.exec(
+                        "umount \"$rootfs/proc\" 2>/dev/null; umount \"$rootfs/sys\" 2>/dev/null; " +
+                            "umount \"$rootfs/dev\" 2>/dev/null; " + umountCmds,
+                        timeoutSec = 15,
+                    )
+                }
+            }
         }
     }
 }

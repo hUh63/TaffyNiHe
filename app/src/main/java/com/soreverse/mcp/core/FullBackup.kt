@@ -610,8 +610,9 @@ object FullBackup {
             }
             restored++
         }
-        editor.commit()
-        return (restored > 0) to sk
+        // commit 失败（磁盘满）时不能算恢复成功
+        val committed = editor.commit()
+        return (restored > 0 && committed) to sk
     }
 
     // ---------- 目录 / 工具 ----------

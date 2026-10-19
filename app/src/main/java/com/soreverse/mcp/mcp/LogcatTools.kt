@@ -310,7 +310,15 @@ object LogcatTools {
                     "stop" -> {
                         captureProcess?.destroy()
                         captureProcess = null
-                        val lineCount = captureFile?.takeIf { it.exists() }?.inputStream()?.bufferedReader()?.useLines { seq -> seq.count() } ?: 0
+                        // 大文件不做全量扫描：每次 status/stop 都 count() 一遍是 O(n) IO，
+                        // 一个 8 小时录制的文件能让 UI 卡死；超过 8MB 按平均行宽估算
+                        val lineCount = captureFile?.takeIf { it.exists() }?.let { f ->
+                            if (f.length() <= 8L * 1024 * 1024) {
+                                f.inputStream().bufferedReader().useLines { seq -> seq.count() }
+                            } else {
+                                (f.length() / 90).toInt()
+                            }
+                        } ?: 0
                         val durationSec = if (captureStartedAt > 0) (System.currentTimeMillis() - captureStartedAt) / 1000 else 0
                         captureStartedAt = 0
                         ok(JSONObject()
@@ -323,7 +331,15 @@ object LogcatTools {
 
                     "status" -> {
                         val running = captureProcess != null && captureProcess!!.isAlive
-                        val lineCount = captureFile?.takeIf { it.exists() }?.inputStream()?.bufferedReader()?.useLines { seq -> seq.count() } ?: 0
+                        // 大文件不做全量扫描：每次 status/stop 都 count() 一遍是 O(n) IO，
+                        // 一个 8 小时录制的文件能让 UI 卡死；超过 8MB 按平均行宽估算
+                        val lineCount = captureFile?.takeIf { it.exists() }?.let { f ->
+                            if (f.length() <= 8L * 1024 * 1024) {
+                                f.inputStream().bufferedReader().useLines { seq -> seq.count() }
+                            } else {
+                                (f.length() / 90).toInt()
+                            }
+                        } ?: 0
                         val durationSec = if (captureStartedAt > 0) (System.currentTimeMillis() - captureStartedAt) / 1000 else 0
                         ok(JSONObject()
                             .put("action", "status")

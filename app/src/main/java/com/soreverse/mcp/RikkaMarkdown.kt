@@ -81,7 +81,8 @@ internal fun RikkaMarkdown(
     modifier: Modifier = Modifier,
     selectable: Boolean = true,
 ) {
-    var parsed by remember { mutableStateOf(parseMarkdown(content)) }
+    // 首帧不在组合线程解析几万字报告（旧实现会卡首帧甚至 ANR）；先显示纯文本，后台解析完再替换
+    var parsed by remember { mutableStateOf<MarkdownParseResult?>(null) }
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
@@ -93,8 +94,13 @@ internal fun RikkaMarkdown(
     }
     val body: @Composable () -> Unit = {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val document = remember(parsed.html) { Jsoup.parse(parsed.html) }
-            document.body().childNodes().forEach { MarkdownNode(it) }
+            val current = parsed
+            if (current == null) {
+                Text(content, style = MaterialTheme.typography.bodyMedium, lineHeight = 24.sp)
+            } else {
+                val document = remember(current.html) { Jsoup.parse(current.html) }
+                document.body().childNodes().forEach { MarkdownNode(it) }
+            }
         }
     }
     if (selectable) SelectionContainer(content = body) else body()

@@ -1,3 +1,37 @@
+# TaffyNiHe v1.3.117（收尾 4 项 · 渲染与挂载）
+
+紧接 v1.3.116 把剩下几处低优先但真实可感知的问题收掉。
+
+## 一、Markdown 渲染不再卡首帧
+
+- 旧实现用 `remember { parseMarkdown(content) }`：**在组合线程（主线程）**对整段文本做
+  `buildMarkdownTreeFromString` + `HtmlGenerator` + `Jsoup.parse`，而调用方喂进来的常是
+  几万字的子代理报告或流式推理正文 —— 打开历史报告时明显卡顿，文本更大直接 ANR；
+  且 `LaunchedEffect(Unit)` 又对同一初始值再解析一遍（首次进入解析两次）。
+- 现在首帧只渲染纯文本，解析全部在后台完成后再替换（`parsed` 可空 + 空态降级）。
+
+## 二、chroot 的挂载/卸载拆开
+
+- 原来 `mount proc/sys/dev` → `chroot` 执行 → `umount` 全在**同一条 su 命令串**里。超时或被杀时
+  `umount` 段不会执行，挂载点永久残留在 rootfs 内，之后 `umount` busy、重解 rootfs 失败，
+  多次执行还会累积。
+- 现在执行与卸载是两次独立调用，卸载放在 `finally`（超时/异常也会跑），并带 15s 上限。
+
+## 三、日志行数统计不再全量扫描
+
+- `status` / `stop` 会对录制文件做一次 `useLines { count() }`。一个跑了几小时的
+  `*:V` 录制文件几十 MB，每次查询都是 O(n) 磁盘 IO（UI 卡一下）。
+- 现在 ≤8MB 精确统计，超过则按平均行宽估算（`bytes / 90`）。
+
+## 四、偏好恢复的写入结果参与成败
+
+- `applyPrefs` 里 `editor.commit()` 的返回值被丢弃，磁盘满导致写失败时仍报「恢复成功」。
+  现在 commit 失败即视为该次恢复失败（走回滚路径）。
+
+---
+
+上一版（v1.3.116）的完整清单见下一节。
+
 # TaffyNiHe v1.3.116（第五轮深挖 · 连上一轮留下的四条一起补完）
 
 这一轮先补上一轮明确留下的 4 条已知风险，再往下查了三个没审过的域（多智能体 / blutter

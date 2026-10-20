@@ -9,45 +9,34 @@ import android.os.ParcelFileDescriptor
 import com.soreverse.mcp.blutter.BlutterRunnerService
 import com.soreverse.mcp.blutter.IBlutterRunner
 import com.soreverse.mcp.blutter.IBlutterRunnerCallback
-import org.json.JSONObject
+import com.soreverse.mcp.core.MemoryGuard
 import java.io.File
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONObject
 
-internal class BlutterEmbeddedBackend(
-    private val context: Context,
-    private val store: BlutterResultStore,
-) {
+internal class BlutterEmbeddedBackend(private val context: Context, private val store: BlutterResultStore) {
     private val active = ConcurrentHashMap<String, ActiveJob>()
 
-    fun start(jobId: String, runner: BlutterRunnerDescriptor, libraries: FlutterLibraries, options: JSONObject) {
-        val jobDir = File(context.noBackupFilesDir, "blutter/v1/jobs/$jobId/input").apply { mkdirs() }
-        val libapp = File(jobDir, "libapp.so").apply { writeBytes(libraries.libapp) }
-        val libflutter = File(jobDir, "libflutter.so").apply { writeBytes(libraries.libflutter) }
-        val output = File(jobDir.parentFile, "runner-result.json").apply { if (exists()) delete() }
-        val connection = RunnerConnection(jobId, runner, libraries, libapp, libflutter, output, options)
-        val job = ActiveJob(connection)
-        active[jobId] = job
-        // 隔离进程可能既不回调 onProgress 也不回调 onCompleted（吊死），
-        // 那样任务会永远停在 running 且绑定不释放。这里按"无心跳时长"兜底终止。
-        val watchdog = android.os.Handler(android.os.Looper.getMainLooper())
-        val tick = object : Runnable {
-            override fun run() {
-                val current = active[jobId] ?: return
-                if (System.currentTimeMillis() - current.lastBeat > RUNNER_IDLE_TIMEOUT_MS) {
-                    (current.connection as? RunnerConnection)?.interruptByTimeout()
-                    return
-                }
-                watchdog.postDelayed(this, 60_000L)
-            }
-        }
-        watchdog.postDelayed(tick, 60_000L)
+    fun start(jobId: String, runner: BlutterRunnerDescriptor, libraries: FlutterLibraryFiles, options: JSONObject) {
+        val libapp = libraries.libapp
+        val libflutter = libraries.libflutter
+        val output = File(libapp.parentFile?.parentFile, "runner-result.json").apply { if (exists()) delete() }
+        val connection =
+            RunnerConnection(jobId, runner, libraries, output, options)
+        active[jobId] = ActiveJob(connection)
         store.update(jobId, "running", "binding_runner")
         val intent = Intent(context, BlutterRunnerService::class.java)
         if (!context.bindService(intent, connection, Context.BIND_AUTO_CREATE)) {
             active.remove(jobId)
-            fail(jobId, "RUNNER_BIND_FAILED", "Cannot bind the isolated Blutter runner process", "binding_runner", true)
+            fail(
+                jobId,
+                "RUNNER_BIND_FAILED",
+                "Cannot bind the isolated Blutter runner process",
+                "binding_runner",
+                true
+            )
         }
     }
 
@@ -62,11 +51,9 @@ internal class BlutterEmbeddedBackend(
     private inner class RunnerConnection(
         private val jobId: String,
         private val descriptor: BlutterRunnerDescriptor,
-        private val libraries: FlutterLibraries,
-        private val libapp: File,
-        private val libflutter: File,
+        private val libraries: FlutterLibraryFiles,
         private val output: File,
-        private val options: JSONObject,
+        private val options: JSONObject
     ) : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             val runner = IBlutterRunner.Stub.asInterface(binder)
@@ -77,12 +64,30 @@ internal class BlutterEmbeddedBackend(
             var flutterFd: ParcelFileDescriptor? = null
             var resultFd: ParcelFileDescriptor? = null
             try {
-                appFd = ParcelFileDescriptor.open(libapp, ParcelFileDescriptor.MODE_READ_ONLY)
-                flutterFd = ParcelFileDescriptor.open(libflutter, ParcelFileDescriptor.MODE_READ_ONLY)
-                resultFd = ParcelFileDescriptor.open(output, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE)
-                runner.run(jobId, descriptor.libraryName, appFd, flutterFd, resultFd, options.toString(), callback)
+                appFd = ParcelFileDescriptor.open(libraries.libapp, ParcelFileDescriptor.MODE_READ_ONLY)
+                flutterFd =
+                    ParcelFileDescriptor.open(libraries.libflutter, ParcelFileDescriptor.MODE_READ_ONLY)
+                resultFd =
+                    ParcelFileDescriptor.open(
+                        output,
+                        ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or
+                            ParcelFileDescriptor.MODE_READ_WRITE
+                    )
+                runner.run(
+                    jobId,
+                    descriptor.libraryName,
+                    appFd,
+                    flutterFd,
+                    resultFd,
+                    options.toString(),
+                    callback
+                )
             } catch (error: Exception) {
-                finishFailure("RUNNER_TRANSPORT_FAILED", error.message ?: "Runner transport failed", true)
+                finishFailure(
+                    "RUNNER_TRANSPORT_FAILED",
+                    error.message ?: "Runner transport failed",
+                    true
+                )
             } finally {
                 runCatching { appFd?.close() }
                 runCatching { flutterFd?.close() }
@@ -91,7 +96,17 @@ internal class BlutterEmbeddedBackend(
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
-            if (active.containsKey(jobId)) finishFailure("RUNNER_INTERRUPTED", "The isolated runner process disconnected", true, "interrupted")
+            if (active.containsKey(
+                    jobId
+                )
+            ) {
+                finishFailure(
+                    "RUNNER_INTERRUPTED",
+                    "The isolated runner process disconnected",
+                    true,
+                    "interrupted"
+                )
+            }
         }
 
         override fun onBindingDied(name: ComponentName) {
@@ -104,8 +119,9 @@ internal class BlutterEmbeddedBackend(
 
         private val callback = object : IBlutterRunnerCallback.Stub() {
             override fun onProgress(callbackJobId: String, stage: String, percent: Int) {
-                if (callbackJobId == jobId && active.containsKey(jobId)) {
-                    active[jobId]?.lastBeat = System.currentTimeMillis()
+                if (callbackJobId == jobId &&
+                    active.containsKey(jobId)
+                ) {
                     store.update(jobId, "running", stage)
                 }
             }
@@ -113,48 +129,96 @@ internal class BlutterEmbeddedBackend(
             override fun onCompleted(callbackJobId: String, exitCode: Int, errorCode: String, message: String, resultBytes: Long, resultSha256: String) {
                 if (callbackJobId != jobId || !active.containsKey(jobId)) return
                 if (exitCode != 0 || errorCode.isNotBlank()) {
-                    finishFailure(errorCode.ifBlank { "RUNNER_FAILED" }, message.ifBlank { "Blutter runner exited with code $exitCode" }, true)
+                    finishFailure(
+                        errorCode.ifBlank {
+                            "RUNNER_FAILED"
+                        },
+                        message.ifBlank { "Blutter runner exited with code $exitCode" },
+                        true
+                    )
                     return
                 }
                 runCatching { commitOutput() }.onFailure { error ->
-                    finishFailure("RUNNER_RESULT_INVALID", error.message ?: "Runner result is invalid", false)
+                    finishFailure(
+                        if (error is com.soreverse.mcp.core.InsufficientMemoryException) {
+                            "INSUFFICIENT_MEMORY"
+                        } else {
+                            "RUNNER_RESULT_INVALID"
+                        },
+                        error.message ?: "Runner result is invalid",
+                        false
+                    )
                 }
             }
         }
 
-        /** 由 watchdog 在长时间无进度时调用（隔离进程吊死）。 */
-        fun interruptByTimeout() {
-            finishFailure(
-                "RUNNER_TIMEOUT",
-                "Blutter runner 超过 ${RUNNER_IDLE_TIMEOUT_MS / 60000} 分钟没有进度回调，已终止（可用更小的输入重试）",
-                true,
-                "timeout",
-            )
-        }
-
         private fun commitOutput() {
             check(output.isFile) { "Runner did not create a result" }
-            check(output.length() in 2..MAX_RESULT_BYTES) { "Runner result exceeds the allowed size" }
+            check(output.length() in 2..MAX_RESULT_BYTES) {
+                "Runner result exceeds the allowed size"
+            }
+            // Parsing needs the document twice over (text + object tree); refuse
+            // before allocating rather than dying with an OutOfMemoryError in the
+            // main process, which would take the UI down with it.
+            MemoryGuard.ensureAnalysisMemory(output.length(), "Validating the Blutter runner result")
             val result = JSONObject(output.readText())
             val generated = Instant.now().toString()
             val input = JSONObject()
                 .put("displayName", libraries.displayName)
                 .put("abi", libraries.abi)
-                .put("libapp", fileJson(libraries.libappEntry, libraries.libapp))
-                .put("libflutter", fileJson(libraries.libflutterEntry, libraries.libflutter))
+                .put("libapp", fileJson(libraries.libappEntry, libraries.libappSize, libraries.libappSha256))
+                .put("libflutter", fileJson(libraries.libflutterEntry, libraries.libflutterSize, libraries.libflutterSha256))
             val nativeSummary = result.optJSONObject("summary") ?: error("Missing runner summary")
             for (kind in listOf("libraries", "classes", "functions", "objects")) {
                 val page = result.optJSONObject(kind) ?: error("Missing result page: $kind")
-                check(page.has("items") && page.has("total") && page.has("hasMore") && page.has("nextCursor")) { "Invalid result page: $kind" }
+                check(
+                    page.has("items") &&
+                        page.has("total") &&
+                        page.has("hasMore") &&
+                        page.has("nextCursor")
+                ) { "Invalid result page: $kind" }
                 validateEntities(page.optJSONArray("items"), kind)
             }
             result.put("jobId", jobId).put("status", "succeeded").put("backend", "embedded")
                 .put("createdAt", generated).put("completedAt", generated).put("input", input)
-                .put("flutter", JSONObject().put("dartVersion", JSONObject.NULL).put("engineRevision", JSONObject.NULL).put("compressedPointers", JSONObject.NULL).put("nullSafety", JSONObject.NULL).put("confidence", 0.0))
-                .put("runner", JSONObject().put("runnerId", descriptor.runnerId).put("source", "embedded").put("upstreamCommit", descriptor.upstreamCommit).put("sha256", descriptor.sha256))
+                .put(
+                    "flutter",
+                    JSONObject().put(
+                        "dartVersion",
+                        JSONObject.NULL
+                    ).put(
+                        "engineRevision",
+                        JSONObject.NULL
+                    ).put(
+                        "compressedPointers",
+                        JSONObject.NULL
+                    ).put("nullSafety", JSONObject.NULL).put("confidence", 0.0)
+                )
+                .put(
+                    "runner",
+                    JSONObject().put(
+                        "runnerId",
+                        descriptor.runnerId
+                    ).put(
+                        "source",
+                        "embedded"
+                    ).put(
+                        "upstreamCommit",
+                        descriptor.upstreamCommit
+                    ).put("sha256", descriptor.sha256)
+                )
                 .put("summary", nativeSummary)
-                .put("provenance", JSONObject().put("protocolVersion", 1).put("normalizerVersion", "native-1").put("cacheHit", false).put("durationMillis", 0))
-            val key = digest(libapp, libflutter, descriptor.sha256, options.toString())
+                .put(
+                    "provenance",
+                    JSONObject().put(
+                        "protocolVersion",
+                        1
+                    ).put(
+                        "normalizerVersion",
+                        "native-1"
+                    ).put("cacheHit", false).put("durationMillis", 0)
+                )
+            val key = cacheKey(libraries, descriptor.sha256, options.toString())
             store.update(jobId, "running", "committing")
             store.commit(jobId, result, key)
             finish()
@@ -167,53 +231,80 @@ internal class BlutterEmbeddedBackend(
 
         private fun finish() {
             if (active.remove(jobId) != null) runCatching { context.unbindService(this) }
-            runCatching { libapp.parentFile?.deleteRecursively() }
+            runCatching { libraries.libapp.parentFile?.deleteRecursively() }
             runCatching { output.delete() }
         }
     }
 
     private fun fail(jobId: String, code: String, message: String, stage: String, recoverable: Boolean, status: String = "failed") {
-        store.update(jobId, status, stage, JSONObject().put("code", code).put("message", message).put("recoverable", recoverable).put("stage", stage))
+        store.update(
+            jobId,
+            status,
+            stage,
+            JSONObject().put(
+                "code",
+                code
+            ).put("message", message).put("recoverable", recoverable).put("stage", stage)
+        )
     }
 
-    private fun digest(libapp: File, libflutter: File, runnerSha256: String, options: String): String {
+    /**
+     * Cache key over the two library contents, the runner digest and the canonical
+     * options. The files are streamed instead of read into memory, which produces
+     * the same digest the previous `ByteArray` version did — existing cache
+     * entries stay valid.
+     */
+    fun cacheKey(libraries: FlutterLibraryFiles, runnerSha256: String, options: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        listOf(libapp, libflutter).forEach { file ->
-            file.inputStream().use { input ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    digest.update(buffer, 0, count)
-                }
-            }
-        }
+        digest.updateFile(libraries.libapp)
+        digest.updateFile(libraries.libflutter)
         digest.update(runnerSha256.toByteArray())
         digest.update(options.toByteArray())
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun fileJson(name: String, bytes: ByteArray): JSONObject = JSONObject().put("name", name).put("size", bytes.size).put("sha256", sha256(bytes))
-    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun MessageDigest.updateFile(file: File) {
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                update(buffer, 0, count)
+            }
+        }
+    }
+
+    private fun fileJson(name: String, size: Long, sha256: String): JSONObject = JSONObject().put("name", name).put("size", size).put("sha256", sha256)
+
     private fun validateEntities(items: org.json.JSONArray?, kind: String) {
         require(items != null) { "Missing items for $kind" }
         for (index in 0 until items.length()) {
             val item = items.optJSONObject(index) ?: error("Invalid entity in $kind")
-            val expectedKind = mapOf("libraries" to "library", "classes" to "class", "functions" to "function", "objects" to "object")[kind] ?: error("Unsupported result kind")
+            val expectedKind =
+                mapOf(
+                    "libraries" to "library",
+                    "classes" to "class",
+                    "functions" to "function",
+                    "objects" to "object"
+                )[kind]
+                    ?: error("Unsupported result kind")
             require(item.optString("kind") == expectedKind) { "Invalid entity kind in $kind" }
-            require(item.optString("id").isNotBlank() && item.has("name")) { "Invalid entity fields in $kind" }
-            if (item.has("address") && !item.isNull("address")) require(item.optString("address").matches(Regex("^0x[0-9a-fA-F]+$"))) { "Invalid entity address" }
+            require(item.optString("id").isNotBlank() && item.has("name")) {
+                "Invalid entity fields in $kind"
+            }
+            if (item.has("address") &&
+                !item.isNull("address")
+            ) {
+                require(item.optString("address").matches(Regex("^0x[0-9a-fA-F]+$"))) {
+                    "Invalid entity address"
+                }
+            }
         }
     }
 
-    private data class ActiveJob(
-        val connection: ServiceConnection,
-        var runner: IBlutterRunner? = null,
-        @Volatile var lastBeat: Long = System.currentTimeMillis(),
-    )
+    private data class ActiveJob(val connection: ServiceConnection, var runner: IBlutterRunner? = null)
 
     private companion object {
         const val MAX_RESULT_BYTES = 512L * 1024L * 1024L
-        const val RUNNER_IDLE_TIMEOUT_MS = 5 * 60 * 1000L
     }
 }

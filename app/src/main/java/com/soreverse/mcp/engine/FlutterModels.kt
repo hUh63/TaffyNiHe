@@ -12,7 +12,7 @@ internal data class FlutterFingerprint(
     val os: String?,
     val compressedPointers: Boolean?,
     val confidence: Double,
-    val evidence: List<String>,
+    val evidence: List<String>
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("dartVersion", dartVersion ?: JSONObject.NULL)
@@ -36,5 +36,28 @@ internal data class FlutterLibraries(
     val libapp: ByteArray,
     val libflutter: ByteArray,
     val libappEntry: String,
+    val libflutterEntry: String
+)
+
+/**
+ * The same pair, but still on disk.
+ *
+ * This is what the analyze path passes around: the two libraries are streamed
+ * out of the APK straight into the job directory, so neither ever exists as a
+ * `ByteArray` in the host process. Sizes and digests are recorded while
+ * streaming, which keeps the result cache key byte-identical to the previous
+ * in-memory implementation (the digest of a file equals the digest of the bytes
+ * it holds), so existing cached results stay valid.
+ */
+internal data class FlutterLibraryFiles(
+    val displayName: String,
+    val abi: String,
+    val libapp: java.io.File,
+    val libflutter: java.io.File,
+    val libappEntry: String,
     val libflutterEntry: String,
+    val libappSize: Long,
+    val libflutterSize: Long,
+    val libappSha256: String,
+    val libflutterSha256: String
 )

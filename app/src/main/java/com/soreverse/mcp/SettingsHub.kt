@@ -72,9 +72,10 @@ private val toolPageDests = setOf(
     SettingsDest.Rizin, SettingsDest.Edbg, SettingsDest.Capture, SettingsDest.Sandbox,
     SettingsDest.Workflow, SettingsDest.ApkEdit, SettingsDest.DexExplorer, SettingsDest.Linux,
     SettingsDest.Terminal, SettingsDest.Git, SettingsDest.Extensions, SettingsDest.NativeExec,
+    SettingsDest.Search, SettingsDest.DevEnv,
 )
 
-private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
+internal fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Root -> t.settings
     SettingsDest.ServiceConfig -> if (t.zh) "服务配置" else "Service Configuration"
     SettingsDest.Appearance -> if (t.zh) "外观与语言" else "Appearance"
@@ -114,6 +115,8 @@ private fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Snapshots -> if (t.zh) "编辑快照 / 回滚" else "Edit Snapshots"
     SettingsDest.Workflow -> if (t.zh) "逆向工作流图" else "Reverse Workflow"
     SettingsDest.Help -> if (t.zh) "帮助" else "Help"
+    SettingsDest.Search -> if (t.zh) "搜索设置" else "Search settings"
+    SettingsDest.DevEnv -> if (t.zh) "开发环境" else "Dev environment"
 }
 
 @Composable
@@ -157,89 +160,13 @@ internal fun SettingsHub(
     onHome: (() -> Unit)? = null,
 ) {
     Box(modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            ScreenHeader(
-                title = t.settings,
-                subtitle = if (t.zh) "服务 / 分析 / 编辑 / 开发 / 诊断（可搜索）" else "Service / analysis / dev / engine / diagnostics (searchable)",
-                showBack = onHome != null,
-                onBack = onHome,
-            )
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = LocalUiMetrics.current.pagePad)
-                    .padding(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                var settingsQuery by remember { mutableStateOf("") }
-                SettingsSearchField(t, settingsQuery) { settingsQuery = it }
-                if (settingsQuery.isBlank()) {
-                    // ── 对齐 Explorer So SettingsFragment 的分组：外观 / AI·MCP / 权限 / 调试 / 关于 ──
-                    SettingsGroup(if (t.zh) "外观" else "Appearance") {
-                        SettingsNavRow(t, SettingsDest.Appearance, onDest)
-                    }
-                    SettingsGroup(if (t.zh) "AI · MCP" else "AI · MCP") {
-                        SettingsNavRow(t, SettingsDest.ApkBridge, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.AiDeep, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.ServiceConfig, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Tunnel, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Probe, onDest)
-                    }
-                    SettingsGroup(if (t.zh) "分析与动态" else "Analysis & dynamic") {
-                        SettingsNavRow(t, SettingsDest.Rizin, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Edbg, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Capture, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Sandbox, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Workflow, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Blutter, onDest)
-                    }
-                    SettingsGroup(if (t.zh) "编辑与产物" else "Editing & artifacts") {
-                        SettingsNavRow(t, SettingsDest.ApkEdit, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.DexExplorer, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.ApkSign, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Snapshots, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Audit, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Export, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Limits, onDest)
-                    }
-                    SettingsGroup(if (t.zh) "开发环境" else "Dev environment") {
-                        SettingsNavRow(t, SettingsDest.Linux, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Terminal, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.NativeExec, onDest); GroupDivider()
-                        NavRow(settingsTitle(t, SettingsDest.Python), null, settingsIcon(SettingsDest.Python), onClick = onOpenEditor); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Git, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Workspace, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Extensions, onDest)
-                    }
-                    SettingsGroup(if (t.zh) "权限与保活" else "Permissions & keep-alive") {
-                        SettingsNavRow(t, SettingsDest.Permissions, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.KeepAlive, onDest)
-                    }
-                    SettingsGroup(if (t.zh) "调试" else "Debug") {
-                        SettingsNavRow(t, SettingsDest.LogcatViewer, onDest)
-                    }
-                    SettingsGroup(if (t.zh) "关于" else "About") {
-                        SettingsNavRow(t, SettingsDest.ToolStats, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Updates, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.BackupRestore, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Help, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Credits, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.Disclaimer, onDest); GroupDivider()
-                        SettingsNavRow(t, SettingsDest.About, onDest)
-                    }
-                } else {
-                    SettingsSearchResults(t, settingsQuery, onDest)
-                }
-                // License footer
-                Text(
-                    "${com.soreverse.mcp.core.Provenance.PROJECT} · ${com.soreverse.mcp.core.Provenance.LICENSE}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp).align(Alignment.CenterHorizontally),
-                )
-            }
-        }
+        SettingsRootPage(
+            t = t,
+            settings = settings,
+            onDest = onDest,
+            onSearch = { onDest(SettingsDest.Search) },
+            onBack = onHome,
+        )
         if (dest != SettingsDest.Root) {
     Surface(
         modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -292,6 +219,8 @@ internal fun SettingsHub(
             SettingsDest.Sandbox -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsSandboxPage(t) }
             // 编辑器已是顶层独立页面：子页路由到此处时直接切到 Editor tab（覆盖扩展页 / 工作流页的跳转）
             SettingsDest.Python -> LaunchedEffect(Unit) { onOpenEditor() }
+            SettingsDest.Search -> SettingsSearchPage(t, onDest, onBack)
+            SettingsDest.DevEnv -> SettingsDevEnvPage(t, onDest, onOpenEditor, onBack)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
             SettingsDest.ToolStats -> PageScroll {
                 // 合并强相关入口：工具调用统计 + 隧道稳定性 同属「运行时统计」，合并到同一页。
@@ -372,72 +301,10 @@ internal fun SettingsHub(
 }
 }
 
-@Composable
-private fun SettingsSearchField(t: UiText, query: String, onQuery: (String) -> Unit) {
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQuery,
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        shape = RoundedCornerShape(AppShape.md),
-        placeholder = { Text(if (t.zh) "搜索设置…" else "Search settings…", style = MaterialTheme.typography.bodyMedium) },
-        leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-    )
-}
-
-@Composable
-private fun SettingsSearchResults(t: UiText, query: String, onDest: (SettingsDest) -> Unit) {
-    val hits = remember(query, t.zh) {
-        SettingsDest.values()
-            .filter { it != SettingsDest.Root }
-            .filter { settingsTitle(t, it).contains(query.trim(), ignoreCase = true) }
-    }
-    if (hits.isEmpty()) {
-        Text(
-            if (t.zh) "没有匹配的设置项" else "No matching settings",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-    } else {
-        SurfacePanel {
-            hits.forEachIndexed { i, dest ->
-                if (i > 0) GroupDivider()
-                NavRow(settingsTitle(t, dest), null, settingsIcon(dest), onClick = { onDest(dest) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingsNavRow(t: UiText, dest: SettingsDest, onDest: (SettingsDest) -> Unit) {
-    NavRow(settingsTitle(t, dest), null, settingsIcon(dest), onClick = { onDest(dest) })
-}
-
-/** 单列分组卡片：组标题 + 一张圆角面板（行之间用 GroupDivider 分隔）。 */
-@Composable
-private fun SettingsGroup(title: String, rows: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 6.dp, top = 2.dp),
-        )
-        val shape = RoundedCornerShape(AppShape.lg)
-        Column(
-            Modifier.fillMaxWidth()
-                .clip(shape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)), shape),
-            content = rows,
-        )
-    }
-}
-
 /** 设置项图标：首页入口 / 设置分组 / 搜索结果共用一个来源，保证视觉一致。 */
-private fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
+internal fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
+    SettingsDest.Search -> Icons.Default.Search
+    SettingsDest.DevEnv -> Icons.Default.Build
     SettingsDest.ServiceConfig -> Icons.Default.Settings
     SettingsDest.ApkBridge -> Icons.Default.Link
     SettingsDest.Tunnel -> Icons.Default.Cloud

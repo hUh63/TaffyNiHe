@@ -1,3 +1,54 @@
+# TaffyNiHe v1.3.118（收尾三项 + 借鉴上游）
+
+把上一版留下的三条「物理上最难」的问题收掉，同时把上游 SOMCP #170 里能安全摘出来的一片
+（结果分页内存）移植过来。
+
+## 一、heavy 闸门：从「软租约」到「可观测 + 可恢复」
+
+`future.cancel` 打不断 native 调用，这是平台限制；所以上一版的租约只是保证「不会永久锁死」。
+这一版把「发生过什么」和「怎么恢复」补完整：
+
+- 租约超期被回收时置 `poisoned = true` 并累加 `leaked`，`/health` 新增 `heavy` 字段
+  （`permits / inFlight / leaked / poisoned`），客户端与状态页都能看到「有任务可能仍在后台跑」。
+- 设置 → 服务与连接 新增 **「重建引擎（清理僵尸任务）」**：释放引擎持有的工作区/模拟器会话/
+  Frida 会话/SQLite 句柄并清除告警（`EngineProvider.close` + `HeavyGate.clearPoisoned`）。
+- `HeavyGate` 从 `mcp` 包移到 `core` 包：UI 与 core 层都能访问它（原来只能被 MCP 层引用，
+  想加恢复入口都做不到）。
+- 新任务在 `poisoned` 状态下仍然放行（否则功能等于永久不可用），只是串行 + 告警，避免
+  与僵尸任务并发写同一份产物。
+
+## 二、DexKit 搜索不再复制整个 dex
+
+`taffy_dex_search action=method_strings` 原来把 APK 里每个 `classes*.dex` 整份复制成临时文件、
+再用 `loadDexFile` 载入 —— 200MB 级多 dex 包会在磁盘和堆上各翻一倍。现在改用
+`DexFileFactory.loadDexContainer` 直接按条目定位，读哪个 dex 由容器负责，不再落临时文件。
+
+## 三、抓包代理的流控
+
+- **并发连接上限 32**：每条连接一个线程 + 30s soTimeout，超限直接回 `503` 并关闭，不再为
+  每条新连接开线程（连接风暴会把线程数打爆）。
+- **单连接双向各 512MB 转身上限**：`CONNECT` 隧道、WebSocket 双向、以及没有
+  `Content-Length` 的流式响应都必须有终点，否则一条连接可以把代理拖到天荒地老。
+
+## 四、借鉴上游 SOMCP #170（Flutter 内存）
+
+- **结果分页不再每页重解析整份 `result.json`**：新增单份结果缓存（同一 job 连续翻页只解析
+  一次），并把 `JSONObject(result.toString())` 换成浅拷贝 —— 后者会把整份结果重新序列化再
+  解析，每翻一页峰值内存翻一倍。
+- 上游 #170 的主体（Flutter 解析改「映射优先 + 流式落盘」，6 个文件 ~900 行）与 native 交互
+  耦合很深，单独一轮做更稳，不在本版塞入。
+
+## 五、上游核对结论（本次一并核过，无需改）
+
+- `Fix update download picking the wrong ABI APK`：塔菲早已用「-<abi>.」整段匹配 + 按
+  `SUPPORTED_ABIS` 优先序选包，不会出现 `x86` 命中 `x86_64`、`armeabi` 命中 `armeabi-v7a`。
+- `完整性守卫类加 -keep`：`IntegrityGuard` / `SelfArtifactGuard` / `NativeProbe` / `BackupCrypto`
+  都已在 `proguard-rules.pro` 里 keep。
+- `删除壳的 frida_maps 探针`：塔菲的 `InjectionProbe` 刻意不含 `frida`/`gadget` 关键字，
+  不会因为文件里出现 "frida" 字样而误杀。
+- 太墟（taixu）v1.2.1 的更新集中在 bot 群聊/团队协作、任务调度时区、ADB 候选回退与插件 v2
+  授权——与塔菲（逆向工具）没有交集；其插件授权模型塔菲已用 `PluginManager` 权限位覆盖。
+
 # TaffyNiHe v1.3.117（收尾 4 项 · 渲染与挂载）
 
 紧接 v1.3.116 把剩下几处低优先但真实可感知的问题收掉。

@@ -266,6 +266,18 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                 PrimaryActionButton(if (t.zh) "重新生成" else "Regenerate", { accessToken = settings.resetAccessToken() })
                 SecondaryActionButton(if (t.zh) "复制 Token" else "Copy token") { copy(context, accessToken, t.copied) }
             }
+            GroupDivider()
+            // 重工具租约超期后（native 调用打不断）会出现"可能仍在后台跑"的僵尸任务，
+            // 这里给一个显式恢复入口：释放引擎持有的工作区/会话并清掉告警。
+            SecondaryActionButton(if (t.zh) "重建引擎（清理僵尸任务）" else "Rebuild engine (clear zombie tasks)") {
+                runCatching { com.soreverse.mcp.core.EngineProvider.close(context) }
+                com.soreverse.mcp.core.HeavyGate.clearPoisoned()
+                android.widget.Toast.makeText(
+                    context,
+                    if (t.zh) "引擎已重建，重工具可重新调用" else "Engine rebuilt",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
         }
     }
     if (showStorageDialog) {

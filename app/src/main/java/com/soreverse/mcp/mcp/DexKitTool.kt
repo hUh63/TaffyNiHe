@@ -190,39 +190,33 @@ object DexKitTool {
             var foundMethod = false
             // baksmali 反汇编 + 文本正则提取, 复用已验证 API, 不依赖底层指令接口
             runCatching {
-                java.util.zip.ZipFile(apk).use { zf ->
-                    val dexEntries = zf.entries().toList().filter { it.name.matches(Regex("classes\\d*\\.dex")) }
-                    for (dexEntry in dexEntries) {
-                        val tempDex = File.createTempFile("classes_", ".dex")
-                        zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
-                        try {
-                            val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
-                            // 仅当该类存在于该 DEX 时才反汇编整个 DEX(避免对所有 DEX 无谓 baksmali)
-                            val classDef = dexFile.classes.firstOrNull { it.type == classDescriptor } ?: continue
-                            // 类存在但无该名字的方法(可能拼错) → 跳过, 最终返回 METHOD_NOT_FOUND
-                            if (classDef.methods.none { it.name == methodBase }) continue
-                            val outDir = File.createTempFile("smali_ms_", "").apply { delete(); mkdirs() }
-                            try {
-                                val bopts = com.android.tools.smali.baksmali.BaksmaliOptions()
-                                com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(dexFile, outDir, 4, bopts)
-                                val smaliFile = File(outDir, className.replace('.', '/') + ".smali")
-                                if (smaliFile.isFile) {
-                                    val smaliText = smaliFile.readText()
-                                    val extracted = extractMethodRefs(smaliText, method, methodBase)
-                                    strings.addAll(extracted.strings)
-                                    constants.addAll(extracted.constants)
-                                    calls.addAll(extracted.calls)
-                                    // 以"是否真正进入过目标方法体"为判定标准, 避免 smali 文件存在但方法签名没匹配到的误报
-                                    if (extracted.found) { foundMethod = true }
-                                }
-                            } finally {
-                                outDir.deleteRecursively()
-                            }
-                        } finally {
-                            tempDex.delete()
+                // 直接用 MultiDexContainer 定位 APK 内的 dex。旧实现把每个 classes*.dex
+                // 整份复制成临时文件再载入，200MB 级多 dex 包会在磁盘与堆上各翻一倍。
+                val container = DexFileFactory.loadDexContainer(apk, Opcodes.getDefault())
+                for (dexName in container.dexEntryNames) {
+                    val dexFile = runCatching { container.getEntry(dexName)?.dexFile }.getOrNull() ?: continue
+                    // 仅当该类存在于该 DEX 时才反汇编整个 DEX(避免对所有 DEX 无谓 baksmali)
+                    val classDef = dexFile.classes.firstOrNull { it.type == classDescriptor } ?: continue
+                    // 类存在但无该名字的方法(可能拼错) → 跳过, 最终返回 METHOD_NOT_FOUND
+                    if (classDef.methods.none { it.name == methodBase }) continue
+                    val outDir = File.createTempFile("smali_ms_", "").apply { delete(); mkdirs() }
+                    try {
+                        val bopts = com.android.tools.smali.baksmali.BaksmaliOptions()
+                        com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(dexFile, outDir, 4, bopts)
+                        val smaliFile = File(outDir, className.replace('.', '/') + ".smali")
+                        if (smaliFile.isFile) {
+                            val smaliText = smaliFile.readText()
+                            val extracted = extractMethodRefs(smaliText, method, methodBase)
+                            strings.addAll(extracted.strings)
+                            constants.addAll(extracted.constants)
+                            calls.addAll(extracted.calls)
+                            // 以"是否真正进入过目标方法体"为判定标准, 避免 smali 文件存在但方法签名没匹配到的误报
+                            if (extracted.found) { foundMethod = true }
                         }
-                        if (foundMethod) break
+                    } finally {
+                        outDir.deleteRecursively()
                     }
+                    if (foundMethod) break
                 }
             }
 

@@ -117,6 +117,12 @@ class HttpCaptureServer(
     /** 已建立的客户端连接：stop() 必须一起关掉，否则代理在后台继续转发/记录。 */
     private val activeSockets = java.util.Collections.synchronizedSet(HashSet<Socket>())
 
+    /** 并发连接上限：每条连接一个线程 + 30s soTimeout，不设上限会把线程数打爆。 */
+    private val connSlots = java.util.concurrent.Semaphore(32)
+
+    /** 单连接转发上限（两个方向各自计）：无 Content-Length 的流式响应必须有个终点。 */
+    private val MAX_RELAY_BYTES = 512L * 1024 * 1024
+
     fun isRunning(): Boolean = running
 
     fun start(): Boolean {
@@ -165,9 +171,23 @@ class HttpCaptureServer(
         while (running) {
             val client = try { serverSocket?.accept() } catch (e: Exception) { null }
             if (client == null) { if (!running) break; continue }
+            if (!connSlots.tryAcquire()) {
+                // 超限直接 503 关闭，不为它再开线程（否则线程数会随连接数无限增长）
+                runCatching {
+                    client.getOutputStream().write(
+                        "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+                            .toByteArray()
+                    )
+                }
+                runCatching { client.close() }
+                continue
+            }
             activeSockets.add(client)
             thread(name = "capture-conn", isDaemon = true) {
-                try { handle(client) } finally { activeSockets.remove(client) }
+                try { handle(client) } finally {
+                    activeSockets.remove(client)
+                    connSlots.release()
+                }
             }
         }
     }
@@ -297,6 +317,7 @@ class HttpCaptureServer(
                         upstream.getOutputStream().write(buf, 0, n)
                         upstream.getOutputStream().flush()
                         sent += n
+                        if (sent > MAX_RELAY_BYTES) break
                     }
                     relay.join(2000)
                     record(method, host, "", "", sent, System.currentTimeMillis() - t0, isHttps = true)
@@ -386,11 +407,14 @@ class HttpCaptureServer(
                 val c2s = thread(name = "ws-c2s", isDaemon = true) {
                     runCatching {
                         val buf = ByteArray(8192)
+                        var relayed = 0L
                         while (running) {
                             val n = client.getInputStream().read(buf)
                             if (n < 0) break
                             clientParser.feed(buf, n)
                             upOut.write(buf, 0, n); upOut.flush()
+                            relayed += n
+                            if (relayed > MAX_RELAY_BYTES) break
                         }
                     }
                     runCatching { upstream.close() }
@@ -398,11 +422,14 @@ class HttpCaptureServer(
                 }
                 runCatching {
                     val buf = ByteArray(8192)
+                    var relayed = 0L
                     while (running) {
                         val n = upIn.read(buf)
                         if (n < 0) break
                         serverParser.feed(buf, n)
                         clientOut.write(buf, 0, n); clientOut.flush()
+                        relayed += n
+                        if (relayed > MAX_RELAY_BYTES) break
                     }
                 }
                 runCatching { c2s.interrupt() }
@@ -421,6 +448,8 @@ class HttpCaptureServer(
                 sent += n
                 total += n
                 if (contentLength > 0 && sent >= contentLength) break
+                // 没有 Content-Length 的流式响应必须有个终点，否则一条连接能把代理拖到天荒地老
+                if (sent > MAX_RELAY_BYTES) break
             }
             record(methodTag, host, path, status, total, System.currentTimeMillis() - t0, isHttps,
                 reqHeaders = headerLines.joinToString("\n"),

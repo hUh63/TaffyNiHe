@@ -338,6 +338,9 @@ object IntegrityGuard {
             declaredMethodNames("android.app.ActivityThread"),
         )?.let { threats += it }
         arkUnpackRomThreat(Build.MODEL, Build.DISPLAY, Build.FINGERPRINT)?.let { threats += it }
+        // 进程内 hook 帧（Xposed 系）与 PackageInfo.CREATOR 被替换（一键过签框架）。
+        hookStackThreat()?.let { threats += it }
+        creatorIntegrityThreat()?.let { threats += it }
         val maps = procMapsIndicators()
         if (maps.isNotEmpty()) threats += maps
         // 对齐 SOMCP v1.0.22：已删除 Frida 端口探活检测（openLocalInstrumentationPorts 置空）。
@@ -369,6 +372,45 @@ object IntegrityGuard {
         } else {
             null
         }
+
+    /**
+     * 进程内 hook 帧检测（Xposed / libxposed 系）。
+     *
+     * 只比对**包前缀**：`de.robv.android.xposed.` 与 `io.github.libxposed.` 是已知 hook API
+     * 的包面，普通应用栈帧不可能命中；命中只说明「本进程确实被 hook 了」，与「设备上装了
+     * 模块」无关（LSPosed 只注入被勾选的应用）。
+     */
+    internal fun hookFrameThreat(frameClassNames: List<String>): String? {
+        val prefixes = listOf(
+            "de.robv.android.xposed.",
+            "io.github.libxposed.",
+        )
+        val hit = prefixes.firstOrNull { prefix -> frameClassNames.any { it.startsWith(prefix) } } ?: return null
+        return "in-process hook frames from $hit"
+    }
+
+    private fun hookStackThreat(): String? = runCatching {
+        val frames = Thread.getAllStackTraces().values.flatMap { stack -> stack.map { it.className } }
+        hookFrameThreat(frames)
+    }.getOrNull()
+
+    /**
+     * `PackageInfo.CREATOR` 是否被换成外来类（SoLab/DPatch/LSPatch 一类过签框架的做法：
+     * 换掉 Creator，让每次 getPackageInfo() 反序列化时都被改写成「原版签名」）。
+     *
+     * 判据是 **classLoader 身份** 而不是「classLoader 为 null」：真 Creator 是匿名类
+     * `PackageInfo$1`，嵌套类由定义外层类的同一个 loader 定义，所以唯一在所有 ROM 上都成立
+     * 的不变式是 `CREATOR.classLoader === PackageInfo.classLoader`；用 null 判据会在
+     * ART 模块 / APEX / 定制 framework 的机器上把正版也判成被改。
+     */
+    private fun creatorIntegrityThreat(): String? = runCatching {
+        val creator = PackageInfo::class.java.getField("CREATOR").get(null) ?: return@runCatching "PackageInfo.CREATOR is null"
+        if (creator.javaClass.classLoader !== PackageInfo::class.java.classLoader) {
+            "PackageInfo.CREATOR replaced by a foreign classloader"
+        } else {
+            null
+        }
+    }.getOrNull()
 
     /** [className] 声明的全部方法名；解析不到时返回空列表（不触发初始化）。 */
     private fun declaredMethodNames(className: String): List<String> = runCatching {

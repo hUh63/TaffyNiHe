@@ -102,4 +102,41 @@ class IntegrityGuardThreatTest {
         )
         assertNull(IntegrityGuard.arkUnpackRomThreat(null, null, null))
     }
+
+    /** Xposed / libxposed 模块代码跑在我们的线程上，栈帧本身就是注入证据。 */
+    @Test
+    fun moduleHookFramesAreAThreat() {
+        assertNotNull(
+            IntegrityGuard.hookFrameThreat(
+                listOf(
+                    "android.app.ActivityThread",
+                    "de.robv.android.xposed.XposedBridge",
+                    "com.soreverse.mcp.MainActivity"
+                )
+            )
+        )
+        assertNotNull(IntegrityGuard.hookFrameThreat(listOf("io.github.libxposed.api.XposedModule")))
+    }
+
+    @Test
+    fun ordinaryApplicationFramesAreNotHookThreats() {
+        assertNull(
+            IntegrityGuard.hookFrameThreat(
+                listOf(
+                    "com.soreverse.mcp.core.IntegrityGuard",
+                    "androidx.core.app.CoreComponentFactory",
+                    "android.app.Application",
+                    "kotlin.concurrent.ThreadKt"
+                )
+            )
+        )
+        assertNull(IntegrityGuard.hookFrameThreat(emptyList()))
+    }
+
+    /** 只比包前缀：把 needle 当子串塞进自家包名的仿冒类不能命中。 */
+    @Test
+    fun hookFrameMatchRequiresPackagePrefixBoundary() {
+        assertNull(IntegrityGuard.hookFrameThreat(listOf("com.soreverse.mcp.de.robv.android.xposed.Fake")))
+        assertNotNull(IntegrityGuard.hookFrameThreat(listOf("de.robv.android.xposed.XC_MethodHook")))
+    }
 }

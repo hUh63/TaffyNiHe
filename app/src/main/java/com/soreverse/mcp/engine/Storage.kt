@@ -314,6 +314,21 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
         return readBytes(found ?: error("File not found in work directory: $relativePath"), maxBytes)
     }
 
+    /**
+     * 相对路径对应文件的字节大小；找不到返回 null。
+     *
+     * Flutter 库动辄上百 MB，调用方要先用真实大小做内存估算
+     * ([com.soreverse.mcp.core.MemoryGuard]) 再决定是否整份读进内存，
+     * 所以这里和 [readFile] 走同一套 walk 解析，但只取 size 不打开流。
+     */
+    fun fileSize(relativePath: String): Long? = runCatching {
+        var found: Long? = null
+        walk(treeUri, "", 0, ScanOptions(scanApks = true, scanSubdirectories = true, maxDepth = 32)) { _, _, path, size, _ ->
+            if (path == relativePath) found = size
+        }
+        found
+    }.getOrNull()
+
     fun writeRootFile(displayName: String, bytes: ByteArray, mimeType: String = "application/octet-stream"): SoSource {
         val safeName = displayName.substringAfterLast('/').substringAfterLast('\\').ifBlank { "downloaded.so" }
         val parent = documentUriForTree()

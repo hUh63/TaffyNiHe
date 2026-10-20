@@ -12,6 +12,28 @@ import java.security.MessageDigest
 import kotlin.system.exitProcess
 
 object IntegrityGuard {
+
+    /**
+     * ROM 级 ART/DEX 转储检测（对齐 SOMCP v1.0.22 / commit 317178e）。
+     *
+     * 这类脱壳机不 hook 我们的进程，而是直接改平台：ArkOS-angler-8.1 把
+     * `dalvik.system.DexFile` 加上 `setFartDumpEnabled` 开关、把
+     * `android.app.ActivityThread` 加上整套 FART dump 管线、并在
+     * `libart.so` 导出 DumpFartDexFileDirect。原版平台不声明这些成员，
+     * 且它们都在 boot classpath 上，从本进程反射即可观测（无需权限/无 hook）。
+     */
+    private const val FART_DEXFILE_SWITCH = "setFartDumpEnabled"
+
+    /** 同一补丁注入 ActivityThread 的方法名（都带 FART 自家品牌，原版平台不会重名）。 */
+    private val FART_ACTIVITYTHREAD_MARKERS = listOf(
+        "runFartDump",
+        "startFartDumpThreadIfNeeded",
+        "readFartDumpSwitches",
+        "getFartProcessDirectory",
+    )
+
+    /** 脱壳 ROM 的固定品牌串（ArkOS 把 ro.product.model 设成 `Ark脱壳机(…)`）。 */
+    private const val ARK_ROM_MODEL_TOKEN = "Ark脱壳机"
     data class Result(
         val trusted: Boolean,
         val reason: String,
@@ -310,6 +332,12 @@ object IntegrityGuard {
         //（读不到 /proc/self/status 或抛异常），这里一律按“已附加 tracer”处理，绝不默认放行。
         val tracer = tracerPid()
         if (tracer > 0) threats += "native tracer attached"
+        // ROM 级 ART/DEX 转储（FART/Ark 系）：平台被改，只能拒绝运行。
+        fartDumpThreat(
+            declaredMethodNames("dalvik.system.DexFile"),
+            declaredMethodNames("android.app.ActivityThread"),
+        )?.let { threats += it }
+        arkUnpackRomThreat(Build.MODEL, Build.DISPLAY, Build.FINGERPRINT)?.let { threats += it }
         val maps = procMapsIndicators()
         if (maps.isNotEmpty()) threats += maps
         // 对齐 SOMCP v1.0.22：已删除 Frida 端口探活检测（openLocalInstrumentationPorts 置空）。
@@ -318,6 +346,35 @@ object IntegrityGuard {
 
     // 对齐 SOMCP v1.0.22：fail-closed —— 读不到 /proc/self/status（被 hook 隐藏 / 异常）时，
     // 不再返回 0（=“无 tracer”= 放行），而返回 -1 表示“无法判定”，交由 runtimeThreats 按不安全处理。
+    /**
+     * 纯函数：只吃反射看到的两个方法名清单，便于离线固定规则。
+     *
+     * 恢复空列表（类没解析出来）时不报威胁——查不到不等于被改，误判比漏判更糟。
+     */
+    internal fun fartDumpThreat(dexFileMethods: List<String>, activityThreadMethods: List<String>): String? {
+        if (FART_DEXFILE_SWITCH in dexFileMethods) return "ART runtime carries the FART/Ark DEX-dump switch"
+        if (activityThreadMethods.any { it in FART_ACTIVITYTHREAD_MARKERS }) {
+            return "framework carries the FART/Ark DEX-dump pipeline"
+        }
+        return null
+    }
+
+    /**
+     * 同一 ROM 的身份兜底：dump 类被改名时 build.prop 仍留着品牌串。
+     * 单独看比 [fartDumpThreat] 弱（build.prop 谁都能改），但只花三次字符串比较。
+     */
+    internal fun arkUnpackRomThreat(vararg identityFields: String?): String? =
+        if (identityFields.any { field -> field != null && field.contains(ARK_ROM_MODEL_TOKEN) }) {
+            "Ark unpacking ROM identity ($ARK_ROM_MODEL_TOKEN)"
+        } else {
+            null
+        }
+
+    /** [className] 声明的全部方法名；解析不到时返回空列表（不触发初始化）。 */
+    private fun declaredMethodNames(className: String): List<String> = runCatching {
+        Class.forName(className, false, IntegrityGuard::class.java.classLoader).declaredMethods.map { it.name }
+    }.getOrDefault(emptyList())
+
     private fun tracerPid(): Int = runCatching {
         File("/proc/self/status").useLines { lines ->
             lines.firstOrNull { it.startsWith("TracerPid:") }

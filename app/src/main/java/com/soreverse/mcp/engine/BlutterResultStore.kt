@@ -57,9 +57,17 @@ internal class BlutterResultStore(context: Context) {
         val dir = File(results, key)
         if (!dir.exists()) dir.mkdirs()
         write(File(dir, "result.json"), result)
+        if (cachedResultKey == key) {
+            cachedResultKey = ""
+            cachedResult = null
+        }
         update(jobId, "succeeded", "committed", resultKey = key)
         return result
     }
+
+    /** 最近一次解析的结果（同一 job 连续翻页只解析一次）。分页曾经每页都重读+重解析整份文件。 */
+    private var cachedResultKey: String = ""
+    private var cachedResult: JSONObject? = null
 
     @Synchronized
     fun result(jobId: String, kind: String?, cursor: String?, limit: Int): JSONObject? {
@@ -70,7 +78,17 @@ internal class BlutterResultStore(context: Context) {
         if (key.isBlank()) return JSONObject().put("jobId", jobId).put("status", state.optString("status"))
         val file = File(File(results, key), "result.json")
         if (!file.isFile) return null
-        val result = JSONObject(file.readTextCapped(ReadLimits.RESULT_JSON_BYTES))
+        val result = if (cachedResultKey == key) {
+            cachedResult ?: JSONObject(file.readTextCapped(ReadLimits.RESULT_JSON_BYTES)).also {
+                cachedResultKey = key
+                cachedResult = it
+            }
+        } else {
+            JSONObject(file.readTextCapped(ReadLimits.RESULT_JSON_BYTES)).also {
+                cachedResultKey = key
+                cachedResult = it
+            }
+        }
         if (kind == null) return result.put("jobId", jobId)
         require(kind in PAGE_KINDS) { "Unsupported result kind" }
         val page = result.optJSONObject(kind) ?: return result.put("jobId", jobId)
@@ -79,7 +97,15 @@ internal class BlutterResultStore(context: Context) {
         val end = minOf(offset + limit, items.length())
         val selected = JSONArray()
         for (index in offset until end) selected.put(items.get(index))
-        val response = JSONObject(result.toString()).put("jobId", jobId)
+        // 浅拷贝：JSONObject(result.toString()) 会把整份结果重新序列化再解析，
+        // 每页请求都让峰值内存翻倍。共享已解析子对象是安全的（调用方只做序列化输出）。
+        val response = JSONObject()
+        val resultKeys = result.keys()
+        while (resultKeys.hasNext()) {
+            val name = resultKeys.next()
+            response.put(name, result.get(name))
+        }
+        response.put("jobId", jobId)
         response.put(kind, JSONObject()
             .put("items", selected)
             .put("total", items.length())

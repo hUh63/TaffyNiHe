@@ -455,14 +455,7 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
         )
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = LocalUiMetrics.current.pagePad, vertical = 8.dp)
-            .padding(bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(LocalUiMetrics.current.sectionGap),
-    ) {
+    PageScroll {
         GlassGroup(title = t.backupLocal) {
             // 上游 1.0.21 借鉴: 包含密钥时强制启用加密并锁定加密开关
             BackupToggleRow(

@@ -178,11 +178,8 @@ internal fun SettingsHub(
     Column(Modifier.fillMaxSize()) {
         // 工具/功能页自带沉浸顶栏，不再套「设置子页」标题；其余设置页保持统一标题栏。
         if (dest !in toolPageDests) {
-            ScreenHeader(
-                title = settingsTitle(t, dest),
-                showBack = true,
-                onBack = onBack,
-            )
+            // 太墟式二级页顶栏：大标题随内容滚动折叠（PageScroll 通过 CompositionLocal 递出滚动量）
+            SettingsSubPageHeader(title = settingsTitle(t, dest), onBack = onBack)
         }
         Box(Modifier.fillMaxSize()) {
         when (dest) {

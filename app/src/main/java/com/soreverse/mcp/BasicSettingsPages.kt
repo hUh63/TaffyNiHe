@@ -165,16 +165,17 @@ internal fun SecondaryActionButton(text: String, onClick: () -> Unit, modifier: 
 
 @Composable
 internal fun SurfacePanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(LocalUiMetrics.current.cardRadius)
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)), shape)
-            .padding(14.dp),
-        content = content,
-    )
+    // 太墟规格：surfaceContainer + extraLarge 圆角 + 零描边（原来是自己拼 clip/background/border 的伪卡片）
+    androidx.compose.material3.Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), content = content)
+    }
 }
 
 @Composable

@@ -43,7 +43,7 @@ internal fun SettingsHelpPage(t: UiText) {
     val fg = Color(0xFFD6E2F0)
     var tab by remember { mutableStateOf(0) }   // 0=功能教程 1=实现原理 2=MCP Skill
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    PageScroll {
         Text(
             if (zh) "帮助 · 教程 / 原理 / MCP Skill" else "Help · Guide / Internals / MCP Skill",
             style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface,

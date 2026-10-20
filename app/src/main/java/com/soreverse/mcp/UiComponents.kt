@@ -40,7 +40,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +52,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.sp
 
 /**
@@ -331,18 +335,75 @@ internal fun PrimaryActionButton(
     }
 }
 
+/**
+ * 设置子页当前滚动位置（像素）。
+ *
+ * 只为了让 [SettingsSubPageHeader] 把大标题随滚动收成小标题——太墟（taixu）的二级页
+ * 是「34sp 大标题 → 滚动后 22sp」，但要折叠就得知道页面滚到哪；页面各自持有
+ * [rememberScrollState]，所以用 CompositionLocal 把它递出来，而不是让每个页面
+ * 都改成 LazyColumn 架构。
+ */
+internal val LocalPageScrollState = compositionLocalOf<ScrollState?> { null }
+
 @Composable
 internal fun PageScroll(content: @Composable ColumnScope.() -> Unit) {
     val metrics = LocalUiMetrics.current
-    Column(
+    val scroll = rememberScrollState()
+    CompositionLocalProvider(LocalPageScrollState provides scroll) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .padding(horizontal = metrics.pagePad, vertical = 8.dp)
+                .padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(metrics.sectionGap),
+            content = content,
+        )
+    }
+}
+
+/**
+ * 设置子页顶栏 —— 太墟式「折叠大标题」。
+ *
+ * 标题字号与行高随 [LocalPageScrollState] 的滚动偏移在 34sp→22sp 之间线性收缩，
+ * 顶栏高度同步 96dp→64dp。没有滚动源的页面（少数自绘 Column）保持大标题不折叠。
+ *
+ * 只在本 composable 内读 scroll.value：读在外层会让整页每帧重组。
+ */
+@Composable
+internal fun SettingsSubPageHeader(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val scroll = LocalPageScrollState.current
+    val progress = ((scroll?.value ?: 0) / 96f).coerceIn(0f, 1f)
+    Row(
         Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = metrics.pagePad, vertical = 8.dp)
-            .padding(bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(metrics.sectionGap),
-        content = content,
-    )
+            .fillMaxWidth()
+            .heightIn(min = (64f - 24f * progress).dp)
+            .padding(start = 4.dp, end = 12.dp, top = (10f - 6f * progress).dp, bottom = (6f - 4f * progress).dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        if (onBack != null) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = MaterialTheme.colorScheme.onSurface)
+            }
+        } else {
+            Spacer(Modifier.width(12.dp))
+        }
+        Text(
+            title,
+            modifier = Modifier.weight(1f).padding(start = 4.dp, bottom = (6f - 4f * progress).dp),
+            fontSize = (34f - 12f * progress).sp,
+            lineHeight = (40f - 12f * progress).sp,
+            fontWeight = FontWeight.Normal,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        trailing?.invoke()
+    }
 }
 
 @Composable

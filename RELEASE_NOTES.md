@@ -1,3 +1,70 @@
+# TaffyNiHe v1.3.119（上游 SOMCP 完整对齐 + 设置页换太墟体系）
+
+这一版把两件事做到「完整」：SOMCP 侧凡是能安全落地的改进全部对齐（Flutter 分析链路整条重写、
+ROM 级脱壳检测），设置界面整体换成太墟（taixu）的布局与操作体系（根页拼接卡 + 设置全局搜索 +
+开发环境二级页），并把页面基座一次性换到同一套规格，后续新页面无需再单独调样式。
+
+## 一、Flutter 分析链路：按上游 #170 整条重做（映射优先 + 流式落盘）
+
+旧实现的瓶颈在内存：`libapp.so` / `libflutter.so` 先从 APK 解成 `ByteArray`，再写进任务目录，
+一份库在堆里同时存在两份副本；体积大的 Flutter 包（两个库各上百 MB）在手机上直接顶到 OOM。
+
+- **库文件直落盘**：`FlutterArtifactInspector.extractLibrariesTo()` 把两个库从 APK 直接流式写进
+  `blutter/v1/jobs/<id>/input/`，边写边算大小与 SHA-256，堆里不再有库的副本；结果缓存 key
+  与原实现字节级一致（文件摘要 = 内容摘要），历史缓存继续命中。
+- **run 阶段传入文件而不是字节**：`BlutterEmbeddedBackend` 用任务目录里的文件直接 open 成
+  `ParcelFileDescriptor` 交给 runner 进程，中间少一次全量拷贝。
+- **新增 `FlutterByteScan`**：在字节层面扫 snapshot 指纹（compressed pointers / 版本特征），
+  与「符号/映射优先」的判定互证；判定顺序改为**映射优先、字节兜底**，版本误判明显减少。
+- **runner 匹配加权**：`BlutterRunnerMatcher` 以 snapshot hash 为主证据、engine revision 与
+  Flutter 版本为次证据排序，`coverageHint` 给出「最接近的几个 runner」而不是只回一句不支持。
+- **内存守卫保留并前移**：读结果前用 `MemoryGuard` 估算（结果解析要文本 + 语法树两份），
+  余量不足返回 `INSUFFICIENT_MEMORY`，不再让 `org.json` 抛 `OutOfMemoryError`；结果分页
+  保留单份解析缓存 + 浅拷贝，翻页不再重复解析整份文档。
+- 配套单测：`FlutterArtifactInspectorTest`（流式抽取 / ABI 选择 / 指纹判定）、
+  `BlutterRunnerMatcherTest`（权重与版本序）。
+
+## 二、ROM 级 ART/DEX 转储检测（对齐上游 `317178e`）
+
+FART / Ark 系脱壳机不改我们的进程，改的是平台本身：`dalvik.system.DexFile` 多出
+`setFartDumpEnabled` 开关、`android.app.ActivityThread` 多出 `runFartDump` 等整条管线、
+`libart.so` 导出 `DumpFartDexFileDirect`，并把 DEX 拉到 `/sdcard/Ark脱壳机/`。这些成员全在
+boot classpath 上，**原版平台一个都不声明**，所以本进程反射即可判定，不需要权限、不需要 hook。
+
+- 规则拆成两个纯函数（`fartDumpThreat` / `arkUnpackRomThreat`）并加 6 条单测，钉住
+  「原版平台的 dump 面（`handleDumpActivity` 等）不误判」「空清单不误报」「按成员名精确匹配」；
+- 反射用 `initialize = false`：只看声明的成员表，不触发类初始化；
+- 只取这两条**低误报**判据。上游的「进程内 Xposed 帧探针」与「同类分发版检测」刻意不取：
+  前者会把装了 LSPosed 的正常设备判成被篡改，后者是上游自己的分发纠纷，与本产品无关。
+
+## 三、设置页换成太墟（taixu）体系
+
+参考 `wkbin/taixu` 的 `feature/settings`，把设置从「Exbin 风分组面板」改成太墟的
+「大标题 + 搜索 + 拼接卡」：
+
+- **根页**：`LargeTopAppBar` 大标题（滚动收起）+ 圆形搜索胶囊 + 运行态卡（端口 / 工具数 /
+  鉴权）+ 六个分组；每组是一张「拼接卡」——顶行上方外圆角、中间行小圆角、底行下方外圆角，
+  视觉上连成一张卡但不做嵌套；分类入口行 96dp、48dp `secondaryContainer` 图标瓦片、
+  右侧是**状态摘要**（如 `:8080`、`36 项`）而不是开关。
+- **开发环境二级页**（新增）：原来根页里 7 行摊平成三组——运行环境（Linux / 终端 / 本地可执行）、
+  开发工具（编辑器 / Git / 扩展）、工作区（默认目录 / 临时工作区）。
+- **设置全局搜索**（新增）：39 项索引（标题 / 说明 / 关键词 / 归属分组），空查询时给 8 个热门
+  标签，命中按分组收拢成拼接卡，点行直达目标页。
+- **基座统一**：`GlassGroup` / `AppCard` / `NavRow` / `ScreenHeader` 一次性换到太墟规格
+  （`surfaceContainer` + `extraLarge` 圆角 + 无描边；组标题在卡外用 `primary`；行高 64dp、
+  标题 `titleMedium`；`NavRow` 新增 `value` 参数承载状态摘要；设置子页标题改 24sp 常规字重）。
+  这一步让 60+ 个既有页面在零改动的情况下同步换上新观感。
+
+## 四、说明
+
+- 上游 `AppListGuard`（同类分发版检测）与 Xposed 帧探针**未移植**，理由见第二节；
+- 上游 CI/VMP 壳相关提交（`#169`、`#163`、`cebfd86b` 等）属发布流程与壳加固，与本项目流水线无关。
+
+## 验证
+
+- JVM 单元测试（含新增 Flutter 与完整性规则测试）。
+- Debug Kotlin/Java 编译、四 ABI 原生编译、Release APK 构建与签名校验。
+
 # TaffyNiHe v1.3.118（收尾三项 + 借鉴上游）
 
 把上一版留下的三条「物理上最难」的问题收掉，同时把上游 SOMCP #170 里能安全摘出来的一片

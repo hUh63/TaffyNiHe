@@ -74,7 +74,8 @@ internal fun ScreenHeader(
             Column {
                 Text(
                     title,
-                    style = MaterialTheme.typography.titleLarge,
+                    // 太墟式：无副标题的设置子页用大标题（24sp 常规字重），标题本身就是视觉锚点
+                    style = if (subtitle.isNullOrBlank()) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Normal,
                     color = titleColor ?: MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,

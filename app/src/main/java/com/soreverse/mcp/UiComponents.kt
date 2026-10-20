@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -74,7 +75,7 @@ internal fun ScreenHeader(
                 Text(
                     title,
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Normal,
                     color = titleColor ?: MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -102,7 +103,7 @@ internal fun ScreenHeader(
             }
         },
         actions = { trailing?.invoke() },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
     )
 }
 
@@ -176,20 +177,19 @@ internal fun GlassGroup(
         if (!title.isNullOrBlank()) {
             Text(
                 title,
+                // 太墟式：组标题在卡片外、primary 色（不是卡内灰标题）
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 2.dp),
-                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 20.dp, bottom = 4.dp),
             )
         }
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(metrics.cardRadius),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) {
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), content = content)
+            Column(Modifier.fillMaxWidth(), content = content)
         }
         if (!footer.isNullOrBlank()) {
             Text(
@@ -219,19 +219,24 @@ internal fun NavRow(
     icon: ImageVector? = null,
     iconTint: Color? = null,
     trailing: String? = null,
+    /** 右侧状态摘要（太墟式）：如「:8080」「12 个扩展」，不是按钮。 */
+    value: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val resolvedTint = iconTint ?: MaterialTheme.colorScheme.primary
     ListItem(
-        modifier = Modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        modifier = Modifier
+            .heightIn(min = 64.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint) } },
+        leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint, modifier = Modifier.size(24.dp)) } },
         headlineContent = {
             Text(
                 title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         },
         supportingContent = if (!subtitle.isNullOrBlank()) {
@@ -247,6 +252,15 @@ internal fun NavRow(
         } else null,
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!value.isNullOrBlank()) {
+                    Text(
+                        value,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (!trailing.isNullOrBlank()) {
                     Text(
                         trailing,
@@ -358,9 +372,8 @@ internal fun AppCard(
             Text(
                 title,
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 2.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 20.dp, bottom = 4.dp),
             )
         }
         Card(

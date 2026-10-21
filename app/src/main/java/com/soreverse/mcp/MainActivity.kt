@@ -155,13 +155,20 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 12)
         }
-        // 把塔菲逆向工作区注册进太墟主导航的「逆向」中枢（幂等）。
-        ReverseWorkspaceEntry.ensureRegistered()
+        // 壳层切换：移植太墟后，默认主界面是太墟壳（首页/智枢/工坊/逆向/乾坤），
+        // 塔菲自己的五页工作区作为「逆向」中枢嵌在其中（HostWorkspaceRegistry 注入）。
+        // 太墟装配需要 Koin 就绪；若 Application 阶段太墟初始化失败，则整体回退到塔菲原界面，
+        // 保证逆向工具链始终可用。
+        val taixuShellReady = runCatching { org.koin.core.context.GlobalContext.get() }.isSuccess
         setContent {
-            // calculateWindowSizeClass 需要 Activity 作用域：在这里算一次宽度尺寸类，
-            // 再传给 SoReverseApp 做 Compact / Medium / Expanded 三态响应式布局。
-            val windowSizeClass = calculateWindowSizeClass(this@MainActivity)
-            IntegrityGate { SoReverseApp(widthSizeClass = windowSizeClass.widthSizeClass) }
+            if (taixuShellReady) {
+                top.wkbin.taixu.TaiXuEmbeddedRoot()
+            } else {
+                // calculateWindowSizeClass 需要 Activity 作用域：在这里算一次宽度尺寸类，
+                // 再传给 SoReverseApp 做 Compact / Medium / Expanded 三态响应式布局。
+                val windowSizeClass = calculateWindowSizeClass(this@MainActivity)
+                IntegrityGate { SoReverseApp(widthSizeClass = windowSizeClass.widthSizeClass) }
+            }
         }
     }
 
@@ -176,7 +183,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-internal fun IntegrityGate(content: @Composable () -> Unit) {
+private fun IntegrityGate(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
     // v1.3.55 性能修复: 完整性校验会读安装包（native 侧 mmap + 结构/指纹检查），
@@ -357,7 +364,7 @@ private fun textFor(mode: String, context: Context): UiText {
     ExperimentalMaterial3WindowSizeClassApi::class,
 )
 @Composable
-internal fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
+private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
     val context = LocalContext.current
     val settings = remember { SettingsStore(context) }
     val appScope = rememberCoroutineScope()

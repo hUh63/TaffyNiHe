@@ -227,24 +227,6 @@ internal fun CommandHubScreen(
             )
         }
 
-        // ── 太墟工作台（Linux Runtime · Agent Harness · 可视化工作流 · PTY 终端 · 浏览器 · 插件）──
-        // 页面与布局全部来自太墟（wkbin/taixu）原实现，独立 Activity 承载，与逆向工作台并存。
-        IosGroupHeader(if (zh) "太墟" else "TaiXu")
-        IosGroup {
-            IosRow(
-                icon = Icons.Filled.Inventory2,
-                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                iconBg = MaterialTheme.colorScheme.primaryContainer,
-                title = if (zh) "太墟工作台" else "TaiXu Workspace",
-                subtitle = if (zh) "Linux · Agent · 工作流 · 终端 · 浏览器" else "Linux · Agent · Workflow · Terminal",
-                onClick = {
-                    runCatching {
-                        context.startActivity(Intent(context, top.wkbin.taixu.MainActivity::class.java))
-                    }
-                },
-            )
-        }
-
         // ── 服务状态 ──
         IosGroupHeader(if (zh) "服务" else "Service")
         IosGroup {

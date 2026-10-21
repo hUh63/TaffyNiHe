@@ -1,0 +1,33 @@
+// Managed by TaiXu. Release signing for sandbox Android/Flutter builds.
+// Activated only when the host app exports the TAIXU_KEYSTORE_* environment
+// variables before launching the build; debug builds see no change at all.
+def taixuStoreFile = System.getenv('TAIXU_KEYSTORE_FILE')
+def taixuStorePassword = System.getenv('TAIXU_KEYSTORE_STORE_PASSWORD')
+def taixuKeyAlias = System.getenv('TAIXU_KEYSTORE_KEY_ALIAS')
+def taixuKeyPassword = System.getenv('TAIXU_KEYSTORE_KEY_PASSWORD')
+
+if (taixuStoreFile && taixuStorePassword && taixuKeyAlias && taixuKeyPassword) {
+    gradle.afterProject { project ->
+        if (!project.pluginManager.hasPlugin('com.android.application')) {
+            return
+        }
+        def androidExtension = project.extensions.findByName('android')
+        if (androidExtension == null) {
+            return
+        }
+        def keystoreFile = new File(taixuStoreFile)
+        if (!keystoreFile.isFile()) {
+            project.logger.warn('TaiXu release signing skipped, keystore missing: ' + taixuStoreFile)
+            return
+        }
+        def signingConfig = androidExtension.signingConfigs.maybeCreate('taixuRelease')
+        signingConfig.storeFile = keystoreFile
+        signingConfig.storePassword = taixuStorePassword
+        signingConfig.keyAlias = taixuKeyAlias
+        signingConfig.keyPassword = taixuKeyPassword
+        // Force the release build type onto the TaiXu managed key, even if the
+        // project already declares its own signingConfig for release.
+        androidExtension.buildTypes.getByName('release').signingConfig = signingConfig
+        project.logger.lifecycle('TaiXu release signing enabled: ' + taixuStoreFile)
+    }
+}

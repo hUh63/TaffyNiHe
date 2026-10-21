@@ -1,0 +1,105 @@
+[
+  {
+    "schemaVersion": 1,
+    "id": "llama-cpp",
+    "name": "llama.cpp 本地推理引擎",
+    "description": "在 ARM64 Linux 沙箱内运行 GGUF 模型，并提供 OpenAI 兼容的本地推理接口。",
+    "dependencies": ["python>=3.11", "curl", "ca-certificates"],
+    "launchType": "one_shot",
+    "version": "1.0.0",
+    "latestVersion": "1.0.0",
+    "publisher": "ggml-org / TaiXu",
+    "homepage": "https://github.com/ggml-org/llama.cpp",
+    "category": "AI_AGENT",
+    "architectures": ["ARM64"],
+    "permissions": ["NETWORK", "LOCAL_WEB"],
+    "installMethod": "SCRIPT",
+    "installSteps": [
+      "case \"$(uname -m)\" in aarch64|arm64) ;; *) echo 'llama.cpp 本地推理仅支持 ARM64/aarch64' >&2; exit 64;; esac",
+      "if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential cmake curl ca-certificates; elif command -v apk >/dev/null 2>&1; then apk add --no-cache build-base cmake curl ca-certificates linux-headers; elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm --needed base-devel cmake curl ca-certificates; elif command -v dnf >/dev/null 2>&1; then dnf install -y gcc-c++ cmake make curl ca-certificates; elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install gcc-c++ cmake make curl ca-certificates; else echo '当前发行版缺少受支持的包管理器，无法安装 C++ 构建工具链' >&2; exit 65; fi",
+      "mkdir -p \"$TAIXU_TOOL_DIR/bin\" \"$TAIXU_TOOL_DIR/lib\" \"$TAIXU_TOOL_DIR/src\"",
+      "LLAMA_SOURCE_URL=$(python3 -c 'import json,urllib.request; print(json.load(urllib.request.urlopen(\"https://api.github.com/repos/ggml-org/llama.cpp/releases/latest\"))[\"tarball_url\"])') && test -n \"$LLAMA_SOURCE_URL\" && curl --fail --location --retry 3 --connect-timeout 20 \"$LLAMA_SOURCE_URL\" -o /tmp/taixu-llama-cpp-source.tar.gz && rm -rf \"$TAIXU_TOOL_DIR/src/llama.cpp\" && mkdir -p \"$TAIXU_TOOL_DIR/src/llama.cpp\" && tar -xzf /tmp/taixu-llama-cpp-source.tar.gz -C \"$TAIXU_TOOL_DIR/src/llama.cpp\" --strip-components=1 && rm -f /tmp/taixu-llama-cpp-source.tar.gz",
+      "cmake -S \"$TAIXU_TOOL_DIR/src/llama.cpp\" -B \"$TAIXU_TOOL_DIR/src/llama.cpp/build\" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=ON -DGGML_OPENMP=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON && cmake --build \"$TAIXU_TOOL_DIR/src/llama.cpp/build\" --config Release --target llama-server -j\"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)\"",
+      "rm -rf \"$TAIXU_TOOL_DIR/lib/release\" && mkdir -p \"$TAIXU_TOOL_DIR/lib/release\" && cp -a \"$TAIXU_TOOL_DIR/src/llama.cpp/build/bin/.\" \"$TAIXU_TOOL_DIR/lib/release/\" && test -x \"$TAIXU_TOOL_DIR/lib/release/llama-server\" && ln -sf ../lib/release/llama-server \"$TAIXU_TOOL_DIR/bin/llama-server\"",
+      "LD_LIBRARY_PATH=\"$TAIXU_TOOL_DIR/lib/release${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\" \"$TAIXU_TOOL_DIR/bin/llama-server\" --version"
+    ],
+    "launchCommand": "llama-server --version",
+    "verifyCommand": "case \"$(uname -m)\" in aarch64|arm64) llama-server --version;; *) exit 1;; esac",
+    "commandLinks": ["llama-server"],
+    "environment": {
+      "LD_LIBRARY_PATH": "/opt/taixu/tools/llama-cpp/lib/release"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "id": "hello-tool",
+    "name": "Hello Tool",
+    "description": "用于验证安装、启动、校验和回滚流程的内置测试工具。",
+    "dependencies": [],
+    "launchType": "one_shot",
+    "version": "1.0.0",
+    "latestVersion": "1.0.0",
+    "publisher": "TaiXu",
+    "category": "DEVELOPER_TOOL",
+    "architectures": ["ARM64"],
+    "permissions": ["WORKSPACE_READ", "WORKSPACE_WRITE"],
+    "installMethod": "SCRIPT",
+    "installSteps": [
+      "mkdir -p $TAIXU_TOOL_DIR/bin",
+      "printf '#!/bin/sh\\necho hello-tool 1.0.0\\n' > $TAIXU_TOOL_DIR/bin/hello-tool",
+      "chmod +x $TAIXU_TOOL_DIR/bin/hello-tool"
+    ],
+    "launchCommand": "hello-tool",
+    "verifyCommand": "hello-tool",
+    "commandLinks": ["hello-tool"]
+  },
+  {
+    "schemaVersion": 1,
+    "id": "qemu-x86-64-compat",
+    "name": "QEMU x86_64 兼容构建环境",
+    "description": "可选的 ARM64 QEMU 用户态模拟器与隔离 x86_64 Ubuntu Base RootFS，仅用于第三方项目的兼容构建。",
+    "dependencies": ["curl", "ca-certificates"],
+    "launchType": "command",
+    "version": "1.0.0",
+    "latestVersion": "1.0.0",
+    "publisher": "TaiXu",
+    "homepage": "https://github.com/termux/proot-distro",
+    "category": "DEVELOPER_TOOL",
+    "architectures": ["ARM64"],
+    "permissions": ["NETWORK", "WORKSPACE_READ", "WORKSPACE_WRITE"],
+    "installMethod": "SCRIPT",
+    "installSteps": [
+      "case \"$(uname -m)\" in aarch64|arm64) ;; *) echo 'QEMU 兼容插件宿主仅支持 ARM64' >&2; exit 64;; esac",
+      "if ! command -v apt-get >/dev/null 2>&1; then echo '当前仅支持 Debian/Ubuntu ARM64 RootFS 安装 QEMU 兼容插件' >&2; exit 65; fi",
+      "DEBIAN_FRONTEND=noninteractive apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qemu-user-static curl ca-certificates tar gzip unzip xz-utils findutils coreutils",
+      "QEMU_SOURCE=$(command -v qemu-x86_64-static || command -v qemu-x86_64) && test -n \"$QEMU_SOURCE\"",
+      "COMPAT_ROOT=/opt/taixu/compat/x86_64; mkdir -p \"$COMPAT_ROOT/rootfs\" \"$TAIXU_TOOL_DIR/bin\"; cp \"$QEMU_SOURCE\" \"$COMPAT_ROOT/qemu-x86_64\"; chmod 755 \"$COMPAT_ROOT/qemu-x86_64\"",
+      "ROOTFS_ARCHIVE=/tmp/taixu-ubuntu-base-24.04.3-amd64.tar.gz; curl --fail --location --retry 3 --connect-timeout 20 https://cdimage.ubuntu.com/ubuntu-base/releases/24.04.3/release/ubuntu-base-24.04.3-base-amd64.tar.gz -o \"$ROOTFS_ARCHIVE\"",
+      "echo '6bc2cde3930ad088b3bb46fa45279e96d25bc3810f209850ecbe4722711874f9  /tmp/taixu-ubuntu-base-24.04.3-amd64.tar.gz' | sha256sum -c -",
+      "rm -rf /opt/taixu/compat/x86_64/rootfs && mkdir -p /opt/taixu/compat/x86_64/rootfs && tar -xzf \"$ROOTFS_ARCHIVE\" -C /opt/taixu/compat/x86_64/rootfs && rm -f \"$ROOTFS_ARCHIVE\"",
+      "COMPAT_ROOT=/opt/taixu/compat/x86_64; JDK_ARCHIVE=/tmp/taixu-jdk17-x64.tar.gz; curl --fail --location --retry 3 https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz -o \"$JDK_ARCHIVE\" && echo '3808d1d15e3ec6bd5b84057fb5d84c33d8a1536a258146bcea2e603fc726e08e  /tmp/taixu-jdk17-x64.tar.gz' | sha256sum -c -",
+      "rm -rf /tmp/taixu-jdk-x64 \"$COMPAT_ROOT/jdk-17\"; mkdir -p /tmp/taixu-jdk-x64; tar -xzf /tmp/taixu-jdk17-x64.tar.gz -C /tmp/taixu-jdk-x64; JDK_SOURCE=$(find /tmp/taixu-jdk-x64 -type f -path '*/bin/java' -print -quit | xargs -r dirname | xargs -r dirname); test -x \"$JDK_SOURCE/bin/java\"; mv \"$JDK_SOURCE\" \"$COMPAT_ROOT/jdk-17\"; rm -rf /tmp/taixu-jdk-x64 /tmp/taixu-jdk17-x64.tar.gz",
+      "GRADLE_ARCHIVE=/tmp/taixu-gradle-8.14.2.zip; curl --fail --location --retry 3 https://mirrors.cloud.tencent.com/gradle/gradle-8.14.2-bin.zip -o \"$GRADLE_ARCHIVE\" && echo '7197a12f450794931532469d4ff21a59ea2c1cd59a3ec3f89c035c3c420a6999  /tmp/taixu-gradle-8.14.2.zip' | sha256sum -c -",
+      "rm -rf /tmp/taixu-gradle-x64 \"$COMPAT_ROOT/gradle-8.14.2\"; mkdir -p /tmp/taixu-gradle-x64; unzip -q /tmp/taixu-gradle-8.14.2.zip -d /tmp/taixu-gradle-x64; mv /tmp/taixu-gradle-x64/gradle-8.14.2 \"$COMPAT_ROOT/gradle-8.14.2\"; rm -rf /tmp/taixu-gradle-x64 /tmp/taixu-gradle-8.14.2.zip",
+      "PLATFORM_ARCHIVE=/tmp/taixu-platform-34.zip; curl --fail --location --retry 3 https://mirrors.cloud.tencent.com/AndroidSDK/platform-34-ext7_r03.zip -o \"$PLATFORM_ARCHIVE\" && echo '16fdb74c55e59ae3ef52def135aec713508467bd56d7dabcd8c9be31fa8b20f3  /tmp/taixu-platform-34.zip' | sha256sum -c -",
+      "rm -rf /tmp/taixu-platform-x64 \"$COMPAT_ROOT/android-sdk/platforms/android-34\"; mkdir -p /tmp/taixu-platform-x64 \"$COMPAT_ROOT/android-sdk/platforms\"; unzip -q /tmp/taixu-platform-34.zip -d /tmp/taixu-platform-x64; PLATFORM_SOURCE=$(find /tmp/taixu-platform-x64 -type f -name android.jar -print -quit | xargs -r dirname); test -f \"$PLATFORM_SOURCE/android.jar\"; mv \"$PLATFORM_SOURCE\" \"$COMPAT_ROOT/android-sdk/platforms/android-34\"; rm -rf /tmp/taixu-platform-x64 /tmp/taixu-platform-34.zip",
+      "BUILD_TOOLS_ARCHIVE=/tmp/taixu-build-tools-35.zip; curl --fail --location --retry 3 https://mirrors.cloud.tencent.com/AndroidSDK/build-tools_r35_linux.zip -o \"$BUILD_TOOLS_ARCHIVE\" && echo 'bd3a4966912eb8b30ed0d00b0cda6b6543b949d5ffe00bea54c04c81e1561d88  /tmp/taixu-build-tools-35.zip' | sha256sum -c -",
+      "rm -rf /tmp/taixu-build-tools-x64 \"$COMPAT_ROOT/android-sdk/build-tools/35.0.0\"; mkdir -p /tmp/taixu-build-tools-x64 \"$COMPAT_ROOT/android-sdk/build-tools\"; unzip -q /tmp/taixu-build-tools-35.zip -d /tmp/taixu-build-tools-x64; BUILD_SOURCE=$(find /tmp/taixu-build-tools-x64 -type f -name source.properties -print -quit | xargs -r dirname); test -f \"$BUILD_SOURCE/lib/d8.jar\"; mv \"$BUILD_SOURCE\" \"$COMPAT_ROOT/android-sdk/build-tools/35.0.0\"; chmod 755 \"$COMPAT_ROOT/android-sdk/build-tools/35.0.0/aapt2\" 2>/dev/null || true; rm -rf /tmp/taixu-build-tools-x64 /tmp/taixu-build-tools-35.zip",
+      "FLUTTER_ARCHIVE=/tmp/taixu-flutter-x64.tar.xz; curl --fail --location --retry 3 https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.1-stable.tar.xz -o \"$FLUTTER_ARCHIVE\" && echo 'a1d8166c0309267cb7dc99f1424eecf08b86946ad3b50723c6f59945964aea45  /tmp/taixu-flutter-x64.tar.xz' | sha256sum -c -",
+      "rm -rf \"$COMPAT_ROOT/flutter\"; tar -xJf /tmp/taixu-flutter-x64.tar.xz -C \"$COMPAT_ROOT\"; rm -f /tmp/taixu-flutter-x64.tar.xz; mkdir -p \"$COMPAT_ROOT/cache/gradle\" \"$COMPAT_ROOT/cache/flutter-pub\"",
+      "test -x /opt/taixu/compat/x86_64/qemu-x86_64 && test -x /opt/taixu/compat/x86_64/rootfs/bin/sh && test -x /opt/taixu/compat/x86_64/jdk-17/bin/java && test -d /opt/taixu/compat/x86_64/gradle-8.14.2/lib && test -f /opt/taixu/compat/x86_64/android-sdk/platforms/android-34/android.jar && test -x /opt/taixu/compat/x86_64/android-sdk/build-tools/35.0.0/aapt2 && test -x /opt/taixu/compat/x86_64/flutter/bin/cache/dart-sdk/bin/dart && (test -f /opt/taixu/compat/x86_64/rootfs/lib64/ld-linux-x86-64.so.2 || test -f /opt/taixu/compat/x86_64/rootfs/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2)",
+      "printf '#!/usr/bin/env sh\\nexec /opt/taixu/compat/x86_64/qemu-x86_64 \"$@\"\\n' > \"$TAIXU_TOOL_DIR/bin/qemu-x86_64\" && chmod 755 \"$TAIXU_TOOL_DIR/bin/qemu-x86_64\""
+    ],
+    "uninstallSteps": [
+      "rm -rf /opt/taixu/compat/x86_64 \"$TAIXU_TOOL_DIR\""
+    ],
+    "launchCommand": "qemu-x86_64 --version",
+    "verifyCommand": "test -x /opt/taixu/compat/x86_64/qemu-x86_64 && test -x /opt/taixu/compat/x86_64/rootfs/bin/sh && test -x /opt/taixu/compat/x86_64/jdk-17/bin/java && test -x /opt/taixu/compat/x86_64/android-sdk/build-tools/35.0.0/aapt2 && test -x /opt/taixu/compat/x86_64/flutter/bin/cache/dart-sdk/bin/dart && qemu-x86_64 --version",
+    "commandLinks": ["qemu-x86_64"],
+    "environment": {
+      "TAIXU_QEMU_COMPAT_ROOT": "/opt/taixu/compat/x86_64",
+      "TAIXU_QEMU_COMPAT_QEMU": "/opt/taixu/compat/x86_64/qemu-x86_64",
+      "TAIXU_QEMU_COMPAT_ROOTFS": "/opt/taixu/compat/x86_64/rootfs"
+    }
+  }
+]

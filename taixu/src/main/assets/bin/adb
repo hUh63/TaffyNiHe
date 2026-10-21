@@ -1,0 +1,78 @@
+#!/bin/sh
+# TaiXu ADB Wrapper — 解决 PRoot 下 ADB daemon 独立调用重启导致断连的问题
+# 在同一条命令执行周期内自动完成 connect + 目标操作执行
+set -u
+
+REAL_ADB=""
+
+# Android Bionic 二进制在 PRoot 内的解释器（如 /system/bin/linker64）常是悬空链接：
+# 此时 -x 为真，但 exec 必然 ENOENT（报 "not found"）。仅凭 -x 选候选会选中它并 break，
+# 导致后续所有 adb 命令失败且不回退到可用的候选。这里补一层 ELF 解释器存在性校验。
+elf_interp_ok() {
+    _target=$1
+    _magic=$(head -c 4 "$_target" 2>/dev/null) || return 0
+    # 非 ELF（脚本等）不归本函数判定，交回调用方原有的 -x 逻辑。
+    [ "$_magic" = "$(printf '\177ELF')" ] || return 0
+    _interp=$(LC_ALL=C grep -a -o -m1 -e '/system/bin/linker[0-9]*' "$_target" 2>/dev/null | head -n 1)
+    # 静态链接或非 Android 解释器的 ELF 无此段，视为可用。
+    [ -n "$_interp" ] || return 0
+    [ -e "$_interp" ] || return 1
+    return 0
+}
+
+for candidate in     "${TAIXU_TOOL_DIR:-/opt/taixu/tools}/android-suite-offline/bin/adb"     "${ANDROID_HOME:-/opt/android-sdk}/platform-tools/adb"     /usr/bin/adb     /bin/adb; do
+    if [ -x "$candidate" ]; then
+        real_target=$(readlink -f "$candidate" 2>/dev/null || echo "$candidate")
+        if [ "$real_target" != "/opt/taixu/bin/adb" ] && [ "$real_target" != "/usr/local/bin/adb" ] && [ -x "$real_target" ] && elf_interp_ok "$real_target"; then
+            REAL_ADB="$candidate"
+            break
+        fi
+    fi
+done
+
+if [ -z "$REAL_ADB" ]; then
+    case "${1:-}" in
+        logcat)
+            shift
+            exec /opt/taixu/bin/logcat-grabber "" "$@"
+            ;;
+        shell)
+            shift
+            exec /opt/taixu/bin/taixu-host shell "$@"
+            ;;
+        install)
+            shift
+            exec /opt/taixu/bin/taixu-host install-apk "$@"
+            ;;
+        *)
+            echo "错误: 未找到本地 ARM64 adb 二进制文件，请安装 android-suite-offline 或使用 taixu-host / logcat-grabber" >&2
+            exit 127
+            ;;
+    esac
+fi
+
+case "${1:-}" in
+    ""|version|--version|-v|help|--help|-h|start-server|kill-server|connect|disconnect|pair)
+        exec "$REAL_ADB" "$@"
+        ;;
+esac
+
+PORT=""
+if [ -f /opt/taixu/.adb-port ]; then
+    PORT=$(cat /opt/taixu/.adb-port 2>/dev/null | tr -d '[:space:]')
+fi
+if [ -z "$PORT" ]; then
+    PORT=$(curl -s http://127.0.0.1:7980/api/health 2>/dev/null | grep -o '"adbPort":[0-9]*' | cut -d':' -f2 || true)
+fi
+
+HOST="127.0.0.1"
+if [ -f /opt/taixu/.adb-host ]; then
+    H=$(cat /opt/taixu/.adb-host 2>/dev/null | tr -d '[:space:]')
+    [ -n "$H" ] && HOST="$H"
+fi
+
+if [ -n "$PORT" ] && [ "$PORT" != "0" ]; then
+    "$REAL_ADB" connect "$HOST:$PORT" >/dev/null 2>&1 || true
+fi
+
+exec "$REAL_ADB" "$@"

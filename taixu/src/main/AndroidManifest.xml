@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- SSH 设置页检测 VPN / 观察默认网络（getActiveNetwork / NetworkCallback） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- SSH 后台保活：持有 WifiLock 防止息屏/后台时 Wi-Fi 无线电源进入省电导致断连 -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- 无线 ADB：保持 mDNS 多播接收，自动发现动态配对端口与连接端口。 -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Android 17 (API 37) 本地网络权限：用于无线调试端口 mDNS 发现 -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- MCP 被控端常驻：外部 AI 客户端需随时可连，长时间保活不适用 dataSync 的 6 小时硬超时 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Agent 执行期间持有 PARTIAL_WAKE_LOCK 进程锁，防止息屏后 CPU 休眠冻结推理/工具执行 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 设置页"电池优化与后台运行"入口：申请豁免电池优化 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- APK 逆向模板：枚举已安装应用以提取安装包（读取 /data/app 下的 base.apk） -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- 工坊悬浮小窗：在其他应用或桌面之上显示工坊构建状态与快捷操作 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Harness host 工具执行 settings put 修改系统设置（亮度、动画等）；Shizuku shell UID 自带此权限，
+         但部分 ROM 下 UserService 可能以 app UID 运行，缺少声明会被 SettingsProvider 静默拒绝。
+         此为特殊权限，用户需在"设置→应用→太墟→修改系统设置"中手动授权。 -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Android 11+ 包可见性：允许解析 Shizuku App 与 QQ（授权弹窗、群卡片调起与 Binder 交互） -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="com.tencent.mobileqq" />
+        <package android:name="com.tencent.tim" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mqqopensdkapi" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mqqapi" />
+        </intent>
+    </queries>
+
+    <application>
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|fontScale|density|keyboardHidden|navigation"
+            android:theme="@style/taixu_theme"
+            android:windowSoftInputMode="adjustResize|stateHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="taixu" android:host="oauth" android:path="/mcp" />
+            </intent-filter>
+            <!-- 系统分享入口：任意 App「分享给太墟」，仅接收纯文本 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <!-- 应用内 APK 更新安装文件提供器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/taixu_file_paths" />
+        </provider>
+        <!-- Shizuku Binder 接收器（硬性要求）：Shizuku App 通过该 Provider 把 Binder 推送到本应用进程，
+             缺失它 Shizuku.pingBinder() 将永远返回 false，表现为"Shizuku 服务未运行"。 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <service
+            android:name=".runtime.service.RuntimeForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+        <service
+            android:name=".service.AgentForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+        <!-- MCP 被控端常驻：外部 AI 客户端可随时连接，需长期存活。
+             specialUse 而非 dataSync —— dataSync 在 Android 15+ 有 6 小时硬超时，会周期性掐断连接。 -->
+        <service
+            android:name=".service.AgentMcpForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local MCP server kept alive so external AI clients can connect at any time" />
+        </service>
+        <!-- 工作流后台执行保活：运行期间 dataSync 前台服务，结束自动退出 -->
+        <service
+            android:name=".service.WorkflowForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+        <service
+            android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
+            android:enabled="false"
+            android:exported="false">
+            <meta-data
+                android:name="autoStoreLocales"
+                android:value="true" />
+        </service>
+        <receiver
+            android:name=".service.AgentReplyReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".workflow.WorkflowApprovalReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".service.adb.AdbNotificationReceiver"
+            android:exported="false" />
+        <!-- Shower 虚拟屏：接收 shower-server（shell uid 独立进程）广播交出的 IShowerService Binder，
+             必须 exported=true（发送方不在本应用进程）；action 与预编译 shower-server.jar 内协议绑定，不可改名 -->
+        <receiver
+            android:name="top.wkbin.taixu.runtime.virtualdisplay.ShowerBinderReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.ai.assistance.operit.action.SHOWER_BINDER_READY" />
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="top.wkbin.taixu.ui.chat.floating.FloatingChatService"
+            android:exported="false" />
+        <service
+            android:name="top.wkbin.taixu.ui.workflow.hud.WorkflowHudService"
+            android:exported="false" />
+        <!-- 工作流定时计划使用按需初始化的 WorkManager（Configuration.Provider + KoinWorkerFactory），
+             必须移除默认的 WorkManagerInitializer，否则自定义 WorkerFactory 不生效 -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+        <!-- GUI 手势通路：必须 exported=true，否则 Android 12+ system_server 无法绑定无障碍服务 -->
+        <service
+            android:name="top.wkbin.taixu.runtime.gui.TaiXuGuiAccessibilityService"
+            android:exported="true"
+            android:label="@string/taixu_app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/taixu_gui_accessibility_service" />
+        </service>
+    </application>
+
+</manifest>

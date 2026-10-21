@@ -1,6 +1,5 @@
 package com.soreverse.mcp
 
-import android.app.Application
 import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.core.CrashReporter
 import com.soreverse.mcp.core.IntegrityGuard
@@ -8,10 +7,15 @@ import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.ToolStats
 import com.soreverse.mcp.nativecore.RizinNativeEngine
+import top.wkbin.taixu.TaiXuApplication
 
-class SoReverseApplication : Application() {
+class SoReverseApplication : TaiXuApplication() {
     override fun onCreate() {
-        super.onCreate()
+        // 太墟装配（Koin + Room + PRoot 运行时 + 前台服务 + 工作流调度）与塔菲逆向内核共用同一个
+        // Application：先让太墟完成装配，再跑塔菲自己的初始化。
+        // 太墟装配异常一律隔离——任一模块初始化失败都不能阻断塔菲的逆向工具链启动。
+        runCatching { super.onCreate() }
+            .onFailure { android.util.Log.e("SoReverseApplication", "Taixu bootstrap failed", it) }
         if (CrashReporter.isCrashProcess()) return
         AppLog.init(this)
         CrashReporter.install(this)

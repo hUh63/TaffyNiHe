@@ -34,6 +34,22 @@ object IntegrityGuard {
 
     /** 脱壳 ROM 的固定品牌串（ArkOS 把 ro.product.model 设成 `Ark脱壳机(…)`）。 */
     private const val ARK_ROM_MODEL_TOKEN = "Ark脱壳机"
+
+    /**
+     * 合并后 manifest 里唯一「本产品自己会出现」的 appComponentFactory：
+     * `androidx.core:core`（经 activity-compose 传递进来）在它自己的 manifest 声明，
+     * manifest merger 会带进来。除此之外只认本应用包前缀。
+     */
+    private const val ANDROIDX_COMPONENT_FACTORY = "androidx.core.app.CoreComponentFactory"
+
+    /** 运行环境探针的缓存时长：探针要读 /proc 与全线程栈，不能跟着 3s 轮询跑。 */
+    private const val RUNTIME_TTL_MS = 30_000L
+
+    /** 应用 Context（运行环境探针里 appComponentFactory / Application 类要靠它）。 */
+    @Volatile private var appContext: Context? = null
+
+    /** 运行环境威胁缓存：at(ms) to threats。 */
+    @Volatile private var runtimeCache: Pair<Long, List<String>>? = null
     data class Result(
         val trusted: Boolean,
         val reason: String,
@@ -224,6 +240,7 @@ object IntegrityGuard {
     }
 
     fun verify(context: Context): Result {
+        appContext = context.applicationContext ?: context
         cached?.let { (time, result) ->
             if (System.currentTimeMillis() - time < 2_000L) return result
         }
@@ -280,9 +297,13 @@ object IntegrityGuard {
         }.getOrElse {
             Result(false, it.message ?: it.javaClass.simpleName, expectedSignerDigest(), emptyList())
         }
-        if (!result.trusted) recordFailure(context, result)
-        cached = System.currentTimeMillis() to result
-        return result
+        // 运行时威胁只报告、不改 trusted（见 runtimeThreats 注释）：签名一致时它就是
+        // 「环境提示」，进 Result.threats 供门禁弹窗与「设置 → 自检」展示。
+        val runtime = cachedRuntimeThreats()
+        val merged = if (runtime.isEmpty()) result else result.copy(threats = (result.threats + runtime).distinct())
+        if (!merged.trusted) recordFailure(context, merged)
+        cached = System.currentTimeMillis() to merged
+        return merged
     }
 
     // 门禁判断处（对齐 SOMCP v1.0.22）：放行需同时满足「完整性结论可信」与「无运行时威胁」。
@@ -325,7 +346,31 @@ object IntegrityGuard {
         }
     }
 
-    private fun runtimeThreats(): List<String> {
+    /**
+     * UI / 诊断用：当前运行环境的威胁清单。
+     *
+     * 设计立场（对齐上游 v1.0.22 的收窄方向）：这些探针**只报告、不阻断**。
+     * 本产品面向逆向场景，用户常开 root / Lupa / 调试器，把运行环境当硬门禁用会把
+     * 正常使用全部挡掉；但完全不报又会让「装了什么」无从解释。所以清单进
+     * [Result.threats] 并可在「设置 → 自检」直接查看。
+     */
+    fun runtimeThreats(context: Context, force: Boolean = false): List<String> {
+        appContext = context.applicationContext ?: context
+        return cachedRuntimeThreats(force)
+    }
+
+    private fun cachedRuntimeThreats(force: Boolean = false): List<String> {
+        if (!force) {
+            runtimeCache?.let { (at, value) ->
+                if (System.currentTimeMillis() - at < RUNTIME_TTL_MS) return value
+            }
+        }
+        val list = computeRuntimeThreats()
+        runtimeCache = System.currentTimeMillis() to list
+        return list
+    }
+
+    private fun computeRuntimeThreats(): List<String> {
         val threats = linkedSetOf<String>()
         if (Debug.isDebuggerConnected() || Debug.waitingForDebugger()) threats += "debugger attached"
         // 对齐 SOMCP v1.0.22：fail-closed —— tracerPid() 在“无法判定”时返回 -1
@@ -341,6 +386,12 @@ object IntegrityGuard {
         // 进程内 hook 帧（Xposed 系）与 PackageInfo.CREATOR 被替换（一键过签框架）。
         hookStackThreat()?.let { threats += it }
         creatorIntegrityThreat()?.let { threats += it }
+        appContext?.let { ctx ->
+            // DPatch 一类框架会改写 manifest 的 appComponentFactory 抢在应用代码前接管进程。
+            factoryHijackThreat(ctx)?.let { threats += it }
+            // 代理 Application 子类：manifest 仍指向我们的类，但实例被换成 repack 的子类。
+            applicationClassThreat(ctx)?.let { threats += it }
+        }
         val maps = procMapsIndicators()
         if (maps.isNotEmpty()) threats += maps
         // 对齐 SOMCP v1.0.22：已删除 Frida 端口探活检测（openLocalInstrumentationPorts 置空）。
@@ -360,6 +411,29 @@ object IntegrityGuard {
             return "framework carries the FART/Ark DEX-dump pipeline"
         }
         return null
+    }
+
+    private fun factoryHijackThreat(context: Context): String? = runCatching {
+        foreignFactoryThreat(context.applicationInfo?.appComponentFactory, context.packageName)
+    }.getOrNull()
+
+    /** 纯判据：只认「未声明 / androidx 合并进来的那个 / 本应用包前缀」。 */
+    internal fun foreignFactoryThreat(factory: String?, ownPackage: String): String? {
+        val genuine = factory.isNullOrEmpty() ||
+            factory == ANDROIDX_COMPONENT_FACTORY ||
+            factory.startsWith("$ownPackage.")
+        return if (genuine) null else "foreign appComponentFactory declared (value withheld)"
+    }
+
+    /** 代理 Application：实例类名必须就是 manifest 声明的那个类。 */
+    private fun applicationClassThreat(context: Context): String? {
+        if (context !is android.app.Application) return null
+        val expected = "com.soreverse.mcp.SoReverseApplication"
+        return if (context.javaClass.name != expected) {
+            "application instance class is not the declared one"
+        } else {
+            null
+        }
     }
 
     /**

@@ -139,4 +139,21 @@ class IntegrityGuardThreatTest {
         assertNull(IntegrityGuard.hookFrameThreat(listOf("com.soreverse.mcp.de.robv.android.xposed.Fake")))
         assertNotNull(IntegrityGuard.hookFrameThreat(listOf("de.robv.android.xposed.XC_MethodHook")))
     }
+
+    /** appComponentFactory 白名单：未声明、androidx 合并进来的、本包前缀三种都算正版。 */
+    @Test
+    fun factoryAllowlistAdmitsGenuineValues() {
+        assertNull(IntegrityGuard.foreignFactoryThreat(null, "com.soreverse.mcp"))
+        assertNull(IntegrityGuard.foreignFactoryThreat("", "com.soreverse.mcp"))
+        assertNull(IntegrityGuard.foreignFactoryThreat("androidx.core.app.CoreComponentFactory", "com.soreverse.mcp"))
+        assertNull(IntegrityGuard.foreignFactoryThreat("com.soreverse.mcp.rt.shell.BootstrapComponentFactory", "com.soreverse.mcp"))
+    }
+
+    /** 外来 factory（DPatch 之类）必须命中，且不能把包名相近的当正版。 */
+    @Test
+    fun foreignFactoryIsAThreat() {
+        assertNotNull(IntegrityGuard.foreignFactoryThreat("com.pandora.core.AppFactory", "com.soreverse.mcp"))
+        assertNotNull(IntegrityGuard.foreignFactoryThreat("com.soreverse.mcp2.Factory", "com.soreverse.mcp"))
+        assertNotNull(IntegrityGuard.foreignFactoryThreat("androidx.core.app.CoreComponentFactoryX", "com.soreverse.mcp"))
+    }
 }

@@ -109,6 +109,7 @@ internal fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) 
     SettingsDest.Help -> if (t.zh) "帮助" else "Help"
     SettingsDest.Search -> if (t.zh) "搜索设置" else "Search settings"
     SettingsDest.DevEnv -> if (t.zh) "开发环境" else "Dev environment"
+    SettingsDest.SelfCheck -> if (t.zh) "自检" else "Self check"
 }
 
 @Composable
@@ -205,6 +206,7 @@ internal fun SettingsHub(
             // 编辑器已是顶层独立页面：子页路由到此处时直接切到 Editor tab（覆盖扩展页 / 工作流页的跳转）
             SettingsDest.Python -> LaunchedEffect(Unit) { onOpenEditor() }
             SettingsDest.Search -> SettingsSearchPage(t, onDest, onBack)
+            SettingsDest.SelfCheck -> SettingsSelfCheckPage(t, onBack)
             SettingsDest.DevEnv -> SettingsDevEnvPage(t, onDest, onOpenEditor, onBack)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings, onBack)
             SettingsDest.ToolStats -> SettingsScaffold(
@@ -334,6 +336,7 @@ internal fun SettingsHub(
 internal fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
     SettingsDest.Search -> Icons.Default.Search
     SettingsDest.DevEnv -> Icons.Default.Build
+    SettingsDest.SelfCheck -> Icons.Default.Security
     SettingsDest.ServiceConfig -> Icons.Default.Settings
     SettingsDest.ApkBridge -> Icons.Default.Link
     SettingsDest.Tunnel -> Icons.Default.Cloud

@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.SettingsStore
+import kotlinx.coroutines.launch
 import com.soreverse.mcp.mcp.ToolCatalog
 
 /**
@@ -90,6 +91,7 @@ internal fun settingsIndex(zh: Boolean): List<SettingsEntry> {
         e(SettingsDest.TempWorkspace, if (zh) "临时工作区" else "Temp workspaces", if (zh) "缓存上限与清理" else "Cache limit and cleanup", "temp cache 临时 缓存 清理", if (zh) "权限与应用" else "App"),
         e(SettingsDest.BackupRestore, if (zh) "备份与恢复" else "Backup & restore", if (zh) "设置快照导入导出（密钥脱敏）" else "Settings snapshot import/export", "backup restore 备份 恢复 导入 导出", if (zh) "权限与应用" else "App"),
         // 诊断与关于
+        e(SettingsDest.SelfCheck, if (zh) "自检" else "Self check", if (zh) "签名完整性结论与运行环境探针（只报告）" else "Integrity verdict and runtime probes", "selfcheck 自检 完整性 签名 威胁 调试器 hook", if (zh) "诊断与关于" else "Diagnostics"),
         e(SettingsDest.ToolStats, if (zh) "运行统计" else "Runtime stats", if (zh) "工具调用次数、耗时与失败率" else "Tool calls, latency, failures", "stats 统计 调用 耗时 失败", if (zh) "诊断与关于" else "Diagnostics"),
         e(SettingsDest.LogcatViewer, "Logcat", if (zh) "日志抓取与过滤" else "Log capture and filter", "logcat 日志 log 过滤 抓取", if (zh) "诊断与关于" else "Diagnostics"),
         e(SettingsDest.Updates, if (zh) "版本更新" else "Update", if (zh) "检查更新、通道与校验和" else "Update check, channel, checksum", "update 更新 版本 通道 校验", if (zh) "诊断与关于" else "Diagnostics"),
@@ -329,6 +331,9 @@ internal fun SettingsRootPage(
         item("diagnostics") {
             SettingsSection(if (t.zh) "诊断与关于" else "Diagnostics & about") {
                 PreferenceSurface(first = true, last = false) {
+                    CategoryEntry(t, SettingsDest.SelfCheck, if (t.zh) "完整性结论与运行环境探针" else "Integrity verdict and runtime probes", null, onDest)
+                }
+                PreferenceSurface(first = false, last = false) {
                     CategoryEntry(t, SettingsDest.ToolStats, if (t.zh) "工具调用次数、耗时与失败率" else "Tool calls, latency, failures", null, onDest)
                 }
                 PreferenceSurface(first = false, last = false) {
@@ -496,6 +501,93 @@ internal fun SettingsSearchPage(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 设置 → 自检：把完整性结论与「运行环境威胁清单」摆出来。
+ *
+ * 这些探针（调试器 / tracer / FART-ROM / 进程内 hook 帧 / CREATOR 换类 / maps 特征）
+ * 只报告、不阻断——本产品面向逆向场景，用户常开 root 与调试器；但完全不展示又会让
+ * 「为什么弹完整性提示」无从解释，所以给它们一个独立、可重跑的查看页。
+ */
+@Composable
+internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var result by remember { androidx.compose.runtime.mutableStateOf<com.soreverse.mcp.core.IntegrityGuard.Result?>(null) }
+    var threats by remember { androidx.compose.runtime.mutableStateOf<List<String>>(emptyList()) }
+    var busy by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    suspend fun runCheck() {
+        busy = true
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            result = com.soreverse.mcp.core.IntegrityGuard.verify(context)
+            threats = com.soreverse.mcp.core.IntegrityGuard.runtimeThreats(context, force = true)
+        }
+        busy = false
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { runCheck() }
+
+    SettingsScaffold(
+        title = if (t.zh) "自检" else "Self check",
+        onBack = onBack,
+        statusText = if (t.zh) "完整性结论 + 运行环境探针（只报告，不阻断）" else "Integrity result + runtime probes (report only)",
+    ) {
+        item("integrity") {
+            SettingsSection(if (t.zh) "安装包完整性" else "Package integrity") {
+                val r = result
+                PreferenceSurface(first = true, last = true) {
+                    SettingsItemRow(
+                        icon = settingsIcon(SettingsDest.SelfCheck),
+                        title = when {
+                            r == null -> if (t.zh) "检测中…" else "Checking…"
+                            r.trusted -> if (t.zh) "签名与内容一致" else "Signature and content verified"
+                            else -> if (t.zh) "未通过" else "Not verified"
+                        },
+                        subtitle = r?.reason ?: (if (t.zh) "正在校验签名与 APK 完整性" else "Verifying signature and APK integrity"),
+                        value = r?.let { if (it.trusted) "OK" else "FAIL" },
+                        onClick = { scope.launch { runCheck() } },
+                    )
+                }
+            }
+        }
+        item("runtime") {
+            SettingsSection(if (t.zh) "运行环境" else "Runtime environment") {
+                if (threats.isEmpty()) {
+                    PreferenceSurface(first = true, last = true) {
+                        SettingsItemRow(
+                            icon = settingsIcon(SettingsDest.Permissions),
+                            title = if (t.zh) "未发现异常特征" else "No anomalies detected",
+                            subtitle = if (t.zh) "未命中调试器、tracer、脱壳 ROM、hook 帧或过签框架特征" else "No debugger, tracer, unpacking ROM, hook frames or signing-bypass markers",
+                            value = null,
+                            onClick = { scope.launch { runCheck() } },
+                        )
+                    }
+                } else {
+                    threats.forEachIndexed { index, threat ->
+                        PreferenceSurface(first = index == 0, last = index == threats.lastIndex) {
+                            SettingsItemRow(
+                                icon = settingsIcon(SettingsDest.SelfCheck),
+                                title = threat,
+                                subtitle = if (t.zh) "该项只作提示：不影响签名校验结论" else "Informational only: does not change the signature verdict",
+                                value = null,
+                                onClick = { scope.launch { runCheck() } },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item("retry") {
+            androidx.compose.material3.FilledTonalButton(
+                onClick = { scope.launch { runCheck() } },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (busy) (if (t.zh) "检测中…" else "Checking…") else (if (t.zh) "重新检测" else "Run again"))
             }
         }
     }

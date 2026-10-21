@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
         }
         // 壳层切换：移植太墟后，默认主界面是太墟壳（首页/智枢/工坊/逆向/乾坤），
         // 塔菲自己的五页工作区作为「逆向」中枢嵌在其中（HostWorkspaceRegistry 注入）。
-        // 太墟装配需要 Koin 就绪；若 Application 阶段太墟初始化失败，则整体回退到塔菲原界面，
+        // 太墟装配依赖 Koin；若 Application 阶段太墟初始化失败，整体回退塔菲原界面，
         // 保证逆向工具链始终可用。
         val taixuShellReady = runCatching { org.koin.core.context.GlobalContext.get() }.isSuccess
         setContent {
@@ -183,7 +183,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun IntegrityGate(content: @Composable () -> Unit) {
+internal fun IntegrityGate(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
     // v1.3.55 性能修复: 完整性校验会读安装包（native 侧 mmap + 结构/指纹检查），
@@ -364,7 +364,7 @@ private fun textFor(mode: String, context: Context): UiText {
     ExperimentalMaterial3WindowSizeClassApi::class,
 )
 @Composable
-private fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
+internal fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
     val context = LocalContext.current
     val settings = remember { SettingsStore(context) }
     val appScope = rememberCoroutineScope()

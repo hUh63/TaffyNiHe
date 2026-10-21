@@ -217,6 +217,8 @@ dependencies {
     implementation(project(":feature:browser"))
     // 太墟应用层（原 :app 改造为库）：全部太墟页面 + Koin 装配 + 前台服务
     implementation(project(":taixu"))
+    // 宿主需要自行检测太墟（Koin）是否装配成功，才能决定壳层是否回退。
+    implementation(libs.koin.core)
 
     // 终端模块化（对标 Xed-Editor 的 terminal-emulator / terminal-view 两个独立 module）：
     // :terminal-emulator = 会话内核（进程 + ANSI 过滤），:terminal-view = Compose 终端视图。

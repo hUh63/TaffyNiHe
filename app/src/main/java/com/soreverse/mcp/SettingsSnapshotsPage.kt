@@ -49,7 +49,7 @@ import java.util.Locale
  * 本页只做枚举 + 展示 + 调用，不重复实现快照逻辑。
  */
 @Composable
-internal fun SettingsSnapshotsPage(t: UiText) {
+internal fun SettingsSnapshotsPage(t: UiText, onBack: () -> Unit) {
     val zh = t.zh
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
@@ -113,7 +113,12 @@ internal fun SettingsSnapshotsPage(t: UiText) {
         InlineHint(rollbackMsg)
     }
 
-    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    SettingsScaffold(
+        title = if (zh) "编辑快照 / 回滚" else "Edit snapshots",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (zh) "编辑快照 / 回滚" else "Edit Snapshots / Rollback", style = MaterialTheme.typography.titleSmall)
         Text(
             if (zh) "写操作（smali / manifest / 归档等）改动前会自动登记快照；此处可查看差异并一键回滚。"
@@ -156,6 +161,9 @@ internal fun SettingsSnapshotsPage(t: UiText) {
                 Text(detail, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label))
             }
             OutlinedButton(onClick = { detail = "" }) { Text(if (zh) "收起差异" else "Hide diff", fontSize = AppText.body) }
+        }
+    
+            }
         }
     }
 

@@ -26,7 +26,7 @@ import org.json.JSONObject
  * 4 套 Runner（Dart 3.11.5 / 3.12.2 / 3.13.0 / 3.13.1）脱节了。
  */
 @Composable
-internal fun SettingsBlutterPage(t: UiText) {
+internal fun SettingsBlutterPage(t: UiText, onBack: () -> Unit) {
     val zh = t.zh
     val context = LocalContext.current.applicationContext
     val manifest = remember {
@@ -50,7 +50,15 @@ internal fun SettingsBlutterPage(t: UiText) {
             .take(4)
     }
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "Blutter" else "Blutter",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = if (zh) "内置 Runner" else "Embedded runners") {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (manifest == null) {
@@ -129,6 +137,9 @@ internal fun SettingsBlutterPage(t: UiText) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+        }
+    
             }
         }
     }

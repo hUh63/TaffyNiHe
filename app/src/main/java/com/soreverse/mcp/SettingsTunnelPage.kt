@@ -50,7 +50,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
+internal fun SettingsTunnelPage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tunnelType by remember { mutableStateOf(settings.tunnelType) }
@@ -112,7 +113,15 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "隧道" else "Tunnel",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         // 状态
         GlassGroup(title = if (t.zh) "状态" else "Status") {
             Text(
@@ -411,6 +420,9 @@ internal fun SettingsTunnelPage(t: UiText, settings: SettingsStore) {
                         dismissButton = { TextButton(onClick = { confirmClearLog = false }) { Text(if (t.zh) "取消" else "Cancel") } },
                     )
                 }
+            }
+        }
+    
             }
         }
     }

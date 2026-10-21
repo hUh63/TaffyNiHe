@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun SettingsAppearancePage(
     t: UiText,
+    onBack: () -> Unit,
     language: String,
     onLanguage: (String) -> Unit,
     themeMode: String,
@@ -48,7 +49,15 @@ internal fun SettingsAppearancePage(
     predictiveBack: Boolean,
     onPredictiveBack: (Boolean) -> Unit,
 ) {
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "外观与语言" else "Appearance",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         SurfacePanel {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Text(if (t.zh) "实时预览" else "Live preview", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -157,6 +166,9 @@ internal fun SettingsAppearancePage(
             ToggleRow(if (t.zh) "高对比" else "High contrast", highContrast, onHighContrast)
             GroupDivider()
             ToggleRow(t.predictiveBack, predictiveBack, onPredictiveBack)
+        }
+    
+            }
         }
     }
 }

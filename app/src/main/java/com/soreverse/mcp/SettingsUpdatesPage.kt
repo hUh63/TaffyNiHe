@@ -67,6 +67,7 @@ import java.io.File
 @Composable
 internal fun SettingsUpdatesPage(
     t: UiText,
+    onBack: () -> Unit,
     settings: SettingsStore,
     manager: GitHubUpdateManager,
     initialRelease: GitHubRelease?,
@@ -230,7 +231,15 @@ internal fun SettingsUpdatesPage(
     }
     val versionText = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "版本更新" else "Software update",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         // 频道切换 pill（正式版 / 测试版，上游 1.0.21 借鉴）
         ChannelSegmentsPill(
             selected = channel,
@@ -385,6 +394,9 @@ internal fun SettingsUpdatesPage(
                     )
                     if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+        }
+    
             }
         }
     }

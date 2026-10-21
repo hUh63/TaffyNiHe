@@ -57,7 +57,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
-internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
+internal fun SettingsServiceConfigPage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = LocalContext.current
     var treeUri by remember { mutableStateOf(settings.treeUri) }
     var portText by remember { mutableStateOf(settings.port.toString()) }
@@ -94,7 +95,15 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "服务配置" else "Service Configuration",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = if (t.zh) "工作目录" else "Work directory") {
             NavRow(
                 title = treeUri?.let(WorkDirectory::displayPath) ?: if (t.zh) "未设置" else "Not set",
@@ -277,6 +286,9 @@ internal fun SettingsServiceConfigPage(t: UiText, settings: SettingsStore) {
                     if (t.zh) "引擎已重建，重工具可重新调用" else "Engine rebuilt",
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
+            }
+        }
+    
             }
         }
     }

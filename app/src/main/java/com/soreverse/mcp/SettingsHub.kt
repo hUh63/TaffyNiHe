@@ -67,14 +67,6 @@ import com.soreverse.mcp.core.GitHubRelease
 import com.soreverse.mcp.core.GitHubUpdateManager
 import com.soreverse.mcp.core.SettingsStore
 
-/** 功能/工具页：不走「设置子页」范式，使用各自的沉浸式顶栏（见 [ToolPageScaffold]）。 */
-private val toolPageDests = setOf(
-    SettingsDest.Rizin, SettingsDest.Edbg, SettingsDest.Capture, SettingsDest.Sandbox,
-    SettingsDest.Workflow, SettingsDest.ApkEdit, SettingsDest.DexExplorer, SettingsDest.Linux,
-    SettingsDest.Terminal, SettingsDest.Git, SettingsDest.Extensions, SettingsDest.NativeExec,
-    SettingsDest.Search, SettingsDest.DevEnv,
-)
-
 internal fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) {
     SettingsDest.Root -> t.settings
     SettingsDest.ServiceConfig -> if (t.zh) "服务配置" else "Service Configuration"
@@ -176,34 +168,30 @@ internal fun SettingsHub(
         color = MaterialTheme.colorScheme.background,
     ) {
     Column(Modifier.fillMaxSize()) {
-        // 工具/功能页自带沉浸顶栏，不再套「设置子页」标题；其余设置页保持统一标题栏。
-        if (dest !in toolPageDests) {
-            // 太墟式二级页顶栏：大标题随内容滚动折叠（PageScroll 通过 CompositionLocal 递出滚动量）
-            SettingsSubPageHeader(title = settingsTitle(t, dest), onBack = onBack)
-        }
+        // 每个二级页自己拥有 Scaffold + 折叠大标题（太墟架构）；hub 只负责路由与转场。
         Box(Modifier.fillMaxSize()) {
         when (dest) {
-            SettingsDest.ServiceConfig -> SettingsServiceConfigPage(t, settings)
-            SettingsDest.Appearance -> SettingsAppearancePage(t, language, onLanguage, themeMode, onTheme, accentColor, onAccent, pureBlackDark, onPureBlack, uiDensity, onDensity, cornerStyle, onCorner, motionMode, onMotion, showAdvancedHome, onShowAdvancedHome, highContrast, onHighContrast, dynamicColor, onDynamicColor, textScale, onTextScale, predictiveBack, onPredictiveBack)
-            SettingsDest.KeepAlive -> SettingsKeepAlivePage(t, settings)
-            SettingsDest.Limits -> SettingsLimitsPage(t, settings)
-            SettingsDest.Export -> SettingsExportPage(t, settings)
-            SettingsDest.Audit -> SettingsAuditPage(t, settings)
-            SettingsDest.Blutter -> SettingsBlutterPage(t)
-            SettingsDest.Tunnel -> SettingsTunnelPage(t, settings)
-            SettingsDest.ApkBridge -> SettingsApkBridgePage(t, settings)
-            SettingsDest.AiDeep -> SettingsAiDeepPage(t, settings)
-            SettingsDest.Updates -> SettingsUpdatesPage(t, settings, updateManager, availableRelease, onRelease)
-            SettingsDest.Probe -> SettingsProbePage(t, settings)
-            SettingsDest.ApkSign -> SettingsApkSignPage(t, settings)
-            SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings)
-            SettingsDest.Workspace -> SettingsWorkspacePage(t, settings, { onDest(SettingsDest.ServiceConfig) }, { onDest(SettingsDest.TempWorkspace) })
-            SettingsDest.Permissions -> SettingsPermissionsPage(t)
-            SettingsDest.LogcatViewer -> LogcatViewerPage(t)
+            SettingsDest.ServiceConfig -> SettingsServiceConfigPage(t, settings, onBack)
+            SettingsDest.Appearance -> SettingsAppearancePage(t, language, onLanguage, themeMode, onTheme, accentColor, onAccent, pureBlackDark, onPureBlack, uiDensity, onDensity, cornerStyle, onCorner, motionMode, onMotion, showAdvancedHome, onShowAdvancedHome, highContrast, onHighContrast, dynamicColor, onDynamicColor, textScale, onTextScale, predictiveBack, onPredictiveBack, onBack)
+            SettingsDest.KeepAlive -> SettingsKeepAlivePage(t, settings, onBack)
+            SettingsDest.Limits -> SettingsLimitsPage(t, settings, onBack)
+            SettingsDest.Export -> SettingsExportPage(t, settings, onBack)
+            SettingsDest.Audit -> SettingsAuditPage(t, settings, onBack)
+            SettingsDest.Blutter -> SettingsBlutterPage(t, onBack)
+            SettingsDest.Tunnel -> SettingsTunnelPage(t, settings, onBack)
+            SettingsDest.ApkBridge -> SettingsApkBridgePage(t, settings, onBack)
+            SettingsDest.AiDeep -> SettingsAiDeepPage(t, settings, onBack)
+            SettingsDest.Updates -> SettingsUpdatesPage(t, settings, updateManager, availableRelease, onRelease, onBack)
+            SettingsDest.Probe -> SettingsProbePage(t, settings, onBack)
+            SettingsDest.ApkSign -> SettingsApkSignPage(t, settings, onBack)
+            SettingsDest.TempWorkspace -> SettingsTempWorkspacePage(t, settings, onBack)
+            SettingsDest.Workspace -> SettingsWorkspacePage(t, settings, { onDest(SettingsDest.ServiceConfig) }, { onDest(SettingsDest.TempWorkspace) }, onBack)
+            SettingsDest.Permissions -> SettingsPermissionsPage(t, onBack)
+            SettingsDest.LogcatViewer -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { LogcatViewerPage(t) }
             SettingsDest.Edbg -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { EdbgPage(t) }
             SettingsDest.DexExplorer -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsDexExplorerPage(t) }
             SettingsDest.ApkEdit -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsApkEditPage(t) }
-            SettingsDest.Snapshots -> SettingsSnapshotsPage(t)
+            SettingsDest.Snapshots -> SettingsSnapshotsPage(t, onBack)
             SettingsDest.Workflow -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsWorkflowPage(t, onDest) }
             SettingsDest.Rizin -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { RizinPage(t) }
             SettingsDest.Capture -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { CapturePage(t) }
@@ -212,21 +200,51 @@ internal fun SettingsHub(
             SettingsDest.NativeExec -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsNativeExecPage(t) }
             SettingsDest.Git -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsGitPage(t) }
             SettingsDest.Extensions -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsExtensionsPage(t, onDest) }
-            SettingsDest.Help -> SettingsHelpPage(t)
+            SettingsDest.Help -> SettingsHelpPage(t, onBack)
             SettingsDest.Sandbox -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsSandboxPage(t) }
             // 编辑器已是顶层独立页面：子页路由到此处时直接切到 Editor tab（覆盖扩展页 / 工作流页的跳转）
             SettingsDest.Python -> LaunchedEffect(Unit) { onOpenEditor() }
             SettingsDest.Search -> SettingsSearchPage(t, onDest, onBack)
             SettingsDest.DevEnv -> SettingsDevEnvPage(t, onDest, onOpenEditor, onBack)
-            SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings)
-            SettingsDest.ToolStats -> PageScroll {
+            SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings, onBack)
+            SettingsDest.ToolStats -> SettingsDest.ToolStats -> SettingsScaffold(
+                title = if (t.zh) "运行统计" else "Runtime stats",
+                onBack = onBack,
+            ) {
+                item("content") {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
                 // 合并强相关入口：工具调用统计 + 隧道稳定性 同属「运行时统计」，合并到同一页。
                 GlassGroup { Column(Modifier.padding(12.dp)) { ToolStatsSection(t, settings) } }
                 GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } }
+            
+                    }
+                }
             }
-            SettingsDest.TunnelStats -> PageScroll { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } }
-            SettingsDest.Credits -> SettingsCreditsPage(t)
-            SettingsDest.Disclaimer -> PageScroll {
+            SettingsDest.TunnelStats -> SettingsDest.TunnelStats -> SettingsScaffold(
+                title = if (t.zh) "隧道稳定性" else "Tunnel stability",
+                onBack = onBack,
+            ) {
+                item("content") {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) { GlassGroup { Column(Modifier.padding(12.dp)) { TunnelStatsSection(t) } } 
+                    }
+                }
+            }
+            SettingsDest.Credits -> SettingsCreditsPage(t, onBack)
+            SettingsDest.Disclaimer -> SettingsDest.Disclaimer -> SettingsScaffold(
+                title = t.disclaimer,
+                onBack = onBack,
+            ) {
+                item("content") {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
                 GlassGroup {
                     Text(t.disclaimerBody, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                 }
@@ -242,10 +260,21 @@ internal fun SettingsHub(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            
+                    }
+                }
             }
             SettingsDest.About -> {
                 val aboutContext = LocalContext.current
-                PageScroll {
+                SettingsScaffold(
+                    title = t.about,
+                    onBack = onBack,
+                ) {
+                    item("content") {
+                        Column(
+                            Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
                     GlassGroup {
                         Text(t.aboutBody, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                         Row(Modifier.padding(14.dp)) {
@@ -286,6 +315,9 @@ internal fun SettingsHub(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                
+                        }
                     }
                 }
             }

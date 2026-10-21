@@ -1,5 +1,7 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Arrangement
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -15,8 +17,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun SettingsCreditsPage(t: UiText) {
-    PageScroll {
+internal fun SettingsCreditsPage(t: UiText, onBack: () -> Unit) {
+    SettingsScaffold(
+        title = if (t.zh) "开源致谢" else "Credits",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(
             title = "玄星逆核·GPL-3.0",
         ) {
@@ -84,6 +94,9 @@ internal fun SettingsCreditsPage(t: UiText) {
             CreditProject("native-lib-loader", if (t.zh) "依赖链中的原生库加载工具" else "Native library loading", "https://github.com/scijava/native-lib-loader"),
             CreditProject("MT 管理器 / MT Manager", if (t.zh) "APK 工作流参考与 APK MCP 能力来源" else "APK workflow reference and APK MCP provider", "https://mt2.cn/"),
         ))
+    
+            }
+        }
     }
 }
 

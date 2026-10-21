@@ -69,7 +69,8 @@ import org.json.JSONObject
  * - 管理工具子页：按工具分卡片，名称 + 描述 + 启用开关
  */
 @Composable
-internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
+internal fun SettingsApkBridgePage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bridge = remember { activeBridge(context.applicationContext) }
@@ -119,7 +120,15 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
             onBack = { toolsTarget = null },
         )
     } else {
-        PageScroll {
+        SettingsScaffold(
+        title = if (t.zh) "MCP 桥接" else "MCP bridge",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             // ── 桥接列表 ──
             GlassGroup(
                 title = if (zh) "桥接列表" else "Bridge List",
@@ -198,7 +207,10 @@ internal fun SettingsApkBridgePage(t: UiText, settings: SettingsStore) {
                     )
                 }
             }
+        
+            }
         }
+    }
     }
 
     // ── 添加桥接弹窗 ──

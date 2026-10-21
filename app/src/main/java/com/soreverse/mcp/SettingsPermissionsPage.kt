@@ -52,7 +52,7 @@ import rikka.shizuku.Shizuku
  * eDBG、eBPF dex、增强 logcat 等功能依赖这里的通道授权。
  */
 @Composable
-internal fun SettingsPermissionsPage(t: UiText) {
+internal fun SettingsPermissionsPage(t: UiText, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
@@ -117,7 +117,15 @@ internal fun SettingsPermissionsPage(t: UiText) {
         }
     }
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "权限管理" else "Permissions",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         // ── 总览 ──
         GlassGroup(title = if (zh) "特权通道" else "Privileged channels") {
             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -308,6 +316,9 @@ internal fun SettingsPermissionsPage(t: UiText) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             )
+        }
+    
+            }
         }
     }
 }

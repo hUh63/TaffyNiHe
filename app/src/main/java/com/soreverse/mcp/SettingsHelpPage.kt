@@ -35,7 +35,7 @@ import androidx.compose.ui.unit.sp
  * 全部内容内置离线可用——不再需要去网站看教程。
  */
 @Composable
-internal fun SettingsHelpPage(t: UiText) {
+internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
     val zh = t.zh
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -43,7 +43,15 @@ internal fun SettingsHelpPage(t: UiText) {
     val fg = Color(0xFFD6E2F0)
     var tab by remember { mutableStateOf(0) }   // 0=功能教程 1=实现原理 2=MCP Skill
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "帮助" else "Help",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         Text(
             if (zh) "帮助 · 教程 / 原理 / MCP Skill" else "Help · Guide / Internals / MCP Skill",
             style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface,
@@ -85,6 +93,9 @@ internal fun SettingsHelpPage(t: UiText) {
                 color = fg,
                 modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AppShape.lg)).padding(12.dp),
             )
+        }
+    
+            }
         }
     }
 }

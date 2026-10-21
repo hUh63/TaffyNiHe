@@ -128,7 +128,8 @@ private fun RequestFieldsEditor(
 }
 
 @Composable
-internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
+internal fun SettingsAiDeepPage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val deepService = remember { DeepAnalysisService(context.applicationContext) }
@@ -147,7 +148,15 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
     var status by remember { mutableStateOf("") }
     var loadingModels by remember { mutableStateOf(false) }
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "AI 深度分析" else "AI deep analysis",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = if (t.zh) "协议兼容" else "Provider") {
             // openrouter / xai 是 OpenAI 协议的预设端点（存储层面 provider 仍为 openai）
             val selectedChip = when {
@@ -360,6 +369,9 @@ internal fun SettingsAiDeepPage(t: UiText, settings: SettingsStore) {
                 systemPrompt = SettingsStore.DEFAULT_AI_SYSTEM_PROMPT
                 settings.aiSystemPrompt = systemPrompt
             }, Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp))
+        }
+    
+            }
         }
     }
 }

@@ -165,28 +165,36 @@ internal fun SecondaryActionButton(text: String, onClick: () -> Unit, modifier: 
 
 @Composable
 internal fun SurfacePanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    // 太墟规格：surfaceContainer + extraLarge 圆角 + 零描边（原来是自己拼 clip/background/border 的伪卡片）
-    androidx.compose.material3.Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), content = content)
-    }
+    val shape = RoundedCornerShape(LocalUiMetrics.current.cardRadius)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)), shape)
+            .padding(14.dp),
+        content = content,
+    )
 }
 
 @Composable
-internal fun SettingsKeepAlivePage(t: UiText, settings: SettingsStore) {
+internal fun SettingsKeepAlivePage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var floating by remember { mutableStateOf(settings.floatingEnabled) }
     var floatingOpacity by remember { mutableStateOf(settings.floatingOpacity) }
     var floatingAutoEdge by remember { mutableStateOf(settings.floatingAutoEdge) }
     var wakeLock by remember { mutableStateOf(settings.wakeLockEnabled) }
     var bootAutoStart by remember { mutableStateOf(settings.bootAutoStart) }
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "后台保活" else "Keep alive",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup {
             ToggleRow(t.wakeLock, wakeLock) { wakeLock = it; settings.wakeLockEnabled = it }
             GroupDivider()
@@ -258,6 +266,9 @@ internal fun SettingsKeepAlivePage(t: UiText, settings: SettingsStore) {
                 }, Modifier.fillMaxWidth())
             }
         }
+    
+            }
+        }
     }
 }
 
@@ -284,14 +295,23 @@ internal fun keepAliveAdvice(zh: Boolean): String {
 }
 
 @Composable
-internal fun SettingsLimitsPage(t: UiText, settings: SettingsStore) {
+internal fun SettingsLimitsPage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     var defaultLimit by remember { mutableStateOf(settings.defaultLimit.toString()) }
     var stringLimit by remember { mutableStateOf(settings.stringLimit.toString()) }
     var disasmLimit by remember { mutableStateOf(settings.disasmLimit.toString()) }
     var disasmBytes by remember { mutableStateOf(settings.disasmMaxBytes.toString()) }
     var hexdumpBytes by remember { mutableStateOf(settings.hexdumpMaxBytes.toString()) }
     var maxRequestKb by remember { mutableStateOf(settings.maxRequestKb.toString()) }
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "返回数量" else "Result limits",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup {
             NumberSettingRow(if (t.zh) "默认 limit" else "Default limit", defaultLimit, { defaultLimit = it }, { settings.defaultLimit = it }, if (t.zh) "条" else "items")
             GroupDivider()
@@ -305,17 +325,29 @@ internal fun SettingsLimitsPage(t: UiText, settings: SettingsStore) {
             GroupDivider()
             NumberSettingRow(if (t.zh) "请求上限" else "Request limit", maxRequestKb, { maxRequestKb = it }, { settings.maxRequestKb = it }, "KB")
         }
+    
+            }
+        }
     }
 }
 
 @Composable
-internal fun SettingsExportPage(t: UiText, settings: SettingsStore) {
+internal fun SettingsExportPage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     var conflictStrategy by remember { mutableStateOf(settings.outputConflictStrategy) }
     var writePatchReport by remember { mutableStateOf(settings.writePatchReport) }
     var buildCopyToWorkDir by remember { mutableStateOf(settings.buildCopyToWorkDir) }
     var maxPatchBytes by remember { mutableStateOf(settings.maxPatchBytes.toString()) }
     var maxBuildOutputs by remember { mutableStateOf(settings.maxBuildOutputs.toString()) }
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "导出" else "Export",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = if (t.zh) "文件名冲突" else "File conflict") {
             ChipRow(listOf("rename" to if (t.zh) "自动改名" else "Auto rename", "overwrite" to if (t.zh) "覆盖" else "Overwrite"), conflictStrategy) {
                 conflictStrategy = it
@@ -337,13 +369,25 @@ internal fun SettingsExportPage(t: UiText, settings: SettingsStore) {
             GroupDivider()
             NumberSettingRow(if (t.zh) "构建产物列表上限" else "Max build outputs", maxBuildOutputs, { maxBuildOutputs = it }, { settings.maxBuildOutputs = it }, if (t.zh) "项" else "items")
         }
+    
+            }
+        }
     }
 }
 
 @Composable
-internal fun SettingsProbePage(t: UiText, settings: SettingsStore) {
+internal fun SettingsProbePage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     var probeUrl by remember { mutableStateOf(settings.externalProbeUrl) }
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "外部探针" else "External probe",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(footer = t.reachabilityHelp) {
             OutlinedTextField(
                 value = probeUrl,
@@ -359,6 +403,9 @@ internal fun SettingsProbePage(t: UiText, settings: SettingsStore) {
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             )
             Text(t.externalProbeExample, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    
+            }
         }
     }
 }

@@ -30,7 +30,8 @@ import com.soreverse.mcp.mcp.ToolCatalog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsAuditPage(t: UiText, settings: SettingsStore) {
+internal fun SettingsAuditPage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     var autoSnapshotBeforeEdit by remember { mutableStateOf(settings.autoSnapshotBeforeEdit) }
     var auditLogEnabled by remember { mutableStateOf(settings.auditLogEnabled) }
     var auditPersist by remember { mutableStateOf(settings.auditPersist) }
@@ -47,7 +48,15 @@ internal fun SettingsAuditPage(t: UiText, settings: SettingsStore) {
     var toolCallRateLimitPerMin by remember { mutableStateOf(settings.toolCallRateLimitPerMin.toString()) }
     var disabledTools by remember { mutableStateOf(settings.disabledTools) }
     var blockDestructiveTools by remember { mutableStateOf(settings.blockDestructiveTools) }
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "编辑校验与审计" else "Edit & audit",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup {
             ToggleRow(if (t.zh) "编辑前自动快照" else "Auto-snapshot before edit", autoSnapshotBeforeEdit) { autoSnapshotBeforeEdit = it; settings.autoSnapshotBeforeEdit = it }
             GroupDivider()
@@ -158,6 +167,9 @@ internal fun SettingsAuditPage(t: UiText, settings: SettingsStore) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    
             }
         }
     }

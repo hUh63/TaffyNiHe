@@ -83,7 +83,8 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
+internal fun SettingsBackupRestorePage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var includeSecrets by remember { mutableStateOf(false) }
@@ -455,7 +456,15 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
         )
     }
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "备份与恢复" else "Backup & restore",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = t.backupLocal) {
             // 上游 1.0.21 借鉴: 包含密钥时强制启用加密并锁定加密开关
             BackupToggleRow(
@@ -736,6 +745,9 @@ internal fun SettingsBackupRestorePage(t: UiText, settings: SettingsStore) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    
             }
         }
     }

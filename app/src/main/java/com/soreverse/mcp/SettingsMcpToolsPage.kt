@@ -67,7 +67,8 @@ private val SCHEME_OPTIONS = listOf(
 )
 
 @Composable
-internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
+internal fun SettingsApkSignPage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     var showImport by remember { mutableStateOf(false) }
@@ -77,7 +78,15 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
     val keySource = settings.apkSignKeySource
     val activeKey = settings.apkSignKeystoreName
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "APK 签名" else "APK signing",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = if (t.zh) "自动签名" else "Auto sign") {
             ToggleRow(
                 if (t.zh) "修改APK后自动签名" else "Auto-sign after APK edit",
@@ -159,6 +168,9 @@ internal fun SettingsApkSignPage(t: UiText, settings: SettingsStore) {
                 if (t.zh) "不签名时保留 V2/V3 签名数据" else "Keep V2/V3 signature when unsigned",
                 settings.apkKeepV2V3WhenNoSign,
             ) { settings.apkKeepV2V3WhenNoSign = it; refresh++ }
+        }
+    
+            }
         }
     }
 
@@ -284,7 +296,8 @@ private fun IconButtonMini(onClick: () -> Unit, icon: androidx.compose.ui.graphi
 // ─────────────────────────── 临时工作区 ───────────────────────────
 
 @Composable
-internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
+internal fun SettingsTempWorkspacePage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     var limit by remember { mutableIntStateOf(settings.tempWorkspaceLimit) }
@@ -293,7 +306,15 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
     val count = TempWorkspaceManager.count(context)
     val stats = TempWorkspaceManager.stats(context)
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "临时工作区" else "Temp workspaces",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = if (t.zh) "临时工作区数量上限" else "Temp workspace limit") {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
@@ -343,6 +364,9 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
                 PrimaryActionButton(if (t.zh) "清理全部临时工作区" else "Clean all temp workspaces", { showCleanConfirm = true }, modifier = Modifier.fillMaxWidth(), leading = Icons.Default.Delete)
             }
         }
+    
+            }
+        }
     }
 
     if (showCleanConfirm) {
@@ -369,7 +393,8 @@ internal fun SettingsTempWorkspacePage(t: UiText, settings: SettingsStore) {
 // ─────────────────────────── 工作区管理 ───────────────────────────
 
 @Composable
-internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenServiceConfig: () -> Unit, onOpenTemp: () -> Unit = {}) {
+internal fun SettingsWorkspacePage(t: UiText,
+    onBack: () -> Unit, settings: SettingsStore, onOpenServiceConfig: () -> Unit, onOpenTemp: () -> Unit = {}) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var refresh by remember { mutableIntStateOf(0) }
@@ -379,7 +404,15 @@ internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenSer
     val roots = WorkspacePolicy.allowedRoots(context)
     val tempCount = TempWorkspaceManager.count(context)
 
-    PageScroll {
+    SettingsScaffold(
+        title = if (t.zh) "工作区" else "Workspace",
+        onBack = onBack,
+    ) {
+        item("content") {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
         GlassGroup(title = if (t.zh) "工作目录" else "Work directory") {
             NavRow(
                 title = workDir?.takeIf { it.isNotBlank() } ?: if (t.zh) "未设置" else "Not set",
@@ -446,6 +479,9 @@ internal fun SettingsWorkspacePage(t: UiText, settings: SettingsStore, onOpenSer
                 icon = Icons.Default.Storage,
                 onClick = onOpenTemp,
             )
+        }
+    
+            }
         }
     }
 }

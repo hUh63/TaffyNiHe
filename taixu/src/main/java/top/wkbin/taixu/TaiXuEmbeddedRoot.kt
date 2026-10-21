@@ -8,7 +8,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
-import top.wkbin.taixu.core.datastore.SettingsDataStore
+import top.wkbin.taixu.core.datastore.AppearancePreferences
 import top.wkbin.taixu.core.model.ThemePalette
 import top.wkbin.taixu.ui.navigation.TaiXuNavHost
 import top.wkbin.taixu.ui.theme.TaiXuTheme
@@ -28,7 +28,8 @@ import top.wkbin.taixu.ui.theme.TaiXuTheme
  */
 @Composable
 fun TaiXuEmbeddedRoot() {
-    val settingsDataStore: SettingsDataStore = koinInject()
+    // 与上游 MainActivity 一致：主题相关偏好走 AppearancePreferences 窄接口（含 themePalette）。
+    val settingsDataStore: AppearancePreferences = koinInject()
     val themeMode by settingsDataStore.themeMode.collectAsStateWithLifecycle(initialValue = "system")
     val dynamicColorEnabled by settingsDataStore.dynamicColorEnabled.collectAsStateWithLifecycle(initialValue = true)
     val themePalette by settingsDataStore.themePalette.collectAsStateWithLifecycle(initialValue = ThemePalette())

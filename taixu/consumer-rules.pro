@@ -23,8 +23,6 @@
 -keepnames class top.wkbin.taixu.service.AgentForegroundService
 
 # Keep line information for deobfuscating production crashes while hiding source filenames.
--keepattributes SourceFile,LineNumberTable
--renamesourcefileattribute SourceFile
 
 # === Shizuku UserService (release 构建必保) ===
 # Shizuku 在独立 fork 的进程中按全限定类名反射加载 ShizukuHostUserService，

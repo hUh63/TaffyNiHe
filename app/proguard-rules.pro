@@ -171,3 +171,7 @@
 -keep class org.mozilla.javascript.** { *; }
 -dontwarn org.mozilla.javascript.**
 -dontwarn java.beans.**
+
+# === 移植自太墟：release 崩溃堆栈保留行号（全局选项不能放 consumer rules，只能放宿主） ===
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

@@ -42,8 +42,13 @@ import top.wkbin.taixu.workflow.AppForegroundTracker
 import top.wkbin.taixu.workflow.WorkflowApprovalNotifier
 import top.wkbin.taixu.workflow.WorkflowRunUiController
 import java.io.File
-
-class TaiXuApplication : Application(), Configuration.Provider {
+/**
+ * 太墟宿主 Application。
+ *
+ * 塔菲逆核移植后由 `com.soreverse.mcp.SoReverseApplication` 继承：太墟负责 Koin/Room/前台服务/
+ * 工作流调度的装配，塔菲在其之后追加逆向内核初始化。故此处必须 `open`（与上游唯一差异）。
+ */
+open class TaiXuApplication : Application(), Configuration.Provider {
 
     companion object {
         private const val TAG = "TaiXuApp"

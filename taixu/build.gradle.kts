@@ -84,7 +84,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.bundles.koin.compose)
     // 工作流定时计划：WorkManager 到点触发 + Koin Worker 注入
-    implementation(libs.androidx.work.runtime.ktx)
+    // api：TaiXuApplication 实现 androidx.work.Configuration.Provider，宿主要继承它，
+    // 必须能在自己的编译类路径上看到 work-runtime 的类型。
+    api(libs.androidx.work.runtime.ktx)
     implementation(libs.koin.workmanager)
     implementation(libs.bundles.room)
     implementation(libs.shizuku.provider)

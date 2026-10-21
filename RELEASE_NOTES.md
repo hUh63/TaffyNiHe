@@ -1,3 +1,52 @@
+# TaffyNiHe v1.3.120（设置子页全部换折叠大标题 + 完整性判据补齐）
+
+上一版把设置**根页**换成了太墟体系，二级页还留着旧的固定顶栏；这一版把所有二级设置页
+一次性换成太墟的「折叠大标题」，并把上游 SOMCP v1.0.22 里最后两项低误报完整性判据补齐。
+
+## 一、设置子页：34sp 大标题 → 滚动收成 22sp
+
+太墟（taixu）二级页的观感来自「大标题随内容滚动收缩」，而塔菲的设置子页各有各的滚动容器
+（`PageScroll` / 自绘 `Column`），直接改成 `LazyColumn` 架构要动 20 个页面。
+
+改为让**滚动源自己把位置递出来**：
+
+- `PageScroll` 新增 `LocalPageScrollState`（CompositionLocal 暴露 `ScrollState`）；
+- 新增 `SettingsSubPageHeader`：标题字号 34sp→22sp、行高 40sp→28sp、顶栏高度 96dp→64dp，
+  随滚动偏移线性收缩；只有它自己读 `scroll.value`，不会让整页每帧重组；
+- `SettingsHub` 的子页外壳把 `ScreenHeader` 换成 `SettingsSubPageHeader`——**一次接线，
+  服务配置 / 外观 / 返回数量 / 导出 / 审计 / 隧道 / 桥接 / AI / 更新 / 探针 / 致谢 /
+  权限 / 快照 / Blutter / 工作区 / 统计 / 免责 / 关于 全部生效**；
+- 备份恢复页与帮助页原本各自复刻了一份 `PageScroll` 的 `Column`，并入 `PageScroll`
+  （顺带获得折叠行为）；编辑快照页因内含独立 `LazyColumn` 列表，保留大标题不折叠（避免嵌套滚动）；
+- `SurfacePanel`（外观 / 权限等页自绘的 `clip + background + border` 伪卡片）改为 M3 `Card`：
+  `surfaceContainer` + `extraLarge` 圆角 + 零描边 + 16dp 内边距。
+
+## 二、完整性校验：补齐上游最后两项低误报判据
+
+- **进程内 hook 帧**：栈帧里出现 `de.robv.android.xposed.` / `io.github.libxposed.` 包前缀即判定
+  注入（只比包前缀，仿冒包名不会命中）。注意这只在**本进程真被 hook** 时触发——设备上装了
+  LSPosed 但没勾选本应用不会误报，所以这条可以安全启用。
+- **`PackageInfo.CREATOR` 被换成外来类**：一键过签框架（SoLab/DPatch/LSPatch）换 Creator 来改写
+  签名。判据是 `CREATOR.classLoader === PackageInfo.classLoader` 的身份比较，而不是常见的
+  「classLoader 为 null」——后者在 ART 模块 / APEX / 定制 framework 的机器上会把正版判成被改。
+- 新增 3 条单测（模块帧命中、普通应用帧不命中、前缀边界）。
+- 仍然**不取**：同类分发版检测（上游自己的分发纠纷）与通用 `appComponentFactory` 检测
+  （合并后的 manifest 可能带三方 factory，误报代价大于收益）。
+
+## 三、上游核对
+
+- **SOMCP**：v1.0.22（2026-10-19）之后无新提交，`#170` Flutter 链路、`317178e` ROM 脱壳检测、
+  `#172` 等均已对齐，本次再补齐 hook 帧 / CREATOR 两项；
+- **太墟 taixu**：最新发布 v1.3.0（2026-10-20），设置体系源码（`SettingsScreen` / `SettingsDensity` /
+  `SettingsPreferenceRows` / `LinuxEnvironmentSettingsScreen` / `SettingsSearchScreen`）最后改动
+  仍是 10-16～10-19，本版采用的即该版本；v1.3.0 的更新集中在群聊机器人、自定义迭代与统计账本，
+  与设置布局无关。
+
+## 验证
+
+- JVM 单元测试（新增 3 条完整性规则用例）。
+- Debug Kotlin/Java 编译、Release APK 构建与签名校验。
+
 # TaffyNiHe v1.3.119（上游 SOMCP 完整对齐 + 设置页换太墟体系）
 
 这一版把两件事做到「完整」：SOMCP 侧凡是能安全落地的改进全部对齐（Flutter 分析链路整条重写、

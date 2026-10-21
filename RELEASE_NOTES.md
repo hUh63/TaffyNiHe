@@ -1,3 +1,43 @@
+# TaffyNiHe v1.3.121（页面架构对齐：每个二级页自持脚手架 + 运行环境探针接线）
+
+上一版把「顶栏」换成了折叠大标题，但页面架构还是「hub 画标题 + 页面自己滚一段 Column」。
+这一版把架构真正对齐太墟：**每个二级页自己拥有 Scaffold + LazyColumn + 折叠大标题**，hub 只负责
+路由与转场；同时把此前只写不用的运行环境探针接进结果，并给它们一个可查看的位置。
+
+## 一、页面架构对齐（18 个二级页一次换完）
+
+- 每个二级页现在长这样（与 taixu `PersonalizationScaffold` 一致）：
+  `SettingsScaffold(title, onBack) { item / 分组 }`，标题随自身列表滚动折叠；
+- hub 不再绘制二级页标题，也不再需要「把滚动量递出去」的 CompositionLocal 方案
+  （上一版的 `LocalPageScrollState` / `SettingsSubPageHeader` 已删除，`PageScroll` 回归朴素实现）；
+- 服务配置 / 外观 / 保活 / 返回数量 / 导出 / 审计 / Blutter / 隧道 / 桥接 / AI / 更新 / 探针 /
+  APK 签名 / 临时工作区 / 工作区 / 权限 / 快照 / 致谢 / 帮助 / 备份恢复 / 统计 / 免责 / 关于
+  全部改为「页面自持脚手架」；日志查看器按工具页处理（紧凑沉浸顶栏，日志流需要垂直空间）；
+- 页面内容的水平边距改由 `SettingsScaffold` 的 16dp contentPadding 统一，二级页不再各自设内边距。
+
+## 二、运行环境探针：从「只写不用」到「有结论、有出处」
+
+`IntegrityGuard` 里那批探针（调试器 / tracer / FART-ROM / 进程内 hook 帧 / `PackageInfo.CREATOR`
+换类 / maps 特征）此前只定义、没有任何调用点，等于死代码。这一版：
+
+- `verify()` 会把探针结果并入 `Result.threats`（**不改 `trusted`**——签名结论仍只由签名与内容决定，
+  避免把逆向场景常开的 root/调试器做成硬门禁）；
+- 探针自带 30s 缓存：`Thread.getAllStackTraces()` 与 `/proc` 读取不能跟着 UI 的 3s 轮询跑；
+- 补上上游剩余两项判据：`appComponentFactory` 白名单（未声明 / androidx 合并的
+  `CoreComponentFactory` / 本应用包前缀，其余视为被 DPatch 一类框架改写）与「代理 Application」
+  （实例类名必须是 manifest 声明的 `SoReverseApplication`）；新增 2 条单测钉住白名单边界。
+
+## 三、新增「设置 → 自检」
+
+- 位置：设置根页「诊断与关于」第一项（快捷搜索也收录了「自检 / 完整性 / 威胁」等关键词）；
+- 内容：安装包完整性结论（通过 / 未通过 + 原因）+ 运行环境威胁清单（逐条说明「只作提示」）+
+  「重新检测」按钮；空态给出「未命中调试器、tracer、脱壳 ROM、hook 帧或过签框架」的明确说明。
+
+## 验证
+
+- JVM 单元测试（完整性规则用例 8 条）。
+- Debug Kotlin/Java 编译、Release APK 构建与签名校验。
+
 # TaffyNiHe v1.3.120（设置子页全部换折叠大标题 + 完整性判据补齐）
 
 上一版把设置**根页**换成了太墟体系，二级页还留着旧的固定顶栏；这一版把所有二级设置页

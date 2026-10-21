@@ -1,0 +1,37 @@
+package top.wkbin.taixu.ui.bot
+
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import top.wkbin.taixu.ui.theme.TaiXuTheme
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class ExpandableGroupTextTest {
+    @get:Rule val compose = createComposeRule()
+
+    @Test fun `collapsed report restores its complete original text`() {
+        val text = "report ".repeat(220) + "THE END"
+        compose.setContent { TaiXuTheme { ExpandableGroupText("report", text, false, markdown = false) } }
+        compose.onNodeWithText(text).assertDoesNotExist()
+        compose.onNodeWithText("展开全文").performClick()
+        compose.onNodeWithText(text).assertExists()
+    }
+
+    @Test fun `streaming text stays visible until completion`() {
+        val streaming = mutableStateOf(true)
+        val text = "report ".repeat(220)
+        compose.setContent { TaiXuTheme { ExpandableGroupText("report", text, streaming.value, markdown = false) } }
+        compose.onNodeWithText(text).assertExists()
+        compose.onNodeWithText("展开全文").assertDoesNotExist()
+        compose.runOnIdle { streaming.value = false }
+        compose.onNodeWithText("展开全文").assertExists()
+        compose.onNodeWithText(text).assertDoesNotExist()
+    }
+}

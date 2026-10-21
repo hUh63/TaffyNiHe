@@ -17,6 +17,9 @@ android {
 
     defaultConfig {
         manifestPlaceholders["appLabel"] = "太墟"
+        // 太墟的 release keep 规则随库模块传递给宿主 app（serialization/Shizuku/Shower/JGit 等），
+        // 否则宿主 R8 会把反射加载的类裁掉或直接因缺失 JDK 类失败。
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     buildFeatures {
@@ -84,9 +87,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.bundles.koin.compose)
     // 工作流定时计划：WorkManager 到点触发 + Koin Worker 注入
-    // api：TaiXuApplication 实现 androidx.work.Configuration.Provider，宿主要继承它，
-    // 必须能在自己的编译类路径上看到 work-runtime 的类型。
-    api(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.koin.workmanager)
     implementation(libs.bundles.room)
     implementation(libs.shizuku.provider)

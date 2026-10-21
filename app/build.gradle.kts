@@ -178,9 +178,25 @@ android {
 }
 
 dependencies {
-    // ===== 太墟移植 · 批0a：地基模块 =====
+    // ===== 太墟移植：地基（模块树由 build-logic convention 插件统一 compileSdk 37.1 / minSdk 29） =====
     implementation(project(":core:model"))
     implementation(project(":core:common"))
+    implementation(project(":core:database"))
+    implementation(project(":core:datastore"))
+    implementation(project(":core:network"))
+    implementation(project(":core:security"))
+    implementation(project(":core:browser"))
+    implementation(project(":runtime"))
+    implementation(project(":runtime:browser"))
+    implementation(project(":tools"))
+    implementation(project(":plugin:api"))
+    implementation(project(":plugin:runtime"))
+    implementation(project(":plugin:packages"))
+    implementation(project(":plugin:ui"))
+    implementation(project(":project-template"))
+    implementation(project(":termux-terminal-emulator"))
+    implementation(project(":feature:theme"))
+    implementation(project(":feature:components"))
 
     // 终端模块化（对标 Xed-Editor 的 terminal-emulator / terminal-view 两个独立 module）：
     // :terminal-emulator = 会话内核（进程 + ANSI 过滤），:terminal-view = Compose 终端视图。

@@ -1,0 +1,18 @@
+plugins {
+    alias(libs.plugins.taixu.android.library.compose)
+}
+
+android {
+    namespace = "top.wkbin.taixu.feature.components"
+}
+
+dependencies {
+    implementation(project(":core:common"))
+    implementation(project(":core:model"))
+    implementation(project(":feature:theme"))
+    implementation(libs.bundles.compose.ui)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.bundles.coil)
+    testImplementation(libs.junit)
+}

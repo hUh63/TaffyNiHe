@@ -184,7 +184,7 @@ class AppUpdateManager(
     fun installApk(apkFile: File) {
         val uri: Uri = FileProvider.getUriForFile(
             context,
-            "${context.packageName}.fileprovider",
+            "${context.packageName}.taixu.fileprovider",
             apkFile,
         )
 

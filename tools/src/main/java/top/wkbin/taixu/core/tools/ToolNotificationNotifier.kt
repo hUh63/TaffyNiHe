@@ -234,7 +234,7 @@ class ToolNotificationNotifier(
         if (!apk.isFile || apk.length() <= 0L) return null
         val stagedApk = runCatching { stageApkForInstall(apk) }.getOrNull() ?: return getLaunchIntent()
         val uri = runCatching {
-            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", stagedApk)
+            FileProvider.getUriForFile(context, "${context.packageName}.taixu.fileprovider", stagedApk)
         }.getOrNull() ?: return getLaunchIntent()
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")

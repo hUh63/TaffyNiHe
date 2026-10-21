@@ -7,7 +7,7 @@ import java.io.File
 import top.wkbin.taixu.feature.bot.R
 
 internal fun shareDiagnostics(context: Context, file: File) {
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.taixu.fileprovider", file)
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_STREAM, uri)

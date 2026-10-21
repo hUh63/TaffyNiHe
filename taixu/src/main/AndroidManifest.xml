@@ -76,7 +76,7 @@
         <!-- 应用内 APK 更新安装文件提供器 -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
+            android:authorities="${applicationId}.taixu.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

@@ -78,7 +78,7 @@ internal class HostBridgeApkInstall(
         try {
             val uri: Uri = FileProvider.getUriForFile(
                 context,
-                "${context.packageName}.fileprovider",
+                "${context.packageName}.taixu.fileprovider",
                 cachedApk,
             )
             val intent = Intent(Intent.ACTION_VIEW).apply {

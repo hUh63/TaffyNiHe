@@ -22,9 +22,11 @@
         android:name="android.permission.READ_LOGS"
         tools:ignore="ProtectedPermissions" />
     <!-- Android 10 及以下的共享存储读写（Android 11+ 由 MANAGE_EXTERNAL_STORAGE 覆盖） -->
+    <!-- 太墟库模块对同权限声明 maxSdkVersion=29，宿主统一放宽到 32（覆盖库声明，避免合并冲突） -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
+        android:maxSdkVersion="32"
+        tools:replace="android:maxSdkVersion" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />

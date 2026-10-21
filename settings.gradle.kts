@@ -1,4 +1,6 @@
 pluginManagement {
+    // 太墟移植：convention 插件（taixu.android.library / taixu.jvm.library …）
+    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
@@ -13,6 +15,8 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // 太墟移植：本地仓库托管第三方预编译 AAR（termux terminal-emulator / terminal-view）
+        maven { url = uri(rootDir.resolve("repo")) }
         google()
         mavenCentral()
         maven("https://maven.aliyun.com/repository/google")
@@ -30,3 +34,7 @@ include(":app")
 //  - :terminal-view     终端 Compose 视图（TerminalScreen），依赖前者
 include(":terminal-emulator")
 include(":terminal-view")
+
+// ===== 太墟（wkbin/taixu）模块树移植 · 批0a：地基 =====
+include(":core:model")
+include(":core:common")

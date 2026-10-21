@@ -23,7 +23,8 @@ android {
 
     defaultConfig {
         applicationId = "com.taffynihe"
-        minSdk = 26
+        // 太墟移植：convention 插件（build-logic）统一 minSdk=29，太墟模块全部按 Android 10+ 设计
+        minSdk = 29
         targetSdk = 36
         versionCode = 232
         versionName = "1.3.121"
@@ -177,6 +178,10 @@ android {
 }
 
 dependencies {
+    // ===== 太墟移植 · 批0a：地基模块 =====
+    implementation(project(":core:model"))
+    implementation(project(":core:common"))
+
     // 终端模块化（对标 Xed-Editor 的 terminal-emulator / terminal-view 两个独立 module）：
     // :terminal-emulator = 会话内核（进程 + ANSI 过滤），:terminal-view = Compose 终端视图。
     implementation(project(":terminal-emulator"))

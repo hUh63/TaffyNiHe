@@ -1,0 +1,943 @@
+package com.soreverse.mcp
+
+import android.Manifest
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.res.Configuration
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.BorderStroke
+import com.soreverse.mcp.core.AppLog
+import com.soreverse.mcp.core.DeepAnalysisService
+import com.soreverse.mcp.core.DeepReportStore
+import com.soreverse.mcp.core.IntegrityGuard
+import com.soreverse.mcp.core.GitHubRelease
+import com.soreverse.mcp.core.GitHubUpdateManager
+import com.soreverse.mcp.core.UpdateChannel
+import com.soreverse.mcp.core.PublicReachability
+import com.soreverse.mcp.core.SettingsStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import java.util.Locale
+
+typealias AndroidSettings = android.provider.Settings
+
+class MainActivity : ComponentActivity() {
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 12)
+        }
+        // 把塔菲逆向工作区注册进太墟主导航的「逆向」中枢（幂等）。
+        ReverseWorkspaceEntry.ensureRegistered()
+        setContent {
+            // calculateWindowSizeClass 需要 Activity 作用域：在这里算一次宽度尺寸类，
+            // 再传给 SoReverseApp 做 Compact / Medium / Expanded 三态响应式布局。
+            val windowSizeClass = calculateWindowSizeClass(this@MainActivity)
+            IntegrityGate { SoReverseApp(widthSizeClass = windowSizeClass.widthSizeClass) }
+        }
+    }
+
+    override fun onDestroy() {
+        // 用户真正退出（而非旋转/配置变更）时释放引擎持有的 SO 副本、模拟器/Frida 会话、
+        // 分页缓存与工作目录的 SQLite 句柄。
+        if (isFinishing && !isChangingConfigurations) {
+            runCatching { com.soreverse.mcp.core.EngineProvider.close(this) }
+        }
+        super.onDestroy()
+    }
+}
+
+@Composable
+internal fun IntegrityGate(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    // v1.3.55 性能修复: 完整性校验会读安装包（native 侧 mmap + 结构/指纹检查），
+    // 旧实现直接在 remember 里同步调用、并在**主线程**每 3 秒轮询一次 —— 这是"整机一卡一卡"
+    // 的直接原因。现在：首次校验与轮询都放到 IO 线程，且轮询只走轻量路径
+    // （重量级的 dex-CRC 结构检查与 v2/v3 真实验签已移入后台低频深检，见 IntegrityGuard）。
+    var result by remember { mutableStateOf<IntegrityGuard.Result?>(null) }
+    LaunchedEffect(Unit) {
+        result = withContext(Dispatchers.IO) { IntegrityGuard.verify(context.applicationContext) }
+    }
+    LaunchedEffect(result?.trusted) {
+        while (result?.trusted == true) {
+            delay(3_000)
+            result = withContext(Dispatchers.IO) { IntegrityGuard.verify(context.applicationContext) }
+        }
+    }
+    val r = result
+    if (r == null) {
+        // 首帧：校验尚未返回，先给一个极简启动态，避免白屏/阻塞首帧。
+        MaterialTheme(colorScheme = appleDarkColors()) {
+            Box(Modifier.fillMaxSize().background(AppleColors.Dark.background), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AppleColors.Dark.label)
+            }
+        }
+        return
+    }
+    if (r.trusted) {
+        content()
+        return
+    }
+    // v1.3.9 (上游 v1.0.21 借鉴)：只有「签名者摘要明确不匹配」才倒计时退出。
+    // 其他失败（native 库加载失败 UnsatisfiedLinkError、PackageManager 异常、v2/v3 解析差异等）
+    // 一律不自动杀进程 —— 旧行为会让一次误判直接变成"启动即退出"的死循环，且没有任何记录可查。
+    val hardFail = r.expected.isNotBlank() && r.actual.isNotEmpty() &&
+        r.reason == "application signature mismatch"
+    val lastFailure = remember { IntegrityGuard.lastFailure(context.applicationContext) }
+    var proceed by remember { mutableStateOf(false) }
+    // 不再倒计时自动退出（对齐上游 1.0.22）：用户没盯着屏幕时，弹窗 10 秒后进程被杀，
+    // 表现出来就是"应用无缘无故闪退"。改为门禁页常驻，由用户显式选择退出或继续使用。
+    if (proceed) {
+        content()
+        return
+    }
+    MaterialTheme(colorScheme = appleDarkColors()) {
+        Box(Modifier.fillMaxSize().background(AppleColors.Dark.background), contentAlignment = Alignment.Center) {
+            AlertDialog(
+                onDismissRequest = {},
+                containerColor = AppleColors.Dark.card,
+                titleContentColor = AppleColors.Dark.label,
+                textContentColor = AppleColors.Dark.secondaryLabel,
+                title = { Text("应用完整性校验失败", fontWeight = FontWeight.SemiBold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            if (hardFail) {
+                                "检测到当前安装包签名与官方发布签名不一致。本地数据、MCP 服务和原生编辑能力存在被替换的风险；如果这是你自行签名/修改的包，可以点「仍然使用」继续。"
+                            } else {
+                                "完整性校验未通过（原因不是签名不匹配，可能是运行环境或原生库问题）。原因已记录，可点「仍然使用」继续。"
+                            },
+                        )
+                        Text("原因: ${r.reason}", style = MaterialTheme.typography.bodySmall)
+                        if (r.expected.isNotBlank()) Text("期望: ${r.expected.take(16)}...${r.expected.takeLast(16)}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        if (r.actual.isNotEmpty()) Text("实际: ${r.actual.joinToString { it.take(16) + "..." + it.takeLast(16) }}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        if (r.threats.isNotEmpty()) Text("威胁: ${r.threats.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        if (lastFailure != null) {
+                            Text("上次失败记录: $lastFailure", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text("如果这是你自行签名/修改的安装包，可点击「仍然使用」继续（下次安装官方签名包即恢复校验）。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { proceed = true }) { Text("仍然使用", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { activity?.let { IntegrityGuard.terminate(it) } }) {
+                        Text("退出应用", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+            )
+        }
+    }
+}
+
+private fun localizedResources(context: Context, locale: java.util.Locale): android.content.res.Resources {
+    val config = Configuration(context.resources.configuration).apply { setLocale(locale) }
+    return context.createConfigurationContext(config).resources
+}
+
+private fun textFor(mode: String, context: Context): UiText {
+    val forcedZh = mode == "zh"
+    val forcedEn = mode == "en"
+    val systemZh = Locale.getDefault().language == "zh"
+    val zh = forcedZh || (!forcedEn && mode == "system" && systemZh)
+    // When the user forces a language, override the resource configuration so
+    // values-zh/ vs values/ resolves deterministically regardless of device locale.
+    val res = when {
+        forcedZh -> localizedResources(context, java.util.Locale.CHINESE)
+        forcedEn -> localizedResources(context, java.util.Locale.ENGLISH)
+        // system mode respects the device locale, including zh systems.
+        systemZh -> localizedResources(context, java.util.Locale.CHINESE)
+        else -> context.resources
+    }
+    fun s(id: Int): String = res.getString(id)
+    return UiText(
+        zh = zh,
+        appTitle = s(R.string.app_title),
+        subtitle = s(R.string.app_subtitle),
+        state = s(R.string.state),
+        running = s(R.string.running),
+        stopped = s(R.string.stopped),
+        power = s(R.string.power),
+        directory = s(R.string.directory),
+        chooseDirectory = s(R.string.choose_directory),
+        noDirectory = s(R.string.no_directory),
+        port = s(R.string.port),
+        links = s(R.string.links),
+        logs = s(R.string.logs),
+        tools = s(R.string.toolset),
+        settings = s(R.string.settings),
+        language = s(R.string.language),
+        theme = s(R.string.theme),
+        keepAlive = s(R.string.keep_alive),
+        floating = s(R.string.floating),
+        wakeLock = s(R.string.wake_lock),
+        predictiveBack = s(R.string.predictive_back),
+        battery = s(R.string.battery),
+        permissions = s(R.string.permissions),
+        test = s(R.string.test),
+        copied = s(R.string.copied),
+        externalProbe = s(R.string.external_probe),
+        probeServiceUrl = s(R.string.probe_service_url),
+        reachabilityHelp = s(R.string.reachability_help),
+        instructions = s(R.string.instructions),
+        instructionsBody = s(R.string.instructions_body),
+        disclaimer = s(R.string.disclaimer),
+        disclaimerBody = s(R.string.disclaimer_body),
+        about = s(R.string.about),
+        aboutBody = s(R.string.about_body),
+        joinQqGroup = s(R.string.join_qq_group),
+        accept = s(R.string.accept),
+        decline = s(R.string.decline),
+        firstRunDisclaimerTitle = s(R.string.first_run_disclaimer_title),
+        externalProbeExample = s(R.string.external_probe_example),
+        backupRestore = s(R.string.backup_restore),
+        backupRestoreSubtitle = s(R.string.backup_restore_subtitle),
+        backupLocal = s(R.string.backup_local),
+        backupExport = s(R.string.backup_export),
+        backupImport = s(R.string.backup_import),
+        backupIncludeSecrets = s(R.string.backup_include_secrets),
+        backupIncludeSecretsSubtitle = s(R.string.backup_include_secrets_subtitle),
+        backupEncryptToggleSubtitle = s(R.string.backup_encrypt_toggle_subtitle),
+        backupHistory = s(R.string.backup_history),
+        backupHistoryEmpty = s(R.string.backup_history_empty),
+        backupRestoreAction = s(R.string.backup_restore_action),
+        backupExportSuccess = s(R.string.backup_export_success),
+        backupImportSuccess = s(R.string.backup_import_success),
+        backupImportError = s(R.string.backup_import_error),
+        backupSecretsMasked = s(R.string.backup_secrets_masked),
+        backupEncryptToggle = s(R.string.backup_encrypt_toggle),
+        backupEncryptPassword = s(R.string.backup_encrypt_password),
+        backupEncryptConfirm = s(R.string.backup_encrypt_confirm),
+        backupEncryptPasswordHint = s(R.string.backup_encrypt_password_hint),
+        backupDecryptPassword = s(R.string.backup_decrypt_password),
+        backupDecryptPasswordHint = s(R.string.backup_decrypt_password_hint),
+        backupPasswordMismatch = s(R.string.backup_password_mismatch),
+        backupPasswordRequired = s(R.string.backup_password_required),
+        backupDecryptFailed = s(R.string.backup_decrypt_failed),
+        backupEncryptWarning = s(R.string.backup_encrypt_warning),
+        backupEncryptWarningTitle = s(R.string.backup_encrypt_warning_title),
+    )
+}
+
+
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalAnimationApi::class,
+    androidx.compose.foundation.layout.ExperimentalLayoutApi::class,
+    ExperimentalMaterial3WindowSizeClassApi::class,
+)
+@Composable
+internal fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
+    val context = LocalContext.current
+    val settings = remember { SettingsStore(context) }
+    val appScope = rememberCoroutineScope()
+    // App 级状态放进 ViewModel：Activity 重建（旋转/深色/字号）时不再清空分析结果与 AI 对话
+    val appViewModel = androidx.lifecycle.ViewModelProvider(context as ComponentActivity)[AppViewModel::class.java]
+    val deepService = appViewModel.deepService
+    val updateManager = appViewModel.updateManager
+    var availableRelease by remember { mutableStateOf<GitHubRelease?>(null) }
+    var showUpdatePrompt by remember { mutableStateOf(false) }
+    // App 未声明 configChanges，屏幕旋转 / 深色切换 / 字体缩放都会重建 Activity，
+    // 用 rememberSaveable 保住当前 tab 与设置子页，不要每次都弹回首页。
+    var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
+    var editorMounted by remember { mutableStateOf(false) }
+    // 编辑器有未保存内容时，切换底部导航前的二次确认目标页（null = 无待确认）
+    var pendingLeave by remember { mutableStateOf<MainTab?>(null) }
+    // 「任务」页继续历史任务：正在恢复的任务 id（按钮转圈）+ 恢复失败原因（弹窗展示）
+    var resumingTaskId by remember { mutableStateOf<String?>(null) }
+    var taskResumeError by remember { mutableStateOf<String?>(null) }
+    var settingsDest by rememberSaveable { mutableStateOf(SettingsDest.Root) }
+    var language by remember { mutableStateOf(settings.language) }
+    var themeMode by remember { mutableStateOf(settings.themeMode) }
+    var accentColor by remember { mutableStateOf(settings.accentColor) }
+    var pureBlackDark by remember { mutableStateOf(settings.pureBlackDark) }
+    var uiDensity by remember { mutableStateOf(settings.uiDensity) }
+    var cornerStyle by remember { mutableStateOf(settings.cornerStyle) }
+    var motionMode by remember { mutableStateOf(settings.motionMode) }
+    var showAdvancedHome by remember { mutableStateOf(settings.showAdvancedHome) }
+    var highContrast by remember { mutableStateOf(settings.highContrast) }
+    var dynamicColor by remember { mutableStateOf(settings.dynamicColor) }
+    var textScale by remember { mutableStateOf(settings.textScale) }
+    var predictiveBack by remember { mutableStateOf(settings.predictiveBackEnabled) }
+    var disclaimerAccepted by remember { mutableStateOf(settings.disclaimerAccepted) }
+    val analyzeState = appViewModel.analyzeState
+    var pendingDeepLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var backProgress by remember { mutableStateOf(0f) }
+    var toolCategory by remember { mutableStateOf<String?>(null) }
+    var showMcpToolList by remember { mutableStateOf(false) }
+    var mcpToolCategory by remember { mutableStateOf<String?>(null) }
+    var showLogs by remember { mutableStateOf(false) }
+    val toolState = remember { ToolPagesState() }
+    val workspaceState = appViewModel.workspaceState
+    val t = textFor(language, context)
+    val dark = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> isSystemInDarkTheme()
+    }
+    val accent = AppPalette.accent(accentColor, dark)
+    val colors = remember(dark, accent, pureBlackDark, highContrast, dynamicColor) {
+        if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Material You：Android 12+ 跟随系统壁纸动态取色
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        } else if (dark) {
+            appDarkColors(accent, pureBlackDark, highContrast)
+        } else {
+            appLightColors(accent, highContrast)
+        }
+    }
+    // 深色模式下同步系统栏底色/图标：XML theme 把 statusBarColor/navigationBarColor 写死成浅色 #F2F2F7，
+    // 且 windowLightStatusBar=true。Android 14 及以下这两个属性仍然生效，
+    // 不动态改写就会出现「深色界面 + 一条浅灰状态栏 + 深色图标」的割裂（Android 15+ 强制 edge-to-edge，此赋值被忽略但无害）。
+    val rootView = LocalView.current
+    val hostWindow = (context as ComponentActivity).window
+    SideEffect {
+        val barColor = colors.surface.toArgb()
+        runCatching {
+            hostWindow.statusBarColor = barColor
+            hostWindow.navigationBarColor = barColor
+        }
+        runCatching {
+            androidx.core.view.WindowCompat.getInsetsController(hostWindow, rootView).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
+    val metrics = remember(uiDensity, cornerStyle) { uiMetrics(uiDensity, cornerStyle) }
+    val typography = remember(textScale) { scaledTypography(textScaleFactor(textScale)) }
+    // 让显式写 fontSize = AppText.xx 的文本也跟随 App 字号设置
+    SideEffect { AppText.scale = textScaleFactor(textScale) }
+    val reduceMotion = when (motionMode) {
+        "reduced" -> true
+        "full" -> false
+        else -> false
+    }
+    LaunchedEffect(Unit) {
+        if (settings.autoCheckUpdates) {
+            // v1.3.9: 启动自动检查必须跟随用户选择的更新频道。旧代码写死 check()（=正式版），
+            // 于是用户切到「测试版」后启动检查仍然只查 stable —— Beta 频道形同虚设。
+            val startupChannel = runCatching { UpdateChannel.valueOf(settings.updateChannel.uppercase()) }
+                .getOrDefault(UpdateChannel.STABLE)
+            updateManager.check(startupChannel)
+                .onSuccess { result ->
+                    if (result is com.soreverse.mcp.core.UpdateCheckResult.Available) {
+                        availableRelease = result.release
+                        showUpdatePrompt = true
+                    }
+                }
+                .onFailure { AppLog.w("Background update check failed: ${it.message}") }
+        }
+    }
+    val inSettingsDetail = tab == MainTab.Settings && settingsDest != SettingsDest.Root
+    val inAnalyzeDetail = tab == MainTab.Tools && (analyzeState.showDeepReport || analyzeState.expandedSoPath != null)
+    val inInternalDetail = inSettingsDetail || inAnalyzeDetail
+
+    LaunchedEffect(tab) {
+        if (tab == MainTab.Tools && analyzeState.restoreDeepReportOnAnalyzeEntry) {
+            analyzeState.restoreDeepReportOnAnalyzeEntry = false
+            analyzeState.showDeepReport = true
+        }
+    }
+
+    fun requestDeepLeave(action: () -> Unit) {
+        if (tab == MainTab.Tools && analyzeState.showDeepReport && analyzeState.deepAnalyzingPath != null) {
+            pendingDeepLeave = action
+        } else {
+            action()
+        }
+    }
+
+    fun closeInternalDetail() {
+        when {
+            inSettingsDetail -> settingsDest = SettingsDest.Root
+            inAnalyzeDetail && analyzeState.showDeepReport -> requestDeepLeave { analyzeState.showDeepReport = false }
+            inAnalyzeDetail -> analyzeState.expandedSoPath = null
+        }
+    }
+
+    if (Build.VERSION.SDK_INT >= 34) {
+        PredictiveBackHandler(enabled = inInternalDetail && predictiveBack) { progress ->
+            try {
+                progress.collect { event -> backProgress = event.progress }
+                closeInternalDetail()
+                backProgress = 0f
+            } catch (_: CancellationException) {
+                backProgress = 0f
+            }
+        }
+    }
+
+    LaunchedEffect(tab, settingsDest, analyzeState.expandedSoPath, analyzeState.showDeepReport, predictiveBack) {
+        if (!inInternalDetail || !predictiveBack) backProgress = 0f
+    }
+
+    // 底部导航：非首页 tab 按返回回到首页；首页交给系统退出。
+    val backToHomeActive = !inInternalDetail && tab != MainTab.Home
+    DisposableEffect(predictiveBack, tab, settingsDest, analyzeState.expandedSoPath, analyzeState.showDeepReport) {
+        val detailActive = inInternalDetail && (!predictiveBack || Build.VERSION.SDK_INT < 34)
+        val callback = object : OnBackPressedCallback(detailActive || backToHomeActive) {
+            override fun handleOnBackPressed() {
+                if (inInternalDetail) {
+                    closeInternalDetail()
+                } else if (tab != MainTab.Home) {
+                    requestDeepLeave {
+                        tab = MainTab.Home
+                        settingsDest = SettingsDest.Root
+                        toolCategory = null
+                    }
+                }
+            }
+        }
+        (context as ComponentActivity).onBackPressedDispatcher.addCallback(callback)
+        onDispose { callback.remove() }
+    }
+
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalUiMetrics provides metrics,
+        LocalReduceMotion provides reduceMotion,
+    ) {
+        MaterialTheme(colorScheme = colors, typography = typography) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background),
+            ) {
+                // Soft ambient wash — depth without fake glass blobs.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.10f else 0.06f),
+                                    Color.Transparent,
+                                    MaterialTheme.colorScheme.background,
+                                ),
+                            ),
+                        ),
+                )
+                // 三态响应式布局（借鉴太墟 taixu）：Compact = 手机竖屏，沿用底部导航；
+                // Medium = 折叠屏展开 / 小平板（600~840dp），Expanded = 平板横屏 / 大折叠（>=840dp），
+                // 后两者改用左侧 NavigationRail（图标 + 文字），让内容区占满其余宽度。
+                val wideLayout = widthSizeClass != WindowWidthSizeClass.Compact
+                val expandedLayout = widthSizeClass == WindowWidthSizeClass.Expanded
+                // 借鉴上游 SOMCP v1.0.21: 设置子页面与工具功能页自动隐藏导航
+                // （沉浸全屏工作区，返回上级时恢复；隐藏/恢复带滑动动画）
+                val inSubPage = (tab == MainTab.Settings && settingsDest != SettingsDest.Root) ||
+                    (tab == MainTab.Tools && toolCategory != null)
+                // 底部导航与左侧导航栏共用同一套切换逻辑（含编辑器离开确认），状态处理完全不变
+                val onNavSelect: (MainTab) -> Unit = { target ->
+                    if (target != tab) {
+                        if (tab == MainTab.Editor && EditorSession.dirty && EditorSession.confirmOnExit) {
+                            pendingLeave = target
+                        } else {
+                            settingsDest = SettingsDest.Root
+                            toolCategory = null
+                            tab = target
+                        }
+                    }
+                }
+                Scaffold(
+                    containerColor = Color.Transparent,
+                    bottomBar = {
+                        // 仅窄屏（手机竖屏）保留底部导航
+                        if (!wideLayout) {
+                            AnimatedVisibility(
+                                visible = !inSubPage,
+                                enter = slideInVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeIn(),
+                                exit = slideOutVertically(animationSpec = tween(if (reduceMotion) 0 else 220)) { it } + fadeOut(),
+                            ) {
+                                AppBottomNav(current = tab, zh = t.zh, onSelect = onNavSelect)
+                            }
+                        }
+                    },
+                ) { padding ->
+                    Row(
+                        Modifier
+                            .padding(padding)
+                            .fillMaxSize(),
+                    ) {
+                        if (wideLayout) {
+                            // 宽屏：垂直左侧栏（M3 NavigationRail），图标常显文字
+                            AnimatedVisibility(
+                                visible = !inSubPage,
+                                enter = slideInHorizontally(animationSpec = tween(if (reduceMotion) 0 else 220)) { -it } + fadeIn(),
+                                exit = slideOutHorizontally(animationSpec = tween(if (reduceMotion) 0 else 220)) { -it } + fadeOut(),
+                            ) {
+                                AppSideNavRail(current = tab, zh = t.zh, onSelect = onNavSelect)
+                            }
+                        }
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxSize(),
+                            contentAlignment = Alignment.TopCenter,
+                        ) {
+                        // Expanded 给主内容一个宽度上限并水平居中，避免超宽屏文字被拉成一条线
+                        Box(
+                            if (expandedLayout) {
+                                Modifier
+                                    .fillMaxHeight()
+                                    .widthIn(max = 1200.dp)
+                                    .fillMaxWidth()
+                            } else {
+                                Modifier.fillMaxSize()
+                            },
+                        ) {
+                        val animMs = if (reduceMotion) 0 else 180
+                        // 编辑器独立页：常驻挂载以保活（切走时移出可视区——不销毁、不接收触摸）
+                        val editorActive = tab == MainTab.Editor
+                        if (editorActive) editorMounted = true
+                        if (editorMounted) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .then(if (editorActive) Modifier else Modifier.offset(y = -20000.dp)),
+                            ) {
+                                EditorScreen(t)
+                            }
+                        }
+                        if (!editorActive) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.background),
+                            ) {
+                        AnimatedContent(
+                            targetState = tab,
+                            transitionSpec = {
+                                (fadeIn(tween(animMs)) + scaleIn(initialScale = 0.985f, animationSpec = tween(animMs))) togetherWith
+                                    (fadeOut(tween((animMs * 0.75f).toInt().coerceAtLeast(0))) + scaleOut(targetScale = 0.99f, animationSpec = tween((animMs * 0.75f).toInt().coerceAtLeast(0))))
+                            },
+                            label = "main-nav",
+                        ) { currentTab ->
+                            when (currentTab) {
+                                MainTab.Home -> CommandHubScreen(
+                                    t = t,
+                                    settings = settings,
+                                    onNavigate = { target, category ->
+                                        if (target == MainTab.Tools) {
+                                            tab = MainTab.Tools
+                                        } else if (target == MainTab.Home) {
+                                            // 卫星/工具列表 → 展示 MCP 工具清单 或 日志
+                                            if (category == "logs") {
+                                                showLogs = true
+                                            } else {
+                                                showMcpToolList = true
+                                                mcpToolCategory = category
+                                            }
+                                        } else if (target == MainTab.Settings) {
+                                            tab = MainTab.Settings
+                                        }
+                                    },
+                                    onNavigateSettings = { dest ->
+                                        settingsDest = dest
+                                        tab = MainTab.Settings
+                                    },
+                                )
+                                MainTab.Tools -> {
+                                    // AI 深度分析对话全屏层：工具页发起 AI 分析后进入聊天（状态由 analyzeState 持有）
+                                    if (analyzeState.showDeepReport) {
+                                        DeepAiChatScreen(
+                                            t = t,
+                                            settings = settings,
+                                            state = analyzeState,
+                                            scope = appScope,
+                                            deepService = deepService,
+                                            backProgress = backProgress,
+                                            onLeaveDeepReport = { requestDeepLeave { analyzeState.showDeepReport = false } },
+                                        )
+                                    } else {
+                                        AnalysisWorkspace(
+                                            t = t,
+                                            state = workspaceState,
+                                            context = context,
+                                            onOpenTask = { tab = MainTab.Tasks },
+                                            onAiAnalyze = { path ->
+                                                launchDeepAnalysis(context, path, "", settings, analyzeState, appScope, deepService, t.zh)
+                                            },
+                                            // 侧栏「返回」= 离开分析页（对齐 Explorer So nav_back）
+                                            onLeave = { tab = MainTab.Home },
+                                        )
+                                    }
+                                }
+                                MainTab.Tasks -> TasksPage(
+                                    t = t,
+                                    state = workspaceState,
+                                    resumingTaskId = resumingTaskId,
+                                    onGoAnalyze = { tab = MainTab.Tools },
+                                    onContinueTask = { taskId ->
+                                        // 继续 = 重新打开任务主文件并重建共享工作区，再切回分析页；
+                                        // 失败（文件没了 / URI 授权过期）就用弹窗说清楚，不再“点了没反应”。
+                                        resumingTaskId = taskId
+                                        appScope.launch {
+                                            val failure = resumeTaskWorkspace(context, workspaceState, taskId, t.zh)
+                                            resumingTaskId = null
+                                            if (failure == null) tab = MainTab.Tools else taskResumeError = failure
+                                        }
+                                    },
+                                )
+                                MainTab.Editor -> Box(Modifier.fillMaxSize())
+                                MainTab.Settings -> SettingsHub(
+                                    modifier = Modifier,
+                                    backProgress = backProgress,
+                                    t = t,
+                                    settings = settings,
+                                    updateManager = updateManager,
+                                    availableRelease = availableRelease,
+                                    onRelease = { availableRelease = it },
+                                    language = language,
+                                    onLanguage = { language = it; settings.language = it },
+                                    themeMode = themeMode,
+                                    onTheme = { themeMode = it; settings.themeMode = it },
+                                    accentColor = accentColor,
+                                    onAccent = { accentColor = it; settings.accentColor = it },
+                                    pureBlackDark = pureBlackDark,
+                                    onPureBlack = { pureBlackDark = it; settings.pureBlackDark = it },
+                                    uiDensity = uiDensity,
+                                    onDensity = { uiDensity = it; settings.uiDensity = it },
+                                    cornerStyle = cornerStyle,
+                                    onCorner = { cornerStyle = it; settings.cornerStyle = it },
+                                    motionMode = motionMode,
+                                    onMotion = { motionMode = it; settings.motionMode = it },
+                                    showAdvancedHome = showAdvancedHome,
+                                    onShowAdvancedHome = { showAdvancedHome = it; settings.showAdvancedHome = it },
+                                    highContrast = highContrast,
+                                    onHighContrast = { highContrast = it; settings.highContrast = it },
+                                    dynamicColor = dynamicColor,
+                                    onDynamicColor = { dynamicColor = it; settings.dynamicColor = it },
+                                    textScale = textScale,
+                                    onTextScale = { textScale = it; settings.textScale = it },
+                                    predictiveBack = predictiveBack,
+                                    onPredictiveBack = { predictiveBack = it; settings.predictiveBackEnabled = it },
+                                    dest = settingsDest,
+                                    onDest = { settingsDest = it },
+                                    onBack = { settingsDest = SettingsDest.Root },
+                                    onHome = { tab = MainTab.Home; toolCategory = null },
+                                    onLogs = { showLogs = true },
+                                    onOpenEditor = { settingsDest = SettingsDest.Root; toolCategory = null; tab = MainTab.Editor },
+                                )
+                            }
+                        }
+                            }
+                        }
+                    }   // 内容宽度上限容器（Expanded 居中，Medium 占满）
+                    }   // 内容区（weight 占满左侧导航栏之外的宽度）
+                    }   // Row：左侧 NavigationRail + 内容区
+                }
+            }
+            if (!disclaimerAccepted) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    title = { Text(t.firstRunDisclaimerTitle, fontWeight = FontWeight.SemiBold) },
+                    text = { Text(t.disclaimerBody) },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                settings.disclaimerAccepted = true
+                                disclaimerAccepted = true
+                            },
+                            shape = RoundedCornerShape(LocalUiMetrics.current.controlRadius),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = Color.White,
+                            ),
+                        ) { Text(t.accept) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { (context as? Activity)?.finish() }) { Text(t.decline) }
+                    },
+                )
+            }
+            pendingDeepLeave?.let { leave ->
+                AlertDialog(
+                    onDismissRequest = { pendingDeepLeave = null },
+                    title = { Text(if (t.zh) "AI 分析仍在进行" else "AI analysis is still running") },
+                    text = {
+                        Text(
+                            if (t.zh) {
+                                "离开对话页后，可以让分析在后台继续；下次打开分析页时会恢复当前对话。也可以立即终止本次分析。"
+                            } else {
+                                "Continue the analysis in the background and restore this conversation next time you open Analyze, or stop this analysis now."
+                            },
+                        )
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            pendingDeepLeave = null
+                            analyzeState.restoreDeepReportOnAnalyzeEntry = tab == MainTab.Tools
+                            leave()
+                        }) { Text(if (t.zh) "后台继续" else "Continue in background") }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            pendingDeepLeave = null
+                            analyzeState.restoreDeepReportOnAnalyzeEntry = false
+                            analyzeState.deepJob?.cancel(CancellationException("Stopped by user while leaving"))
+                            leave()
+                        }) { Text(if (t.zh) "终止分析" else "Stop analysis") }
+                    },
+                )
+            }
+            if (showUpdatePrompt && availableRelease != null) {                val release = availableRelease!!
+                AlertDialog(
+                    onDismissRequest = { showUpdatePrompt = false },
+                    title = { Text(if (t.zh) "发现新版本 ${release.tag}" else "Update ${release.tag} available") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(release.name, fontWeight = FontWeight.SemiBold)
+                            if (release.notes.isNotBlank()) {
+                                Text(release.notes.take(800), style = MaterialTheme.typography.bodySmall, maxLines = 12, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { showUpdatePrompt = false }) { Text(if (t.zh) "稍后" else "Later") } },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showUpdatePrompt = false
+                            tab = MainTab.Settings
+                            settingsDest = SettingsDest.Updates
+                        }) { Text(if (t.zh) "查看更新" else "View update") }
+                    },
+                )
+            }
+            // 「离开编辑器前确认」：仅当编辑器有未保存内容且开关打开时触发。
+            // 编辑器是常驻挂载的，离开不会丢内容，因此确认文案如实说明这一点。
+            pendingLeave?.let { target ->
+                AlertDialog(
+                    onDismissRequest = { pendingLeave = null },
+                    title = { Text(if (t.zh) "有未保存的修改" else "Unsaved changes") },
+                    text = {
+                        Text(
+                            if (t.zh) "编辑器里有未保存的内容。切走不会丢失（编辑器保持挂载，标签和内容都还在），仍要现在切换吗？"
+                            else "The editor has unsaved changes. Switching away does not lose them (the editor stays mounted). Switch now?"
+                        )
+                    },
+                    dismissButton = { TextButton(onClick = { pendingLeave = null }) { Text(if (t.zh) "留在编辑器" else "Stay") } },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            pendingLeave = null
+                            settingsDest = SettingsDest.Root
+                            toolCategory = null
+                            tab = target
+                        }) { Text(if (t.zh) "离开" else "Leave") }
+                    },
+                )
+            }
+            // 「继续任务」失败：把具体原因说清楚（文件失效 / URI 授权过期 / 引擎报错）
+            taskResumeError?.let { reason ->
+                AlertDialog(
+                    onDismissRequest = { taskResumeError = null },
+                    title = { Text(if (t.zh) "无法继续该任务" else "Cannot resume this task") },
+                    text = { Text(reason, style = MaterialTheme.typography.bodyMedium) },
+                    dismissButton = {
+                        TextButton(onClick = { taskResumeError = null; tab = MainTab.Tools }) {
+                            Text(if (t.zh) "去分析页" else "Open analysis")
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { taskResumeError = null }) { Text(if (t.zh) "知道了" else "OK") }
+                    },
+                )
+            }
+            BackHandler(enabled = showMcpToolList) { showMcpToolList = false; mcpToolCategory = null }
+            BackHandler(enabled = showLogs) { showLogs = false }
+            if (showMcpToolList) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    McpToolListView(
+                        zh = t.zh,
+                        category = mcpToolCategory,
+                        onClose = { showMcpToolList = false; mcpToolCategory = null },
+                    )
+                }
+            }
+            if (showLogs) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    LogsTab(t = t, settings = settings, onBack = { showLogs = false })
+                }
+            }
+        }
+    }
+}
+
+// 宽屏（Medium / Expanded）左侧导航栏用的 5 个 tab，图标与文案与 AppBottomNav 保持一致
+private data class SideNavItem(
+    val tab: MainTab,
+    val labelZh: String,
+    val labelEn: String,
+    val icon: ImageVector,
+)
+
+private val sideNavItems = listOf(
+    SideNavItem(MainTab.Home, "首页", "Home", Icons.Filled.Home),
+    SideNavItem(MainTab.Tools, "分析", "Analyze", Icons.Filled.Science),
+    SideNavItem(MainTab.Tasks, "任务", "Tasks", Icons.Filled.Folder),
+    SideNavItem(MainTab.Editor, "编辑器", "Editor", Icons.Filled.Code),
+    SideNavItem(MainTab.Settings, "设置", "Settings", Icons.Filled.Settings),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppSideNavRail(current: MainTab, zh: Boolean, onSelect: (MainTab) -> Unit) {
+    NavigationRail(
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Spacer(Modifier.height(8.dp))
+        sideNavItems.forEach { item ->
+            NavigationRailItem(
+                selected = current == item.tab,
+                onClick = { onSelect(item.tab) },
+                icon = { Icon(item.icon, contentDescription = null) },
+                label = { Text(if (zh) item.labelZh else item.labelEn) },
+                alwaysShowLabel = true,
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            )
+        }
+    }
+}

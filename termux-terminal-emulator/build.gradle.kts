@@ -20,6 +20,7 @@ val termuxNativeManifest = layout.projectDirectory.file("termux-native.propertie
 
 tasks.configureEach {
     if (name == "preBuild") {
+        notCompatibleWithConfigurationCache("校验 libtermux.so 与 JNI 声明需读取项目目录")
         doFirst {
             check(bundledTermuxNative.asFile.isFile && bundledTermuxNative.asFile.length() > 4096L) {
                 "Missing bundled libtermux.so. Extract jni/arm64-v8a/libtermux.so from " +

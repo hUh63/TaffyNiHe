@@ -69,8 +69,11 @@ import org.json.JSONObject
  * - 管理工具子页：按工具分卡片，名称 + 描述 + 启用开关
  */
 @Composable
-internal fun SettingsApkBridgePage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsApkBridgePage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val bridge = remember { activeBridge(context.applicationContext) }

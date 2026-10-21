@@ -83,8 +83,11 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsBackupRestorePage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsBackupRestorePage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var includeSecrets by remember { mutableStateOf(false) }

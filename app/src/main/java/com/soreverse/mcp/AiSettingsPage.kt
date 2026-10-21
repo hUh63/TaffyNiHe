@@ -128,8 +128,11 @@ private fun RequestFieldsEditor(
 }
 
 @Composable
-internal fun SettingsAiDeepPage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsAiDeepPage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val deepService = remember { DeepAnalysisService(context.applicationContext) }

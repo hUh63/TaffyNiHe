@@ -67,11 +67,11 @@ import java.io.File
 @Composable
 internal fun SettingsUpdatesPage(
     t: UiText,
-    onBack: () -> Unit,
     settings: SettingsStore,
     manager: GitHubUpdateManager,
     initialRelease: GitHubRelease?,
     onRelease: (GitHubRelease?) -> Unit,
+    onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     // v1.3.9: 旧代码在这里把 settings.autoCheckUpdates 强制清零，却又照常渲染「启动时自动检查」

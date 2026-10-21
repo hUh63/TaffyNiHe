@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun SettingsAppearancePage(
     t: UiText,
-    onBack: () -> Unit,
     language: String,
     onLanguage: (String) -> Unit,
     themeMode: String,
@@ -48,6 +47,7 @@ internal fun SettingsAppearancePage(
     onTextScale: (String) -> Unit,
     predictiveBack: Boolean,
     onPredictiveBack: (Boolean) -> Unit,
+    onBack: () -> Unit,
 ) {
     SettingsScaffold(
         title = if (t.zh) "外观与语言" else "Appearance",

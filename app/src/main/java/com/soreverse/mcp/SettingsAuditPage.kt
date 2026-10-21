@@ -1,5 +1,6 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,8 +31,11 @@ import com.soreverse.mcp.mcp.ToolCatalog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SettingsAuditPage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsAuditPage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     var autoSnapshotBeforeEdit by remember { mutableStateOf(settings.autoSnapshotBeforeEdit) }
     var auditLogEnabled by remember { mutableStateOf(settings.auditLogEnabled) }
     var auditPersist by remember { mutableStateOf(settings.auditPersist) }

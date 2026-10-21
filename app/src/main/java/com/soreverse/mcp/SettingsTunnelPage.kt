@@ -50,8 +50,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun SettingsTunnelPage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsTunnelPage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tunnelType by remember { mutableStateOf(settings.tunnelType) }

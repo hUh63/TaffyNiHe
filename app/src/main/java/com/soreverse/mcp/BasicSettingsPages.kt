@@ -178,8 +178,11 @@ internal fun SurfacePanel(modifier: Modifier = Modifier, content: @Composable Co
 }
 
 @Composable
-internal fun SettingsKeepAlivePage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsKeepAlivePage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var floating by remember { mutableStateOf(settings.floatingEnabled) }
     var floatingOpacity by remember { mutableStateOf(settings.floatingOpacity) }
@@ -295,8 +298,11 @@ internal fun keepAliveAdvice(zh: Boolean): String {
 }
 
 @Composable
-internal fun SettingsLimitsPage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsLimitsPage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     var defaultLimit by remember { mutableStateOf(settings.defaultLimit.toString()) }
     var stringLimit by remember { mutableStateOf(settings.stringLimit.toString()) }
     var disasmLimit by remember { mutableStateOf(settings.disasmLimit.toString()) }
@@ -332,8 +338,11 @@ internal fun SettingsLimitsPage(t: UiText,
 }
 
 @Composable
-internal fun SettingsExportPage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsExportPage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     var conflictStrategy by remember { mutableStateOf(settings.outputConflictStrategy) }
     var writePatchReport by remember { mutableStateOf(settings.writePatchReport) }
     var buildCopyToWorkDir by remember { mutableStateOf(settings.buildCopyToWorkDir) }
@@ -376,8 +385,11 @@ internal fun SettingsExportPage(t: UiText,
 }
 
 @Composable
-internal fun SettingsProbePage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsProbePage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     var probeUrl by remember { mutableStateOf(settings.externalProbeUrl) }
     SettingsScaffold(
         title = if (t.zh) "外部探针" else "External probe",

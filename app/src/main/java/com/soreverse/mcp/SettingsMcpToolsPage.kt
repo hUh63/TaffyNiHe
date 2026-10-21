@@ -67,8 +67,11 @@ private val SCHEME_OPTIONS = listOf(
 )
 
 @Composable
-internal fun SettingsApkSignPage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsApkSignPage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     var showImport by remember { mutableStateOf(false) }
@@ -296,8 +299,11 @@ private fun IconButtonMini(onClick: () -> Unit, icon: androidx.compose.ui.graphi
 // ─────────────────────────── 临时工作区 ───────────────────────────
 
 @Composable
-internal fun SettingsTempWorkspacePage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsTempWorkspacePage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     var limit by remember { mutableIntStateOf(settings.tempWorkspaceLimit) }
@@ -393,8 +399,13 @@ internal fun SettingsTempWorkspacePage(t: UiText,
 // ─────────────────────────── 工作区管理 ───────────────────────────
 
 @Composable
-internal fun SettingsWorkspacePage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore, onOpenServiceConfig: () -> Unit, onOpenTemp: () -> Unit = {}) {
+internal fun SettingsWorkspacePage(
+    t: UiText,
+    settings: SettingsStore,
+    onOpenServiceConfig: () -> Unit,
+    onOpenTemp: () -> Unit = {},
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var refresh by remember { mutableIntStateOf(0) }

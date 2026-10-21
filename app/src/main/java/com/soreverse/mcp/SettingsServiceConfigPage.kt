@@ -57,8 +57,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
-internal fun SettingsServiceConfigPage(t: UiText,
-    onBack: () -> Unit, settings: SettingsStore) {
+internal fun SettingsServiceConfigPage(
+    t: UiText,
+    settings: SettingsStore,
+    onBack: () -> Unit,
+) {
     val context = LocalContext.current
     var treeUri by remember { mutableStateOf(settings.treeUri) }
     var portText by remember { mutableStateOf(settings.port.toString()) }

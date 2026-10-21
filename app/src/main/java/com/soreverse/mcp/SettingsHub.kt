@@ -207,7 +207,7 @@ internal fun SettingsHub(
             SettingsDest.Search -> SettingsSearchPage(t, onDest, onBack)
             SettingsDest.DevEnv -> SettingsDevEnvPage(t, onDest, onOpenEditor, onBack)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings, onBack)
-            SettingsDest.ToolStats -> SettingsDest.ToolStats -> SettingsScaffold(
+            SettingsDest.ToolStats -> SettingsScaffold(
                 title = if (t.zh) "运行统计" else "Runtime stats",
                 onBack = onBack,
             ) {
@@ -223,7 +223,7 @@ internal fun SettingsHub(
                     }
                 }
             }
-            SettingsDest.TunnelStats -> SettingsDest.TunnelStats -> SettingsScaffold(
+            SettingsDest.TunnelStats -> SettingsScaffold(
                 title = if (t.zh) "隧道稳定性" else "Tunnel stability",
                 onBack = onBack,
             ) {
@@ -236,7 +236,7 @@ internal fun SettingsHub(
                 }
             }
             SettingsDest.Credits -> SettingsCreditsPage(t, onBack)
-            SettingsDest.Disclaimer -> SettingsDest.Disclaimer -> SettingsScaffold(
+            SettingsDest.Disclaimer -> SettingsScaffold(
                 title = t.disclaimer,
                 onBack = onBack,
             ) {

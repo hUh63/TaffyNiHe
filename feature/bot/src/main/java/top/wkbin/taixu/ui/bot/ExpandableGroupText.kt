@@ -15,6 +15,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import top.wkbin.taixu.feature.bot.R
 import top.wkbin.taixu.ui.components.MarkdownText
 import top.wkbin.taixu.ui.components.RuntimeTextButton
+import top.wkbin.taixu.ui.components.StreamingMarkdownText
+import top.wkbin.taixu.core.model.ChunkedText
+
+@Composable
+internal fun ExpandableGroupText(
+    messageId: String,
+    text: ChunkedText,
+    streaming: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (streaming) StreamingMarkdownText(text, modifier, "group:$messageId")
+    else ExpandableGroupText(messageId, text.toString(), false, modifier)
+}
 
 @Composable
 internal fun ExpandableGroupText(

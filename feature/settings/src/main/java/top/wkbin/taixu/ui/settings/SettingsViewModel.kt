@@ -342,17 +342,16 @@ class SettingsViewModel(
     val isLoadingReleaseNotes: StateFlow<Boolean> = _isLoadingReleaseNotes.asStateFlow()
 
     fun loadCurrentReleaseNotes(currentVersion: String) {
+        if (_isLoadingReleaseNotes.value) return
+        _isLoadingReleaseNotes.value = true
+        _currentReleaseNotes.value = null
         viewModelScope.launch {
-            _isLoadingReleaseNotes.value = true
-            val bundled = appUpdateManager.getBundledReleaseNotes()
-            if (bundled.isNotBlank()) {
-                _currentReleaseNotes.value = bundled
+            try {
+                _currentReleaseNotes.value = appUpdateManager.fetchReleaseNotes(currentVersion)
+                    .getOrNull()?.takeIf { it.isNotBlank() }
+            } finally {
+                _isLoadingReleaseNotes.value = false
             }
-            val latestNotes = appUpdateManager.getOrFetchCurrentReleaseNotes(currentVersion)
-            if (latestNotes.isNotBlank()) {
-                _currentReleaseNotes.value = latestNotes
-            }
-            _isLoadingReleaseNotes.value = false
         }
     }
 

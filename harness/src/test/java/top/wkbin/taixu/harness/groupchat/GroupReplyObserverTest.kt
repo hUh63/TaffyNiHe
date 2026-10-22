@@ -32,6 +32,29 @@ class GroupReplyObserverTest {
     private val log = AppLogger(ApplicationProvider.getApplicationContext()) { it }
     private val bot = Bot("bot", "name", "role", "persona", "seed", sessionId = "session", createdAt = 0, updatedAt = 0)
 
+    @Test fun `live group projection forwards chunks without materializing full strings`() = runTest {
+        val control = FakeControl()
+        val builder = top.wkbin.taixu.core.model.ChunkedText.Builder()
+        val updates = mutableListOf<GroupReplyProgress>()
+        val result = async {
+            GroupReplyObserver(control, log) { testScheduler.currentTime }
+                .awaitReply("session", bot, emptySet(), 0, onProgress = updates::add)
+        }
+        runCurrent()
+        repeat(3) {
+            builder.append("text ".repeat(1_000))
+            val text = builder.snapshot()
+            control.messages.value = listOf(AssistantText("answer", 0, text))
+            runCurrent()
+            assertSame(text, updates.last().contentText)
+            val flattened = text.javaClass.getDeclaredField("flattened").apply { isAccessible = true }
+            assertNull(flattened.get(text))
+        }
+        control.sessionRunStates.value = mapOf("session" to SessionRunState.COMPLETED)
+        runCurrent()
+        assertEquals(builder.length, result.await().candidate?.textContent?.length)
+    }
+
     @Test fun `new tokens publish immediately and unchanged input causes no refresh loop`() = runTest {
         val control = FakeControl()
         val updates = mutableListOf<GroupReplyProgress>()

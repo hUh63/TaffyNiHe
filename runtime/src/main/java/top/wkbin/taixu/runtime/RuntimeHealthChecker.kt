@@ -1,6 +1,6 @@
 package top.wkbin.taixu.runtime
 
-import top.wkbin.taixu.runtime.proot.ProotCommandBuilder
+import top.wkbin.taixu.runtime.backend.BackendSelector
 import top.wkbin.taixu.runtime.shell.CommandResult
 import top.wkbin.taixu.runtime.shell.ShellCommand
 import top.wkbin.taixu.runtime.shell.ShellExecutor
@@ -8,7 +8,7 @@ import java.io.File
 
 class RuntimeHealthChecker(
     private val pathManager: RuntimePathManager,
-    private val prootCommandBuilder: ProotCommandBuilder,
+    private val backendSelector: BackendSelector,
     private val shellExecutor: ShellExecutor,
 ) {
     suspend fun check(): RuntimeHealth {
@@ -86,7 +86,7 @@ class RuntimeHealthChecker(
     }
 
     private suspend fun runCommand(command: ShellCommand) = shellExecutor.execute(
-        command = prootCommandBuilder.build(
+        command = backendSelector.active().build(
             prootBinary = pathManager.activeProotFile(),
             rootfsDir = pathManager.rootfsDir,
             workspaceDir = pathManager.workspaceDir,

@@ -55,7 +55,7 @@ class SessionModelSwitcher(
                 toContextTokens = ContextWindowPolicy.resolveBudget(
                     profile.contextTokens,
                     defaultBudget(),
-                    modelId = profile.model,
+                    modelId = resolvedVariant ?: profile.model,
                     providerId = profile.provider,
                 ),
             )
@@ -71,21 +71,21 @@ class SessionModelSwitcher(
         val toBudget = ContextWindowPolicy.clampedBudget(
             profile.contextTokens,
             defaultBudget,
-            modelId = profile.model,
+            modelId = resolvedVariant ?: profile.model,
             providerId = profile.provider,
         )
         val fromBudget = previousProfile?.let { previous ->
             ContextWindowPolicy.resolveBudget(
                 previous.contextTokens,
                 defaultBudget,
-                modelId = previous.model,
+                modelId = previousVariant ?: previous.model,
                 providerId = previous.provider,
             )
         }
         val toContextTokensDisplay = ContextWindowPolicy.resolveBudget(
             profile.contextTokens,
             defaultBudget,
-            modelId = profile.model,
+            modelId = resolvedVariant ?: profile.model,
             providerId = profile.provider,
         )
 
@@ -126,7 +126,7 @@ class SessionModelSwitcher(
                 // 压缩失败（DB 异常等）不得中断切换——模型绑定已落库，标记待压缩，
                 // 下一次请求组装会按新预算重新触发压缩。
                 val targetModelConfig = providerClient?.let { client ->
-                    runCatching { client.resolveSavedModelProfile(profile.id, resolvedVariant) }.getOrNull()
+                    runCatching { client.resolveConfigured(profile.id, resolvedVariant) }.getOrNull()
                 }
                 try {
                     compactionManager.compact(sessionId, context, keepFrom, model = targetModelConfig)

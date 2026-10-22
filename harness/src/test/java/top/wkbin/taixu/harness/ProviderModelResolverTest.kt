@@ -120,13 +120,31 @@ class ProviderModelResolverTest {
         assertEquals(ReasoningMode.DISABLED, resolver.resolveConfigured().reasoningMode)
     }
 
-    @Test fun `missing saved profile or removed variant never silently uses active model`() = runBlocking {
+    @Test fun `missing saved profile and invalid agent selections never silently use active model`() = runBlocking {
         models.upsert(profile)
         assertTrue(runCatching { resolver.resolveSavedModelProfile("missing", null) }.exceptionOrNull() is IllegalArgumentException)
         assertTrue(runCatching { resolver.resolveSavedModelProfile(profile.id, "removed-model") }.exceptionOrNull() is IllegalArgumentException)
         assertTrue(runCatching { resolver.resolveRequestedModel("removed-model") }.exceptionOrNull() is IllegalArgumentException)
         assertTrue(runCatching { resolver.resolveConfigured("missing", null) }.exceptionOrNull() is IllegalArgumentException)
-        assertTrue(runCatching { resolver.resolveConfigured(profile.id, "removed-model") }.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(runCatching { resolver.resolveConfigured(null, "unbound-model") }.exceptionOrNull() is IllegalArgumentException)
+    }
+
+    @Test fun `session variant outside settings selection uses its bound supplier configuration`() = runBlocking {
+        models.upsert(profile.copy(model = "gpt-4o-mini"))
+        models.upsert(profile.copy(id = "other", model = "saved-model", isActive = false,
+            baseUrl = "https://other.example/v1", secretRef = "discovered-model-test", temperature = 0.3f))
+        providers.setModelApiKeys("discovered-model-test", listOf("fixture-other-key"))
+
+        val resolved = resolver.resolveConfigured("other", " gpt-4.1-mini ")
+
+        assertEquals("gpt-4.1-mini", resolved.model)
+        assertEquals("https://other.example/v1", resolved.baseUrl)
+        assertEquals("fixture-other-key", resolved.apiKey)
+        assertEquals(0.3f, resolved.temperature)
+        assertEquals(ModelContextWindows.resolve("gpt-4.1-mini", "custom"), resolved.contextTokens)
+        assertEquals("saved-model", models.findById("other")!!.model)
+        assertEquals("gpt-4o-mini", resolver.resolveConfigured(profile.id).model)
+        assertEquals(profile.id, models.activeModel()!!.id)
     }
 
     @Test fun `explicit supplier and model variant determine the request instead of global activation`() = runBlocking {

@@ -462,7 +462,7 @@ private fun VersionReleaseNotesDialog(
                         )
                     }
                 } else {
-                    Text("暂无当前版本的更新日志", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(androidx.compose.ui.res.stringResource(top.wkbin.taixu.feature.settings.R.string.settings_release_notes_unavailable), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },

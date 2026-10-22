@@ -16,8 +16,6 @@ import org.mozilla.javascript.ClassShutter
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.ContextFactory
 import org.mozilla.javascript.Function
-import org.mozilla.javascript.NativeArray
-import org.mozilla.javascript.NativeJSON
 import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.ScriptableObject
 import org.mozilla.javascript.Undefined
@@ -65,7 +63,7 @@ class CapabilityScriptRunner(
             // 注意：下面这行是历史规避写法，**无法**阻止 Rhino 初始化 JavaToJSONConverters。
             // javap 对 rhino-1.9.1 实测：setter 对该类的引用次数为 0，而 getter 直读
             // 静态常量 JavaToJSONConverters.STRING。真机崩溃已在调用侧由
-            // jsToJsonString() / installSafeJson() 切断，机理见其注释。
+            // CapabilityJsonText.stringify() / installSafeJson() 切断，机理见其注释。
             // 保留此设置：若 getter 走字段分支，它仍能挡住宿主对象的 JSON 转换。
             setJavaToJSONConverter { throw Context.reportRuntimeError("Java object JSON conversion is disabled") }
         }
@@ -112,10 +110,10 @@ class CapabilityScriptRunner(
                 capabilityCall(cx1, scope1, args)
             }
             defineFunction(capability, "list") { cx1, scope1, _ ->
-                NativeJSON.parse(cx1, scope1, capabilityListJson(), null)
+                CapabilityJsonText.parse(cx1, scope1, capabilityListJson())
             }
             defineFunction(capability, "inspect") { cx1, scope1, args ->
-                NativeJSON.parse(cx1, scope1, capabilityInspectJson(args.getOrNull(0)?.toString().orEmpty()), null)
+                CapabilityJsonText.parse(cx1, scope1, capabilityInspectJson(args.getOrNull(0)?.toString().orEmpty()))
             }
             ScriptableObject.putProperty(scope, "capability", capability)
 
@@ -124,7 +122,7 @@ class CapabilityScriptRunner(
             val output = when {
                 result == null || result is Undefined -> "(脚本无返回值)"
                 result is CharSequence -> result.toString()
-                else -> jsToJsonString(result)
+                else -> CapabilityJsonText.stringify(result)
             }
             checkExecution()
             return true to output
@@ -139,7 +137,7 @@ class CapabilityScriptRunner(
         val serverId = args.getOrNull(0)?.toString()?.trim().orEmpty()
         val tool = args.getOrNull(1)?.toString()?.trim().orEmpty()
         val argsJson = if (args.size > 2 && args[2] != null) {
-            jsToJsonString(args[2])
+            CapabilityJsonText.stringify(args[2])
         } else {
             "{}"
         }
@@ -165,83 +163,14 @@ class CapabilityScriptRunner(
         }
     }
 
-    /**
-     * 纯 Kotlin 的 JS 值序列化，替代 Rhino 的 [NativeJSON.stringify]。
-     *
-     * 崩溃机理（javap 对 rhino-1.9.1 实测，全库仅此一条通路）：
-     * `NativeJSON.stringify` → `NativeJSON.str()` → 遇到非字符串原始值时进入
-     * `NativeJSON.javaToJSON()` → `Context.getJavaToJSONConverter()`，
-     * 而该方法体里只有一条指令：`getstatic JavaToJSONConverters.STRING`。
-     * 读取静态字段会强制初始化 `JavaToJSONConverters`，其 <clinit> 依赖
-     * java.beans.Introspector / PropertyDescriptor / BeanInfo / BeanDescriptor /
-     * IntrospectionException —— 这 5 个类在 Android 运行时全部不存在，
-     * 于是抛 NoClassDefFoundError 并被包装为 ExceptionInInitializerError。
-     * 原有的 `setJavaToJSONConverter { ... }` 规避无效：javap 显示 setter 对该类的
-     * 引用次数为 0，getter 直读静态常量，调用方无从阻止类初始化。
-     *
-     * 注意 `NativeJSON.parse` 不经过该通路（javaToJSON 只被 str 调用），仍然安全。
-     * 也正因如此，用字符串完成值的单测会命中 CharSequence 快路径而始终为绿，
-     * 真机上任何数字完成值或对象参数却必崩——这是本地单测的固有盲区。
-     */
-    private fun jsToJsonString(value: Any?, depth: Int = 0): String {
-        if (depth >= MAX_JSON_DEPTH) return "\"<max-depth>\""
-        return when {
-            // 数组空洞的 getProperty 得到 NOT_FOUND，按 JSON.stringify 编码为 null。
-            value == null || value === Scriptable.NOT_FOUND || value is Undefined -> "null"
-            value is CharSequence -> jsonStringLiteral(value.toString())
-            value is Boolean -> if (value) "true" else "false"
-            value is Number -> jsonNumberLiteral(value.toDouble())
-            value is NativeArray -> (0 until value.length.toInt()).joinToString(",", "[", "]") { index ->
-                jsToJsonString(ScriptableObject.getProperty(value, index), depth + 1)
-            }
-            value is Function -> "null"
-            value is Scriptable -> value.ids
-                .mapNotNull { id ->
-                    val name = id?.toString() ?: return@mapNotNull null
-                    val member = value.get(name, value)
-                    if (member === Scriptable.NOT_FOUND || member is Undefined || member is Function) {
-                        null
-                    } else {
-                        jsonStringLiteral(name) + ":" + jsToJsonString(member, depth + 1)
-                    }
-                }
-                .joinToString(",", "{", "}")
-            else -> jsonStringLiteral(value.toString())
-        }
-    }
 
-    /** 用纯 Kotlin 实现覆盖沙箱里的 `JSON.stringify`；`parse` 换回安全的 Rhino 实现。 */
+    /** 用纯 Kotlin 实现接管沙箱的 `JSON.stringify` 与 `JSON.parse`，详见 [CapabilityJsonText]。 */
     private fun installSafeJson(cx: Context, scope: Scriptable) {
-        val json = cx.newObject(scope)
-        defineFunction(json, "stringify") { _, _, args -> jsToJsonString(args.getOrNull(0)) }
-        defineFunction(json, "parse") { cx1, scope1, args ->
-            NativeJSON.parse(cx1, scope1, args.getOrNull(0)?.toString().orEmpty(), null)
-        }
-        ScriptableObject.putProperty(scope, "JSON", json)
+        CapabilityJsonText.install(cx, scope, ::defineFunction)
     }
 
-    private fun jsonStringLiteral(raw: String): String = buildString(raw.length + 16) {
-        append('"')
-        for (ch in raw) {
-            when (ch) {
-                '"' -> append("\\\"")
-                '\\' -> append("\\\\")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                '\b' -> append("\\b")
-                '\u000C' -> append("\\f")
-                else -> if (ch < ' ') append("\\u" + ch.code.toString(16).padStart(4, '0')) else append(ch)
-            }
-        }
-        append('"')
-    }
 
-    private fun jsonNumberLiteral(value: Double): String = when {
-        value.isNaN() || value.isInfinite() -> "null"
-        value == Math.floor(value) && Math.abs(value) < 1e15 -> value.toLong().toString()
-        else -> value.toString()
-    }
+
 
     /**
      * 引擎可用性探针。Rhino 在解释模式下用 `Class.forName("org.mozilla.javascript.Interpreter")`
@@ -364,9 +293,6 @@ class CapabilityScriptRunner(
 
         /** Rhino 求值器类名：既是 classOrNull 的加载目标，也是 release 构建必须 keep 的名字。 */
         private const val INTERPRETER_CLASS = "org.mozilla.javascript.Interpreter"
-
-        /** 纯 Kotlin JSON 序列化的递归深度上限，防止自引用对象把栈打爆。 */
-        private const val MAX_JSON_DEPTH = 32
 
         /** 指令观察阈值：解释模式下每次观察的指令间隔，控制死循环熔断的粒度。 */
         private const val INSTRUCTION_OBSERVER_THRESHOLD = 10_000

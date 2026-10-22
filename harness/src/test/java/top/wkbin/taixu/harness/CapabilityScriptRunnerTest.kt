@@ -275,4 +275,68 @@ class CapabilityScriptRunnerTest {
             codegenKept,
         )
     }
+
+    // ---- sandbox JSON.parse：纯 Kotlin 解析器（SandboxJsonReader）合同 ----
+
+    @Test
+    fun `sandbox JSON parse reads objects nested arrays and members`() = runBlocking {
+        val code = """
+            var r = JSON.parse('{"n":1,"arr":[1,2],"o":{"k":"v"}}');
+            r.n + ':' + r.arr.length + ':' + r.o.k
+        """.trimIndent()
+
+        val (ok, output) = runner().execute(code, 10_000)
+
+        assertTrue("对象/嵌套数组解析失败：$output", ok)
+        assertTrue("期望 1:2:v，实际：$output", output.contains("1:2:v"))
+    }
+
+    @Test
+    fun `sandbox JSON parse handles primitives unicode escapes and exponents`() = runBlocking {
+        val code = """
+            var out = JSON.parse('123') + '|'
+                + JSON.parse('-2.5e2') + '|'
+                + JSON.parse('"a\\u0041\\n"') + '|'
+                + JSON.parse('true') + '|'
+                + JSON.parse('null');
+            out
+        """.trimIndent()
+
+        val (ok, output) = runner().execute(code, 10_000)
+
+        assertTrue("原始值解析失败：$output", ok)
+        // -2.5e2 => -250；\u0041 => 'A'；\n => 真实换行；true/null => JS 原始值
+        assertTrue("期望 123|-250|aA\\n|true|null，实际：$output", output.contains("123|-250|aA\n|true|null"))
+    }
+
+    @Test
+    fun `sandbox JSON parse failure is catchable inside script`() = runBlocking {
+        val code = """
+            var flag = 'none';
+            try { JSON.parse('{oops}'); } catch (e) { flag = 'caught'; }
+            flag
+        """.trimIndent()
+
+        val (ok, output) = runner().execute(code, 10_000)
+
+        // NativeJSON.parse 抛的是 Java 异常，会穿透 Rhino 直接炸掉整段脚本；
+        // 纯 Kotlin 解析器抛 EvaluatorException，脚本内 try/catch 能接住。
+        assertTrue("非法 JSON 不应让整脚本失败，ok=$ok output=$output", ok)
+        assertTrue("脚本内 try/catch 必须接住解析异常，实际：$output", output.contains("caught"))
+    }
+
+    @Test
+    fun `sandbox JSON stringify round trips a parsed structure`() = runBlocking {
+        val code = """
+            JSON.stringify(JSON.parse('{"a":[1,2,{"b":null}]}'))
+        """.trimIndent()
+
+        val (ok, output) = runner().execute(code, 10_000)
+
+        assertTrue("round-trip 执行失败：$output", ok)
+        assertTrue(
+            """期望键序稳定地还原为 {"a":[1,2,{"b":null}]}，实际：$output""",
+            output.contains("""{"a":[1,2,{"b":null}]}"""),
+        )
+    }
 }

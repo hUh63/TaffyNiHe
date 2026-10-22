@@ -32,6 +32,8 @@ data class McpServerConfig(
     val env: Map<String, String> = emptyMap(),
     /** 远程 MCP 服务的 HTTP 端点 URL（例如 http://127.0.0.1:8000/mcp 或 .../sse） */
     val serverUrl: String = "",
+    /** 自定义 HTTP 请求头；仓储单独加密，不参与通用序列化或导出。 */
+    @Transient val headers: Map<String, String> = emptyMap(),
     /** Authentication mode for remote HTTP MCP services. */
     val authMode: McpAuthMode = McpAuthMode.NONE,
     /** Public OAuth client configuration; secrets are never stored here. */

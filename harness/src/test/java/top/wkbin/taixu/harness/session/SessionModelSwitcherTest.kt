@@ -25,10 +25,14 @@ import top.wkbin.taixu.core.database.RoomAiModelRepository
 import top.wkbin.taixu.core.database.RoomHarnessRuntimeRepository
 import top.wkbin.taixu.core.database.RoomHarnessSessionRepository
 import top.wkbin.taixu.core.datastore.AgentPreferences
+import top.wkbin.taixu.core.datastore.ProviderPreferences
 import top.wkbin.taixu.core.datastore.SettingsDataStore
 import top.wkbin.taixu.core.security.SecretManager
+import top.wkbin.taixu.core.tools.ProviderRepository
 import top.wkbin.taixu.harness.AssistantText
 import top.wkbin.taixu.harness.ModelSwitchEvent
+import top.wkbin.taixu.harness.ModelContextWindows
+import top.wkbin.taixu.harness.ProviderModelResolver
 import top.wkbin.taixu.harness.UserMessage
 import top.wkbin.taixu.harness.compaction.CompactionManager
 import top.wkbin.taixu.harness.projection.LiveMessagePort
@@ -129,6 +133,30 @@ class SessionModelSwitcherTest {
         val event = port.appended.single().second as ModelSwitchEvent
         assertFalse(event.compacted)
         assertNull(compaction.latestSnapshot("s2"))
+    }
+
+    @Test
+    fun `switching to a discovered model outside saved selection survives session reload`() = runBlocking {
+        models.upsert(AiModelEntity(
+            id = "supplier", name = "Gateway", provider = "openai", model = "gpt-4o-mini",
+            baseUrl = "https://gateway.example/v1", isActive = true, createdAt = 1L,
+        ))
+        seedSession("selected", "supplier", "gpt-4o-mini")
+        seedSession("untouched", "supplier", "gpt-4o-mini")
+
+        val result = switcher.switchModel("selected", "supplier", "gpt-4.1-mini")
+
+        assertTrue(result.switched)
+        assertEquals(ModelContextWindows.resolve("gpt-4.1-mini", "openai"), result.toContextTokens)
+        val settings = SettingsDataStore(ApplicationProvider.getApplicationContext<Context>(), SecretManager())
+        val resolver = ProviderModelResolver(ProviderRepository(ProviderPreferences(settings)), models, AgentPreferences(settings))
+        val reloaded = sessions.findById("selected")!!
+        val resolved = resolver.resolveConfigured(reloaded.modelId, reloaded.modelVariant)
+        assertEquals("gpt-4.1-mini", resolved.model)
+        assertEquals("https://gateway.example/v1", resolved.baseUrl)
+        assertEquals("gpt-4o-mini", models.findById("supplier")!!.model)
+        assertEquals("gpt-4o-mini", sessions.findById("untouched")!!.modelVariant)
+        assertEquals("Gateway · gpt-4.1-mini", (port.appended.single().second as ModelSwitchEvent).toLabel)
     }
 
     @Test

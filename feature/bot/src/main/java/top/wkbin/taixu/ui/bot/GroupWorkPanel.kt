@@ -368,7 +368,7 @@ internal fun liveStatusText(message: GroupMessage?, assignment: BotAssignment?):
     }
     val runningStep = message.steps.lastOrNull { it.success == null }
     if (runningStep != null) return officeStepAction(runningStep)
-    outputSnippet(message.content)?.let { return it }
+    outputSnippet(message.contentText.takeLast(512).toString())?.let { return it }
     reasoningSnippet(message.reasoning)?.let { return it }
     return stringResource(R.string.fbot_office_thinking_fallback)
 }

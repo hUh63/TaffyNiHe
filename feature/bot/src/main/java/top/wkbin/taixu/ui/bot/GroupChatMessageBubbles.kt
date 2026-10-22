@@ -96,7 +96,7 @@ private fun BotMessageBubble(
                 active = message.isStreaming,
                 state = when {
                     message.isStreaming && message.steps.any { it.success == null } -> BotAvatarState.EXECUTING
-                    message.isStreaming && message.reasoning.isNotBlank() && message.content.isBlank() -> BotAvatarState.THINKING
+                    message.isStreaming && message.reasoning.isNotBlank() && !message.contentText.hasText -> BotAvatarState.THINKING
                     message.isStreaming -> BotAvatarState.ACTIVE
                     else -> BotAvatarState.IDLE
                 },
@@ -137,11 +137,11 @@ private fun BotMessageBubble(
                     }
                 }
             }
-            if (message.reasoning.isNotBlank() || (message.isStreaming && message.content.isBlank())) {
+            if (message.reasoning.isNotBlank() || (message.isStreaming && !message.contentText.hasText)) {
                 GroupReasoningPanel(message.id, message.reasoning, message.isStreaming)
             }
             GroupToolCallPanel(message.id, message.steps, message.isStreaming)
-            if (message.content.isNotBlank() || (!message.isStreaming && message.steps.isEmpty())) {
+            if (message.contentText.hasText || (!message.isStreaming && message.steps.isEmpty())) {
                 MessageBubble(message, botShape(firstInGroup, lastInGroup))
             }
         }
@@ -162,7 +162,7 @@ private fun MainBadge() {
 
 @Composable
 private fun MessageBubble(message: GroupMessage, shape: Shape) {
-    val content = message.content
+    val content = message.contentText
     when {
         content.startsWith("❌") -> Surface(
             color = MaterialTheme.colorScheme.errorContainer,
@@ -174,7 +174,7 @@ private fun MessageBubble(message: GroupMessage, shape: Shape) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 ExpandableGroupText(
-                    messageId = message.id, text = content, streaming = message.isStreaming, markdown = false,
+                    messageId = message.id, text = content.toString(), streaming = message.isStreaming, markdown = false,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                 )
             }
@@ -186,13 +186,13 @@ private fun MessageBubble(message: GroupMessage, shape: Shape) {
         ) {
             RuntimeIcon(RuntimeIconName.Sparkles, Modifier.size(14.dp), MaterialTheme.colorScheme.primary)
             Text(
-                text = content.removePrefix("⏳").trim(),
+                text = content.toString().removePrefix("⏳").trim(),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         content.startsWith("💭") -> GroupReasoningPanel(
-            message.id, content.removePrefix("💭").trim(), message.isStreaming,
+            message.id, content.toString().removePrefix("💭").trim(), message.isStreaming,
         )
         else -> Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,

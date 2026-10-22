@@ -77,7 +77,16 @@ class SubagentLaneRunner(
         val operationId = operations.acceptRun(sessionId, user, laneName)
         val finalizer = SubagentLaneFinalizer(operations) { environments?.closeOwner(sessionId, operationId) }
         val toolRoundRunner = SubagentToolRoundRunner(operations, json, toolRoundDispatcher) { call, session, cwd, operation ->
-            toolExecutor().execute(call, session, cwd, allowApprovalRequest = false, operationId = operation, resourceOwner = operation)
+            // 子任务总预算 15 分钟，base 的 10 分钟默认超时会让一条挂住的命令静默吃满预算；
+            // 未显式声明 timeout_seconds 时压到 SUBAGENT_COMMAND_TIMEOUT_CAP_SECONDS。
+            toolExecutor().execute(
+                call.withSubagentCommandTimeoutCap(),
+                session,
+                cwd,
+                allowApprovalRequest = false,
+                operationId = operation,
+                resourceOwner = operation,
+            )
         }
         var finalText = ""
         // 需要审批而被跳过的调用、被写租约拦截的写入：两者都会让"看起来收场了"实际没做完，

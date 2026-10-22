@@ -1,5 +1,6 @@
 package top.wkbin.taixu.core.model.bot
 
+import top.wkbin.taixu.core.model.ChunkedText
 import kotlinx.serialization.Serializable
 
 /** 持久化 PersonaBot：每个 Bot 绑定一个独占会话与一棵 Git 记忆仓库。 */
@@ -98,7 +99,7 @@ data class GroupMessage(
     val senderId: String,
     val senderName: String,
     val senderType: GroupSenderType,
-    val content: String,
+    @kotlinx.serialization.SerialName("content") val contentText: ChunkedText,
     val timestamp: Long,
     val isStreaming: Boolean = false,
     val delegatedTaskId: String? = null,
@@ -108,7 +109,74 @@ data class GroupMessage(
     val reasoning: String = "",
     /** 群内单调递增序号；用于轮次增量历史与稳定排序。 */
     val seq: Long = 0,
-)
+) {
+    /** Full text is materialized lazily only for persistence and legacy consumers. */
+    val content: String get() = contentText.toString()
+
+    constructor(
+        id: String,
+        groupId: String,
+        senderId: String,
+        senderName: String,
+        senderType: GroupSenderType,
+        content: String,
+        timestamp: Long,
+        isStreaming: Boolean = false,
+        delegatedTaskId: String? = null,
+        attachments: List<GroupAttachment> = emptyList(),
+        reactions: List<GroupReaction> = emptyList(),
+        steps: List<GroupToolStep> = emptyList(),
+        reasoning: String = "",
+        seq: Long = 0,
+    ) : this(
+        id = id,
+        groupId = groupId,
+        senderId = senderId,
+        senderName = senderName,
+        senderType = senderType,
+        contentText = ChunkedText.of(content),
+        timestamp = timestamp,
+        isStreaming = isStreaming,
+        delegatedTaskId = delegatedTaskId,
+        attachments = attachments,
+        reactions = reactions,
+        steps = steps,
+        reasoning = reasoning,
+        seq = seq,
+    )
+
+    fun copy(
+        id: String = this.id,
+        groupId: String = this.groupId,
+        senderId: String = this.senderId,
+        senderName: String = this.senderName,
+        senderType: GroupSenderType = this.senderType,
+        content: String,
+        timestamp: Long = this.timestamp,
+        isStreaming: Boolean = this.isStreaming,
+        delegatedTaskId: String? = this.delegatedTaskId,
+        attachments: List<GroupAttachment> = this.attachments,
+        reactions: List<GroupReaction> = this.reactions,
+        steps: List<GroupToolStep> = this.steps,
+        reasoning: String = this.reasoning,
+        seq: Long = this.seq,
+    ): GroupMessage = copy(
+        id = id,
+        groupId = groupId,
+        senderId = senderId,
+        senderName = senderName,
+        senderType = senderType,
+        contentText = ChunkedText.of(content),
+        timestamp = timestamp,
+        isStreaming = isStreaming,
+        delegatedTaskId = delegatedTaskId,
+        attachments = attachments,
+        reactions = reactions,
+        steps = steps,
+        reasoning = reasoning,
+        seq = seq,
+    )
+}
 
 @Serializable
 data class MemoryCommit(

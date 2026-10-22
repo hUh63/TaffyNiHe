@@ -14,12 +14,14 @@ import top.wkbin.taixu.core.tools.backup.LocalBackupService
 import top.wkbin.taixu.core.tools.backup.PreparedBackup
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
+import top.wkbin.taixu.feature.settings.R
 
 data class LocalBackupUiState(
     val busy: Boolean = false,
     val prepared: PreparedBackup? = null,
     val exportFile: File? = null,
     val error: Boolean = false,
+    val errorMessage: Int = R.string.local_backup_error,
     val completed: Boolean = false,
 )
 
@@ -74,7 +76,11 @@ class LocalBackupViewModel(private val context: Context, private val service: Lo
         viewModelScope.launch(Dispatchers.IO) {
             try { action() }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { service.discard(old.prepared); old.exportFile?.delete(); mutableState.value = LocalBackupUiState(error = true) }
+            catch (failure: Exception) {
+                service.discard(old.prepared)
+                old.exportFile?.delete()
+                mutableState.value = LocalBackupUiState(error = true, errorMessage = backupErrorMessage(failure))
+            }
             finally { mutableState.value = mutableState.value.copy(busy = false) }
         }
     }

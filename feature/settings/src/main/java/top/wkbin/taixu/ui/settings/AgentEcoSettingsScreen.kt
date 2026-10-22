@@ -41,7 +41,7 @@ fun AgentEcoSettingsScreen(
     val models by viewModel?.models?.collectAsStateWithLifecycle() ?: previewStateOf(emptyList())
     val skills by viewModel?.allSkills?.collectAsStateWithLifecycle() ?: previewStateOf(emptyList())
     val phrases by viewModel?.quickPhrases?.collectAsStateWithLifecycle() ?: previewStateOf(emptyList())
-    // 插件与底层工具只安装在本机 PRoot：远程主系统下停用插件中心入口，避免误以为会装到服务器。
+    // 插件只安装在本机 PRoot；远程模式仍可点击，由目标页的 LocalSettingsGate 解释限制。
     val activeServerId by (previewOrNull { koinViewModel<RemoteServerViewModel>() }?.activeId?.collectAsStateWithLifecycle() ?: previewStateOf<String?>(null))
 
     PersonalizationScaffold(stringResource(R.string.personal_agents_title), onBack) {
@@ -99,7 +99,7 @@ fun AgentEcoSettingsScreen(
                         icon = RuntimeIconName.Wrench,
                         title = "插件与底层工具中心",
                         subtitle = if (activeServerId != null) stringResource(R.string.settings_nav_tools_remote_summary) else stringResource(R.string.settings_nav_tools_summary),
-                        onClick = if (activeServerId != null) null else onOpenToolCenter,
+                        onClick = onOpenToolCenter,
                     )
                 }
                 PreferenceSurface(first = false, last = false) {

@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import top.wkbin.taixu.harness.AssistantText
+import top.wkbin.taixu.core.model.ChunkedText
 import top.wkbin.taixu.harness.CapabilityEvent
 import top.wkbin.taixu.harness.HarnessMessage
 import top.wkbin.taixu.harness.ModelSwitchEvent
@@ -217,6 +218,10 @@ class SessionMessageProjector(
 
     /** 流式助手文本增量刷新：保留已有 reasoning。 */
     fun streamText(sessionId: String, id: String, createdAt: Long, text: String) {
+        streamText(sessionId, id, createdAt, ChunkedText.of(text))
+    }
+
+    fun streamText(sessionId: String, id: String, createdAt: Long, text: ChunkedText) {
         streamingSessions += sessionId
         streamingLastActivity[sessionId] = System.currentTimeMillis()
         val flow = messagesFlow(sessionId)
@@ -226,7 +231,7 @@ class SessionMessageProjector(
             val message = AssistantText(
                 id = id,
                 createdAt = createdAt,
-                text = text,
+                textContent = text,
                 reasoning = (existing as? AssistantText)?.reasoning,
             )
             val updated = if (idx >= 0) {
@@ -292,7 +297,7 @@ class SessionMessageProjector(
      */
     private fun messageWeight(message: HarnessMessage): Int = when (message) {
         is UserMessage -> message.text.length + message.imageUrls.sumOf { it.length }
-        is AssistantText -> message.text.length + (message.reasoning?.length ?: 0)
+        is AssistantText -> message.textContent.length + (message.reasoning?.length ?: 0)
         is ToolCall -> jsonWeight(message.args) + (message.reasoning?.length ?: 0)
         is ToolResult -> message.output.length +
             (message.imageDataUrl?.length ?: 0) +

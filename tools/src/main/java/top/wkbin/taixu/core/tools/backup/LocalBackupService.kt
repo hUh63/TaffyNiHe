@@ -59,8 +59,9 @@ class LocalBackupService(
 
     suspend fun preview(input: InputStream): PreparedBackup = mutex.withLock {
         recoverLocked()
-        val (stage, manifest) = BackupArchive.read(input, locations.cache)
+        val (stage, archiveManifest) = BackupArchive.read(input, locations.cache)
         try {
+            val manifest = archiveManifest.copy(records = BackupRecordPolicy.upgradeLegacy(archiveManifest.records))
             repository.validate(manifest.records)
             preferences.validate(manifest.preferences)
             validateModels(manifest.records)

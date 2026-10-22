@@ -60,6 +60,10 @@ internal fun McpServerEditorDialog(
     var command by remember(initial) { mutableStateOf(initial?.command ?: "npx") }
     var argsStr by remember(initial) { mutableStateOf(initial?.args?.joinToString(" ").orEmpty()) }
     var serverUrl by remember(initial) { mutableStateOf(initial?.serverUrl ?: "http://127.0.0.1:8000/sse") }
+    var headersJson by remember(initial) { mutableStateOf(kotlinx.serialization.json.JsonObject(
+        initial?.headers.orEmpty().mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) }
+    ).toString()) }
+    val parsedHeaders = remember(headersJson) { parseMcpHeaders(headersJson) }
     var oauthEnabled by remember(initial) { mutableStateOf(initial?.authMode == McpAuthMode.OAUTH) }
     var oauthClientId by remember(initial) { mutableStateOf(initial?.oauthClientId.orEmpty()) }
     var oauthAuthorizationEndpoint by remember(initial) { mutableStateOf(initial?.oauthAuthorizationEndpoint.orEmpty()) }
@@ -83,7 +87,8 @@ internal fun McpServerEditorDialog(
     }
     val parsedServers = remember(jsonText) { parseMcpJson(jsonText) }
 
-    val valid = name.isNotBlank() &&
+    val headerConflict = oauthEnabled && parsedHeaders.getOrNull().orEmpty().keys.any { it.equals("Authorization", true) }
+    val valid = name.isNotBlank() && (transport != McpTransportType.SSE || (parsedHeaders.isSuccess && !headerConflict)) &&
         (transport != McpTransportType.STDIO || command.isNotBlank()) &&
         (transport != McpTransportType.SSE || serverUrl.isNotBlank()) &&
         (!oauthEnabled || (oauthClientId.isNotBlank() && oauthAuthorizationEndpoint.isNotBlank() && oauthTokenEndpoint.isNotBlank()))
@@ -230,6 +235,8 @@ internal fun McpServerEditorDialog(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        McpHeadersEditor(headersJson, { headersJson = it },
+                            if (headerConflict) "自定义 Authorization 与 OAuth 不能同时启用" else parsedHeaders.exceptionOrNull()?.message)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -314,6 +321,7 @@ internal fun McpServerEditorDialog(
                             command = command.trim(),
                             args = argsList,
                             serverUrl = serverUrl.trim(),
+                            headers = if (transport == McpTransportType.SSE) parsedHeaders.getOrThrow() else initial?.headers.orEmpty(),
                             authMode = if (oauthEnabled) McpAuthMode.OAUTH else McpAuthMode.NONE,
                             oauthClientId = oauthClientId.trim(),
                             oauthAuthorizationEndpoint = oauthAuthorizationEndpoint.trim(),

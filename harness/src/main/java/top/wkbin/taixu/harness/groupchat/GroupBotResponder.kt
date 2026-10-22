@@ -128,21 +128,19 @@ internal class GroupBotResponder(
                 return GroupTurnOutcome(text, failed = true)
             }
 
-            var lastCheckpoint = startedAt
             var sawWork = false
             var lastProgress: GroupReplyProgress? = null
             suspend fun observe(completionOnly: Boolean): GroupReplyObserver.ReplyOutcome =
-                observer.awaitReply(
-                    sessionId, bot, baseline, startedAt, baselineOutputRevision, completionOnly, admittedTaskId,
-                ) { progress ->
-                    lastProgress = progress
-                    if (progress.steps.isNotEmpty() || progress.content.isNotBlank()) sawWork = true
-                    liveReplies.update { it + (placeholderId to progress) }
-                    // Smooth UI updates stay in memory; persist only periodic crash-recovery checkpoints.
-                    val now = System.currentTimeMillis()
-                    if (now - lastCheckpoint >= 2_000) {
-                        groupRepository.updateStreamingMessage(placeholderId, progress.content, true, progress.steps, progress.reasoning)
-                        lastCheckpoint = now
+                withGroupReplyCheckpoints(persist = { progress ->
+                    groupRepository.updateStreamingMessage(placeholderId, progress.content, true, progress.steps, progress.reasoning)
+                }) { checkpoint ->
+                    observer.awaitReply(
+                        sessionId, bot, baseline, startedAt, baselineOutputRevision, completionOnly, admittedTaskId,
+                    ) { progress ->
+                        lastProgress = progress
+                        if (progress.steps.isNotEmpty() || progress.contentText.hasText) sawWork = true
+                        liveReplies.update { it + (placeholderId to progress) }
+                        checkpoint(progress)
                     }
                 }
 

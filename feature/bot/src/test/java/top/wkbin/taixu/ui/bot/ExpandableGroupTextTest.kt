@@ -10,11 +10,27 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import top.wkbin.taixu.ui.theme.TaiXuTheme
+import top.wkbin.taixu.core.model.ChunkedText
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ExpandableGroupTextTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun `chunked markdown keeps earlier paragraphs while streaming and after completion`() {
+        val builder = ChunkedText.Builder()
+        builder.append("stable paragraph\n\n")
+        val body = mutableStateOf(builder.snapshot())
+        val live = mutableStateOf(true)
+        compose.setContent { TaiXuTheme { ExpandableGroupText("stream", body.value, live.value) } }
+        compose.onNodeWithText("stable paragraph").assertExists()
+        compose.runOnIdle { builder.append("**new tail**"); body.value = builder.snapshot() }
+        compose.onNodeWithText("stable paragraph").assertExists()
+        compose.onNodeWithText("new tail").assertExists()
+        compose.runOnIdle { live.value = false }
+        compose.onNodeWithText("stable paragraph").assertExists()
+        compose.onNodeWithText("new tail").assertExists()
+    }
 
     @Test fun `collapsed report restores its complete original text`() {
         val text = "report ".repeat(220) + "THE END"

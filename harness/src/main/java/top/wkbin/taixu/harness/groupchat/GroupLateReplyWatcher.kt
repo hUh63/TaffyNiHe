@@ -141,18 +141,15 @@ internal class GroupLateReplyWatcher(
     ) {
         val scope = scope ?: return
         scope.launch {
-            var lastCheckpoint = System.currentTimeMillis()
             val outcome = try {
-                observer.awaitReply(
-                    sessionId, bot, baseline, startedAt, baselineOutputRevision, completionOnly = true, taskId = taskId,
-                ) { progress ->
-                    liveReplies.update { it + (placeholderId to progress) }
-                    val now = System.currentTimeMillis()
-                    if (now - lastCheckpoint >= 2_000) {
-                        groups.updateStreamingMessage(
-                            placeholderId, progress.content, true, progress.steps, progress.reasoning,
-                        )
-                        lastCheckpoint = now
+                withGroupReplyCheckpoints(persist = { progress ->
+                    groups.updateStreamingMessage(placeholderId, progress.content, true, progress.steps, progress.reasoning)
+                }) { checkpoint ->
+                    observer.awaitReply(
+                        sessionId, bot, baseline, startedAt, baselineOutputRevision, completionOnly = true, taskId = taskId,
+                    ) { progress ->
+                        liveReplies.update { it + (placeholderId to progress) }
+                        checkpoint(progress)
                     }
                 }
             } catch (cancelled: CancellationException) {

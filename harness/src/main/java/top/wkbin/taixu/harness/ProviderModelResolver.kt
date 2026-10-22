@@ -35,15 +35,15 @@ internal class ProviderModelResolver(
     /**
      * 同 [resolveModel]，但额外做最小配置校验。[modelId] 非空且存在时优先使用该会话绑定档案，
      * [modelVariant] 用于覆盖档案里的默认模型名，实现同一供应商档案下的会话级模型隔离。
-     * 未绑定档案时使用当前激活模型；已绑定但被删除的档案或具体模型明确报错，不静默换供应商。
+     * 档案中的模型列表是设置页保存的选择，不是供应商可用模型的白名单；会话可绑定发现接口返回的其他模型。
+     * 未绑定档案时使用当前激活模型；已绑定但被删除的档案明确报错，不静默换供应商。
      */
     suspend fun resolveConfigured(modelId: String? = null, modelVariant: String? = null): ModelConfig = withContext(Dispatchers.IO) {
         val requested = modelId?.takeIf { it.isNotBlank() }?.let { modelDao.findById(it) }
         require(modelId.isNullOrBlank() || requested != null) { "绑定的供应商档案已不存在，请重新选择模型" }
         val concrete = modelVariant?.trim()?.takeIf(String::isNotBlank)?.let { variant ->
-            requireNotNull(requested?.model?.split(',')?.map(String::trim)?.firstOrNull { it.equals(variant, true) }) {
-                "绑定的具体模型已不在供应商档案中，请重新选择模型"
-            }
+            requireNotNull(requested) { "指定具体模型时必须绑定供应商档案，请重新选择模型" }
+            requested.model.split(',').map(String::trim).firstOrNull { it.equals(variant, true) } ?: variant
         }
         val active = requested ?: modelDao.activeModel()
         val providerKey = providerRepository.readApiKey().orEmpty()

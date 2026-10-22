@@ -147,7 +147,7 @@ class GroupChatDispatcher(
             messages.map { message ->
                 val progress = live[message.id]
                 if (!message.isStreaming || progress == null) message else message.copy(
-                    content = progress.content, reasoning = progress.reasoning, steps = progress.steps,
+                    contentText = progress.contentText, reasoning = progress.reasoning, steps = progress.steps,
                 )
             }
         }

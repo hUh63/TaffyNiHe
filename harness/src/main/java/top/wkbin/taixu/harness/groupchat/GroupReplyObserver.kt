@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.withTimeoutOrNull
 import top.wkbin.taixu.core.common.logging.AppLogger
 import top.wkbin.taixu.core.model.SessionRunState
+import top.wkbin.taixu.core.model.ChunkedText
 import top.wkbin.taixu.core.model.bot.Bot
 import top.wkbin.taixu.core.model.bot.GroupToolStep
 import top.wkbin.taixu.harness.AssistantText
@@ -18,10 +19,14 @@ import top.wkbin.taixu.harness.ToolResult
 import top.wkbin.taixu.harness.session.SessionControl
 
 internal data class GroupReplyProgress(
-    val content: String,
+    val contentText: ChunkedText,
     val reasoning: String,
     val steps: List<GroupToolStep>,
-)
+) {
+    constructor(content: String, reasoning: String, steps: List<GroupToolStep>) :
+        this(ChunkedText.of(content), reasoning, steps)
+    val content: String get() = contentText.toString()
+}
 
 /** Projects provider output without mixing reasoning, transient status, and answer text. */
 internal class GroupReplyObserver(
@@ -63,7 +68,7 @@ internal class GroupReplyObserver(
         var previousState: SessionRunState? = null
         var receivedOutput = false
         var progressDeadline = startedAt + FIRST_TOKEN_TIMEOUT_MS
-        var previousOutput = emptyList<Pair<String, String?>>()
+        var previousOutput = emptyList<Pair<ChunkedText, String?>>()
         var previousSteps = emptyList<GroupToolStep>()
         var outputRevision = baselineOutputRevision
         var taskStarted = false
@@ -115,21 +120,21 @@ internal class GroupReplyObserver(
                     .filter { it.id !in baseline && it.createdAt >= startedAt - CLOCK_SKEW_MS }
                 candidates.lastOrNull()?.let { candidate ->
                     latestCandidate = candidate
-                    if (candidate.text.isNotBlank()) latestWithText = candidate
+                    if (candidate.textContent.hasText) latestWithText = candidate
                 }
                 reasoning = candidates.mapNotNull { it.reasoning?.takeIf(String::isNotBlank) }
                     .joinToString("\n\n").take(MAX_REASONING_CHARS)
                 latestSteps = groupReplyToolSteps(messages, baseline, startedAt)
                 // Observe actual output, including reasoning beyond the bounded UI preview.
-                val output = candidates.map { it.text to it.reasoning }
+                val output = candidates.map { it.textContent to it.reasoning }
                 if ((output != previousOutput || latestSteps != previousSteps) &&
-                    (output.any { it.first.isNotBlank() || !it.second.isNullOrBlank() } || latestSteps.isNotEmpty())) {
+                    (output.any { it.first.hasText || !it.second.isNullOrBlank() } || latestSteps.isNotEmpty())) {
                     receivedOutput = true
                     progressDeadline = now + FIRST_TOKEN_TIMEOUT_MS
                 }
                 previousOutput = output
                 previousSteps = latestSteps
-                val progress = GroupReplyProgress(latestWithText?.text.orEmpty(), reasoning, latestSteps)
+                val progress = GroupReplyProgress(latestWithText?.textContent ?: ChunkedText.EMPTY, reasoning, latestSteps)
                 if (progress != lastProgress) {
                     onProgress(progress)
                     lastProgress = progress

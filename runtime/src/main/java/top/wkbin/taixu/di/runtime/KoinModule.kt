@@ -2,6 +2,9 @@ package top.wkbin.taixu.di.runtime
 
 import org.koin.dsl.module
 import org.koin.dsl.onClose
+import top.wkbin.taixu.runtime.backend.BackendSelector
+import top.wkbin.taixu.runtime.backend.ModeBackendSelector
+import top.wkbin.taixu.runtime.droidspaces.DroidspacesCommandBuilder
 import top.wkbin.taixu.runtime.proot.ProotCommandBuilder
 import top.wkbin.taixu.core.database.BuildScriptRepository
 import top.wkbin.taixu.runtime.BackgroundTaskRegistry
@@ -67,7 +70,23 @@ val runtimeModule = module {
     }
     single<top.wkbin.taixu.runtime.remote.SshConnectionTester> { get<top.wkbin.taixu.runtime.remote.SshConnector>() }
     single { top.wkbin.taixu.runtime.remote.RemoteSystemService(get(), get()) }
+    /**
+     * 后端选型收敛点：PRoot 与 Droidspaces 两个实现常驻，由调用点在**自己的挂起路径**里
+     * 解析当前模式（`effectiveExecutionMode.first()`）。因此单条命令与会话在其生命周期内
+     * 固定使用同一个后端，也不存在异步快照窗口；切换 ROOT 模式后对下一条命令即时生效。
+     */
     single<ProotCommandBuilder> { ProotCommandBuilder(environmentResolver = get(), logger = get()) }
+    single<DroidspacesCommandBuilder> {
+        DroidspacesCommandBuilder(environmentResolver = get(), logger = get())
+    }
+    single<BackendSelector> {
+        ModeBackendSelector(
+            proot = get<ProotCommandBuilder>(),
+            droidspaces = get<DroidspacesCommandBuilder>(),
+            modes = get<top.wkbin.taixu.core.datastore.RuntimePreferences>().effectiveExecutionMode,
+            containerBackend = get<top.wkbin.taixu.core.datastore.ContainerBackendPreferences>().enabled,
+        )
+    }
 
     single<BackgroundTaskRegistry> { BackgroundTaskRegistry() }
 
@@ -112,7 +131,7 @@ val runtimeModule = module {
             pathManager = get(),
             prootInstaller = get(),
             rootfsInstaller = get(),
-            prootCommandBuilder = get(),
+            backendSelector = get<BackendSelector>(),
             ptyManager = get(),
             shellExecutor = get(),
             healthChecker = get(),
@@ -139,7 +158,7 @@ val runtimeModule = module {
     single<RuntimeHealthChecker> {
         RuntimeHealthChecker(
             pathManager = get(),
-            prootCommandBuilder = get(),
+            backendSelector = get<BackendSelector>(),
             shellExecutor = get(),
         )
     }
@@ -323,7 +342,11 @@ val runtimeModule = module {
     single<LocalServiceLauncherImpl> { LocalServiceLauncherImpl(linuxRuntime = get()) }
 
     single<ProcessRegistryImpl> {
-        ProcessRegistryImpl(pathManager = get(), prootCommandBuilder = get(), sandboxCredentials = get())
+        ProcessRegistryImpl(
+            pathManager = get(),
+            backendSelector = get<BackendSelector>(),
+            sandboxCredentials = get(),
+        )
     }
 
     single<ProcessShellExecutor> { ProcessShellExecutor(pathManager = get()) }

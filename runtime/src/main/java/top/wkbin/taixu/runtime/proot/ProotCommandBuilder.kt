@@ -4,6 +4,7 @@ import top.wkbin.taixu.core.common.logging.AppLogger
 import top.wkbin.taixu.core.common.shell.ShellQuote
 import top.wkbin.taixu.core.model.StorageMountBinding
 import top.wkbin.taixu.runtime.EnvironmentResolver
+import top.wkbin.taixu.runtime.backend.GuestCommandBuilder
 import top.wkbin.taixu.runtime.shell.SessionConfig
 import top.wkbin.taixu.runtime.shell.ShellCommand
 import java.io.File
@@ -13,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ProotCommandBuilder private constructor(
     private val environmentResolver: EnvironmentResolver,
     private val logWarning: (String) -> Unit,
-) {
+) : GuestCommandBuilder {
 
     constructor(
         environmentResolver: EnvironmentResolver,
@@ -23,18 +24,18 @@ class ProotCommandBuilder private constructor(
     /** JVM tests do not need Android logging while validating pure argument construction. */
     internal constructor(environmentResolver: EnvironmentResolver) : this(environmentResolver, {})
 
-    fun build(
+    override fun build(
         prootBinary: File,
         rootfsDir: File,
         workspaceDir: File,
-        homeDir: File = File(rootfsDir.parentFile, "home"),
-        optDir: File = File(rootfsDir.parentFile, "opt/taixu"),
-        tmpDir: File = File(rootfsDir.parentFile, "tmp"),
-        attachmentsDir: File = File(rootfsDir.parentFile, "attachments"),
+        homeDir: File,
+        optDir: File,
+        tmpDir: File,
+        attachmentsDir: File,
         command: ShellCommand,
-        mounts: List<StorageMountBinding> = emptyList(),
-        emulatorBinary: File? = null,
-        hostCredential: Map<String, String> = emptyMap(),
+        mounts: List<StorageMountBinding>,
+        emulatorBinary: File?,
+        hostCredential: Map<String, String>,
     ): List<String> = buildList {
         add(prootBinary.absolutePath)
         addEmulator(emulatorBinary)
@@ -78,20 +79,20 @@ class ProotCommandBuilder private constructor(
         add(if (command.forcePty) wrapInPty(resolvedCommand) else resolvedCommand)
     }
 
-    fun buildInteractive(
+    override fun buildInteractive(
         prootBinary: File,
         rootfsDir: File,
         workspaceDir: File,
-        homeDir: File = File(rootfsDir.parentFile, "home"),
-        optDir: File = File(rootfsDir.parentFile, "opt/taixu"),
-        tmpDir: File = File(rootfsDir.parentFile, "tmp"),
-        attachmentsDir: File = File(rootfsDir.parentFile, "attachments"),
+        homeDir: File,
+        optDir: File,
+        tmpDir: File,
+        attachmentsDir: File,
         config: SessionConfig,
-        ptyMarker: String? = null,
-        nativePty: Boolean = false,
-        mounts: List<StorageMountBinding> = emptyList(),
-        emulatorBinary: File? = null,
-        hostCredential: Map<String, String> = emptyMap(),
+        ptyMarker: String?,
+        nativePty: Boolean,
+        mounts: List<StorageMountBinding>,
+        emulatorBinary: File?,
+        hostCredential: Map<String, String>,
     ): List<String> = buildList {
         val columns = config.columns.coerceIn(20, 400)
         val rows = config.rows.coerceIn(5, 200)

@@ -33,6 +33,7 @@ data class McpServerEntity(
     val argsCiphertext: String,
     val envCiphertext: String,
     val serverUrl: String,
+    @androidx.room.ColumnInfo(defaultValue = "''") val headersCiphertext: String = "",
     val authMode: String = "NONE",
     val oauthClientId: String = "",
     val oauthAuthorizationEndpoint: String = "",
@@ -139,6 +140,7 @@ class McpServerRepository(
 
     suspend fun save(server: McpServerConfig) {
         ensureInitialized()
+        top.wkbin.taixu.core.model.validateMcpHttpHeaders(server.headers)
         dao.upsert(server.toEntity(json, secretManager))
     }
 
@@ -196,6 +198,8 @@ private fun McpServerEntity.toModel(json: Json, secretManager: SecretManager): M
     env = secretManager.decrypt(envCiphertext)
         ?.let { plaintext -> runCatching { json.decodeFromString<Map<String, String>>(plaintext) }.getOrDefault(emptyMap()) }
         .orEmpty(),
+    headers = if (headersCiphertext.isEmpty()) emptyMap() else
+        json.decodeFromString<Map<String, String>>(requireNotNull(secretManager.decrypt(headersCiphertext)) { "MCP 请求头解密失败" }),
     serverUrl = serverUrl,
     authMode = runCatching { McpAuthMode.valueOf(authMode) }.getOrDefault(McpAuthMode.NONE),
     oauthClientId = oauthClientId,
@@ -217,6 +221,7 @@ private fun McpServerConfig.toEntity(json: Json, secretManager: SecretManager): 
     command = command,
     argsCiphertext = secretManager.encrypt(json.encodeToString(args)),
     envCiphertext = secretManager.encrypt(json.encodeToString(env)),
+    headersCiphertext = secretManager.encrypt(json.encodeToString(headers)),
     serverUrl = serverUrl,
     authMode = authMode.name,
     oauthClientId = oauthClientId,

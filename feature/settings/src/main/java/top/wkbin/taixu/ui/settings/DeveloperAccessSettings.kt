@@ -12,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import top.wkbin.taixu.core.datastore.ContainerBackendPreferences
 import top.wkbin.taixu.core.datastore.RemoteServerRepository
 import top.wkbin.taixu.core.tools.InstalledPluginCatalog
 import top.wkbin.taixu.feature.settings.R
@@ -32,8 +34,32 @@ internal fun DeveloperAccessSettings(developer: Boolean, change: (Boolean) -> Un
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         SettingsRow(icon = RuntimeIconName.Terminal, title = "开发者控制台", subtitle = "实时查看 PRoot 进程与命令追踪",
             onClick = onOpenDeveloper)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        ContainerBackendToggle()
         if (hostControls) HostAccessSettings()
     }
+}
+
+/**
+ * 实验性容器后端开关。默认关 → ROOT 仍走 PRoot；打开后 ROOT 模式整链切到 Droidspaces 容器。
+ * 刻意不做成安全边界，见 docs/ADR_SANDBOX_BACKEND.md 附录 A。
+ */
+@Composable
+private fun ContainerBackendToggle() {
+    val preferences = koinInject<ContainerBackendPreferences>()
+    val enabled by preferences.enabled.collectAsStateWithLifecycle(initialValue = false)
+    val scope = rememberCoroutineScope()
+    ToggleRow(
+        icon = RuntimeIconName.Storage,
+        title = "容器后端（Droidspaces，实验）",
+        subtitle = if (enabled) {
+            "已开启：ROOT 模式改走 Droidspaces 容器。容器内为真 root，且按上游说明其可能触达宿主"
+        } else {
+            "默认关闭：ROOT 模式仍走 PRoot，行为与升级前一致"
+        },
+        checked = enabled,
+        change = { value -> scope.launch { preferences.setEnabled(value) } },
+    )
 }
 
 private data class HostAccessTarget(val scope: HostAccessScope, val label: String)

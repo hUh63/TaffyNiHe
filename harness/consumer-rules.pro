@@ -22,10 +22,14 @@
 -dontwarn io.ktor.**
 
 # Rhino's JavaToJSONConverters <clinit> references desktop-only java.beans APIs.
-# CapabilityScriptRunner never calls NativeJSON.stringify: completion values and the
-# sandbox JSON.stringify go through a Kotlin serializer, so that class stays uninitialized
-# on the supported path. R8 still sees the bytecode references. dontwarn does not make
-# NativeJSON.stringify safe — the rejecting Java-to-JSON converter cannot stop the clinit.
+# CapabilityScriptRunner never calls NativeJSON.stringify or NativeJSON.parse: completion
+# values, the sandbox JSON.stringify, the sandbox JSON.parse and capability.list/inspect all
+# run through pure Kotlin code (jsToJsonString / SandboxJsonReader), so that class stays
+# uninitialized on every supported path. R8 still sees the bytecode references. dontwarn does
+# not make NativeJSON.stringify safe — the rejecting Java-to-JSON converter cannot stop the clinit.
+# NativeJSON.parse is NOT an acceptable fallback either: on the v1.4.0 release build every call
+# threw NullPointerException ("Attempt to invoke interface method … on a null object
+# reference"), even for JSON.parse('123'), and the failure escaped script-level try/catch.
 -dontwarn java.beans.BeanDescriptor
 -dontwarn java.beans.BeanInfo
 -dontwarn java.beans.IntrospectionException

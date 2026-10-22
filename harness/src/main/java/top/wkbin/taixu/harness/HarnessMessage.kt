@@ -1,5 +1,6 @@
 package top.wkbin.taixu.harness
 
+import top.wkbin.taixu.core.model.ChunkedText
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -101,7 +102,7 @@ data class UserMessage(
 data class AssistantText(
     override val id: String,
     override val createdAt: Long,
-    val text: String,
+    @kotlinx.serialization.SerialName("text") val textContent: ChunkedText,
     /** 推理模型（如 DeepSeek-R1）返回的 reasoning_content，多轮时需原样传回 API。 */
     val reasoning: String? = null,
     /**
@@ -120,7 +121,66 @@ data class AssistantText(
      */
     val reasoningMs: Long? = null,
     val responsesTurn: ResponsesTurn? = null,
-) : HarnessMessage
+) : HarnessMessage {
+    /** Full text is materialized lazily only for persistence and legacy consumers. */
+    val text: String get() = textContent.toString()
+
+    constructor(
+        id: String,
+        createdAt: Long,
+        text: String,
+        reasoning: String? = null,
+        totalMs: Long? = null,
+        modelId: String? = null,
+        providerId: String? = null,
+        promptTokens: Int? = null,
+        completionTokens: Int? = null,
+        cachedTokens: Int? = null,
+        reasoningMs: Long? = null,
+        responsesTurn: ResponsesTurn? = null,
+    ) : this(
+        id = id,
+        createdAt = createdAt,
+        textContent = ChunkedText.of(text),
+        reasoning = reasoning,
+        totalMs = totalMs,
+        modelId = modelId,
+        providerId = providerId,
+        promptTokens = promptTokens,
+        completionTokens = completionTokens,
+        cachedTokens = cachedTokens,
+        reasoningMs = reasoningMs,
+        responsesTurn = responsesTurn,
+    )
+
+    fun copy(
+        id: String = this.id,
+        createdAt: Long = this.createdAt,
+        text: String,
+        reasoning: String? = this.reasoning,
+        totalMs: Long? = this.totalMs,
+        modelId: String? = this.modelId,
+        providerId: String? = this.providerId,
+        promptTokens: Int? = this.promptTokens,
+        completionTokens: Int? = this.completionTokens,
+        cachedTokens: Int? = this.cachedTokens,
+        reasoningMs: Long? = this.reasoningMs,
+        responsesTurn: ResponsesTurn? = this.responsesTurn,
+    ): AssistantText = copy(
+        id = id,
+        createdAt = createdAt,
+        textContent = ChunkedText.of(text),
+        reasoning = reasoning,
+        totalMs = totalMs,
+        modelId = modelId,
+        providerId = providerId,
+        promptTokens = promptTokens,
+        completionTokens = completionTokens,
+        cachedTokens = cachedTokens,
+        reasoningMs = reasoningMs,
+        responsesTurn = responsesTurn,
+    )
+}
 
 @Serializable
 @SerialName("tool_call")

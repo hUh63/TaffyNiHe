@@ -19,6 +19,14 @@ object BackupRecordPolicy {
         else -> row.getValue("id").toString()
     }
 
+    /** Format-v1 archives predating DB 55 have no execution target. Never bind imported history to this device. */
+    fun upgradeLegacy(records: BackupRecords): BackupRecords = records.copy(tables = records.tables.mapValues { (table, rows) ->
+        if (table != "harness_sessions") rows else rows.map { row ->
+            if ("executionTargetJson" in row) row
+            else JsonObject(row + ("executionTargetJson" to JsonPrimitive("restore-required")))
+        }
+    })
+
     fun portable(records: BackupRecords): BackupRecords = BackupRecords(records.tables.mapValues { (table, rows) ->
         rows.filter { row -> table !in setOf("agent_skills", "agent_subagents") || row["isBuiltin"]?.jsonPrimitive?.intOrNull == 0 }
             .map { row -> JsonObject(row.toMutableMap().apply {

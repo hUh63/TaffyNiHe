@@ -60,7 +60,7 @@ internal fun GroupChatScrollEffects(
         }
     }
 
-    LaunchedEffect(messages.lastOrNull()?.id, messages.lastOrNull()?.content, following) {
+    LaunchedEffect(messages.lastOrNull()?.id, messages.lastOrNull()?.contentText, following) {
         if (!following || !initialPositioned || messages.isEmpty()) return@LaunchedEffect
         listState.followLatestEdge()
     }

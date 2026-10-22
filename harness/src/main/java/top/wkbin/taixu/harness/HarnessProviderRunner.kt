@@ -171,7 +171,7 @@ class HarnessProviderRunner(
                         if (chunk.isNotEmpty()) stateMirrors.recordModelOutput(sessId)
                         stateMirrors.setStatus(sessId, "回复中")
                         streamText.append(chunk)
-                        streamText.publishIfDue(now(), ProviderClient.STREAM_PUBLISH_INTERVAL_MS)?.let {
+                        streamText.publishSnapshotIfDue(now(), ProviderClient.STREAM_PUBLISH_INTERVAL_MS)?.let {
                             messageProjector.streamText(sessId, assistantId, assistantAt, it)
                         }
                     }
@@ -182,7 +182,7 @@ class HarnessProviderRunner(
                         messageProjector.streamReasoning(sessId, assistantId, assistantAt, streamReasoning.toString())
                     }
                     if (streamText.length > 0) {
-                        messageProjector.streamText(sessId, assistantId, assistantAt, streamText.toString())
+                        messageProjector.streamText(sessId, assistantId, assistantAt, streamText.snapshot())
                     }
                 }
             } catch (cancellation: CancellationException) {

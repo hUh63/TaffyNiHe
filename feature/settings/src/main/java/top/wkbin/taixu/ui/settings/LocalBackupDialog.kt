@@ -70,7 +70,7 @@ internal fun LocalBackupDialog(onDismiss: () -> Unit, viewModel: LocalBackupView
                 }
                 if (state.busy) RuntimeLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 if (state.completed) Text(stringResource(R.string.local_backup_completed), color = MaterialTheme.colorScheme.primary)
-                if (state.error) Text(stringResource(R.string.local_backup_error), color = MaterialTheme.colorScheme.error,
+                if (state.error) Text(stringResource(state.errorMessage), color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall)
             }
         },

@@ -76,16 +76,21 @@ class TranslationManager(
     private val _status = MutableStateFlow<TranslationModelStatus>(TranslationModelStatus.Checking)
     val status: StateFlow<TranslationModelStatus> = _status.asStateFlow()
 
-    private val translatorOptions = TranslatorOptions.Builder()
-        .setSourceLanguage(TranslateLanguage.ENGLISH)
-        .setTargetLanguage(TranslateLanguage.CHINESE)
-        .build()
 
     // ML Kit 就绪性取决于进程内 MlKitInitProvider 是否已初始化。R8 内联后它的初始化失败
     // 会以 NPE 直接炸在构造函数里（真机 Android 16 上已复现：ChatViewModel → … → 本类构造）。
     // 因此这里全部惰性化 + 容错：ML Kit 不可用时退化为「模型未下载」，绝不阻断页面创建。
     private val translator: Translator? by lazy {
-        runCatching { Translation.getClient(translatorOptions) }
+        // 注意：TranslateLanguage / TranslatorOptions / Translation 都是 ML Kit 的类，
+        // 只要在构造期读到它们就会触发 ML Kit 静态初始化（MlKitInitProvider 未就绪时内部
+        // Preconditions 直接 NPE）。因此 options 也必须放进 lazy，不能做字段初始化。
+        runCatching {
+            val options = TranslatorOptions.Builder()
+                .setSourceLanguage(TranslateLanguage.ENGLISH)
+                .setTargetLanguage(TranslateLanguage.CHINESE)
+                .build()
+            Translation.getClient(options)
+        }
             .onFailure { appLogger.w("TranslationManager: ML Kit 翻译客户端不可用", it) }
             .getOrNull()
     }

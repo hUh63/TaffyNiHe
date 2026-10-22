@@ -159,11 +159,13 @@ class MainActivity : ComponentActivity() {
         // 塔菲自己的五页工作区作为「逆向」中枢嵌在其中（HostWorkspaceRegistry 注入）。
         // 太墟装配依赖 Koin；若 Application 阶段太墟初始化失败，整体回退塔菲原界面，
         // 保证逆向工具链始终可用。
-        // 不仅看 Koin 容器是否存在，还要试解析壳层渲染的关键依赖（v1.4.1 崩溃教训）。
-        val taixuShellReady = runCatching { top.wkbin.taixu.isTaiXuShellReady() }.getOrDefault(false)
+        // 壳层可用 = 启动守卫允许（上次没在首帧前崩过 + 未连续失败） && 关键依赖能真正解析。
+        val taixuShellReady = TaixuShellGuard.shouldUseShell(this) &&
+            runCatching { top.wkbin.taixu.isTaiXuShellReady() }.getOrDefault(false)
+        if (taixuShellReady) TaixuShellGuard.markLaunching(this)
         setContent {
             if (taixuShellReady) {
-                top.wkbin.taixu.TaiXuEmbeddedRoot()
+                top.wkbin.taixu.TaiXuEmbeddedRoot(onFirstFrame = { TaixuShellGuard.markRendered(this@MainActivity) })
             } else {
                 // calculateWindowSizeClass 需要 Activity 作用域：在这里算一次宽度尺寸类，
                 // 再传给 SoReverseApp 做 Compact / Medium / Expanded 三态响应式布局。

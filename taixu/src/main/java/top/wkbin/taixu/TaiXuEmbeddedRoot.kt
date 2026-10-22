@@ -3,6 +3,7 @@ package top.wkbin.taixu
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -27,7 +28,7 @@ import top.wkbin.taixu.ui.theme.TaiXuTheme
  * 调用前必须保证 Koin 已启动（宿主用 `GlobalContext.get()` 判断并降级）。
  */
 @Composable
-fun TaiXuEmbeddedRoot() {
+fun TaiXuEmbeddedRoot(onFirstFrame: () -> Unit = {}) {
     // 与上游 MainActivity 一致：主题相关偏好走 AppearancePreferences 窄接口（含 themePalette）。
     val settingsDataStore: AppearancePreferences = koinInject()
     val themeMode by settingsDataStore.themeMode.collectAsStateWithLifecycle(initialValue = "system")
@@ -39,6 +40,13 @@ fun TaiXuEmbeddedRoot() {
         "light" -> false
         "dark" -> true
         else -> isSystemInDarkTheme()
+    }
+
+    // 首帧真正绘制出来之后再通知宿主：宿主用它撤销「启动守卫」的 pending 标记。
+    // 若壳层在测量/绘制阶段崩溃，这里不会执行，下次启动即判定壳层不可用。
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.withFrameNanos { }
+        onFirstFrame()
     }
 
     CompositionLocalProvider(

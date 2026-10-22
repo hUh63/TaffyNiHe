@@ -56,3 +56,23 @@ fun TaiXuEmbeddedRoot() {
         }
     }
 }
+
+/**
+ * 壳层是否真的可用。
+ *
+ * 只判断 `GlobalContext.get()` 是不够的：Koin 容器存在，但某个单例**定义**在创建时抛异常，
+ * 会在 Compose 首次组合（onAttachedToWindow）时炸在 UI 线程——v1.4.1 的
+ * `TranslationManager`（ML Kit 未初始化 → NPE）就是这样把启动打崩的。
+ *
+ * 因此这里显式解析壳层渲染必需的关键依赖；任一失败即判定壳层不可用，
+ * 宿主回退到塔菲原界面（逆向工具链仍可用），而不是让用户看到闪退。
+ */
+fun isTaiXuShellReady(): Boolean = runCatching {
+    val koin = org.koin.core.context.GlobalContext.get()
+    koin.get<AppearancePreferences>()
+    koin.get<top.wkbin.taixu.core.common.translation.TranslationManager>()
+    true
+}.getOrElse { error ->
+    android.util.Log.e("TaiXuShell", "shell not ready, falling back: ${error.message}", error)
+    false
+}

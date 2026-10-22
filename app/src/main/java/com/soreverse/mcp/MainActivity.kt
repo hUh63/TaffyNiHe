@@ -159,7 +159,8 @@ class MainActivity : ComponentActivity() {
         // 塔菲自己的五页工作区作为「逆向」中枢嵌在其中（HostWorkspaceRegistry 注入）。
         // 太墟装配依赖 Koin；若 Application 阶段太墟初始化失败，整体回退塔菲原界面，
         // 保证逆向工具链始终可用。
-        val taixuShellReady = runCatching { org.koin.core.context.GlobalContext.get() }.isSuccess
+        // 不仅看 Koin 容器是否存在，还要试解析壳层渲染的关键依赖（v1.4.1 崩溃教训）。
+        val taixuShellReady = runCatching { top.wkbin.taixu.isTaiXuShellReady() }.getOrDefault(false)
         setContent {
             if (taixuShellReady) {
                 top.wkbin.taixu.TaiXuEmbeddedRoot()

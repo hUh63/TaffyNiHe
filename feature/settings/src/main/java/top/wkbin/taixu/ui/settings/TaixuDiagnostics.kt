@@ -97,6 +97,21 @@ object TaixuDiagnostics {
             fatal = false,
         )
 
+        val mlKit = runCatching {
+            GlobalContext.get().get<top.wkbin.taixu.core.common.translation.TranslationManager>().mlKitAvailable
+        }.getOrDefault(false)
+        items += Item(
+            key = "mlkit",
+            title = "离线翻译（ML Kit）",
+            ok = mlKit,
+            detail = if (mlKit) {
+                "ML Kit 已初始化，智枢的思考片段可按需下载英中离线模型翻译"
+            } else {
+                "ML Kit 未初始化：翻译入口会提示不可用（不影响对话与其余功能）"
+            },
+            fatal = false,
+        )
+
         val rootfsRoot = File(context.filesDir, "linux")
         val installed = runCatching { rootfsRoot.listFiles()?.count { it.isDirectory } ?: 0 }.getOrDefault(0)
         items += Item(

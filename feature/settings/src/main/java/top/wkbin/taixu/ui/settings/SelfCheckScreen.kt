@@ -30,7 +30,7 @@ import top.wkbin.taixu.ui.components.RuntimeIllustrationScene
  * 失败项按是否致命分级：致命项（Koin、Room）会让整块功能不可用，受限项只让单个能力退级。
  */
 @Composable
-internal fun SelfCheckScreen(onBack: () -> Unit) {
+fun SelfCheckScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val zh = LocalConfiguration.current.locales[0]?.language?.startsWith("zh") == true
     fun s(zhText: String, enText: String) = if (zh) zhText else enText

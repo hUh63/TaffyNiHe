@@ -236,6 +236,10 @@ jobs:
           if [ -f "${MAPPING}" ]; then
             cp "${MAPPING}" apk-output/mapping.txt
             ls -lh apk-output/mapping.txt
+            # 崩溃定位辅助：把关键混淆名对应的原始类名打印到日志（mapping 347MB 无法直接下载）
+            echo "=== mapping lookup ==="
+            grep -nE "^[^ ]+ -> (vef|rv2|s77|hgd|hdc|uu7|su7|lo0):" "${MAPPING}" || true
+            echo "=== mapping lookup end ==="
           else
             echo "::warning:: 未找到 mapping.txt (${MAPPING})"
           fi

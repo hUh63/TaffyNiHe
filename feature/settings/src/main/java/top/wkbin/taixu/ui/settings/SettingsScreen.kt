@@ -175,7 +175,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SettingsCategoryCard(
+internal fun SettingsCategoryCard(
     icon: RuntimeIconName,
     title: String,
     subtitle: String,

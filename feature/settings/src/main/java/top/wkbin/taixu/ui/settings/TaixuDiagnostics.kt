@@ -52,7 +52,7 @@ object TaixuDiagnostics {
         )
 
         val roomOk = runCatching {
-            val db = GlobalContext.get().get<AppDatabase>()
+            val db: AppDatabase = GlobalContext.get().get()
             db.openHelper.writableDatabase.isOpen
         }.getOrDefault(false)
         items += Item(

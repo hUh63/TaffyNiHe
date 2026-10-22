@@ -21,6 +21,8 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bundles.coil)
+    // 系统自检直接读取 AppDatabase 的 openHelper 判定 Room 是否可用，需 room-runtime 类型可见。
+    implementation(libs.androidx.room.runtime)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

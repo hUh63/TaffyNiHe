@@ -229,6 +229,17 @@ jobs:
           cat SHA256SUMS
           echo "sha256sums=$(ls SHA256SUMS)" >> $GITHUB_OUTPUT
 
+      - name: 校验 ML Kit 初始化 provider（启动崩溃排查）
+        if: steps.build_type.outputs.type == 'release'
+        run: |
+          set +e
+          echo "=== merged manifest: mlkit providers ==="
+          find app/build/intermediates -name "AndroidManifest.xml" -path "*merged*" | while read f; do
+            echo "--- $f"
+            grep -o '<provider[^>]*mlkit[^>]*>' "$f" || echo "(no mlkit provider in $f)"
+          done
+          echo "=== merged manifest end ==="
+
       - name: 收集 R8 mapping (反混淆映射)
         if: steps.build_type.outputs.type == 'release'
         run: |

@@ -37,6 +37,7 @@ import top.wkbin.taixu.ui.settings.ModelEditorScreen
 import top.wkbin.taixu.ui.settings.ModelProfilesScreen
 import top.wkbin.taixu.ui.settings.LocalLlmScreen
 import top.wkbin.taixu.ui.settings.SettingsScreen
+import top.wkbin.taixu.ui.settings.SelfCheckScreen
 import top.wkbin.taixu.ui.settings.SettingsViewModel
 import top.wkbin.taixu.ui.iteration.CustomIterationScreen
 import top.wkbin.taixu.plugin.ui.PluginPages
@@ -322,8 +323,14 @@ fun TaiXuNavHost(
                         onOpenAboutCommunity = { activeStack.push(SettingsDestination, AboutCommunityDestination) },
                         onOpenSearch = { activeStack.push(SettingsDestination, SettingsSearchDestination) },
                         onOpenFeatureHub = { activeStack.push(SettingsDestination, FeatureHubDestination) },
+                        onOpenSelfCheck = { activeStack.push(SettingsDestination, SelfCheckDestination) },
                         viewModel = settingsViewModel,
                     )
+                }
+            }
+            entry<SelfCheckDestination> {
+                GuardedEntry(SelfCheckDestination) {
+                    SelfCheckScreen(onBack = ::popBack)
                 }
             }
             entry<SettingsSearchDestination> {

@@ -8,6 +8,7 @@ sealed interface AppDestination : NavKey
 
 @Serializable data object HomeDestination : AppDestination
 @Serializable data object ReverseDestination : AppDestination
+@Serializable data object SelfCheckDestination : AppDestination
 @Serializable data object AgentDestination : AppDestination
 @Serializable data object WorkspaceDestination : AppDestination
 @Serializable data object WorkshopSettingsDestination : AppDestination

@@ -1,4 +1,8 @@
 package top.wkbin.taixu.ui.settings
+
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import top.wkbin.taixu.ui.components.previewOrNull
 import top.wkbin.taixu.ui.components.previewStateOf
 import org.koin.compose.viewmodel.koinViewModel
@@ -50,6 +54,8 @@ fun SettingsScreen(
     onOpenAboutCommunity: () -> Unit,
     onOpenSearch: () -> Unit = {},
     onOpenFeatureHub: () -> Unit = {},
+    /** 宿主（塔菲逆核）集成自检：ABI / Koin / Room / PRoot / PTY / 逆向引擎 逐项状态。 */
+    onOpenSelfCheck: () -> Unit = {},
     viewModel: SettingsViewModel? = previewOrNull { koinViewModel() }, onBack: () -> Unit = { onNavigate(MainDestination.Agent) },
 ) {
     var showUsageNotice by rememberSaveable { mutableStateOf(false) }
@@ -121,6 +127,33 @@ fun SettingsScreen(
                     stringResource(R.string.settings_material_plugins_title), stringResource(R.string.settings_material_plugins_summary),
                     value = null, first = false, last = false, onClick = openPluginManager)
                 LocalBackupSettingsCard(first = false, last = true)
+            }
+        }
+        item("host-integration") {
+            val zhHost = LocalConfiguration.current.locales[0]?.language?.startsWith("zh") == true
+            PersonalizationSection(if (zhHost) "宿主集成" else "Host integration") {
+                val hostContext = LocalContext.current
+                val hostChecks = remember(hostContext) {
+                    runCatching { TaixuDiagnostics.check(hostContext) }.getOrDefault(emptyList())
+                }
+                val hostBad = hostChecks.count { !it.ok }
+                SettingsCategoryCard(
+                    icon = RuntimeIconName.Reverse,
+                    title = if (zhHost) "系统自检" else "Self check",
+                    subtitle = if (zhHost) {
+                        "ABI · 依赖注入 · 数据库 · PRoot · PTY · 逆向引擎 · 发行版"
+                    } else {
+                        "ABI · DI · database · PRoot · PTY · engine · distros"
+                    },
+                    value = when {
+                        hostChecks.isEmpty() -> null
+                        hostBad == 0 -> if (zhHost) "全部正常" else "All OK"
+                        else -> if (zhHost) "$hostBad 项受限" else "$hostBad limited"
+                    },
+                    first = true,
+                    last = true,
+                    onClick = onOpenSelfCheck,
+                )
             }
         }
         item("application") {

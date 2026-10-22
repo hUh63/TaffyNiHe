@@ -81,13 +81,30 @@ class TranslationManager(
         .setTargetLanguage(TranslateLanguage.CHINESE)
         .build()
 
-    private val translator: Translator by lazy {
-        Translation.getClient(translatorOptions)
+    // ML Kit 就绪性取决于进程内 MlKitInitProvider 是否已初始化。R8 内联后它的初始化失败
+    // 会以 NPE 直接炸在构造函数里（真机 Android 16 上已复现：ChatViewModel → … → 本类构造）。
+    // 因此这里全部惰性化 + 容错：ML Kit 不可用时退化为「模型未下载」，绝不阻断页面创建。
+    private val translator: Translator? by lazy {
+        runCatching { Translation.getClient(translatorOptions) }
+            .onFailure { appLogger.w("TranslationManager: ML Kit 翻译客户端不可用", it) }
+            .getOrNull()
     }
 
-    private val modelManager = RemoteModelManager.getInstance()
-    private val englishModel = TranslateRemoteModel.Builder(TranslateLanguage.ENGLISH).build()
-    private val chineseModel = TranslateRemoteModel.Builder(TranslateLanguage.CHINESE).build()
+    private val modelManager: RemoteModelManager? by lazy {
+        runCatching { RemoteModelManager.getInstance() }
+            .onFailure { appLogger.w("TranslationManager: ML Kit 模型管理器不可用", it) }
+            .getOrNull()
+    }
+    private val englishModel: TranslateRemoteModel? by lazy {
+        runCatching { TranslateRemoteModel.Builder(TranslateLanguage.ENGLISH).build() }.getOrNull()
+    }
+    private val chineseModel: TranslateRemoteModel? by lazy {
+        runCatching { TranslateRemoteModel.Builder(TranslateLanguage.CHINESE).build() }.getOrNull()
+    }
+
+    /** ML Kit 是否可用；不可用时 UI 应提示「翻译组件不可用」，而不是让调用方崩溃。 */
+    val mlKitAvailable: Boolean
+        get() = modelManager != null && englishModel != null && chineseModel != null
 
     /** 内存翻译缓存，避免重复推演计算，最多保存 100 条思考片段 */
     private val translationCache = Collections.synchronizedMap(
@@ -107,8 +124,16 @@ class TranslationManager(
         scope.launch {
             _status.value = TranslationModelStatus.Checking
             try {
-                val enReady = modelManager.isModelDownloaded(englishModel).awaitResult()
-                val zhReady = modelManager.isModelDownloaded(chineseModel).awaitResult()
+                val mm = modelManager
+                val en = englishModel
+                val zh = chineseModel
+                if (mm == null || en == null || zh == null) {
+                    appLogger.w("TranslationManager: ML Kit 不可用，跳过模型状态检测")
+                    _status.value = TranslationModelStatus.NotDownloaded
+                    return@launch
+                }
+                val enReady = mm.isModelDownloaded(en).awaitResult()
+                val zhReady = mm.isModelDownloaded(zh).awaitResult()
                 _status.value = if (enReady && zhReady) {
                     TranslationModelStatus.Ready
                 } else {
@@ -174,12 +199,19 @@ class TranslationManager(
             }
             val conditions = conditionsBuilder.build()
 
-            val enDownloaded = runCatching { modelManager.isModelDownloaded(englishModel).awaitResult() }.getOrDefault(false)
-            val zhDownloaded = runCatching { modelManager.isModelDownloaded(chineseModel).awaitResult() }.getOrDefault(false)
+            val mm = modelManager
+            val en = englishModel
+            val zh = chineseModel
+            if (mm == null || en == null || zh == null) {
+                appLogger.w("TranslationManager: ML Kit 不可用，无法下载翻译模型")
+                return@withContext Result.failure(IllegalStateException("翻译组件不可用（ML Kit 未初始化）"))
+            }
+            val enDownloaded = runCatching { mm.isModelDownloaded(en).awaitResult() }.getOrDefault(false)
+            val zhDownloaded = runCatching { mm.isModelDownloaded(zh).awaitResult() }.getOrDefault(false)
 
             val queue = mutableListOf<Pair<TranslateRemoteModel, String>>()
-            if (!enDownloaded) queue.add(englishModel to "英语语言模型 (en，约 30MB)")
-            if (!zhDownloaded) queue.add(chineseModel to "中文语言模型 (zh，约 30MB)")
+            if (!enDownloaded) queue.add(en to "英语语言模型 (en，约 30MB)")
+            if (!zhDownloaded) queue.add(zh to "中文语言模型 (zh，约 30MB)")
 
             if (queue.isEmpty()) {
                 _status.value = TranslationModelStatus.Ready
@@ -238,7 +270,7 @@ class TranslationManager(
                 }
 
                 try {
-                    modelManager.download(model, conditions).awaitResult()
+                    mm.download(model, conditions).awaitResult()
                 } finally {
                     monitorJob.cancel()
                 }
@@ -268,8 +300,11 @@ class TranslationManager(
     /** 删除本地已下载的模型包以释放存储空间 */
     suspend fun deleteModel(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            modelManager.deleteDownloadedModel(englishModel).awaitResult()
-            modelManager.deleteDownloadedModel(chineseModel).awaitResult()
+            val mm = modelManager ?: return@withContext Result.failure(IllegalStateException("翻译组件不可用（ML Kit 未初始化）"))
+            val en = englishModel ?: return@withContext Result.failure(IllegalStateException("翻译组件不可用（模型描述缺失）"))
+            val zh = chineseModel ?: return@withContext Result.failure(IllegalStateException("翻译组件不可用（模型描述缺失）"))
+            mm.deleteDownloadedModel(en).awaitResult()
+            mm.deleteDownloadedModel(zh).awaitResult()
             _status.value = TranslationModelStatus.NotDownloaded
             translationCache.clear()
             appLogger.i("TranslationManager: ML Kit translation models deleted successfully")
@@ -292,8 +327,14 @@ class TranslationManager(
         }
 
         if (_status.value !is TranslationModelStatus.Ready) {
-            val enReady = runCatching { modelManager.isModelDownloaded(englishModel).awaitResult() }.getOrDefault(false)
-            val zhReady = runCatching { modelManager.isModelDownloaded(chineseModel).awaitResult() }.getOrDefault(false)
+            val mm = modelManager
+            val en = englishModel
+            val zh = chineseModel
+            if (mm == null || en == null || zh == null) {
+                return@withContext Result.failure(IllegalStateException("翻译组件不可用（ML Kit 未初始化）"))
+            }
+            val enReady = runCatching { mm.isModelDownloaded(en).awaitResult() }.getOrDefault(false)
+            val zhReady = runCatching { mm.isModelDownloaded(zh).awaitResult() }.getOrDefault(false)
             if (enReady && zhReady) {
                 _status.value = TranslationModelStatus.Ready
             } else {
@@ -302,7 +343,8 @@ class TranslationManager(
         }
 
         try {
-            val translated = translator.translate(text).awaitResult()
+            val engine = translator ?: return@withContext Result.failure(IllegalStateException("翻译客户端不可用"))
+            val translated = engine.translate(text).awaitResult()
             translationCache[cacheKey] = translated
             Result.success(translated)
         } catch (e: Exception) {
@@ -315,7 +357,7 @@ class TranslationManager(
 
     override fun close() {
         try {
-            translator.close()
+            translator?.close()
         } catch (e: Exception) {
             appLogger.w("TranslationManager: Close translator error", e)
         }

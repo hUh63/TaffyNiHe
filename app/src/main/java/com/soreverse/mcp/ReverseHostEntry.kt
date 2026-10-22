@@ -22,7 +22,7 @@ internal object ReverseWorkspaceEntry {
 
                 @Composable
                 override fun Content() {
-                    IntegrityGate { SoReverseApp() }
+                    IntegrityGate { SoReverseApp(hostThemed = true) }
                 }
             },
         )

@@ -364,7 +364,11 @@ private fun textFor(mode: String, context: Context): UiText {
     ExperimentalMaterial3WindowSizeClassApi::class,
 )
 @Composable
-internal fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact) {
+internal fun SoReverseApp(
+    widthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact,
+    /** 嵌入太墟壳时为 true：不再自带 MaterialTheme，跟随宿主（太墟）的主题与字体，避免双层主题打架。 */
+    hostThemed: Boolean = false,
+) {
     val context = LocalContext.current
     val settings = remember { SettingsStore(context) }
     val appScope = rememberCoroutineScope()
@@ -534,7 +538,7 @@ internal fun SoReverseApp(widthSizeClass: WindowWidthSizeClass = WindowWidthSize
         LocalUiMetrics provides metrics,
         LocalReduceMotion provides reduceMotion,
     ) {
-        MaterialTheme(colorScheme = colors, typography = typography) {
+        ReverseThemeScope(hostThemed, colors, typography) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -946,5 +950,26 @@ private fun AppSideNavRail(current: MainTab, zh: Boolean, onSelect: (MainTab) ->
                 ),
             )
         }
+    }
+}
+
+/**
+ * 逆向工作区的主题作用域。
+ *
+ * 独立运行时（[hostThemed] = false）沿用塔菲自己的配色与字号；
+ * 嵌进太墟壳时（[hostThemed] = true）直接使用外层 TaiXuTheme，避免「太墟壳 + 塔菲主题」双层叠加
+ * 导致同一页面里设置页选的颜色与实际渲染不一致。
+ */
+@Composable
+private fun ReverseThemeScope(
+    hostThemed: Boolean,
+    colors: androidx.compose.material3.ColorScheme,
+    typography: androidx.compose.material3.Typography,
+    content: @Composable () -> Unit,
+) {
+    if (hostThemed) {
+        content()
+    } else {
+        MaterialTheme(colorScheme = colors, typography = typography, content = content)
     }
 }

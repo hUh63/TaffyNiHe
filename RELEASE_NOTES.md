@@ -1,3 +1,34 @@
+## 塔菲逆核 v1.4.0 —— 太墟（TaiXu）整树合并
+
+这是把 [wkbin/taixu](https://github.com/wkbin/taixu)（Android 无 Root Linux 运行时 · Agent Harness · 可视化工作流 · PTY 终端 · 工作区与工具生态）**整树移植**进塔菲逆核的第一个版本：2013 个 Kotlin 文件、37 个 Gradle 模块原样入库，UI 与布局直接沿用上游实现。
+
+### ✨ 新特性
+- **主界面换成太墟壳**：首页（太墟）· 智枢（AI 结对）· 机器人 · 工坊（工作区）· **逆向** · 乾坤（设置）
+- **「逆向」中枢 = 塔菲原工作区**：首页 / 分析 / 任务 / 编辑器 / 设置 原样嵌入，经 `HostWorkspaceRegistry` 注入，不再另开一套底部导航
+- **Linux Runtime**：PRoot 无 Root 运行 ARM64 Linux，RootFS 按 OCI 镜像安装，支持多发行版、绑定挂载与共享存储
+- **Agent Harness**：OpenAI Chat Completions / Responses、Anthropic Messages、Gemini 三种协议，流式正文 + reasoning + 工具调用 + 视觉输入 + token 账本 + 上下文压缩
+- **子智能体与规划**：多子智能体调度、token 预算、写路径租约、Planner/Executor 分离、AI 圆桌
+- **可视化工作流**：可编辑 DAG（条件边 / 并行 / 人工审批 / 运行历史 / WorkManager 定时）
+- **原生 PTY 终端**：`openpty + fork + setsid + TIOCSCTTY + execve` 真控制终端，支持作业控制与多会话
+- **工坊与构建**：新建 / ZIP 导入 / Git 克隆 / 构建 / APK 交付闭环，JGit 分支管理
+- **MCP**：STDIO / Streamable HTTP / Legacy SSE / OAuth PKCE，内置 Browser / SQLite / Git / APK 审计等预设
+- **插件平台**：原生插件、PROCESS 包（v1/v2 + SHA-256 收据）、WEB 包（能力授权 + 独立 WebView 来源）
+- **浏览器 / 群聊机器人 / A2UI / 统计账本 / 局域网 WebChat** 随模块树一并可用
+
+### ⚠️ 兼容性变化
+- **minSdk 26 → 29**（Android 10+）：太墟模块统一按 API 29 设计，低版本设备将无法安装
+- 插件与依赖版本统一到太墟版本目录：AGP 9.4.1 / Kotlin 2.4.21 / Compose BOM 2026.09
+- **Linux 运行时与 PTY 仅 arm64-v8a 可用**（PRoot / libpty_native / libtermux 均为 ARM64 产物）；其它 ABI 上这两项不可用，其余功能正常
+- 质量门调整为 `:app:testDebugUnitTest` + `:core:model:test`（上游 Robolectric 测试需按模块补环境后再放开）
+
+### 🔧 工程
+- 引入 `build-logic` convention 插件、版本目录与本地 AAR 仓库（termux terminal-emulator / terminal-view）
+- 太墟 FileProvider 改用独立 authority（`.taixu.fileprovider`），与宿主 `.fileprovider` 并存
+- 太墟 release keep 规则以 `consumer-rules.pro` 传递给宿主 R8（serialization / Shizuku / Shower / JGit）
+- 宿主 `SoReverseApplication` 继承 `TaiXuApplication` 完成双栈装配，太墟初始化异常被隔离，不影响逆向工具链
+
+---
+
 # TaffyNiHe v1.3.121（页面架构对齐：每个二级页自持脚手架 + 运行环境探针接线）
 
 上一版把「顶栏」换成了折叠大标题，但页面架构还是「hub 画标题 + 页面自己滚一段 Column」。

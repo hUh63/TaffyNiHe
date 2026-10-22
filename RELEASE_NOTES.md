@@ -1,3 +1,26 @@
+## 塔菲逆核 v1.4.2 —— 修复启动崩溃
+
+### 🐛 崩溃修复（1.4.1 装机即闪退）
+真机（OnePlus PLC110 / Android 16）反馈打开即崩，堆栈反混淆后定位为：
+
+```
+ChatViewModel(Factory) → … → TranslationManager(Singleton) 构造 NPE
+  at TranslationManager.<init>   ← ML Kit 未初始化
+```
+
+两处问题叠加：
+1. `TranslationManager` 把 ML Kit 客户端（`RemoteModelManager.getInstance()` / `TranslatorOptions`）写在**构造函数字段初始化**里，ML Kit 不可用时直接 NPE；
+2. 合并后的 Manifest 中**缺少 ML Kit 初始化 provider**（`MlKitInitProvider`，4 份 merged manifest 均已核对），进程内 ML Kit 从未初始化。
+
+本版修法：
+- `TranslationManager` 的 ML Kit 相关对象全部改为**惰性 + 容错**（`by lazy { runCatching { … } }`），不可用时退化为「模型未下载 / 翻译组件不可用」，**构造函数永不再抛**；
+- 壳层就绪检测从「Koin 容器存在」升级为「**试解析壳层渲染必需的关键依赖**」（`AppearancePreferences` + `TranslationManager`），任一失败即回退塔菲原界面，不再把异常留到 UI 线程；
+- 自检页新增「离线翻译（ML Kit）」项，装机后可直接看到该能力是否就绪。
+
+> 遗留：ML Kit 初始化 provider 尚未随包落地，翻译入口会提示不可用（**不影响对话 / 工作流 / 终端 / 工坊 / 逆向工具**），该项在自检页可见，后续单独修复。
+
+---
+
 ## 塔菲逆核 v1.4.1 —— 同步太墟 v1.4.1 + 移植收尾
 
 ### ✨ 同步上游（wkbin/taixu v1.4.1，25 个提交 / 77 个文件）

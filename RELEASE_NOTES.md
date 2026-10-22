@@ -1,3 +1,35 @@
+## 塔菲逆核 v1.4.1 —— 同步太墟 v1.4.1 + 移植收尾
+
+### ✨ 同步上游（wkbin/taixu v1.4.1，25 个提交 / 77 个文件）
+- **MCP**：服务器支持自定义请求头鉴权，凭据加密存储（Room schema 74 + 迁移）
+- **运行时**：容器后端改为显式实验开关，新增 Droidspaces 后端（默认关闭）
+- **群聊**：分块流式正文 + 增量 Markdown 渲染（`ChunkedText` / `IncrementalMarkdown` / `MarkdownParser`）
+- **修复**：旧备份恢复兼容与错误细分、更新日志版本校验、会话切换未选模型时的配置解析、工具中心入口点击无反馈、cron 夏令时回拨
+
+### ✨ 新增：系统自检
+乾坤 → 宿主集成 → **系统自检**，逐项检测并支持点击重测：
+- 设备 ABI（非 arm64 时明确标注哪些能力不可用）
+- 依赖注入装配（Koin）
+- 会话与记忆数据库（Room，schema 74）
+- PRoot 运行时载荷、原生 PTY 终端、逆向引擎 `librz_native.so`、已安装发行版数量
+
+失败项分「致命 / 受限」两级：致命项（Koin、Room）会让整块功能不可用，受限项只让单个能力退级。
+
+### ✨ 主题归一
+逆向中枢嵌在太墟壳里时不再自带 `MaterialTheme`，直接沿用 `TaiXuTheme`，消除「太墟壳 + 塔菲主题」双层叠加导致颜色/字号与实际渲染不一致的问题。
+
+> 注意：因此在**嵌入模式**下，塔菲设置里的「外观与语言」只影响独立运行（Koin 装配失败时自动回退的那套界面）；日常外观请在乾坤里配置。
+
+### ⚠️ 兼容性（继承 v1.4.0）
+- minSdk 29（Android 10+）
+- Linux 运行时与 PTY 仅 arm64-v8a；其它 ABI 由自检页明确提示，其余功能不受影响
+
+### 🔧 工程
+- 修正上游同步中的同名文件串位（`McpHttpHeaders` / `KoinModule` / `strings` 各有两份同名文件）
+- `feature:settings` 补 `room-runtime`，`SelfCheckScreen` 跨模块公开
+
+---
+
 ## 塔菲逆核 v1.4.0 —— 太墟（TaiXu）整树合并
 
 这是把 [wkbin/taixu](https://github.com/wkbin/taixu)（Android 无 Root Linux 运行时 · Agent Harness · 可视化工作流 · PTY 终端 · 工作区与工具生态）**整树移植**进塔菲逆核的第一个版本：2013 个 Kotlin 文件、37 个 Gradle 模块原样入库，UI 与布局直接沿用上游实现。

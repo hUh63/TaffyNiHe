@@ -12,7 +12,8 @@ import android.content.SharedPreferences
  * 1. 决定使用壳层前写入 `pending = true`；
  * 2. 壳层首帧渲染完成后清掉 `pending`、失败计数归零；
  * 3. 下次启动若发现 `pending` 仍为 true，说明上次在渲染前就死了 → 失败计数 +1；
- * 4. 连续 [MAX_FAILS] 次失败即自动改用塔菲原界面（逆向工具链始终可用），并在日志里留痕。
+ * 4. 达到 [MAX_FAILS] 次失败即自动改用塔菲原界面（逆向工具链始终可用），并在日志里留痕。
+ *    阈值取 1：启动崩溃对用户是不可接受的成本，宁可少一次「试一试」的机会。
  *
  * 该机制不依赖任何第三方库，也不会写敏感信息。
  */
@@ -20,7 +21,7 @@ internal object TaixuShellGuard {
     private const val PREFS = "taixu_shell_guard"
     private const val KEY_PENDING = "launch_pending"
     private const val KEY_FAILS = "launch_failures"
-    private const val MAX_FAILS = 2
+    private const val MAX_FAILS = 1
 
     fun shouldUseShell(context: Context): Boolean {
         val prefs = prefs(context)

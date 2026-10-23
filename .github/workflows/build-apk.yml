@@ -251,7 +251,9 @@ jobs:
             echo "=== mapping lookup ==="
             grep -nE "^[^ ]+ -> (jmh|d7c|r1e|sf5|x5c|yn2|mzg|vh9|kth|bce|nph|lb1|xyg|sih):" "${MAPPING}" || true
             echo "=== members of jmh / d7c ==="
-            awk '/ -> (jmh|d7c):/{show=1; print; next} /^[^ ]+ -> /{show=0} show{print}' "${MAPPING}" | head -80
+            awk '/ -> (jmh|d7c):/{show=1; print; next} /^[^ ]+ -> /{show=0} show{print}' "${MAPPING}" | head -600
+            echo "=== methods mapped to x in any class ==="
+            grep -nE "^( +[^ ].*)? -> x$" "${MAPPING}" | head -60
             echo "=== members end ==="
             echo "=== mapping lookup end ==="
           else

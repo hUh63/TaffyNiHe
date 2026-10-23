@@ -1,3 +1,28 @@
+## 塔菲逆核 v1.4.3 —— 彻底修掉 ML Kit 启动崩溃（含 Safe Mode）
+
+### 🐛 崩溃修复
+v1.4.2 只修了 `TranslationManager` 里「后半段」字段，漏掉最靠前的 `translatorOptions`：
+
+```kotlin
+private val translatorOptions = TranslatorOptions.Builder()
+    .setSourceLanguage(TranslateLanguage.ENGLISH)   // 构造期读取 → 触发 ML Kit 类初始化 → NPE
+```
+
+`TranslateLanguage` / `TranslatorOptions` / `Translation` 都是 ML Kit 的类，只要在构造期读到就会触发其静态初始化；而本包内 ML Kit 的初始化 provider 未就绪，内部 `Preconditions` 直接 NPE。R8 内联后崩点落在 `mlkit_common.zzou.x`（已用 CI 打印 mapping 反混淆确认）。
+
+本版把 `translatorOptions` 一并移入 `lazy`，**`TranslationManager` 构造期不再触碰任何 ML Kit 类**；所有 ML Kit 访问都在 `runCatching` 内，失败退化为「翻译组件不可用」。
+
+### 🛡 新增：太墟壳启动守卫（Safe Mode）
+- 进入壳层前写 `pending` 标记；壳层**首帧真正绘制完成**后清除，并把失败计数归零；
+- 下次启动若发现 `pending` 仍在，说明上次在首帧前就崩了 → 失败计数 +1；
+- **连续 2 次失败自动改用塔菲原界面**（逆向工具链始终可用），并在日志留痕。
+
+这样即使再出现同类 UI 崩溃，也不会出现「装上就进不去」的情况。
+
+> 遗留：ML Kit 初始化 provider 仍未随包落地，翻译入口会提示不可用（不影响对话 / 工作流 / 终端 / 工坊 / 逆向），自检页可见该项状态。
+
+---
+
 ## 塔菲逆核 v1.4.2 —— 修复启动崩溃
 
 ### 🐛 崩溃修复（1.4.1 装机即闪退）

@@ -159,19 +159,32 @@ class MainActivity : ComponentActivity() {
         // 塔菲自己的五页工作区作为「逆向」中枢嵌在其中（HostWorkspaceRegistry 注入）。
         // 太墟装配依赖 Koin；若 Application 阶段太墟初始化失败，整体回退塔菲原界面，
         // 保证逆向工具链始终可用。
-        // 壳层可用 = 启动守卫允许（上次没在首帧前崩过 + 未连续失败） && 关键依赖能真正解析。
-        val taixuShellReady = TaixuShellGuard.shouldUseShell(this) &&
-            runCatching { top.wkbin.taixu.isTaiXuShellReady() }.getOrDefault(false)
-        if (taixuShellReady) TaixuShellGuard.markLaunching(this)
-        setContent {
-            if (taixuShellReady) {
-                top.wkbin.taixu.TaiXuEmbeddedRoot(onFirstFrame = { TaixuShellGuard.markRendered(this@MainActivity) })
-            } else {
-                // calculateWindowSizeClass 需要 Activity 作用域：在这里算一次宽度尺寸类，
-                // 再传给 SoReverseApp 做 Compact / Medium / Expanded 三态响应式布局。
-                val windowSizeClass = calculateWindowSizeClass(this@MainActivity)
-                IntegrityGate { SoReverseApp(widthSizeClass = windowSizeClass.widthSizeClass) }
+        // 壳层重构：太墟壳运行在**它自己的 Activity**（installSplashScreen + enableEdgeToEdge
+        // + 主题 + onboarding 全链路原样），宿主这里只做两件事：
+        //   1. 判断壳能不能用（启动守卫 + 关键依赖可真正解析）；
+        //   2. 不能用/启动失败时渲染塔菲原界面兜底（逆向工具链始终可用）。
+        // 早期版本把壳嵌在本 Activity 里渲染，缺少 edge-to-edge 预处理，太墟按 insets 设计的
+        // 布局会在 measure 阶段读到异常值（v1.4.2/1.4.3 启动崩溃即此）。
+        val taixuShellReady = runCatching {
+            top.wkbin.taixu.host.TaixuShellGuard.shouldUseShell(this) && top.wkbin.taixu.isTaiXuShellReady()
+        }.getOrDefault(false)
+        if (taixuShellReady) {
+            val launched = runCatching {
+                startActivity(android.content.Intent(this, top.wkbin.taixu.MainActivity::class.java))
+                finish()
+                true
+            }.getOrElse {
+                android.util.Log.e("SoReverseApplication", "taixu shell launch failed, fallback", it)
+                false
             }
+            if (launched) return
+        }
+        setContent {
+            // 兜底界面：壳不可用 / 壳启动失败 / 壳上次在首帧前崩过。
+            // calculateWindowSizeClass 需要 Activity 作用域：在这里算一次宽度尺寸类，
+            // 再传给 SoReverseApp 做 Compact / Medium / Expanded 三态响应式布局。
+            val windowSizeClass = calculateWindowSizeClass(this@MainActivity)
+            IntegrityGate { SoReverseApp(widthSizeClass = windowSizeClass.widthSizeClass) }
         }
     }
 

@@ -98,6 +98,8 @@ class MainActivity : AppCompatActivity() {
     private var createdUptimeMs: Long = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 启动守卫：本次进入壳，先记 pending；首帧真正绘制完成后再清除（见下方 setContent）。
+        top.wkbin.taixu.host.TaixuShellGuard.markLaunching(this)
         createdUptimeMs = SystemClock.uptimeMillis()
         val splashScreen = installSplashScreen()
         splashScreen.setupTaiXuSplashAnimation { keepSplashOnScreen.value }
@@ -105,6 +107,12 @@ class MainActivity : AppCompatActivity() {
         handleNavigationIntent(intent)
         enableEdgeToEdge()
         setContent {
+            // 首帧真正画出来之后才认为「壳启动成功」：若在组合/测量阶段崩溃，这里不会执行，
+            // 下次由宿主判定壳不可用并回退到塔菲原界面。
+            LaunchedEffect(Unit) {
+                androidx.compose.runtime.withFrameNanos { }
+                top.wkbin.taixu.host.TaixuShellGuard.markRendered(this@MainActivity)
+            }
             val themeMode by settingsDataStore.themeMode.collectAsStateWithLifecycle(initialValue = "system")
             val dynamicColorEnabled by settingsDataStore.dynamicColorEnabled.collectAsStateWithLifecycle(initialValue = true)
             val themePalette by settingsDataStore.themePalette.collectAsStateWithLifecycle(initialValue = top.wkbin.taixu.core.model.ThemePalette())

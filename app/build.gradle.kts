@@ -26,8 +26,8 @@ android {
         // 太墟移植：convention 插件（build-logic）统一 minSdk=29，太墟模块全部按 Android 10+ 设计
         minSdk = 29
         targetSdk = 36
-        versionCode = 238
-        versionName = "1.4.5-diag"
+        versionCode = 239
+        versionName = "1.5.0"
 
         // 逆核: 禁用 CMake native 编译, 完全使用从原版 SOMCP 提取的预编译 so(在 jniLibs/)。
         // 原因: 我们没有 rizin/lief 的交叉编译产物, CMake 只会产出 stub 桩覆盖真 so。
@@ -84,12 +84,8 @@ android {
             buildConfigField("String", "EXPECTED_SIGNER_SHA256", "\"\"")
         }
         release {
-            // === 诊断版（v1.4.5-diag）：临时关闭 R8 ===
-            // 目的：release 的横向类合并会把不相干方法塞进同一个空壳类，导致崩溃堆栈类名不可信
-            // （已确认 mlkit_common.zzou -> jmh 里装的其实是 GraphicKitKt.BusyOverlay 等代码）。
-            // 拿到真实堆栈后，把这两项改回 true 并提升版本号即可恢复正式发布。
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             isDebuggable = false
             isJniDebuggable = false
             // 签名摘要已从 BuildConfig 明文迁移到 IntegrityGuard 的 XOR 混淆字节数组

@@ -1,3 +1,36 @@
+## 塔菲逆核 v1.5.0 —— 壳层架构重构（修启动崩溃的根因）
+
+### 根因（架构级，不是某个字段的问题）
+早期我把太墟壳「精简」成一个可嵌入的 Composable（只取 `TaiXuTheme` + `TaiXuNavHost`），
+塞进塔菲自己的 `MainActivity` 渲染。但太墟整套布局是按 **edge-to-edge + WindowInsets** 设计的：
+
+| | 太墟 MainActivity | 旧的嵌入式壳 |
+| :-- | :-- | :-- |
+| `installSplashScreen` | ✅ | ❌ |
+| `enableEdgeToEdge()` | ✅ | ❌ |
+
+缺少这套预处理 → 布局在 **measure 阶段**读到异常 insets → NPE。
+（真机崩溃栈经 R8 横向类合并后类名不可读，已用 CI 的成员级 mapping 证实 `jmh` 类是「垃圾桶类」，
+里面装的其实是 `GraphicKitKt.BusyOverlay`、`BasicSettingsPagesKt.ChipRow` 等业务代码。）
+
+### 重构内容
+- **太墟壳回到它自己的 Activity**（`top.wkbin.taixu.MainActivity`）：splash、edge-to-edge、主题、
+  onboarding 全链路原样运行，不再由宿主手工复刻；
+- **塔菲 `MainActivity` 退化为「启动器 + 兜底」**：判断壳是否可用 → `startActivity(壳)` 并 finish；
+  不可用/启动失败则直接渲染塔菲原界面；
+- **启动守卫迁入壳模块**（`TaixuShellGuard`），由壳自己的首帧回调（`withFrameNanos`）驱动：
+  首帧画出才算启动成功，否则下次判定壳不可用；
+- 退役 `TaiXuEmbeddedRoot`（嵌入式壳）；
+- 「逆向」中枢仍通过 `HostWorkspaceRegistry` 把塔菲工作区注入太墟主导航。
+
+### 其它
+- 恢复 R8（`isMinifyEnabled`/`isShrinkResources` = true）；
+- 继承 v1.4.4 的全部修复：ML Kit 惰性容错、系统自检页、主题归一。
+
+> 已知遗留：ML Kit 初始化 provider 未随包落地，翻译显示「受限」，不影响其它功能。
+
+---
+
 ## 塔菲逆核 v1.4.5-diag —— 诊断版（不混淆）
 
 **这不是正式版本。** 唯一目的：拿到**可读的真实崩溃堆栈**。

@@ -2138,7 +2138,8 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     fun py(v: Float) = v * sc + originY
 
     // ── 背景图案（对标 Exbin BG_NONE/GRID/COBWEB/HONEYCOMB/RADAR）──
-    drawCfgBackground(bgStyle, colors, density, sc, viewportSize, originX, originY)
+    // 简化视图（大图 / 手势进行中）不画背景图案：几千个网格点/六边形每帧重画纯属浪费，而且这个缩放下根本看不清
+    if (!simpleView) drawCfgBackground(bgStyle, colors, density, sc, viewportSize, originX, originY)
 
     val scl = sc.coerceIn(0.5f, 2f)
     val strokeW = max(1f, 1.35f * density * scl)

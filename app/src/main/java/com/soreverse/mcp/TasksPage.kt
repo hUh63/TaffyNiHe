@@ -77,7 +77,7 @@ internal fun TasksPage(
     ) {
         item {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 2.dp, bottom = 2.dp),
+                Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
                 Column(Modifier.weight(1f)) {

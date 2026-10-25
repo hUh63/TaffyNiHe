@@ -1,5 +1,7 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,16 +12,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.EngineProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -779,6 +786,69 @@ internal fun StructuralEvidenceSection(workspaceId: String, zh: Boolean, context
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 伪 C 的反编译警告面板：`// WARNING:` 注释与 boundaryWarning 集中在这里，默认收起。
+ * 旧实现把警告混进代码行、单行 Ellipsis —— 结果「满屏红字报错且每行都被截断」。
+ */
+@Composable
+internal fun PseudoWarnPanel(
+    boundary: String,
+    warns: List<String>,
+    open: Boolean,
+    onToggle: () -> Unit,
+    zh: Boolean,
+) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        shape = RoundedCornerShape(AppShape.sm),
+        color = cs.errorContainer.copy(alpha = 0.35f),
+        border = BorderStroke(1.dp, cs.error.copy(alpha = 0.35f)),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().clickable { onToggle() }.padding(horizontal = 10.dp, vertical = 7.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Filled.Warning, null, tint = cs.error, modifier = Modifier.size(15.dp))
+                Text(
+                    buildString {
+                        append(if (zh) "反编译警告" else "Decompiler warnings")
+                        if (warns.isNotEmpty()) append(" ").append(warns.size)
+                        if (boundary.isNotBlank()) append(if (zh) " · 有越界输出" else " · boundary")
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (open) (if (zh) "收起" else "Hide") else (if (zh) "展开" else "Show"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = cs.error,
+                )
+            }
+            if (open) {
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (boundary.isNotBlank()) {
+                        Text(boundary, style = MaterialTheme.typography.bodySmall, color = cs.onSurface)
+                    }
+                    warns.forEachIndexed { i, w ->
+                        Text(
+                            "${i + 1}.  $w",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = cs.onSurface.copy(alpha = 0.9f),
+                        )
+                    }
                 }
             }
         }

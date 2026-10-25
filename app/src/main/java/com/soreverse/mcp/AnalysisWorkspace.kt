@@ -5564,69 +5564,6 @@ private fun highlightPseudo(line: String, cs: androidx.compose.material3.ColorSc
     }
 }
 
-/**
- * 伪 C 的反编译警告面板：`// WARNING:` 注释与 boundaryWarning 集中在这里，默认收起。
- * 旧实现把警告混进代码行、单行 Ellipsis —— 结果「满屏红字报错且每行都被截断」。
- */
-@Composable
-private fun PseudoWarnPanel(
-    boundary: String,
-    warns: List<String>,
-    open: Boolean,
-    onToggle: () -> Unit,
-    zh: Boolean,
-) {
-    val cs = MaterialTheme.colorScheme
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-        shape = RoundedCornerShape(AppShape.sm),
-        color = cs.errorContainer.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, cs.error.copy(alpha = 0.35f)),
-    ) {
-        Column(
-            Modifier.fillMaxWidth().clickable { onToggle() }.padding(horizontal = 10.dp, vertical = 7.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Filled.Warning, null, tint = cs.error, modifier = Modifier.size(15.dp))
-                Text(
-                    buildString {
-                        append(if (zh) "反编译警告" else "Decompiler warnings")
-                        if (warns.isNotEmpty()) append(" ").append(warns.size)
-                        if (boundary.isNotBlank()) append(if (zh) " · 有越界输出" else " · boundary")
-                    },
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = cs.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    if (open) (if (zh) "收起" else "Hide") else (if (zh) "展开" else "Show"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = cs.error,
-                )
-            }
-            if (open) {
-                Column(
-                    Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (boundary.isNotBlank()) {
-                        Text(boundary, style = MaterialTheme.typography.bodySmall, color = cs.onSurface)
-                    }
-                    warns.forEachIndexed { i, w ->
-                        Text(
-                            "${i + 1}.  $w",
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            color = cs.onSurface.copy(alpha = 0.9f),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 /** 伪 C 代码视图（对齐 Explorer So fragment_pseudo_c.xml）：
  *  顶部 meta 行（padding 8dp / bg surfaceVariant / labelSmall）放转换器与范围信息 + 复制全部 / 导出；
  *  下方两栏：行号槽（bg surfaceVariant / monospace 13sp / 右对齐）+ 代码区（monospace 13sp / 行距 +2dp）。 */

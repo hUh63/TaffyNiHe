@@ -102,23 +102,6 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * limiter is independent of the heavy concurrency gate so that even
      * lightweight tools (taffy_meta_info help/tools/describe) can be throttled.
      */
-    private object RateLimiter {
-        private val window = 60_000L
-        private val lock = Any()
-        private val byTool = HashMap<String, ArrayDeque<Long>>()
-        fun tryAcquire(name: String, limit: Int): Boolean = synchronized(lock) {
-            if (limit <= 0) return@synchronized true
-            val now = System.currentTimeMillis()
-            val timestamps = byTool.getOrPut(name) { ArrayDeque() }
-            while (timestamps.firstOrNull()?.let { now - it > window } == true) timestamps.removeFirst()
-            if (timestamps.size >= limit) return@synchronized false
-            timestamps.addLast(now)
-            true
-        }
-        fun reset(name: String? = null) = synchronized(lock) {
-            if (name == null) byTool.clear() else byTool.remove(name)
-        }
-    }
 
     /**
      * Reconfigure the heavy-tool concurrency gate. Lower permits ⇒ stricter
@@ -720,16 +703,8 @@ $historyRows
 
     private fun callToolWithPolicy(name: String, args: JSONObject): JSONObject {
         val settings = SettingsStore(context)
-        if (name.isNotEmpty() && isToolDisabled(settings, name)) {
-            return err("TOOL_DISABLED", "Tool $name is disabled by server policy (settings.disabledTools).")
-        }
-        if (settings.blockDestructiveTools && ToolSafety.isDestructive(name)) {
-            return err("DESTRUCTIVE_BLOCKED", "Tool $name is destructive (write/delete/sign) and blocked by settings.blockDestructiveTools. Turn off the guard in Settings > Edit & Audit to allow it.")
-        }
-        val rateLimit = settings.toolCallRateLimitPerMin
-        if (rateLimit > 0 && !RateLimiter.tryAcquire(name, rateLimit)) {
-            return err("RATE_LIMITED", "Tool $name hit the per-minute rate limit ($rateLimit/min). Retry shortly.")
-        }
+        // 禁用 / 破坏性拦截 / 限频 / 自身 artifact 守卫：与 taffy_script 脚本引擎共用同一套（见 ToolPolicy）
+        ToolPolicy.precheck(context, name, args, "server")?.let { return it }
         val heavy = name in ToolCatalog.heavyNames
         val timeoutSec = settings.toolCallTimeoutSec.coerceIn(30, 7200)
         // 租约比调用超时多一点：超时后任务可能仍在后台跑完，租约留给它；

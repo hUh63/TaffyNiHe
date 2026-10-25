@@ -148,6 +148,14 @@ object ScriptTool {
         if (name == "taffy_script") return failureJson("FORBIDDEN", "不允许在脚本内递归调用 taffy_script")
         val handler = ToolCatalog.byName[name]
             ?: return failureJson("UNKNOWN_TOOL", "未注册的工具: $name")
+        val argObj = try {
+            if (argJson.isBlank()) JSONObject() else JSONObject(argJson)
+        } catch (t: Throwable) {
+            return failureJson("BAD_ARGS", "工具 $name 的参数不是合法 JSON: ${t.message ?: "no message"}")
+        }
+        // 与服务端**完全一致**的前置策略：禁用工具 / 破坏性拦截 / 每分钟限频 / 自身 artifact 守卫。
+        // 以前脚本只走 heavy 闸门，等于脚本可以读写塔菲自己的 APK 与内置 SO、也能调用用户禁用的工具。
+        ToolPolicy.precheck(ctx.context, name, argObj, "script")?.let { return it.toString() }
         // 与服务端共用同一个 heavy 闸门：脚本里连调重工具必须排队，
         // 不能绕过限制和外部调用并发操作同一份引擎状态。
         val heavy = name in ToolCatalog.heavyNames
@@ -156,7 +164,6 @@ object ScriptTool {
             return failureJson("SERVER_BUSY", "另一个分析任务正在运行，脚本内重工具调用排队超时: $name")
         }
         return try {
-            val argObj = if (argJson.isBlank()) JSONObject() else JSONObject(argJson)
             handler.handle(ctx, argObj).toString()
         } catch (t: Throwable) {
             failureJson("TOOL_FAILED", "工具 $name 执行失败: ${t.javaClass.simpleName}: ${t.message ?: "no message"}")

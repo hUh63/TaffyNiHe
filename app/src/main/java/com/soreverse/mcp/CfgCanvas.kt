@@ -64,7 +64,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -1724,13 +1723,16 @@ internal fun CfgCanvas(
     var fitted by remember(graph) { mutableStateOf(false) }
     // 手势进行中：临时降级绘制（不画文字/箭头），松手 180ms 后恢复 —— 大图上这是「能不能拖动」的分水岭。
     var interacting by remember { mutableStateOf(false) }
-    // 手势事件计数：每次移动/缩放都 ++，180ms 内没有新事件才认为手势结束。
-    // （旧写法只在 false→true 时启动计时，持续拖动时会每 180ms 闪回一次完整重绘，手感忽轻忽重。）
-    var gestureTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(gestureTick) {
-        if (gestureTick == 0) return@LaunchedEffect
-        delay(180)
-        interacting = false
+    // 手势时间戳用 AtomicLong 而不是 State：每次手势事件都写 State 会让整页每帧重组
+    //（比不降级还慢）。这里只在「开始交互 / 结束交互」各写一次 interacting，中间只更新时间戳。
+    val lastGestureAt = remember { java.util.concurrent.atomic.AtomicLong(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(120)
+            if (interacting && System.currentTimeMillis() - lastGestureAt.get() > 180L) {
+                interacting = false
+            }
+        }
     }
     // 大图自动进入简化视图（只画块骨架）：块数 > 260 时只画骨架，保证大图流畅。
     val simpleView = graph.blocks.size > 260
@@ -1846,8 +1848,8 @@ internal fun CfgCanvas(
                 }
                 .pointerInput(Unit) {
                     detectTransformGestures { _, panChange, zoom, _ ->
-                        interacting = true
-                        gestureTick++
+                        lastGestureAt.set(System.currentTimeMillis())
+                        if (!interacting) interacting = true
                         scale = (scale * zoom).coerceIn(CFG_MIN_SCALE, CFG_MAX_SCALE)
                         if (!dragModeS.value) pan += panChange
                     }

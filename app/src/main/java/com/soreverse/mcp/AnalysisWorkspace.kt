@@ -4474,6 +4474,12 @@ private fun mergeLinearInsns(
     if (linear.isEmpty() || graph == null || graph.blocks.isEmpty()) return emptyMap()
     val starts = graph.blocks.map { it.addrValue }.sorted()
     if (starts.isEmpty()) return emptyMap()
+    // 块上界：pDj 会一路线性反汇编到相邻函数，靠 endText 把越界指令丢掉
+    val endOf = HashMap<Long, Long>(graph.blocks.size * 2)
+    graph.blocks.forEach { b ->
+        val e = parseCfgAddr(b.endText)
+        if (e > b.addrValue) endOf[b.addrValue] = e
+    }
     fun owner(off: Long): Long {
         var lo = 0
         var hi = starts.size - 1
@@ -4482,7 +4488,11 @@ private fun mergeLinearInsns(
             val mid = (lo + hi) / 2
             if (starts[mid] <= off) { ans = mid; lo = mid + 1 } else hi = mid - 1
         }
-        return if (ans >= 0) starts[ans] else -1L
+        val b = if (ans >= 0) starts[ans] else -1L
+        if (b < 0L) return -1L
+        val e = endOf[b] ?: -1L
+        if (e > b && off >= e) return -1L
+        return b
     }
     val m = LinkedHashMap<Long, MutableList<String>>()
     linear.forEach { (off, txt) ->
@@ -5840,12 +5850,19 @@ private fun CfgView(
                         //（只看 agf 时部分块会显示「0 条指令」）。
                         val g = runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
                         val byGraph = parseGraphInsns(
-                            rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; agf json_disasm")),
+                            rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; agf json")),
                         )
-                        val byLinear = mergeLinearInsns(
-                            parsePdfjLinear(rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; pdfj"))),
-                            g,
+                        // `pdfj` 只覆盖「已被 af 分析的函数」内的指令；函数没进分析库时它返回空数组，
+                        // 这正是节点列表一片「0 条指令」的根因 → 退化为从函数入口线性反汇编（pDj）。
+                        var linear = parsePdfjLinear(
+                            rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; pdfj")),
                         )
+                        if (linear.isEmpty()) {
+                            linear = parsePdfjLinear(
+                                rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; pDj 4000")),
+                            )
+                        }
+                        val byLinear = mergeLinearInsns(linear, g)
                         val merged = LinkedHashMap<Long, List<String>>()
                         g?.blocks?.forEach { b ->
                             // pdfj 是**逐指令**的（每条一项），计数最准；agf 的 body 是按块渲染的文本，
@@ -6147,18 +6164,15 @@ private fun CfgNodeListView(
         return s
     }
     fun insnOf(b: CfgBlock): Pair<Int, String> {
-        val list = insns[b.addrValue].orEmpty()
-        if (list.isNotEmpty()) {
-            val head = list.first().trim()
-            val parts = head.split(Regex("\\s+"), limit = 3)
-            val text = if (parts.size >= 2) parts[0] + " " + parts[1] else head
-            return list.size to text
+        // 首行摘要直接用整条指令（旧实现只取前两个词，"mov w0, #0" 会变成 "mov w0,"）
+        fun brief(raw: String): String {
+            val t = raw.trim()
+            return if (t.length > 44) t.take(44) + "…" else t
         }
+        val list = insns[b.addrValue].orEmpty()
+        if (list.isNotEmpty()) return list.size to brief(list.first())
         val lines = b.summary.split("\n").filter { it.isNotBlank() }
-        val head = lines.firstOrNull().orEmpty().trim()
-        val parts = head.split(Regex("\\s+"), limit = 3)
-        val text = if (parts.size >= 2) parts[0] + " " + parts[1] else head
-        return lines.size to text
+        return lines.size to brief(lines.firstOrNull().orEmpty())
     }
 
     Column(Modifier.fillMaxSize()) {

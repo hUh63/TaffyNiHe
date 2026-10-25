@@ -21,16 +21,32 @@ internal object TaixuShellGuard {
     private const val PREFS = "taixu_shell_guard"
     private const val KEY_PENDING = "launch_pending"
     private const val KEY_FAILS = "launch_failures"
+    private const val KEY_LAST_FAIL = "last_fail_ms"
+    /** 失败判定过期时间：超过这个时间自动允许再试一次壳（否则崩一次就永久弃用，用户无路可退）。 */
+    private const val RETRY_AFTER_MS = 24L * 60 * 60 * 1000
     private const val MAX_FAILS = 1
 
     fun shouldUseShell(context: Context): Boolean {
         val prefs = prefs(context)
         if (prefs.getBoolean(KEY_PENDING, false)) {
             val fails = prefs.getInt(KEY_FAILS, 0) + 1
-            prefs.edit().putInt(KEY_FAILS, fails).putBoolean(KEY_PENDING, false).apply()
+            prefs.edit()
+                .putInt(KEY_FAILS, fails)
+                .putLong(KEY_LAST_FAIL, System.currentTimeMillis())
+                .putBoolean(KEY_PENDING, false)
+                .apply()
             android.util.Log.w("TaixuShellGuard", "上次太墟壳在首帧前退出，累计失败=$fails")
         }
-        val fails = prefs.getInt(KEY_FAILS, 0)
+        var fails = prefs.getInt(KEY_FAILS, 0)
+        if (fails >= MAX_FAILS) {
+            // 自动衰减：距上次失败超过 24h 就再给壳一次机会（用户重装/系统更新后壳可能已经好了）
+            val last = prefs.getLong(KEY_LAST_FAIL, 0L)
+            if (last > 0L && System.currentTimeMillis() - last > RETRY_AFTER_MS) {
+                fails = 0
+                prefs.edit().putInt(KEY_FAILS, 0).putLong(KEY_LAST_FAIL, 0L).apply()
+                android.util.Log.w("TaixuShellGuard", "距上次壳启动失败已超过 24h，重新尝试使用壳")
+            }
+        }
         if (fails >= MAX_FAILS) {
             android.util.Log.w("TaixuShellGuard", "太墟壳连续失败 $fails 次，本次改用塔菲原界面")
             return false

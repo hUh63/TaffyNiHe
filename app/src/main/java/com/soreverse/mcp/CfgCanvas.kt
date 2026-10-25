@@ -64,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -265,7 +266,7 @@ internal class CfgLayoutResult(
     val returnIndices: Set<Int>,
 ) {
     /** 边路径缓存（世界坐标，键 = routing + density）：大图每帧重建上千条 Path 会让手势直接失灵。 */
-    internal val edgePathCache = HashMap<String, Triple<Path, Path, Path>>()
+    internal val edgePathCache = java.util.concurrent.ConcurrentHashMap<String, Triple<Path, Path, Path>>()
 }
 
 /** 布局过程中的可变节点。 */
@@ -1723,11 +1724,13 @@ internal fun CfgCanvas(
     var fitted by remember(graph) { mutableStateOf(false) }
     // 手势进行中：临时降级绘制（不画文字/箭头），松手 180ms 后恢复 —— 大图上这是「能不能拖动」的分水岭。
     var interacting by remember { mutableStateOf(false) }
-    LaunchedEffect(interacting) {
-        if (interacting) {
-            delay(180)
-            interacting = false
-        }
+    // 手势事件计数：每次移动/缩放都 ++，180ms 内没有新事件才认为手势结束。
+    // （旧写法只在 false→true 时启动计时，持续拖动时会每 180ms 闪回一次完整重绘，手感忽轻忽重。）
+    var gestureTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(gestureTick) {
+        if (gestureTick == 0) return@LaunchedEffect
+        delay(180)
+        interacting = false
     }
     // 大图自动进入简化视图（只画块骨架）：块数 > 260 时只画骨架，保证大图流畅。
     val simpleView = graph.blocks.size > 260
@@ -1843,7 +1846,8 @@ internal fun CfgCanvas(
                 }
                 .pointerInput(Unit) {
                     detectTransformGestures { _, panChange, zoom, _ ->
-                        if (!interacting) interacting = true
+                        interacting = true
+                        gestureTick++
                         scale = (scale * zoom).coerceIn(CFG_MIN_SCALE, CFG_MAX_SCALE)
                         if (!dragModeS.value) pan += panChange
                     }
@@ -2104,8 +2108,8 @@ private fun CfgLayoutResult.mergedEdgePaths(routing: String, density: Float): Tr
         target.addPath(one)
     }
     val v = Triple(jump, fail, back)
-    edgePathCache[key] = v
-    return v
+    // 导出 PNG 在后台线程也会走这里（同一个 layout 对象），用 putIfAbsent 避免并发写坏缓存
+    return edgePathCache.putIfAbsent(key, v) ?: v
 }
 
 /**

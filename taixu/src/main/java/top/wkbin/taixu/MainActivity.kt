@@ -110,8 +110,24 @@ class MainActivity : AppCompatActivity() {
             // 首帧真正画出来之后才认为「壳启动成功」：若在组合/测量阶段崩溃，这里不会执行，
             // 下次由宿主判定壳不可用并回退到塔菲原界面。
             LaunchedEffect(Unit) {
-                androidx.compose.runtime.withFrameNanos { }
-                top.wkbin.taixu.host.TaixuShellGuard.markRendered(this@MainActivity)
+                // 首帧「真正画完」才算壳启动成功。
+                // 旧实现用 withFrameNanos：它在 doFrame 开始时就恢复协程，此时还没 measure/draw，
+                // 而历史启动崩溃正是崩在 measure 阶段 → pending 被提前清掉，Safe Mode 形同失效。
+                // 改用 OnDrawListener：这一帧 draw 结束才回调；若这帧在组合/测量/绘制中崩了，回调不会发生。
+                val decor = window.decorView
+                val vto = decor.viewTreeObserver
+                var done = false
+                vto.addOnDrawListener(object : android.view.ViewTreeObserver.OnDrawListener {
+                    override fun onDraw() {
+                        if (done) return
+                        done = true
+                        // 不能在 onDraw 内直接移除监听（会抛 IllegalStateException），交给下一轮消息
+                        decor.post {
+                            runCatching { vto.removeOnDrawListener(this) }
+                            runCatching { top.wkbin.taixu.host.TaixuShellGuard.markRendered(this@MainActivity) }
+                        }
+                    }
+                })
             }
             val themeMode by settingsDataStore.themeMode.collectAsStateWithLifecycle(initialValue = "system")
             val dynamicColorEnabled by settingsDataStore.dynamicColorEnabled.collectAsStateWithLifecycle(initialValue = true)

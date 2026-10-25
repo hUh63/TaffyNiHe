@@ -104,7 +104,11 @@ internal fun CommandHubScreen(
     val zh = t.zh
     var running by remember { mutableStateOf(McpForegroundService.isRunning()) }
     var treeUri by remember { mutableStateOf(settings.treeUri) }
-    var endpoints by remember { mutableStateOf(filteredEndpoints(context, settings, settings.port)) }
+    // 端点只在「运行状态 / 端口」变化时重算。旧实现每秒 `NetworkInterface.getNetworkInterfaces()`
+    // 枚举一次网卡再把结果写进 State —— 首页因此每秒重组一次，且主线程多一次 syscall，纯浪费。
+    val endpoints = remember(running, settings.port) {
+        if (running) filteredEndpoints(context, settings, settings.port) else emptyList()
+    }
 
     val pickTree = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         if (uri != null) {
@@ -125,7 +129,6 @@ internal fun CommandHubScreen(
         treeUri?.let { EngineProvider.setWorkDirectory(context, it) }
         while (true) {
             running = McpForegroundService.isRunning()
-            endpoints = filteredEndpoints(context, settings, settings.port)
             delay(1000)
         }
     }

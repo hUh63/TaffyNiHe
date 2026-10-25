@@ -1,3 +1,36 @@
+## 塔菲逆核 v1.5.3 —— 排查第二轮：安全策略收敛 + 数据原子写 + 资源泄漏
+
+这一轮把上一版结尾列的「已知遗留」逐条翻源码核实了一遍 —— 其中 3 条在更早的版本里其实已经修掉了，
+真正还在的 1 条补上；另外又挖出 3 个新问题。
+
+### 1. 🔴 脚本引擎绕过了服务端的全部安全策略（唯一真正遗留的那条）
+`taffy_script` 里的 `tool(name, args)` 只走了 heavy 闸门，其余策略**全部绕过**：
+`disabledTools`（设置里禁用的工具形同虚设）、`blockDestructiveTools`（破坏性拦截失效）、
+每分钟限频，以及**自身 artifact 守卫** —— 也就是脚本可以读写塔菲自己的 APK 与内置 SO，直接破坏完整性校验。
+新增 `mcp/ToolPolicy.kt` 把「禁用 / 破坏性 / 限频 / 自身 artifact」收敛成一处，服务端与脚本共用同一套。
+
+### 2. 🟠 编辑器保存会截断用户文件
+`File.writeText` 先 `open(TRUNC)` 把目标截断成 0 字节再逐块写：大文件保存到一半被系统杀进程 / 存储写满，
+原文件就只剩 0 字节或半截内容（快照只是兜底，不是不丢）。
+新增 `core/AtomicWrite`（同目录临时文件 → `Files.move(ATOMIC_MOVE)`，不支持时逐级回退），
+编辑器「保存 / 另存」与分析页导出都改走它。
+
+### 3. 🟠 壳模式下引擎资源永不释放
+释放逻辑写在塔菲 `MainActivity.onDestroy`，但壳跑在**它自己的 Activity** 里，塔菲 MainActivity 启动壳后
+早就 `finish()` 了 —— 这条路径在壳模式下永远不会执行，SO 副本 / SQLite 句柄 / 模拟器与 Frida 会话
+会一直被持有到进程被杀。改为在 `Application` 注册 `ActivityLifecycleCallbacks`，最后一条 Activity
+真正结束（`isFinishing` 且非配置变更）时释放；按 Home 进后台不释放。
+
+### 4. 🟠 画布手势降级反而更慢（v1.5.2 引入的回归）
+上一版用「每次手势事件都 `gestureTick++`」实现降级计时，等于拖动时每帧写 State → **整页每帧重组**。
+改为 `AtomicLong` 时间戳 + 120ms 低频轮询：只在「开始 / 结束交互」各写一次 `interacting`，
+中间不产生重组；而且它只在 draw 阶段被读取，触发的是重绘而不是重组。
+
+### 核实后确认**早已修掉**的三条（不必再动）
+- **heavy 许可永久锁死**：`HeavyGate` 早已是「租约 + 看门狗」，租约（调用超时 + 120s）到期即回收槽位并计 `leaked`
+- **备份恢复不清空目标目录**：`FullBackup.restore` 早已 `stageTargetDirs()` 把整目录挪开再恢复，成功后丢弃旧目录
+- **抓包服务 stop 不关连接**：`HttpCaptureServer` 早已维护 `activeSockets`，`stop()` 里逐个 close
+
 ## 塔菲逆核 v1.5.2 —— 全仓缺陷排查：修 4 个真 bug
 
 本轮做了一遍全仓扫描（290 个自有 Kotlin 文件，主线程阻塞 / 资源泄漏 / 异常吞咽 / 索引越界 / 状态错位 / 非空断言逐项过），

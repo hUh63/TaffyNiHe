@@ -1145,7 +1145,9 @@ internal fun SettingsEditorPage(t: UiText) {
                 val target = forcePath ?: currentFilePath
                 if (target != null && File(target).isFile) {
                     snapshotIfChanged(target)
-                    val ok = runCatching { File(target).writeText(text); true }.getOrDefault(false)
+                    // 原子写：先写同目录临时文件再 rename。直接 writeText 会先把原文件截断，
+                    // 写到一半被杀（大文件 / 存储满）就只剩 0 字节或半截内容。
+                    val ok = com.soreverse.mcp.core.AtomicWrite.text(File(target), text)
                     if (ok) {
                         // 写完刷新指纹，避免下一次保存把自己刚写的当成外部修改
                         val fresh = FileStampUtil.stamp(File(target))
@@ -1177,7 +1179,7 @@ internal fun SettingsEditorPage(t: UiText) {
         val text = code
         scope.launch {
             val target = File(File(context.filesDir, "editor_files").apply { mkdirs() }, "$base-${System.currentTimeMillis()}.$ext")
-            val ok = withContext(Dispatchers.IO) { runCatching { target.writeText(text); true }.getOrDefault(false) }
+            val ok = withContext(Dispatchers.IO) { com.soreverse.mcp.core.AtomicWrite.text(target, text) }
             if (ok) {
                 savedCode = text
                 currentFile = target.name

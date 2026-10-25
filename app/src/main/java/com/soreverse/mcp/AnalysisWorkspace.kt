@@ -11031,7 +11031,7 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
             val name = "taffy_${spec.key}_${System.currentTimeMillis()}.${if (tabSep) "tsv" else "csv"}"
             // 写到外部私有目录（无需额外权限），路径稳定可被文件管理/分享访问
             val out = java.io.File(exportsDir(context), name)
-            val okW = withContext(Dispatchers.IO) { runCatching { out.writeText(text); true }.getOrDefault(false) }
+            val okW = withContext(Dispatchers.IO) { com.soreverse.mcp.core.AtomicWrite.text(out, text) }
             saved = if (okW) (if (zh) "已保存：${out.absolutePath}" else "saved: ${out.absolutePath}")
                 else (if (zh) "保存失败" else "save failed")
         }

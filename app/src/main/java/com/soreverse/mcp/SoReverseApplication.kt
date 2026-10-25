@@ -37,5 +37,35 @@ class SoReverseApplication : TaiXuApplication() {
         }
         AppLog.i("权限状态: Root=${if (PermissionManager.isRootAvailable()) "可用" else "不可用"} · Shizuku=${if (PermissionManager.isShizukuGranted()) "已授权" else "未授权"} · READ_LOGS=${if (PermissionManager.hasReadLogs(this)) "已授予" else "未授予"}")
         AppLog.i("Logcat 查看器: 无特权时显示应用日志；全系统日志需 Root/Shizuku 或 adb 授权 READ_LOGS")
+        // 引擎资源回收点：壳跑在它自己的 Activity（top.wkbin.taixu.MainActivity）里，
+        // 塔菲 MainActivity 启动壳之后就已经 finish —— 旧实现把释放写在塔菲 MainActivity.onDestroy，
+        // 壳模式下那条路径永远不会执行，SO 副本 / SQLite 句柄 / 模拟器与 Frida 会话会一直被持有到进程被杀。
+        runCatching { registerActivityLifecycleCallbacks(EngineReleaseCallbacks()) }
+            .onFailure { AppLog.w("注册引擎释放回调失败: ${it.message}") }
     }
+}
+
+/**
+ * 「最后一条 Activity 结束」时释放引擎持有的进程级资源。
+ * 只在真的退出（isFinishing 且非配置变更）时释放；按 Home 键进后台不释放，回来还能接着用。
+ */
+private class EngineReleaseCallbacks : android.app.Application.ActivityLifecycleCallbacks {
+    private var started = 0
+
+    override fun onActivityStarted(activity: android.app.Activity) {
+        started++
+    }
+
+    override fun onActivityStopped(activity: android.app.Activity) {
+        started = (started - 1).coerceAtLeast(0)
+        if (started == 0 && activity.isFinishing && !activity.isChangingConfigurations) {
+            runCatching { com.soreverse.mcp.core.EngineProvider.close(activity.applicationContext) }
+        }
+    }
+
+    override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) = Unit
+    override fun onActivityResumed(activity: android.app.Activity) = Unit
+    override fun onActivityPaused(activity: android.app.Activity) = Unit
+    override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) = Unit
+    override fun onActivityDestroyed(activity: android.app.Activity) = Unit
 }

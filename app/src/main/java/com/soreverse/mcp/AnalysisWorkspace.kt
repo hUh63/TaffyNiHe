@@ -4608,8 +4608,11 @@ private fun FuncXRefView(
             "data" to (if (zh) "数据引用" else "Data"),
             "graph" to (if (zh) "图形化" else "Graph"),
         )
-        TabRow(
+        // 等分 TabRow 会把 4 个中文标签各压到 1/4 屏宽 → 「外部引用」被截成「外部引...」。
+        // 改成可滚动页签：每个 Tab 按内容取宽（保底 90dp），窄屏也永远显示完整标签。
+        ScrollableTabRow(
             selectedTabIndex = xrefTabs.indexOfFirst { it.first == tab }.coerceAtLeast(0),
+            edgePadding = 0.dp,
             containerColor = cs.surface,
             contentColor = cs.primary,
             divider = { HorizontalDivider(color = cs.outlineVariant) },
@@ -4618,7 +4621,15 @@ private fun FuncXRefView(
                 Tab(
                     selected = tab == k,
                     onClick = { tab = k },
-                    text = { Text(l, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    text = {
+                        Text(
+                            l,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    },
                 )
             }
         }
@@ -5553,6 +5564,69 @@ private fun highlightPseudo(line: String, cs: androidx.compose.material3.ColorSc
     }
 }
 
+/**
+ * 伪 C 的反编译警告面板：`// WARNING:` 注释与 boundaryWarning 集中在这里，默认收起。
+ * 旧实现把警告混进代码行、单行 Ellipsis —— 结果「满屏红字报错且每行都被截断」。
+ */
+@Composable
+private fun PseudoWarnPanel(
+    boundary: String,
+    warns: List<String>,
+    open: Boolean,
+    onToggle: () -> Unit,
+    zh: Boolean,
+) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        shape = RoundedCornerShape(AppShape.sm),
+        color = cs.errorContainer.copy(alpha = 0.35f),
+        border = BorderStroke(1.dp, cs.error.copy(alpha = 0.35f)),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().clickable { onToggle() }.padding(horizontal = 10.dp, vertical = 7.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Filled.Warning, null, tint = cs.error, modifier = Modifier.size(15.dp))
+                Text(
+                    buildString {
+                        append(if (zh) "反编译警告" else "Decompiler warnings")
+                        if (warns.isNotEmpty()) append(" ").append(warns.size)
+                        if (boundary.isNotBlank()) append(if (zh) " · 有越界输出" else " · boundary")
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (open) (if (zh) "收起" else "Hide") else (if (zh) "展开" else "Show"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = cs.error,
+                )
+            }
+            if (open) {
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (boundary.isNotBlank()) {
+                        Text(boundary, style = MaterialTheme.typography.bodySmall, color = cs.onSurface)
+                    }
+                    warns.forEachIndexed { i, w ->
+                        Text(
+                            "${i + 1}.  $w",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = cs.onSurface.copy(alpha = 0.9f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** 伪 C 代码视图（对齐 Explorer So fragment_pseudo_c.xml）：
  *  顶部 meta 行（padding 8dp / bg surfaceVariant / labelSmall）放转换器与范围信息 + 复制全部 / 导出；
  *  下方两栏：行号槽（bg surfaceVariant / monospace 13sp / 右对齐）+ 代码区（monospace 13sp / 行距 +2dp）。 */
@@ -5586,9 +5660,24 @@ private fun PseudoView(
     val warn = obj?.optString("boundaryWarning").cleanNull().orEmpty()
     val usedEngine = obj?.optString("engine").cleanNull().orEmpty()
 
-    val allLines = remember(pseudo) { if (pseudo.isBlank()) emptyList() else pseudo.split("\n") }
+    val rawLines = remember(pseudo) { if (pseudo.isBlank()) emptyList() else pseudo.split("\n") }
+    // 反编译警告（rz-ghidra / r2dec 的 `// WARNING: …` 注释）从代码里抽出来集中展示：
+    // 旧实现把它们混在代码行里，窄屏上每行都被 Ellipsis 截断，看起来像「满屏报错」。
+    val pseudoWarns = remember(rawLines) {
+        rawLines.map { it.trim() }
+            .filter { it.startsWith("// WARNING") || it.startsWith("//WARNING") }
+            .map { it.removePrefix("//").trim().removePrefix("WARNING:").trim() }
+            .filter { it.isNotEmpty() }
+    }
+    val allLines = remember(rawLines) {
+        rawLines.filter {
+            val t = it.trim()
+            !(t.startsWith("// WARNING") || t.startsWith("//WARNING"))
+        }
+    }
     val truncated = allLines.size > 3000
     val lines = remember(allLines) { if (truncated) allLines.take(3000) else allLines }
+    var warnsOpen by remember(pseudo) { mutableStateOf(false) }
     val vs = rememberScrollState()
     val codeStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp)
     val gutterW = (lines.size.toString().length.coerceAtLeast(2) * 9 + 20).dp
@@ -5673,7 +5762,15 @@ private fun PseudoView(
                     }
                 }
             }
-            if (warn.isNotBlank()) AnalysisErrorBanner(warn)
+            if (warn.isNotBlank() || pseudoWarns.isNotEmpty()) {
+                PseudoWarnPanel(
+                    boundary = warn,
+                    warns = pseudoWarns,
+                    open = warnsOpen,
+                    onToggle = { warnsOpen = !warnsOpen },
+                    zh = zh,
+                )
+            }
             // 代码区（行号槽 + 代码，共用一套竖向滚动）
             Box(Modifier.weight(1f).fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 Column(
@@ -6179,67 +6276,79 @@ private fun CfgNodeListView(
                         val collapsedNow = r.rowId in collapsed.value
                         val insnOpen = r.index in expandedInsn.value
                         Column(Modifier.fillMaxWidth()) {
-                            ListItem(
-                                modifier = Modifier.fillMaxWidth().widthIn(min = 360.dp),
-                                leadingContent = {
-                                    // 缩进用 leading 的左侧内边距表达（层级一眼可见）；三角是 40dp 独立点击区
-                                    IconButton(
-                                        onClick = {
-                                            collapsed.value = if (collapsedNow) collapsed.value - r.rowId
-                                            else collapsed.value + r.rowId
-                                            if (!collapsedNow) expandedInsn.value = expandedInsn.value - r.index
-                                        },
-                                        enabled = !leaf,
-                                        modifier = Modifier.padding(start = (minOf(r.depth, 8) * 16).dp).size(40.dp),
-                                    ) {
-                                        Text(
-                                            if (leaf) "●" else if (collapsedNow) "▶" else "▼",
-                                            fontSize = 15.sp,
-                                            color = if (leaf) cs.onSurfaceVariant else cs.primary,
-                                        )
+                            // 行即整宽（旧实现给 ListItem 加了 widthIn(min = 360.dp)，窄屏直接横向溢出 →
+                            // 标题被切、「N 条指令 | mnemonic」被切、展开的指令看起来「挂到别的节点下面」）。
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable {
+                                        expandedInsn.value = if (insnOpen) expandedInsn.value - r.index
+                                        else expandedInsn.value + r.index
                                     }
-                                },
-                                headlineContent = {
+                                    .padding(
+                                        start = (10 + minOf(r.depth, 8) * 14).dp,
+                                        end = 8.dp,
+                                        top = 5.dp,
+                                        bottom = 5.dp,
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(28.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(enabled = !leaf) {
+                                            val next = !collapsedNow
+                                            collapsed.value =
+                                                if (next) collapsed.value + r.rowId else collapsed.value - r.rowId
+                                            if (next) expandedInsn.value = expandedInsn.value - r.index
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        if (leaf) "●" else if (collapsedNow) "▶" else "▼",
+                                        fontSize = 11.sp,
+                                        color = if (leaf) cs.onSurfaceVariant else cs.primary,
+                                    )
+                                }
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                                     Text(
                                         blockTitle(b, r),
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 12.5.sp,
                                         fontWeight = if (r.entry || r.ref) FontWeight.SemiBold else FontWeight.Normal,
                                         color = when {
                                             r.ref -> cs.error
                                             r.entry -> cs.primary
                                             else -> cs.onSurface
                                         },
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
-                                supportingContent = {
-                                    val (cnt, head) = insnOf(b)
-                                    Text(
-                                        "$cnt " + (if (zh) "条指令" else "insns") + (if (head.isBlank()) "" else " | $head"),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = cs.onSurfaceVariant,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                },
-                                trailingContent = {
-                                    TextButton(onClick = {
-                                        expandedInsn.value = if (insnOpen) expandedInsn.value - r.index
-                                        else expandedInsn.value + r.index
-                                    }) {
-                                        Text(if (insnOpen) (if (zh) "收起" else "Hide") else (if (zh) "指令" else "Insns"))
-                                    }
-                                },
-                            )
+                                    val (cnt, head) = insnOf(b)
+                                    Text(
+                                        "$cnt " + (if (zh) "条指令" else "insns") +
+                                            (if (head.isBlank()) "" else "  ·  $head"),
+                                        fontSize = 11.sp,
+                                        color = cs.onSurfaceVariant,
+                                        maxLines = 2,
+                                    )
+                                }
+                                Text(
+                                    if (insnOpen) (if (zh) "收起" else "Hide") else (if (zh) "指令" else "Insns"),
+                                    fontSize = 11.sp,
+                                    color = if (insnOpen) cs.primary else cs.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
+                            }
 
                         // ── 块内指令明细（点「指令」按钮展开）──
                         if (insnOpen) {
                             val detail = insns[b.addrValue].orEmpty()
                             Column(
                                 Modifier.fillMaxWidth().padding(
-                                    start = (8 + minOf(r.depth, 8) * 16 + 36 + 6).dp,
-                                    end = 16.dp, bottom = 8.dp,
+                                    start = (10 + minOf(r.depth, 8) * 14 + 28 + 2).dp,
+                                    end = 8.dp, bottom = 8.dp,
                                 ),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
@@ -6258,10 +6367,8 @@ private fun CfgNodeListView(
                                         Text(
                                             "${i + 1}.  $ins",
                                             fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp,
+                                            fontSize = 11.5.sp,
                                             color = cs.onSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                 }
@@ -12949,7 +13056,7 @@ private fun buildCallSubgraph(
     // 因此交互画布的上限收到 1500（Exbin 用的是自绘 View + dotMode，能扛 50000）；被截断时统计行的
     //「显示 N/总数」会如实标出。用户显式填了更大的值则按其值（最多 5000）。
     val cap = if (mode == "full") {
-        (if (maxNodes <= 120) 1500 else maxNodes).coerceIn(100, 5000)
+        (if (maxNodes <= 120) 800 else maxNodes).coerceIn(100, 5000)
     } else {
         maxNodes.coerceIn(10, 2000)
     }

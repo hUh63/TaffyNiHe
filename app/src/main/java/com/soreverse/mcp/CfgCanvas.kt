@@ -70,6 +70,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
@@ -89,6 +90,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
@@ -261,7 +263,10 @@ internal class CfgLayoutResult(
     val entryIndex: Int,
     val loopHeadIndices: Set<Int>,
     val returnIndices: Set<Int>,
-)
+) {
+    /** 边路径缓存（世界坐标，键 = routing + density）：大图每帧重建上千条 Path 会让手势直接失灵。 */
+    internal val edgePathCache = HashMap<String, Triple<Path, Path, Path>>()
+}
 
 /** 布局过程中的可变节点。 */
 private class LNode(val index: Int, var key: Int) {
@@ -1716,6 +1721,14 @@ internal fun CfgCanvas(
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     var selected by remember(graph) { mutableStateOf(-1) }
     var fitted by remember(graph) { mutableStateOf(false) }
+    // 手势进行中：临时降级绘制（不画文字/箭头），松手 180ms 后恢复 —— 大图上这是「能不能拖动」的分水岭。
+    var interacting by remember { mutableStateOf(false) }
+    LaunchedEffect(interacting) {
+        if (interacting) {
+            delay(180)
+            interacting = false
+        }
+    }
     // 大图自动进入简化视图（只画块骨架）：块数 > 260 时只画骨架，保证大图流畅。
     val simpleView = graph.blocks.size > 260
     // 单指拖动节点后的位置偏移。
@@ -1830,13 +1843,14 @@ internal fun CfgCanvas(
                 }
                 .pointerInput(Unit) {
                     detectTransformGestures { _, panChange, zoom, _ ->
+                        if (!interacting) interacting = true
                         scale = (scale * zoom).coerceIn(CFG_MIN_SCALE, CFG_MAX_SCALE)
                         if (!dragModeS.value) pan += panChange
                     }
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                drawCfgScene(effective, colors, density, scale, pan, size, simpleView, selected, ui.bgStyle, ui.routing, highlightTexts)
+                drawCfgScene(effective, colors, density, scale, pan, size, simpleView || interacting, selected, ui.bgStyle, ui.routing, highlightTexts)
             }
 
             // 布局在后台线程计算中（ELK 大图尤其慢）：显示加载态，而不是先闪一屏「空图」
@@ -2067,6 +2081,33 @@ internal fun CfgCanvas(
     }
 }
 
+/** 把全部边按颜色合并成 3 条世界坐标 Path（缓存到布局对象上，routing + density 作键）。 */
+private fun CfgLayoutResult.mergedEdgePaths(routing: String, density: Float): Triple<Path, Path, Path> {
+    val key = routing + "|" + density
+    edgePathCache[key]?.let { return it }
+    val jump = Path()
+    val fail = Path()
+    val back = Path()
+    val radius = 9f * density
+    routes.forEach { r ->
+        if (r.points.size < 2) return@forEach
+        val target = when {
+            r.isBack -> back
+            r.kind == "fail" -> fail
+            else -> jump
+        }
+        val one = when (routing) {
+            "polyline" -> polylineCfgPath(r.points)
+            "spline" -> splineCfgPath(r.points)
+            else -> roundedOrthoPath(r.points, radius)
+        }
+        target.addPath(one)
+    }
+    val v = Triple(jump, fail, back)
+    edgePathCache[key] = v
+    return v
+}
+
 /**
  * CFG 场景绘制（Composable 画布与 PNG 导出共用同一套绘制，保证导出与所见一致）。
  * viewportSize 为画布尺寸；导出时可传整图尺寸 + scale=1 + pan=Zero 得到全景。
@@ -2108,47 +2149,53 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     // 大图渲染降级：完整模式可能是几千节点 / 上万条边，每帧全量画路径 + 箭头会把主线程压到
     // 几十毫秒一帧 → 手势完全失灵（即「切到完整模式后图控制不了」）。边多时只画线不画箭头，
     // 再多则整段跳过（缩到 0.42 以下本来已降级为圆点，边也看不清）。
-    val drawEdges = layout.routes.size <= 3000
-    val drawEdgeArrows = layout.routes.size <= 1200
-    if (drawEdges) layout.routes.forEach { r ->
-        if (r.points.size < 2) return@forEach
-        val color = when {
-            r.isBack -> backColor
-            r.kind == "fail" -> failColor
-            else -> jumpColor
-        }
-        val lineW = if (r.isBack) strokeW * 1.9f else strokeW
-        val effect = if (r.kind == "fail" && !r.isBack) dash else null
-        val screenPts = r.points.map { Offset(px(it.x), py(it.y)) }
-        val path = when (routing) {
-            "polyline" -> polylineCfgPath(screenPts)
-            "spline" -> splineCfgPath(screenPts)
-            else -> roundedOrthoPath(screenPts, 9f * density * scl)
-        }
-        drawPath(
-            path,
-            color,
-            style = Stroke(
-                width = lineW,
-                pathEffect = effect,
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round,
-            ),
-        )
-        if (drawEdgeArrows) {
-            val tip = r.points[r.points.size - 1]
-            val prev = r.points[r.points.size - 2]
-            arrowHead(
-                Offset(px(tip.x), py(tip.y)),
-                Offset(px(prev.x), py(prev.y)),
-                color,
-                arrowSize * (if (r.isBack) 1.35f else 1f),
+    val drawEdges = layout.routes.size <= 4000
+    val drawEdgeArrows = !simpleView && layout.routes.size <= 900
+    if (drawEdges && layout.routes.isNotEmpty()) {
+        // 旧实现每帧给每条边 new Path + new List<Offset>：完整模式（上千条边）下每帧几十到上百毫秒，
+        // 拖动事件全被丢掉 —— 表现为「图卡住拖不动，但按钮还有反应」。
+        // 现在把边按颜色合并成 3 条世界坐标 Path（缓存在布局对象上），绘制时用 canvas 变换一次到位。
+        val merged = layout.mergedEdgePaths(routing, density)
+        val invSc = if (sc > 0.0001f) 1f / sc else 1f
+        withTransform({
+            translate(originX, originY)
+            scale(sc, sc, pivot = Offset.Zero)
+        }) {
+            drawPath(
+                merged.third,
+                backColor,
+                style = Stroke(width = strokeW * 1.9f * invSc, cap = StrokeCap.Round, join = StrokeJoin.Round),
             )
+            drawPath(
+                merged.first,
+                jumpColor,
+                style = Stroke(width = strokeW * invSc, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+            drawPath(
+                merged.second,
+                failColor,
+                style = Stroke(
+                    width = strokeW * invSc,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(9f * density, 6f * density), 0f),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
+            )
+            if (drawEdgeArrows) {
+                layout.routes.forEach { r ->
+                    if (r.isBack || r.points.size < 2) return@forEach
+                    val tip = r.points[r.points.size - 1]
+                    val prev = r.points[r.points.size - 2]
+                    arrowHead(tip, prev, if (r.kind == "fail") failColor else jumpColor, arrowSize * invSc)
+                }
+            }
         }
     }
 
     // ── 节点（按角色分层：入口/返回/循环头/普通/选中）──
-    val showText = !simpleView && sc >= TEXT_HIDE_SCALE
+    // 大图（> 400 块）即使不算「简化视图」，也不画节点文字：每帧上千次 measureText + drawText
+    // 是拖动手感的头号杀手；放大到能看清时（sc 大）文字会被 maxTextW 过滤自然消失。
+    val showText = !simpleView && sc >= TEXT_HIDE_SCALE && layout.boxes.size <= 400
     val nodeStroke = max(1f, 1f * density * scl)
     val radius = CornerRadius(8f * density * scl)
     val barW = 3.5f * density * scl

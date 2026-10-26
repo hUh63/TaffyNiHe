@@ -1,3 +1,25 @@
+## 塔菲逆核 v1.5.5 —— 排查第四轮：MCP 工具参数与路径边界
+
+这一轮用脚本把 167 个工具的 **schema 声明** 与 **代码实际读取的参数** 做了一次全量对账，又用路径白名单反查写文件类参数。
+大部分命中是「别名兼容（如 path/dir/filePath 都认）」的误报，真问题 3 个：
+
+### 1. 🟠 `taffy_apk_rebuild` 的 `output` 能把产物写到任意位置
+旧实现直接 `File(custom)`：MCP 客户端传一个绝对路径就能把产物写到工作区之外（绕过 `WorkspacePolicy`）；
+传相对名又会在 Android 上被解析成 `/<name>`，根本写不进去 —— 这个参数实际上只有「绝对路径」一种用法是通的。
+改为**必须落在输出目录内**（绝对路径若不在 outRoot 下则退化为取文件名，相对名按 outRoot 解析）。
+
+### 2. 🟠 `taffy_compile` 的 `output` 可路径穿越
+`File(outDir, outName)` 里 `outName` 若含 `../` 就能把产物写到 `compiled/` 之外。改为只取文件名部分。
+
+### 3. 🟡 `taffy_so_pseudoc_batch` 的 `skipImports` 参数没声明
+工具描述里写着「可用 `skipImports=false` 关闭」，但 schema 里没有这个字段 —— 客户端传了也会被丢弃，等于这个开关不存在。
+补上声明。
+
+### 对账结论（这些**不是** bug）
+- `taffy_apk_sign_kill` 读 `dir`/`filePath`、`taffy_compile` 读 `path`：都是旧参数名的兼容回退（新名优先），不影响使用
+- `taffy_smali_batch` 的 `targetPath`：属于 `rollback` 的共享读取，`path` 已在 schema 里
+- `WorkspacePolicy.PATH_KEYS` 已覆盖 30+ 路径参数名并递归下探嵌套对象/数组，未发现其它绕过点
+
 ## 塔菲逆核 v1.5.4 —— 排查第三轮：协程异常与取消语义 + 会话校验 + 伪 C 虚拟化
 
 上一版结尾挂着的四条，这次全部落地。

@@ -150,8 +150,12 @@ internal fun appLightColors(accent: Color, highContrast: Boolean) = lightColorSc
     onPrimary = Color.White,
     primaryContainer = accent.copy(alpha = 0.12f),
     onPrimaryContainer = Color(0xFF0B1B33),
-    secondary = Color(0xFFE8E8ED),
-    onSecondary = Color(0xFF1C1C1E),
+    // M3 的 secondary 是**强调色槽**（次要但必须可见），不是「次级背景」。
+    // 这里原来填的是 iOS 的 secondarySystemBackground 灰（E8E8ED），与 background
+    // F2F2F7 几乎同色 —— 任何拿它当图标/按钮底色的地方都直接隐形（首页两个功能格
+    // 的图标、eDBG「部署」按钮在浅色下都看不见）。
+    secondary = Color(0xFF56607A),
+    onSecondary = Color.White,
     secondaryContainer = Color(0xFFF2F2F7),
     onSecondaryContainer = Color(0xFF1C1C1E),
     tertiary = AppPalette.indigo,
@@ -178,8 +182,10 @@ internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Bool
     onPrimary = Color.White,
     primaryContainer = accent.copy(alpha = 0.18f),
     onPrimaryContainer = Color(0xFFE8F1FF),
-    secondary = Color(0xFF2C2C2E),
-    onSecondary = Color(0xFFF5F5F7),
+    // 同上：原来是 0xFF2C2C2E，和 surfaceContainerHigh **一字不差**，
+    // 深色主题下用 secondary 着色的图标/按钮等于完全不可见。
+    secondary = Color(0xFFA8B3C7),
+    onSecondary = Color(0xFF1C1C1E),
     secondaryContainer = Color(0xFF3A3A3C),
     onSecondaryContainer = Color(0xFFF5F5F7),
     tertiary = Color(0xFF5E5CE6),

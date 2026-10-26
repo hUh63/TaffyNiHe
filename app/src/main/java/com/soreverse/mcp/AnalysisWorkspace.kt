@@ -7542,7 +7542,7 @@ private suspend fun rzFetch(
         if (out.isBlank()) return@runCatchingCancellable (null as Any?) to ""
         val parsed: Any = runCatching {
             if (out.startsWith("[")) JSONArray(out) as Any else JSONObject(out) as Any
-        }.getOrElse { return@runCatching (null as Any?) to "输出不是 JSON：${out.take(120)}" }
+        }.getOrElse { return@runCatchingCancellable (null as Any?) to "输出不是 JSON：${out.take(120)}" }
         parsed to ""
     }.getOrElse { (null as Any?) to (it.message ?: "command failed") }
 }

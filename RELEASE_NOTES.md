@@ -1,3 +1,27 @@
+## 塔菲逆核 v1.5.4 —— 排查第三轮：协程异常与取消语义 + 会话校验 + 伪 C 虚拟化
+
+上一版结尾挂着的四条，这次全部落地。
+
+### 1. 🟠 155 处 `scope.launch` 没有异常兜底
+`rememberCoroutineScope()` / `lifecycleScope` 都没有 `CoroutineExceptionHandler` —— 块里漏一个 catch，
+异常就直接走 `Thread.uncaughtExceptionHandler`，用户看到的是**闪退**。而工具调用、文件读写、JSON 解析
+全在这些块里。新增 `core/safeLaunch`（异常记日志、不吞 `CancellationException`），
+29 个文件 155 处调用点全部换过去；块内 `return@launch` 标签同步改为 `return@safeLaunch`。
+
+### 2. 🟠 87 处 `withContext(IO){ runCatching { … } }` 吞掉取消
+`runCatching` 把 `CancellationException` 也 catch 成 `Result.failure`：页面切走 / `LaunchedEffect` 重启后
+协程本该立刻取消，却被当成「业务失败」继续往下跑 —— 继续调 native、继续写已销毁的 UI 状态。
+新增 `core/runCatchingCancellable`（只 catch 真异常，取消继续上抛），87 处全部替换，标签一并同步。
+
+### 3. 🟠 伪 C 代码区 3000 行一次性组合
+超大函数进伪C 页要把最多 3000 个 `Row`+`Text` 全部组合出来，卡好几秒且全驻内存。
+改为 `LazyColumn` 虚拟化：行号槽固定、代码区共享一个横向滚动 state（Lazy 只组合可见的十几行，
+所以「共享 state」不会带来多组件争抢的开销）。
+
+### 4. 🟠 `Mcp-Session-Id` 任意值都被接受
+旧实现把客户端带来的任意字符串当成有效会话写进表里，等于会话隔离形同虚设。
+按规范改为：带了 `Mcp-Session-Id` 但服务端不认识（伪造 / 过期 / 服务重启）→ **404**，让客户端重新 `initialize`。
+
 ## 塔菲逆核 v1.5.3 —— 排查第二轮：安全策略收敛 + 数据原子写 + 资源泄漏
 
 这一轮把上一版结尾列的「已知遗留」逐条翻源码核实了一遍 —— 其中 3 条在更早的版本里其实已经修掉了，

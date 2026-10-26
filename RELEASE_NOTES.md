@@ -1,3 +1,62 @@
+## 塔菲逆核 v1.5.7 —— ELF 解析的正确性与健壮性（用真实 SO 逐字段对账找出的一批）
+
+拿 `libandroidx.graphics.path.so`（10KB / 24 节区 / 带 .gnu.version）当探针，把引擎每一条
+解析链与 `readelf` 逐字段对账，加上对畸形 ELF 的变异测试，这一轮修的是**数据正确性**，
+不是界面。
+
+### 1. 所有重定位的符号名都错位一格（影响导入表、PLT 标注、交叉引用）
+
+ELF 的 `.dynsym[0]` 一定是空符号。两条解析路径都按「名字为空就跳过」收集符号，于是列表
+整体前移一格 —— 而重定位的 `symIndex`、`.gnu.version` 的下标，用的都是**原始符号表**下标。
+
+实测后果：
+- `.rela.dyn` 里每条 `R_AARCH64_RELATIVE`（本身不引用符号）都被标成 `__cxa_finalize`；
+- `.rela.plt` 里 `free` 被标成 `JNI_OnLoad`，全部往后串一位；
+- 反汇编里「导入符号地址提示」（`; __cxa_atexit` 这类注释）跟着一起错。
+
+修法：额外维护 `rawSymbols` / `rawDynSymbols` 两份按原始下标对齐的表，只给重定位与版本
+解析用，展示列表照旧过滤空名。
+
+### 2. 符号版本在主路径恒为空
+
+`symbolVersions` 只有手写 `ElfParser` 会填，LIEF 主路径完全不带 —— 于是
+`taffy_so_versions` 的输在正常设备上永远是空表。新增 `engine/ElfGnuVersions.kt`，
+按原始 `.dynsym` 表下标解析 `.gnu.version` / `.gnu.version_r` / `.gnu.version_d`，
+两条路径共用同一份实现（顺带把 old 实现里同样的错位问题一并解决）。
+
+### 3. 概览里的「PLT 桩」计数在主路径永远是 0
+
+native 侧 `build_reloc_json` 的 `section` 字段一直传空串，而 `pltStubs` 的判据是
+`relocations.count { it.section.contains("plt") }`。改为 LIEF 的 `reloc.section()->name()`
+（重定位**作用于**的节，PLT 重定位落在 `.got.plt`）；手写路径同步改成同样的语义
+（按 `r_offset` 落在哪个节区间反查），两条路径的「节」列从此一致。
+
+### 4. 负的 addend 被写成 18 位数
+
+`addend` 是 `int64_t`，原来按 `uint64_t` 输出，负数变成 `18446744073709551612`，Kotlin 端
+`optLong` 再回绕成另一个值（org.json 对大整数会先转 Double）。改有符号输出。
+
+### 5. 畸形 ELF 能把解析打崩
+
+`sectionBytes` / `RawSection.bytes` 里 `start + size` 用的是 Int 加法，两侧都能接近
+`Int.MAX_VALUE`（例如 `sh_offset=1000`、`sh_size=0x7FFFFF00`），相加回绕成负数后
+`copyOfRange(start, 负数)` 直接抛 `IllegalArgumentException`。改用 Long 运算并夹到文件长度。
+变异测试：对 400 个畸形头部样本，旧实现 104 个抛异常，新实现 0 个。
+
+### 6. APK 里 >64MiB 的 SO 打不开（而同一个 SO 解到本地能开）
+
+`readSource` 的 APK 分支上限是 `maxMemory/8`（多数机器 32~64MiB），`libil2cpp.so`
+（Unity）、`libUE4.so`（UE）都远超这个数，直接从 APK 选就失败。本地文件路径却允许到
+512MiB —— 同一个文件不该因为「从哪进」而一半能开一半不能开。改成统一按当前堆余量
+（headroom/2，下限 16MiB、上限 512MiB），超限提示给出 MiB 数与「先解到本地再打开」的建议。
+
+### 7. 大文件读取吃掉双份内存，且 OOM 时整个进程会崩
+
+`readBytesChannel` 先 `allocateDirect(size)` 再拷一份到 `ByteArray`，峰值翻倍；更麻烦的是
+direct 分配失败抛 `OutOfMemoryError`（`Error` 不是 `Exception`），原来的
+`catch (Exception)` 捕不到，会直接带崩进程。改为直接读进堆上 `ByteArray`，捕获改为
+`Throwable`，并挡掉 `size<=0` / `size>Int.MAX` 的入参。
+
 ## 塔菲逆核 v1.5.6 —— 退出界面时不要把在跑的 MCP 服务一起废掉
 
 v1.5.3 把引擎资源释放点从「塔菲 MainActivity.onDestroy」挪到了 `Application` 的

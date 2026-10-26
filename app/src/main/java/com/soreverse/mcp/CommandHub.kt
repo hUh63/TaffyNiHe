@@ -145,7 +145,9 @@ internal fun CommandHubScreen(
     val sats = remember(zh) { workbenchTiles(zh) }
     // 工作目录只显示末段名字，完整路径在设置里看
     val dirName = remember(treeUri) {
-        treeUri?.lastPathSegment?.substringAfterLast(':')?.takeIf { it.isNotBlank() }
+        // Uri.getLastPathSegment() 对 opaque URI 会抛 UnsupportedOperationException。SAF 正常返回
+        // tree URI（hierarchical）不受影响，但首页不该因为一个目录名崩掉。
+        runCatching { treeUri?.lastPathSegment?.substringAfterLast(':')?.takeIf { it.isNotBlank() } }.getOrNull()
     }
 
     Column(

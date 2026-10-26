@@ -264,34 +264,39 @@ class McpHttpServer(private val context: Context, private val port: Int, private
             append("Mcp-Session-Id", sessionId)
         }
 
-        call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
-            // Send initial SSE hello with session ID
-            val endpoint = JSONObject().put("uri", "/mcp").put("method", "POST")
-            writeStringUtf8("event: endpoint\ndata: $endpoint\n\n: Taffy ready (session=$sessionId)\n\n")
-            flush()
+        try {
+            call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
+                // Send initial SSE hello with session ID
+                val endpoint = JSONObject().put("uri", "/mcp").put("method", "POST")
+                writeStringUtf8("event: endpoint\ndata: $endpoint\n\n: Taffy ready (session=$sessionId)\n\n")
+                flush()
 
-            // Keep connection alive with heartbeats until timeout
-            val startTime = System.currentTimeMillis()
-            while (System.currentTimeMillis() - startTime < SESSION_TIMEOUT_MS) {
-                delay(15_000) // 15s heartbeat
-                val sessionAge = System.currentTimeMillis() - (sessions[sessionId] ?: 0)
-                if (sessionAge > SESSION_TIMEOUT_MS) {
-                    sessions.remove(sessionId)
-                    AppLog.i("SSE session expired: $sessionId")
-                    break
-                }
-                try {
-                    writeStringUtf8(": heartbeat\n\n")
-                    flush()
-                } catch (e: Exception) {
-                    AppLog.w("SSE heartbeat write failed: ${e.message}")
-                    break
+                // Keep connection alive with heartbeats until timeout
+                val startTime = System.currentTimeMillis()
+                while (System.currentTimeMillis() - startTime < SESSION_TIMEOUT_MS) {
+                    delay(15_000) // 15s heartbeat
+                    val sessionAge = System.currentTimeMillis() - (sessions[sessionId] ?: 0)
+                    if (sessionAge > SESSION_TIMEOUT_MS) {
+                        sessions.remove(sessionId)
+                        AppLog.i("SSE session expired: $sessionId")
+                        break
+                    }
+                    try {
+                        writeStringUtf8(": heartbeat\n\n")
+                        flush()
+                    } catch (e: Exception) {
+                        AppLog.w("SSE heartbeat write failed: ${e.message}")
+                        break
+                    }
                 }
             }
+        } finally {
+            // 客户端直接断开时 respondBytesWriter 会抛（写失败/协程取消），而清理原先写在
+            // 它后面 —— 一抛异常这条会话就留在表里直到 30 分钟超时，把 sessions（上限 512）
+            // 的槽位白占着。放到 finally 里保证任何退出路径都回收。
+            sessions.remove(sessionId)
+            AppLog.i("SSE client disconnected: session=$sessionId")
         }
-
-        sessions.remove(sessionId)
-        AppLog.i("SSE client disconnected: session=$sessionId")
     }
 
     private class RequestTooLargeException : Exception()

@@ -144,7 +144,15 @@ object ApkEditorTool {
 
         private fun resolveOutput(args: JSONObject, outRoot: File, defaultName: String): File {
             val custom = args.str("output")
-            val out = if (custom.isNotBlank()) File(custom) else File(outRoot, defaultName)
+            // output 允许指定名字，但必须是 outRoot 内的路径：
+            // 旧实现直接 File(custom)，MCP 客户端可以用一个绝对路径把产物写到任意位置（绕过工作区策略）；
+            // 而相对名在 Android 上会被解析成 "/<name>"，根本写不进去。
+            val out = if (custom.isNotBlank()) {
+                val f = File(custom)
+                if (f.isAbsolute && !f.absolutePath.startsWith(outRoot.absolutePath + File.separator)) {
+                    File(outRoot, f.name)
+                } else if (f.isAbsolute) f else File(outRoot, f.name)
+            } else File(outRoot, defaultName)
             if (out.exists()) {
                 // force 语义原来完全没参与判断：force=false 也先删掉旧产物再覆盖，
                 // 一旦本次构建失败，上一次的结果就被白毁了。

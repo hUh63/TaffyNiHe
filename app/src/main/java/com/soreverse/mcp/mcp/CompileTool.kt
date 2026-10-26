@@ -165,7 +165,8 @@ object CompileTool {
             val outName = args.str("output").ifBlank {
                 srcFile.nameWithoutExtension + if (shared) ".so" else ""
             }
-            val outFile = File(outDir, outName)
+            // 只取文件名部分：output 里带 ../ 会把产物写到 compiled/ 之外
+            val outFile = File(outDir, File(outName).name)
 
             // 组装编译命令
             val sharedFlag = if (shared) "-shared -fPIC" else ""

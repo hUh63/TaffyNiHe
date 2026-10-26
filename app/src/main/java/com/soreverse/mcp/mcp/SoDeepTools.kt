@@ -870,6 +870,7 @@ object SoDeepTools {
                 "count" int "生成函数数量(默认 5, 上限 30)"
                 "startIndex" int "从第几个函数开始(默认 0)"
                 "filter" str "只处理函数名含该子串的函数"
+                "skipImports" bool "自动跳过 sym.imp.* / imp.* 导入桩(默认 true；显式给了 filter 时不生效)"
                 "outFile" str "可选: 把结果合并写入该文件名(保存到 App 的 pseudoc-out/ 目录)"
             })
         }

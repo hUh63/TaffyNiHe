@@ -6947,7 +6947,7 @@ private fun DemangleView(zh: Boolean, context: android.content.Context) {
             val res = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
                     val handler = com.soreverse.mcp.mcp.ToolCatalog.byName["taffy_so_demangle"]
-                        ?: return@runCatching null
+                        ?: return@runCatchingCancellable null
                     val tcx = com.soreverse.mcp.mcp.ToolContext(
                         context,
                         com.soreverse.mcp.core.SettingsStore(context),
@@ -7266,7 +7266,7 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
         val r = withContext(Dispatchers.IO) {
             runCatchingCancellable {
                 val eng = com.soreverse.mcp.nativecore.NativeEngine.active()
-                if (!eng.available()) return@runCatching null
+                if (!eng.available()) return@runCatchingCancellable null
                 eng.assemble(src, arch, addr, false)
             }.getOrNull()
         }
@@ -7299,7 +7299,7 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
                             .ifBlank { eo.optJSONObject("data")?.optString("editSessionId").orEmpty() }
                         if (sid.isNotBlank()) sessionId = sid
                     }
-                    if (sid.isBlank()) return@runCatching JSONObject()
+                    if (sid.isBlank()) return@runCatchingCancellable JSONObject()
                         .put("error", JSONObject().put("message", if (zh) "无法创建编辑会话" else "could not open edit session"))
                     val edit = JSONObject()
                         .put("writeAsm", asm.trim())
@@ -7347,7 +7347,7 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
                             .ifBlank { eo.optJSONObject("data")?.optString("editSessionId").orEmpty() }
                         if (sid.isNotBlank()) sessionId = sid
                     }
-                    if (sid.isBlank()) return@runCatching JSONObject()
+                    if (sid.isBlank()) return@runCatchingCancellable JSONObject()
                         .put("error", JSONObject().put("message", if (zh) "无法创建编辑会话" else "could not open edit session"))
                     eng.editAppend(ws, sid, outHex)
                 }.getOrElse { JSONObject().put("error", JSONObject().put("message", it.message ?: "failed")) }
@@ -7537,7 +7537,7 @@ private suspend fun rzFetch(
     runCatchingCancellable {
         val r = EngineProvider.get(context).rzCommand(ws, "", cmd)
         val err = errMessageOf(r.toString())
-        if (err.isNotBlank()) return@runCatching (null as Any?) to err
+        if (err.isNotBlank()) return@runCatchingCancellable (null as Any?) to err
         val out = r.optString("stdout").ifBlank { r.optString("text") }.trim()
         if (out.isBlank()) return@runCatching (null as Any?) to ""
         val parsed: Any = runCatching {
@@ -9156,7 +9156,7 @@ private suspend fun callMcpTool(
     args: JSONObject,
 ): JSONObject? = withContext(Dispatchers.IO) {
     runCatchingCancellable {
-        val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatching null
+        val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatchingCancellable null
         val tcx = com.soreverse.mcp.mcp.ToolContext(
             context,
             com.soreverse.mcp.core.SettingsStore(context),

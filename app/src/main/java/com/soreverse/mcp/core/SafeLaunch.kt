@@ -2,10 +2,10 @@ package com.soreverse.mcp.core
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * `scope.launch` 的兜底版本：块内任何未捕获异常只记日志，不再把整个进程打崩。

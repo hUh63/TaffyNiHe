@@ -867,7 +867,7 @@ internal fun SettingsEditorPage(t: UiText) {
             var via = "jedi"
             val lspOk = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
-                    if (!LspClient.ensureStarted(context)) return@runCatching false
+                    if (!LspClient.ensureStarted(context)) return@runCatchingCancellable false
                     LspClient.didChange(code)
                     when (kind) {
                         "complete" -> {
@@ -950,7 +950,7 @@ internal fun SettingsEditorPage(t: UiText) {
         scope.safeLaunch {
             val ok = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
-                    if (!LspClient.ensureStarted(context)) return@runCatching false
+                    if (!LspClient.ensureStarted(context)) return@runCatchingCancellable false
                     LspClient.didChange(code)
                     Thread.sleep(1200)
                     true

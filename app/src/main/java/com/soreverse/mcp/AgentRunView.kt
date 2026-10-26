@@ -98,7 +98,7 @@ internal fun AgentRunView(
 
     suspend fun callTool(name: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         runCatchingCancellable {
-            val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatching null
+            val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatchingCancellable null
             val tcx = com.soreverse.mcp.mcp.ToolContext(
                 context,
                 com.soreverse.mcp.core.SettingsStore(context),

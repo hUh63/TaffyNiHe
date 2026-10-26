@@ -67,6 +67,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 抓包图形化页：三区（HTTP 抓包 / 采集工具 / 教程）。
@@ -134,9 +136,9 @@ internal fun CapturePage(t: UiText) {
     fun replay(e: HttpCaptureServer.Entry) {
         replaying = true
         replayResult = ""
-        scope.launch {
+        scope.safeLaunch {
             replayResult = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val conn = java.net.URL(e.url).openConnection() as java.net.HttpURLConnection
                     conn.requestMethod = e.method.uppercase()
                     conn.connectTimeout = 8000
@@ -192,7 +194,7 @@ internal fun CapturePage(t: UiText) {
         if (busy) return
         busy = true
         busyMsg = action
-        scope.launch {
+        scope.safeLaunch {
             try {
                 val res = withContext(Dispatchers.IO) {
                     val ctx = ToolContext(context, settings, EngineProvider.get(context))
@@ -221,7 +223,7 @@ internal fun CapturePage(t: UiText) {
     }
 
     fun probeEnv() {
-        scope.launch {
+        scope.safeLaunch {
             tcpdumpOk = withContext(Dispatchers.IO) {
                 val r = PermissionManager.exec("which tcpdump 2>/dev/null || ls /system/xbin/tcpdump /data/local/tmp/tcpdump 2>/dev/null", timeoutSec = 8)
                 r.stdout.isNotBlank() || r.stderr.contains("tcpdump")

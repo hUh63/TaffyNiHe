@@ -41,6 +41,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 设置 → APK Manifest 编辑：图形化编辑 AndroidManifest
@@ -99,9 +101,9 @@ internal fun SettingsApkEditPage(t: UiText) {
             return
         }
         loading = true
-        scope.launch {
+        scope.safeLaunch {
             val res = withContext(Dispatchers.IO) {
-                runCatching { ManifestEditTools.manifestEdit.handle(handle(), JSONObject().put("action", "get").put("path", path)) }
+                runCatchingCancellable { ManifestEditTools.manifestEdit.handle(handle(), JSONObject().put("action", "get").put("path", path)) }
             }
             loading = false
             res.onSuccess { r ->
@@ -124,9 +126,9 @@ internal fun SettingsApkEditPage(t: UiText) {
         }
         loading = true
         error = ""
-        scope.launch {
+        scope.safeLaunch {
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val args = JSONObject().put("action", action).put("path", path)
                     pairs.forEach { (k, v) -> args.put(k, v) }
                     ManifestEditTools.manifestEdit.handle(handle(), args)
@@ -153,10 +155,10 @@ internal fun SettingsApkEditPage(t: UiText) {
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             loading = true
             val dst = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "input.apk"
                     val f = File(context.cacheDir, "apk_edit_${System.currentTimeMillis()}.apk")
                     context.contentResolver.openInputStream(uri)?.use { i -> f.outputStream().use { o -> i.copyTo(o) } }

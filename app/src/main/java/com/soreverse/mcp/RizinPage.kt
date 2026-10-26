@@ -50,6 +50,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * Rizin 引擎页（图形化分析工作台，对标 Explorer So）。
@@ -135,12 +137,12 @@ internal fun RizinPage(t: UiText) {
 
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = if (zh) "正在打开并分析…" else "Opening & analyzing…"
             errMsg = ""
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val input = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalStateException("read failed")
                     val f = File(context.cacheDir, "rz_open_${System.currentTimeMillis()}.so")
@@ -168,7 +170,7 @@ internal fun RizinPage(t: UiText) {
     fun runCommand(cmd: String) {
         val c = cmd.trim()
         if (c.isEmpty() || workspaceId.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = "rz $c"
             // 引擎异常会逃到 scope 的协程里（无 handler 时直接崩进程），
@@ -190,7 +192,7 @@ internal fun RizinPage(t: UiText) {
 
     fun openDisasm(locator: String) {
         if (locator.isBlank() || workspaceId.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = if (zh) "反汇编 $locator" else "Disassembling $locator"
             try {
@@ -212,7 +214,7 @@ internal fun RizinPage(t: UiText) {
 
     fun loadStringsIfNeeded() {
         if (strings.isNotEmpty() || workspaceId.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = if (zh) "提取字符串…" else "Extracting strings…"
             try {

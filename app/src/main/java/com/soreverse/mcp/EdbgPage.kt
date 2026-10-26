@@ -53,6 +53,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /** 数值比较内核版本（旧代码用字符串比较，"5.9" 会被判为 ≥"5.10"，属逻辑错误）。 */
 private fun versionAtLeast(value: String, min: String): Boolean {
@@ -118,11 +120,11 @@ internal fun EdbgPage(t: UiText) {
 
     val decompileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = if (zh) "正在反编译…" else "Decompiling…"
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val input = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         ?: throw IllegalStateException("read failed")
                     val f = File(context.cacheDir, "edbg_decompile_input")
@@ -143,7 +145,7 @@ internal fun EdbgPage(t: UiText) {
     }
 
     fun probe() {
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = if (zh) "检测环境…" else "Probing…"
             env = withContext(Dispatchers.IO) {
@@ -155,7 +157,7 @@ internal fun EdbgPage(t: UiText) {
     }
 
     fun runAction(action: String) {
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = when (action) {
                 "launch" -> if (zh) "启动调试…" else "Launching…"
@@ -191,7 +193,7 @@ internal fun EdbgPage(t: UiText) {
     }
 
     fun viewClass(cls: String) {
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             busyMsg = if (zh) "反编译 $cls" else "Decompiling $cls"
             classSource = withContext(Dispatchers.IO) {

@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 internal fun launchSoScan(
     context: Context,
@@ -25,7 +27,7 @@ internal fun launchSoScan(
     if (state.scanning) return null
     state.scanning = true
     state.message = if (zh) "正在扫描 SO 文件…" else "Scanning SO files…"
-    return scope.launch {
+    return scope.safeLaunch {
         try {
             val loaded = withContext(Dispatchers.IO) { loadSoSources(context.applicationContext, settings.defaultLimit, zh) }
             state.soSources = loaded.first
@@ -52,7 +54,7 @@ internal fun launchBasicAnalysis(
     if (state.analyzingSoPath != null || state.deepAnalyzingPath != null) return null
     state.analyzingSoPath = path
     state.message = if (zh) "正在分析 $name…" else "Analyzing $name…"
-    return scope.launch {
+    return scope.safeLaunch {
         try {
             val detail = withContext(Dispatchers.IO) { openSoForUi(context.applicationContext, path, zh) }
             state.message = detail.second
@@ -91,7 +93,7 @@ internal fun launchBasicAnalysisFromApk(
     state.analyzingSoPath = analysisKey
     state.message = if (zh) "正在提取并分析 $libName…" else "Extracting and analyzing $libName…"
     state.detailMessage = if (zh) "正在提取并分析 $libName…" else "Extracting and analyzing $libName…"
-    return scope.launch {
+    return scope.safeLaunch {
         try {
             val cachePath = withContext(Dispatchers.IO) {
                 extractSoFromApkEntry(context.applicationContext, apkPath, entryName)
@@ -100,7 +102,7 @@ internal fun launchBasicAnalysisFromApk(
                 val errorMsg = if (zh) "无法从 APK 中提取 $libName" else "Cannot extract $libName from APK"
                 state.message = errorMsg
                 state.detailMessage = errorMsg
-                return@launch
+                return@safeLaunch
             }
             state.extractedSoPaths = state.extractedSoPaths + (analysisKey to cachePath)
             val detail = withContext(Dispatchers.IO) { openSoForUi(context.applicationContext, cachePath, zh) }
@@ -138,11 +140,11 @@ internal fun openSoAndAnalyze(
     if (state.analyzingSoPath != null || state.deepAnalyzingPath != null) return null
     state.analyzingSoPath = path
     state.message = if (zh) "正在打开 ${path.substringAfterLast('/')}…" else "Opening ${path.substringAfterLast('/')}…"
-    return scope.launch {
+    return scope.safeLaunch {
         var analysisStarted = false
         try {
             val result = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val engine = EngineProvider.get(context)
                     engine.open(path, temporary = false)
                 }
@@ -183,7 +185,7 @@ internal fun launchWorkspaceAnalysis(
     if (state.analyzingSoPath != null || state.deepAnalyzingPath != null) return null
     state.analyzingSoPath = workspaceId
     state.message = if (zh) "正在分析 $name…" else "Analyzing $name…"
-    return scope.launch {
+    return scope.safeLaunch {
         try {
             val detail = withContext(Dispatchers.IO) { analyzeWorkspaceForUi(context.applicationContext, workspaceId, zh) }
             state.message = detail.second
@@ -252,7 +254,7 @@ internal fun launchDeepAnalysis(
     state.deepEvidencePreview = ""
     state.deepError = ""
     deepService.resetReportDraft(resetWorkspace = request.isBlank())
-    return scope.launch {
+    return scope.safeLaunch {
         val collector = launch {
             deepService.events.collect { event ->
                 if (event.kind != DeepAnalysisEvent.Kind.DONE && event.kind != DeepAnalysisEvent.Kind.TEXT) {

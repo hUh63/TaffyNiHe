@@ -45,6 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 权限管理页（设置 → 诊断与关于 → 权限管理）。
@@ -106,7 +107,7 @@ internal fun SettingsPermissionsPage(t: UiText, onBack: () -> Unit) {
     fun runProbe() {
         if (probing) return
         probing = true; probeText = ""
-        scope.launch {
+        scope.safeLaunch {
             try {
                 probeText = withContext(Dispatchers.IO) { PermissionManager.selfTest().toString(2) }
             } catch (e: Throwable) {

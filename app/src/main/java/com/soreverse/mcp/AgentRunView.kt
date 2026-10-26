@@ -49,6 +49,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 多智能体编排页。
@@ -95,7 +97,7 @@ internal fun AgentRunView(
         .ifBlank { snapshot?.optJSONObject("record")?.optString("conclusion").orEmpty() }
 
     suspend fun callTool(name: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatching null
             val tcx = com.soreverse.mcp.mcp.ToolContext(
                 context,
@@ -109,7 +111,7 @@ internal fun AgentRunView(
 
     /** 轮询到结束：1.2s 一次，最多 30 分钟（编排本身有 wallClock 上限）。 */
     fun poll(id: String) {
-        scope.launch {
+        scope.safeLaunch {
             var guard = 0
             var failures = 0
             while (guard < 1500) {
@@ -140,7 +142,7 @@ internal fun AgentRunView(
         busy = true
         error = ""
         statusJson = ""
-        scope.launch {
+        scope.safeLaunch {
             val args = JSONObject()
                 .put("action", "run")
                 .put("goal", goal.trim())
@@ -153,7 +155,7 @@ internal fun AgentRunView(
             if (r == null || !r.optBoolean("ok", false)) {
                 error = r?.optJSONObject("error")?.optString("message").orEmpty()
                     .ifBlank { if (zh) "启动失败：AI 未配置或引擎异常" else "failed to start" }
-                return@launch
+                return@safeLaunch
             }
             val id = r.optString("runId")
             runId = id
@@ -174,7 +176,7 @@ internal fun AgentRunView(
         if (id.isBlank()) return
         busy = true
         error = ""
-        scope.launch {
+        scope.safeLaunch {
             val r = callTool(
                 "taffy_agent_run",
                 JSONObject().put("action", "resume").put("runId", id).put("zh", zh),
@@ -183,7 +185,7 @@ internal fun AgentRunView(
             if (r == null || !r.optBoolean("ok", false)) {
                 error = r?.optJSONObject("error")?.optString("message").orEmpty()
                     .ifBlank { if (zh) "续跑失败" else "resume failed" }
-                return@launch
+                return@safeLaunch
             }
             runId = id
             poll(id)
@@ -193,14 +195,14 @@ internal fun AgentRunView(
     fun cancel() {
         val id = runId
         if (id.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             callTool("taffy_agent_run", JSONObject().put("action", "cancel").put("runId", id))
         }
     }
 
     fun loadHistory() {
         showHistory = true
-        scope.launch {
+        scope.safeLaunch {
             val r = callTool("taffy_agent_run", JSONObject().put("action", "list").put("limit", 20))
             historyJson = r?.optJSONArray("runs")?.toString().orEmpty()
         }
@@ -285,7 +287,7 @@ internal fun AgentRunView(
             showHistory -> HistoryPane(historyJson, zh) { runId2 ->
                 showHistory = false
                 runId = runId2
-                scope.launch {
+                scope.safeLaunch {
                     val s = callTool("taffy_agent_run", JSONObject().put("action", "get").put("runId", runId2))
                     statusJson = s?.toString().orEmpty()
                 }

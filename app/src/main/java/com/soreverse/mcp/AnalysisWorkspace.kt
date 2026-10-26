@@ -166,6 +166,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 选择文件的 ActivityResultContract：与 OpenDocument 相同，但额外请求
@@ -213,7 +215,7 @@ internal suspend fun resumeTaskWorkspace(
     tools.openError = ""
     tools.opening = true
     val opened = withContext(Dispatchers.IO) {
-        runCatching<JSONObject> { EngineProvider.get(context).open(path, false) }.getOrNull()
+        runCatchingCancellable<JSONObject> { EngineProvider.get(context).open(path, false) }.getOrNull()
     }
     tools.opening = false
     if (opened == null || !opened.optBoolean("ok", false)) {
@@ -300,7 +302,7 @@ internal fun AnalysisWorkspace(
         treeScope.launch {
             treeLoading = key
             val res = withContext(Dispatchers.IO) {
-                runCatching { EngineProvider.get(context).list(ws, "", key, "", 200) }.getOrNull()
+                runCatchingCancellable { EngineProvider.get(context).list(ws, "", key, "", 200) }.getOrNull()
             }
             treeChildren = treeChildren + (key to extractNames(res))
             treeLoading = ""
@@ -908,9 +910,9 @@ private fun WorkspacePicker(state: WorkspaceState, zh: Boolean) {
     var manualError by remember { mutableStateOf("") }
 
     fun openWorkspaceFile(path: String, fallbackName: String) {
-        scope.launch {
+        scope.safeLaunch {
             tools.opening = true; tools.openError = ""
-            val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).open(path, false) }.getOrNull() }
+            val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).open(path, false) }.getOrNull() }
             if (r != null && r.optBoolean("ok", false)) {
                 tools.sharedWorkspaceId = r.optString("workspaceId"); tools.sharedSoName = r.optString("soFileName").ifBlank { r.optString("fileName") }
                 val fname = tools.sharedSoName.ifBlank { fallbackName }
@@ -1059,8 +1061,8 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
             "decompile" -> {
                 SmBtn(if (zh) "反编译" else "Dec", bm, bp, {
                     val loc = tools.decompileTarget.trim(); if (loc.isEmpty()) return@SmBtn
-                    scope.launch { tools.decompileRunning = true; tools.decompileError = ""; tools.decompileResult = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzDecompile(tools.sharedWorkspaceId, "", loc, true) }.getOrNull() }
+                    scope.safeLaunch { tools.decompileRunning = true; tools.decompileError = ""; tools.decompileResult = ""
+                        val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).rzDecompile(tools.sharedWorkspaceId, "", loc, true) }.getOrNull() }
                         tools.decompileRunning = false
                         val text = if (r != null && r.optBoolean("ok", false)) r.optString("pseudocode").ifBlank { r.toString() }
                             else r?.optJSONObject("error")?.optString("message").orEmpty().ifBlank { r?.optString("error") ?: if (zh) "反编译失败" else "Failed" }
@@ -1079,23 +1081,23 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                 }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "unpack" -> {
-                SmBtn(if (zh) "分析" else "Analyze", bm, bp, { scope.launch { tools.unpackRunning = true
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
+                SmBtn(if (zh) "分析" else "Analyze", bm, bp, { scope.safeLaunch { tools.unpackRunning = true
+                    val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", "", 60) }.getOrNull() }
                     tools.unpackRunning = false; tools.addTab(tl, if (zh) "分析" else "Analyze", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.unpackRunning, loading = tools.unpackRunning)
-                SmBtn("SO", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", ".so", 60) }.getOrNull() }
+                SmBtn("SO", bm, bp, { scope.safeLaunch {
+                    val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "files", ".so", 60) }.getOrNull() }
                     tools.addTab(tl, "SO", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn("DEX", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "classes", "", 30) }.getOrNull() }
+                SmBtn("DEX", bm, bp, { scope.safeLaunch {
+                    val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).list(tools.sharedWorkspaceId, "", "classes", "", 30) }.getOrNull() }
                     tools.addTab(tl, "DEX", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "soanalyze" -> {
-                SmBtn(if (zh) "概览" else "Ovw", bm, bp, { scope.launch { tools.soAnalyzeRunning = true
-                    val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
-                    val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
+                SmBtn(if (zh) "概览" else "Ovw", bm, bp, { scope.safeLaunch { tools.soAnalyzeRunning = true
+                    val o = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).overview(tools.sharedWorkspaceId) }.getOrNull() }
+                    val c = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).rzScanCrypto(tools.sharedWorkspaceId) }.getOrNull() }
                     tools.soAnalyzeRunning = false
                     val merged = JSONObject()
                     if (o != null) merged.put("overview", o)
@@ -1113,11 +1115,11 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                     tools.cfgVisible = true
                     onShowCfg()
                     if (cfgTarget.isNotBlank()) {
-                        scope.launch {
+                        scope.safeLaunch {
                             tools.cfgLoading = true
                             tools.cfgTarget = cfgTarget
                             tools.cfgJson = ""
-                            val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", cfgTarget) }.getOrNull() }
+                            val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).rzCfg(tools.sharedWorkspaceId, "", cfgTarget) }.getOrNull() }
                             tools.cfgLoading = false
                             tools.cfgJson = r?.toString() ?: JSONObject().put("ok", false)
                                 .put("error", JSONObject().put("code", "TAFFY_UI_ERROR")
@@ -1137,23 +1139,23 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
             }
             "emulate" -> {
                 SmBtn(if (zh) "模拟" else "Emu", bm, bp, { val sym = tools.emulateSymbol.trim(); if (sym.isEmpty()) return@SmBtn
-                    scope.launch { tools.emulateRunning = true; tools.emulateError = ""
-                        val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", sym, org.json.JSONArray(), true) }.getOrNull() }
+                    scope.safeLaunch { tools.emulateRunning = true; tools.emulateError = ""
+                        val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", sym, org.json.JSONArray(), true) }.getOrNull() }
                         tools.emulateRunning = false
                         tools.addTab(tl, if (zh) "模拟" else "Emulate", r?.toString() ?: (tools.emulateError.ifBlank { if (zh) "失败" else "Failed" }))
                     }
                 }, enabled = tools.sharedWorkspaceId.isNotBlank() && tools.emulateSymbol.isNotBlank() && !tools.emulateRunning, loading = tools.emulateRunning)
-                SmBtn(if (zh) "寄存器" else "Regs", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", tools.emulateSymbol.ifBlank { "JNI_OnLoad" }, org.json.JSONArray(), true) }.getOrNull() }
+                SmBtn(if (zh) "寄存器" else "Regs", bm, bp, { scope.safeLaunch {
+                    val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).emulate(tools.sharedWorkspaceId, "", tools.emulateSymbol.ifBlank { "JNI_OnLoad" }, org.json.JSONArray(), true) }.getOrNull() }
                     tools.addTab(tl, if (zh) "寄存器" else "Registers", r?.toString() ?: (if (zh) "先模拟" else "emu first"))
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
-                SmBtn("Mem", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", 0L, 256) }.getOrNull() }
+                SmBtn("Mem", bm, bp, { scope.safeLaunch {
+                    val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).dumpMemory(tools.sharedWorkspaceId, "", 0L, 256) }.getOrNull() }
                     tools.addTab(tl, "Mem", r?.toString() ?: (if (zh) "先模拟" else "emu first"))
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
             }
             "frida" -> {
-                SmBtn(if (zh) "校验" else "Valid", bm, bp, { scope.launch {
+                SmBtn(if (zh) "校验" else "Valid", bm, bp, { scope.safeLaunch {
                     val script = tools.fridaScript.trim()
                     val errors = mutableListOf<String>()
                     if (script.isBlank()) errors.add(if (zh) "脚本为空" else "empty script")
@@ -1183,17 +1185,17 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                 }, enabled = true)
             }
             "rebuild" -> {
-                SmBtn(if (zh) "回编" else "Build", bm, bp, { scope.launch { tools.rebuildRunning = true
-                    val c = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editCheck(tools.sharedWorkspaceId, "") }.getOrNull() }
-                    val b = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
-                    val o = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
+                SmBtn(if (zh) "回编" else "Build", bm, bp, { scope.safeLaunch { tools.rebuildRunning = true
+                    val c = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).editCheck(tools.sharedWorkspaceId, "") }.getOrNull() }
+                    val b = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).build(tools.sharedWorkspaceId, "", tools.sharedSoName) }.getOrNull() }
+                    val o = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).listBuildOutputs() }.getOrNull() }
                     tools.rebuildRunning = false
                     val merged = JSONObject()
                     if (c != null) merged.put("editCheck", c); if (b != null) merged.put("build", b); if (o != null) merged.put("outputs", o)
                     tools.addTab(tl, if (zh) "回编" else "Build", merged.toString())
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank() && !tools.rebuildRunning, loading = tools.rebuildRunning)
-                SmBtn(if (zh) "补丁" else "Patch", bm, bp, { scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
+                SmBtn(if (zh) "补丁" else "Patch", bm, bp, { scope.safeLaunch {
+                    val r = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).editAudit(tools.sharedWorkspaceId, "") }.getOrNull() }
                     tools.addTab(tl, if (zh) "补丁" else "Patch", r?.toString() ?: if (zh) "无" else "none")
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 // 与「符号 / 字符串」视图重复 → 直接跳转。
@@ -1204,11 +1206,11 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                 // 与「字符串」视图重复 → 直接跳转。
                 SmBtn(if (zh) "字符串视图" else "Strings", bm, bp, { tools.analysisView = "strings" }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 // 编辑：读取地址数据展示可编辑格式
-                SmBtn(if (zh) "编辑" else "Edit", bm, bp, { scope.launch {
+                SmBtn(if (zh) "编辑" else "Edit", bm, bp, { scope.safeLaunch {
                     val addr = tools.disasmAddr.ifBlank { "0x0" }
-                    val read = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr, 0, 64) }.getOrNull() }
+                    val read = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr, 0, 64) }.getOrNull() }
                     val hexData = read?.optString("hex") ?: read?.optString("data") ?: read?.optString("result") ?: ""
-                    val edit = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).editHex(tools.sharedWorkspaceId, "", addr, org.json.JSONArray(), false) }.getOrNull() }
+                    val edit = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).editHex(tools.sharedWorkspaceId, "", addr, org.json.JSONArray(), false) }.getOrNull() }
                     val result = JSONObject()
                     result.put("address", addr); result.put("hexData", hexData)
                     val ascii = hexData.split(" ").filter { it.length == 2 }.map {
@@ -1220,11 +1222,11 @@ private fun ToolConsole(state: WorkspaceState, zh: Boolean, onAiAnalyze: (String
                     tools.editorEditResult = result.toString(2); tools.addTab(tl, if (zh) "编辑" else "Edit", tools.editorEditResult)
                 } }, enabled = tools.sharedWorkspaceId.isNotBlank())
                 // 对比：对比当前文件两个地址的数据
-                SmBtn(if (zh) "对比" else "Diff", bm, bp, { scope.launch {
+                SmBtn(if (zh) "对比" else "Diff", bm, bp, { scope.safeLaunch {
                     val addr1 = tools.disasmAddr.ifBlank { "0x0" }
                     val addr2 = tools.decompileTarget.ifBlank { "0x100" }
-                    val r1 = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr1, 0, 64) }.getOrNull() }
-                    val r2 = withContext(Dispatchers.IO) { runCatching<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr2, 0, 64) }.getOrNull() }
+                    val r1 = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr1, 0, 64) }.getOrNull() }
+                    val r2 = withContext(Dispatchers.IO) { runCatchingCancellable<JSONObject> { EngineProvider.get(ctx).hexdump(tools.sharedWorkspaceId, "", addr2, 0, 64) }.getOrNull() }
                     val hex1 = r1?.optString("hex") ?: r1?.optString("data") ?: ""; val hex2 = r2?.optString("hex") ?: r2?.optString("data") ?: ""
                     val result = JSONObject()
                     result.put("对比地址1(地址栏)", addr1); result.put("对比地址2(对比地址栏)", addr2)
@@ -1927,11 +1929,11 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
     fun load(off: Int) {
         val p = path.trim()
         if (p.isBlank()) { error = if (zh) "请先选择文件或填入绝对路径" else "Pick a file or enter an absolute path"; return }
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""
             val len = (lengthText.trim().toIntOrNull() ?: 512).coerceIn(16, 65536)
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     // v1.3.18: 原独立 hexdump 工具已收敛删除，这里直接用内置纯 Java HexDump。
                     // content:// 文档 URI（SAF 选文件带进来的路径）不能当文件路径打开，需走 ContentResolver。
                     val isUri = p.startsWith("content://")
@@ -2561,7 +2563,7 @@ private suspend fun loadListCache(
     if (tools.viewCache.containsKey(cacheKey)) return
     tools.viewLoading = cacheKey
     val r = withContext(Dispatchers.IO) {
-        runCatching { rawListCall(context, ws, view, prefix, limit) }.getOrNull()
+        runCatchingCancellable { rawListCall(context, ws, view, prefix, limit) }.getOrNull()
     }
     tools.viewLoading = ""
     tools.cacheView(
@@ -2583,7 +2585,7 @@ private suspend fun fetchDisasm(
     tools.viewLoading = key
     val annotate = tools.disasmAnnotate
     val r = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             EngineProvider.get(context).disasm(ws, "", target, limit, "", 0, 0, 65536, "", null, "auto", annotate)
         }.getOrNull()
     }
@@ -2632,15 +2634,15 @@ private fun loadCfg(
     tools.cfgKey = key
     tools.cfgTarget = target
     tools.cfgVisible = true
-    scope.launch {
+    scope.safeLaunch {
         tools.cfgLoading = true
         tools.cfgJson = ""
         val r = withContext(Dispatchers.IO) {
-            runCatching { EngineProvider.get(context).rzCfg(ws, "", target) }.getOrNull()
+            runCatchingCancellable { EngineProvider.get(context).rzCfg(ws, "", target) }.getOrNull()
         }
         // 只有最新的请求能回写：连点两个函数时 A 的请求可能晚于 B 完成，
         // 旧实现会把 A 的图写进 B 的页面，而且"是否需要重取"的判定还会因此成立而不再自愈。
-        if (tools.cfgReqToken != token) return@launch
+        if (tools.cfgReqToken != token) return@safeLaunch
         tools.cfgLoading = false
         tools.cfgJson = r?.toString()
             ?: errJson(if (zh) "CFG 查询失败：引擎无响应" else "CFG query failed: engine did not respond")
@@ -2773,7 +2775,7 @@ private fun CalcView(zh: Boolean, context: android.content.Context) {
                 else -> args.put(f.key, v)
             }
         }
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""; result = ""
             val r = callMcpTool(context, "taffy_calculate", args)
             loading = false
@@ -2856,7 +2858,7 @@ private fun IappView(zh: Boolean, context: android.content.Context) {
         val args = JSONObject().put("action", action)
         if (apkPath.isNotBlank()) args.put("path", apkPath.trim())
         if (soPath.isNotBlank()) args.put("soPath", soPath.trim())
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""; result = ""
             val r = callMcpTool(context, "taffy_iapp_decrypt", args)
             loading = false
@@ -4050,9 +4052,9 @@ private fun SearchView(
         if (busy) return
         busy = true
         header = if (zh) "搜索中…" else "searching…"
-        scope.launch {
+        scope.safeLaunch {
             val hits = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     var text = ""
                     for (c in listOf("s 0; $cmd", cmd)) {
@@ -4125,9 +4127,9 @@ private fun SearchView(
         }
         busy = true
         header = if (zh) "搜索中…" else "searching…"
-        scope.launch {
+        scope.safeLaunch {
             val json = withContext(Dispatchers.IO) {
-                runCatching { rawListCall(context, ws, src.first, "", 3000) }.getOrNull()
+                runCatchingCancellable { rawListCall(context, ws, src.first, "", 3000) }.getOrNull()
             }
             val base = rowsOf(json?.toString(), src.first)
             val sel = exbinFilterRows(base, q, caseSensitive, useRegex, src.second, tools.sigCache)
@@ -4538,7 +4540,7 @@ private fun FuncXRefView(
         if (ws.isBlank() || loc.isBlank()) return@LaunchedEffect
         loading = true
         val res = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val eng = EngineProvider.get(context)
                 // ⓪ 全局调用图（agC = FUNCALL 图）：节点是函数、边是调用关系。native 侧每次命令都会
                 //    先跑 rz_core_analysis_all，所以这份数据最稳 —— 作为「调用关系」的主来源。
@@ -5300,7 +5302,7 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                     Spacer(Modifier.size(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         SmallAction(if (zh) "生成计划" else "Build plan", loading = deFlatBusy) {
-                            scope.launch {
+                            scope.safeLaunch {
                                 deFlatBusy = true
                                 deFlatJson = ""
                                 val rr = callMcpTool(context, "taffy_so_deflatten", JSONObject()
@@ -5317,7 +5319,7 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                             if (zh) "写入出口重定向（$safeCount）" else "Apply ($safeCount)",
                             enabled = safeCount > 0 && !deFlatBusy,
                         ) {
-                            scope.launch {
+                            scope.safeLaunch {
                                 deFlatBusy = true
                                 val rr = callMcpTool(context, "taffy_so_deflatten", JSONObject()
                                     .put("workspaceId", ws)
@@ -5329,7 +5331,7 @@ private fun OllvmView(tools: ToolPagesState, zh: Boolean, context: android.conte
                             }
                         }
                         SmallAction(if (zh) "扫描 SO" else "Scan SO", loading = deFlatBusy) {
-                            scope.launch {
+                            scope.safeLaunch {
                                 deFlatBusy = true
                                 scanJson = ""
                                 val rr = callMcpTool(context, "taffy_so_deflatten", JSONObject()
@@ -5625,7 +5627,6 @@ private fun PseudoView(
     val truncated = allLines.size > 3000
     val lines = remember(allLines) { if (truncated) allLines.take(3000) else allLines }
     var warnsOpen by remember(pseudo) { mutableStateOf(false) }
-    val vs = rememberScrollState()
     val codeStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp)
     val gutterW = (lines.size.toString().length.coerceAtLeast(2) * 9 + 20).dp
 
@@ -5693,9 +5694,9 @@ private fun PseudoView(
                     copyToClipboard(context, pseudo, zh)
                 }
                 TonalMiniButton(if (zh) "导出" else "Export", Modifier.padding(start = 8.dp)) {
-                    scope.launch {
+                    scope.safeLaunch {
                         val f = withContext(Dispatchers.IO) {
-                            runCatching {
+                            runCatchingCancellable {
                                 val dir = exportsDir(context)
                                 if (!dir.exists()) dir.mkdirs()
                                 val nm = tools.selectedFunctionName.ifBlank { target }
@@ -5719,30 +5720,35 @@ private fun PseudoView(
                 )
             }
             // 代码区（行号槽 + 代码，共用一套竖向滚动）
-            Box(Modifier.weight(1f).fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                Column(
-                    Modifier.fillMaxHeight().verticalScroll(vs)
-                        .width(IntrinsicSize.Max).padding(bottom = 8.dp),
-                ) {
-                    lines.forEachIndexed { idx, line ->
-                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                            Box(
-                                Modifier.width(gutterW).fillMaxHeight()
-                                    .background(cs.surfaceVariant)
-                                    .padding(start = 12.dp, end = 8.dp),
-                                contentAlignment = Alignment.CenterEnd,
-                            ) {
-                                Text(
-                                    "${idx + 1}",
-                                    style = codeStyle,
-                                    color = cs.onSurfaceVariant,
-                                    textAlign = TextAlign.End,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                )
-                            }
+            // 代码区：LazyColumn 虚拟化。旧实现把最多 3000 行 Row+Text 一次性组合，
+            // 超大函数进伪C 页要卡好几秒（而且全在内存里）。
+            // 行号槽固定不动，代码区共享同一个横向滚动 state —— Lazy 只组合可见的十几行，
+            // 所以「共享 state」不会带来多组件争抢的开销。
+            val codeHScroll = rememberScrollState()
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                items(lines.size) { idx ->
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                        Box(
+                            Modifier.width(gutterW).fillMaxHeight()
+                                .background(cs.surfaceVariant)
+                                .padding(start = 12.dp, end = 8.dp),
+                            contentAlignment = Alignment.CenterEnd,
+                        ) {
                             Text(
-                                highlightPseudo(line, cs),
+                                "${idx + 1}",
+                                style = codeStyle,
+                                color = cs.onSurfaceVariant,
+                                textAlign = TextAlign.End,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(codeHScroll)) {
+                            Text(
+                                highlightPseudo(lines[idx], cs),
                                 style = codeStyle,
                                 color = cs.onSurface,
                                 maxLines = 1,
@@ -5751,7 +5757,9 @@ private fun PseudoView(
                             )
                         }
                     }
-                    if (truncated) {
+                }
+                if (truncated) {
+                    item {
                         Text(
                             if (zh) "… 已截断，仅显示前 3000 行（完整内容点「复制全部」）"
                             else "… truncated to first 3000 lines (use Copy for full text)",
@@ -5825,7 +5833,7 @@ private fun CfgView(
     LaunchedEffect(tools.cfgUi.contentMode, tools.cfgJson, target, ws) {
         if (ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
         val m = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 when (tools.cfgUi.contentMode) {
                     "pseudo" -> {
                         // 优先：r2dec 精确块映射（对标 Exbin BlockPseudoCProvider.convertWithBlockMap）
@@ -5886,7 +5894,7 @@ private fun CfgView(
 
     // 兜底：一键定位入口点（ELF 入口 → 首个函数 → 列表第一项）
     fun useEntryPoint() {
-        scope.launch {
+        scope.safeLaunch {
             tools.cfgLoading = true
             val p = resolveCfgEntry(context, tools)
             tools.cfgLoading = false
@@ -5912,9 +5920,9 @@ private fun CfgView(
     // 按需拉取单个块的指令（有些块不在本函数体内、pdfj 归并拿不到，展开时才补一次）。
     fun loadBlockInsns(addr: Long) {
         if (ws.isBlank() || addr <= 0L) return
-        scope.launch {
+        scope.safeLaunch {
             val list = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     val txt = rzText(eng.rzCommand(ws, "", "e scr.color=0; s " + java.lang.Long.toHexString(addr) + "; pdj"))
                     parsePdfjOps(txt).map { it.text }
@@ -6934,10 +6942,10 @@ private fun DemangleView(zh: Boolean, context: android.content.Context) {
     fun run() {
         val sym = input.trim()
         if (sym.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             working = true
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val handler = com.soreverse.mcp.mcp.ToolCatalog.byName["taffy_so_demangle"]
                         ?: return@runCatching null
                     val tcx = com.soreverse.mcp.mcp.ToolContext(
@@ -7256,7 +7264,7 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
         kotlinx.coroutines.delay(400)
         val src = asm.trim()
         val r = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val eng = com.soreverse.mcp.nativecore.NativeEngine.active()
                 if (!eng.available()) return@runCatching null
                 eng.assemble(src, arch, addr, false)
@@ -7278,12 +7286,12 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
     fun applyToSession(dryRun: Boolean) {
         if (ws.isBlank()) { patchErr = if (zh) "需先打开工作区才能写回" else "open a workspace first"; return }
         if (asm.isBlank() || locator.isBlank()) { patchErr = if (zh) "需要汇编内容与目标地址" else "need assembly + target address"; return }
-        scope.launch {
+        scope.safeLaunch {
             patching = true
             patchErr = ""; patchMsg = ""
             var sid = sessionId
             val r = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     if (sid.isBlank()) {
                         val eo = eng.editOpen(ws)
@@ -7326,12 +7334,12 @@ private fun AsmEditorView(tools: ToolPagesState, zh: Boolean, context: android.c
     fun applyAppend() {
         if (ws.isBlank()) { patchErr = if (zh) "需先打开工作区" else "open a workspace first"; return }
         if (outHex.isBlank()) { patchErr = if (zh) "请先输入可编码的汇编" else "assemble something first"; return }
-        scope.launch {
+        scope.safeLaunch {
             patching = true
             patchErr = ""; patchMsg = ""
             var sid = sessionId
             val r = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     if (sid.isBlank()) {
                         val eo = eng.editOpen(ws)
@@ -7526,7 +7534,7 @@ private suspend fun rzFetch(
     ws: String,
     cmd: String,
 ): Pair<Any?, String> = withContext(Dispatchers.IO) {
-    runCatching {
+    runCatchingCancellable {
         val r = EngineProvider.get(context).rzCommand(ws, "", cmd)
         val err = errMessageOf(r.toString())
         if (err.isNotBlank()) return@runCatching (null as Any?) to err
@@ -9147,7 +9155,7 @@ private suspend fun callMcpTool(
     name: String,
     args: JSONObject,
 ): JSONObject? = withContext(Dispatchers.IO) {
-    runCatching {
+    runCatchingCancellable {
         val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatching null
         val tcx = com.soreverse.mcp.mcp.ToolContext(
             context,
@@ -9312,7 +9320,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                     color = cs.primary,
                     modifier = Modifier.clip(RoundedCornerShape(6.dp))
                         .clickable(enabled = !exporting) {
-                            scope.launch {
+                            scope.safeLaunch {
                                 exporting = true
                                 val r = callMcpTool(context, "taffy_so_vtable",
                                     JSONObject().put("workspaceId", ws).put("action", "export")
@@ -9515,7 +9523,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         if (ws.isBlank()) return@LaunchedEffect
         loading = true; error = ""; note = ""
         val res = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val eng = EngineProvider.get(context)
                 var raw = ""
                 var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
@@ -9544,7 +9552,7 @@ private fun CallGraphView(tools: ToolPagesState, zh: Boolean, context: android.c
         nodes = n; edges = e; note = nt
         // 函数大小（供调用图节点卡：addr · size bytes · 调用/被调，对齐 Exbin GlobalCfgView）
         fnSizes = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val fns = rzArray(EngineProvider.get(context).rzCommand(ws, "", "aflj"))
                 val m = HashMap<String, Long>()
                 fns.forEach { o -> val nm = o.optString("name"); if (nm.isNotBlank()) m[nm] = o.optLong("size", -1L) }
@@ -9655,10 +9663,10 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
     fun load() {
         val a = addr.trim()
         if (a.isBlank() || ws.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""; info = ""
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     // 地址容错：用户常漏写 0x 前缀（此时 rizin 按十进制解释 → 落到未映射区 → 读取为空）。
                     val cands = if (a.startsWith("0x", true)) listOf(a) else listOf(a, "0x$a")
@@ -9695,9 +9703,9 @@ private fun AddrViewerView(tools: ToolPagesState, zh: Boolean, context: android.
     fun readPointer() {
         val a = addr.trim()
         if (a.isBlank() || ws.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             val txt = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     val cands = if (a.startsWith("0x", true)) listOf(a) else listOf(a, "0x$a")
                     var v = -1L
@@ -9928,7 +9936,7 @@ private fun FuncSigView(tools: ToolPagesState, zh: Boolean, context: android.con
 
     fun go() {
         if (ws.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""; ran = true
             val r = callMcpTool(context, "taffy_so_func_sig",
                 JSONObject().put("workspaceId", ws).put("locator", locator.trim())
@@ -10191,7 +10199,7 @@ private fun HardeningView(tools: ToolPagesState, zh: Boolean, context: android.c
         if (ws.isBlank()) return@LaunchedEffect
         loading = true; error = ""; ran = true
         val res = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val eng = EngineProvider.get(context)
                 // 1) 字符串清单（quiet，逐行；限流避免大 SO 内存爆）
                 val strRes = eng.rzCommand(ws, "", "izq")
@@ -10409,7 +10417,7 @@ private fun GlobalXRefView(
         if (ws.isBlank()) return@LaunchedEffect
         loading = true; error = ""; note = ""
         val res = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val eng = EngineProvider.get(context)
                 var raw = ""
                 var g: Pair<List<JSONObject>, List<Pair<String, String>>> = emptyList<JSONObject>() to emptyList()
@@ -10508,11 +10516,11 @@ private fun GlobalXRefView(
     /** 完整分析：跑 rizin `aaaa`（全量分析）后重建全局调用图，保证 SCC / 交叉引用基于完整调用关系。 */
     fun runFullAnalysis() {
         if (ws.isBlank() || deepLoading) return
-        scope.launch {
+        scope.safeLaunch {
             deepLoading = true
             savedMsg = if (zh) "完整分析中（aaaa）…" else "running full analysis (aaaa)…"
             withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     rzText(eng.rzCommand(ws, "", "aaaa"))
                 }
@@ -10996,13 +11004,13 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
     fun generate() {
         if (ws.isBlank()) return
         val lim = limit.toIntOrNull()?.coerceIn(1, 100000) ?: 2000
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""; text = ""; count = 0; saved = ""
             val res = withContext(Dispatchers.IO) {
-                runCatching { rzArray(EngineProvider.get(context).rzCommand(ws, "", spec.cmd)) }.getOrNull()
+                runCatchingCancellable { rzArray(EngineProvider.get(context).rzCommand(ws, "", spec.cmd)) }.getOrNull()
             }
             loading = false
-            if (res == null) { error = if (zh) "命令失败（${spec.cmd}）" else "command failed (${spec.cmd})"; return@launch }
+            if (res == null) { error = if (zh) "命令失败（${spec.cmd}）" else "command failed (${spec.cmd})"; return@safeLaunch }
             val rows = res.take(lim)
             count = rows.size
             val sep = if (tabSep) "\t" else ","
@@ -11026,7 +11034,7 @@ private fun ExportView(tools: ToolPagesState, zh: Boolean, context: android.cont
 
     fun saveToWorkspace() {
         if (text.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             saved = ""
             val name = "taffy_${spec.key}_${System.currentTimeMillis()}.${if (tabSep) "tsv" else "csv"}"
             // 写到外部私有目录（无需额外权限），路径稳定可被文件管理/分享访问
@@ -11195,7 +11203,7 @@ private fun UnpackView(tools: ToolPagesState, zh: Boolean, context: android.cont
         if (ws.isBlank() || scanned) return@LaunchedEffect
         scanning = true
         val res = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val eng = EngineProvider.get(context)
                 val txt = eng.rzCommand(ws, "", "izq").let { r -> r.optString("stdout").ifBlank { r.optString("text") } }
                 val strs = txt.split('\n').map { it.trim() }.filter { it.length in 3..300 }.take(50000)
@@ -12011,10 +12019,10 @@ private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.co
     fun load() {
         val loc = locator.trim().ifBlank { tools.selectedFunctionVa.ifBlank { tools.selectedFunctionName } }
         if (loc.isBlank() || ws.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""; ran = true
             val r = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val sigR = callMcpTool(context, "taffy_so_func_sig",
                         JSONObject().put("workspaceId", ws).put("locator", loc).put("count", 1))
                     val s = sigR?.optJSONArray("signatures")?.optJSONObject(0)
@@ -12025,7 +12033,7 @@ private fun FuncInfoView(tools: ToolPagesState, zh: Boolean, context: android.co
                 }.getOrNull()
             }
             loading = false
-            if (r == null) { error = if (zh) "取数失败（定位失败或引擎异常）" else "failed" ; return@launch }
+            if (r == null) { error = if (zh) "取数失败（定位失败或引擎异常）" else "failed" ; return@safeLaunch }
             sig = r.first; callers = r.second; callees = r.third
             if (sig == null && callers.isEmpty() && callees.isEmpty()) error = if (zh) "无数据：请检查函数名/地址" else "no data"
         }
@@ -12288,9 +12296,9 @@ private fun AnalyzeModeView(tools: ToolPagesState, zh: Boolean, context: android
 
     fun collectStats() {
         if (ws.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             val s = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val eng = EngineProvider.get(context)
                     val fns = rzArray(eng.rzCommand(ws, "", "aflj")).size
                     val strs = rzArray(eng.rzCommand(ws, "", "izj")).size
@@ -12310,12 +12318,12 @@ private fun AnalyzeModeView(tools: ToolPagesState, zh: Boolean, context: android
 
     fun run(mode: String) {
         if (ws.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             running = mode
             log = ""
             val cmd = if (mode == "full") "aaaa" else "aa"
             val r = withContext(Dispatchers.IO) {
-                runCatching { EngineProvider.get(context).rzCommand(ws, "", cmd) }.getOrNull()
+                runCatchingCancellable { EngineProvider.get(context).rzCommand(ws, "", cmd) }.getOrNull()
             }
             running = ""
             log = if (r == null) (if (zh) "分析命令失败" else "analysis failed")
@@ -12405,7 +12413,7 @@ private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.
     }
 
     fun run(block: suspend () -> JSONObject?, set: (String) -> Unit) {
-        scope.launch {
+        scope.safeLaunch {
             busy = true
             val r = block()
             busy = false
@@ -12557,7 +12565,7 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
 
     fun gen() {
         if (ws.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             loading = true; error = ""; text = ""
             val r = callMcpTool(context, "taffy_so_pseudoc_batch", JSONObject()
                 .put("workspaceId", ws)
@@ -12566,8 +12574,8 @@ private fun GlobalPseudoCView(tools: ToolPagesState, zh: Boolean, context: andro
                 .put("filter", filter.trim())
                 .put("outFile", outFile.trim()))
             loading = false
-            if (r == null) { error = if (zh) "引擎未就绪" else "engine not ready"; return@launch }
-            if (!r.optBoolean("ok", true)) { error = r.optString("error").ifBlank { r.optString("note") }; return@launch }
+            if (r == null) { error = if (zh) "引擎未就绪" else "engine not ready"; return@safeLaunch }
+            if (!r.optBoolean("ok", true)) { error = r.optString("error").ifBlank { r.optString("note") }; return@safeLaunch }
             okCount = r.optInt("generated", r.optInt("succeeded", r.optInt("okCount", 0)))
             failCount = r.optInt("failed", r.optInt("failCount", 0))
             val fns = r.optJSONArray("functions")
@@ -12691,7 +12699,7 @@ private fun StringDetailDialog(
         if (ws.isBlank() || row.va.isBlank()) return@LaunchedEffect
         loadingRefs = true
         refs = withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 parseRzArray(EngineProvider.get(context).rzCommand(ws, "", "s ${row.va}; axtj")) ?: emptyList()
             }.getOrDefault(emptyList())
         }
@@ -13526,7 +13534,7 @@ private fun CallGraphGraphPane(
         if (va.isBlank() || ws.isBlank()) { cfgPopupJson = ""; return@LaunchedEffect }
         popupLoading = true; cfgPopupJson = ""
         cfgPopupJson = withContext(Dispatchers.IO) {
-            runCatching { EngineProvider.get(context).rzCfg(ws, "", va).toString() }.getOrDefault("")
+            runCatchingCancellable { EngineProvider.get(context).rzCfg(ws, "", va).toString() }.getOrDefault("")
         }
         popupLoading = false
     }

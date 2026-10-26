@@ -59,6 +59,7 @@ import com.soreverse.mcp.core.UpdateDownloadEvent
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 更新页（UI 同步上游 SOMCP v1.0.21 设计：Hero 状态头卡 + 当前版本卡 + 更新日志）。
@@ -123,7 +124,7 @@ internal fun SettingsUpdatesPage(
         verifyNote = ""
         downloadPhase = if (forced != null) "downloading" else "probing"
         error = ""
-        downloadJob = scope.launch {
+        downloadJob = scope.safeLaunch {
             try {
                 manager.download(update, forced) { event ->
                     when (event) {
@@ -176,7 +177,7 @@ internal fun SettingsUpdatesPage(
         error = ""
         status = if (t.zh) "正在检查更新…" else "Checking for updates…"
         val updateChannel = if (target == "beta") UpdateChannel.BETA else UpdateChannel.STABLE
-        scope.launch {
+        scope.safeLaunch {
             manager.check(updateChannel)
                 .onSuccess { result ->
                     checking = false

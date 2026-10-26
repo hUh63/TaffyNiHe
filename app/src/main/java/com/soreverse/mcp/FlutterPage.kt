@@ -44,6 +44,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * Flutter / Dart AOT 分析视图（内置 Blutter Runner，全本地）。
@@ -143,7 +145,7 @@ internal fun FlutterView(
             return
         }
         inspecting = true; error = ""; notice = ""; inspect = null; result = null; jobId = ""; jobStatus = ""; jobStage = ""
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) { callBlutter(JSONObject().put("action", "inspect").put("path", target)) }
             inspecting = false
             if (!r.optBoolean("ok", false)) error = errorText(r) else inspect = r
@@ -162,13 +164,13 @@ internal fun FlutterView(
             return
         }
         analyzing = true; error = ""; notice = ""; result = null
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) { callBlutter(JSONObject().put("action", "analyze").put("path", target)) }
             analyzing = false
             val id = r.optString("jobId").takeIf { it.isNotBlank() && it != "null" }
             if (id == null) {
                 error = errorText(r)
-                return@launch
+                return@safeLaunch
             }
             jobId = id
             jobStatus = r.optString("status").ifBlank { "running" }
@@ -198,7 +200,7 @@ internal fun FlutterView(
 
     fun doCancel() {
         if (jobId.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             withContext(Dispatchers.IO) { callBlutter(JSONObject().put("action", "cancel").put("jobId", jobId)) }
             jobStatus = "cancelled"
             jobStage = "cancelled"
@@ -250,10 +252,10 @@ internal fun FlutterView(
                             }
                         })
                         ToolChip(if (zh) "工作区 APK" else "Workspace APK", onClick = {
-                            scope.launch {
+                            scope.safeLaunch {
                                 val handler = ToolCatalog.byName["taffy_so_close"]
                                 val ctx = ToolContext(appContext, SettingsStore(appContext), EngineProvider.get(appContext), runCatching { EngineProvider.getBinaryEngine(appContext) }.getOrNull())
-                                val r = withContext(Dispatchers.IO) { runCatching { handler?.handle(ctx, JSONObject().put("action", "list")) }.getOrNull() }
+                                val r = withContext(Dispatchers.IO) { runCatchingCancellable { handler?.handle(ctx, JSONObject().put("action", "list")) }.getOrNull() }
                                 val list = r?.optJSONArray("items")
                                 var found = ""
                                 for (i in 0 until (list?.length() ?: 0)) {

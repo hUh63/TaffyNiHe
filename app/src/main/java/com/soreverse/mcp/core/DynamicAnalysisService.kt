@@ -32,6 +32,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import org.json.JSONObject
+import com.soreverse.mcp.core.runCatchingCancellable
 
 data class DynamicAnalysisEvent(val kind: Kind, val text: String, val toolName: String = "") {
     enum class Kind { STATUS, THINKING, TOOL, FINALIZING, TEXT, ERROR, DONE }
@@ -50,7 +51,7 @@ class DynamicAnalysisService(private val appContext: Context) {
         runBlocking(Dispatchers.IO) { analyze(dynamicRun, path, settings, zh, request) }
 
     suspend fun analyze(dynamicRun: String, path: String, settings: SettingsStore, zh: Boolean, request: String): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             requireConfigured(settings)
             emit(DynamicAnalysisEvent.Kind.STATUS, if (zh) "正在初始化动态分析 AI 会话…" else "Initializing dynamic-analysis AI session…")
             val userPrompt = buildUserPrompt(dynamicRun, path, zh, request)

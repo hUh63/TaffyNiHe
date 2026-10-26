@@ -44,6 +44,7 @@ import com.soreverse.mcp.core.RootShell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 设置 → Linux 环境：内置 Alpine/Ubuntu rootfs 的管理与 shell 执行。
@@ -79,7 +80,7 @@ internal fun SettingsLinuxPage(t: UiText) {
     fun launchBusy(tag: String, block: () -> Unit) {
         if (busy != null) return
         busy = tag
-        scope.launch {
+        scope.safeLaunch {
             try {
                 withContext(Dispatchers.IO) { block() }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -98,7 +99,7 @@ internal fun SettingsLinuxPage(t: UiText) {
         output = ""
         execInfo = if (zh) "执行中…" else "Running…"
         busy = "exec"
-        scope.launch {
+        scope.safeLaunch {
             try {
                 val r = withContext(Dispatchers.IO) { LinuxRootfs.exec(context, distro, script, timeoutSec = 60) }
                 output = r?.output ?: (if (zh) "执行失败（$distro 未就绪，先安装）" else "failed ($distro not ready)")
@@ -204,7 +205,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                         if (busy == null) {
                             diag = emptyList()
                             busy = "diag"
-                            scope.launch {
+                            scope.safeLaunch {
                                 val r = withContext(Dispatchers.IO) { LinuxRootfs.diagnose(context, target, zh) }
                                 diag = r
                                 busy = null
@@ -254,7 +255,7 @@ internal fun SettingsLinuxPage(t: UiText) {
                     {
                         if (busy == null) {
                             busy = "injection"
-                            scope.launch {
+                            scope.safeLaunch {
                                 injFindings = InjectionProbe.detectAsync(context)
                                 busy = null
                             }

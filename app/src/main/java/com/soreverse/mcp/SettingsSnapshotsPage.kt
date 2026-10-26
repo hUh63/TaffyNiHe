@@ -40,6 +40,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 设置 → 编辑快照：把 taffy_edit_snapshot（编辑前自动快照 / diff / 回滚）图形化。
@@ -64,9 +66,9 @@ internal fun SettingsSnapshotsPage(t: UiText, onBack: () -> Unit) {
 
     fun refresh() {
         loading = true
-        scope.launch {
+        scope.safeLaunch {
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val root = File(context.filesDir, "edit-snapshots")
                     val out = ArrayList<JSONObject>()
                     root.listFiles()?.filter { it.isDirectory }?.forEach { toolDir ->
@@ -87,19 +89,19 @@ internal fun SettingsSnapshotsPage(t: UiText, onBack: () -> Unit) {
     LaunchedEffect(Unit) { refresh() }
 
     fun showDiff(tool: String, id: String) {
-        scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { EditSnapshotService.diff(context, id, tool) }.getOrNull() }
+        scope.safeLaunch {
+            val r = withContext(Dispatchers.IO) { runCatchingCancellable { EditSnapshotService.diff(context, id, tool) }.getOrNull() }
             detailTitle = "$tool / $id"
             detail = r?.toString(2) ?: (if (zh) "差异读取失败" else "diff failed")
         }
     }
 
     fun doRollback(tool: String, id: String) {
-        scope.launch {
+        scope.safeLaunch {
             // 原来把 Result 丢掉、只 refresh 列表：回滚失败时用户看到"什么都没发生"，
             // 会误以为已经回滚，继续在错误的状态上改文件。
             val outcome = withContext(Dispatchers.IO) {
-                runCatching { EditSnapshotService.rollback(context, id, tool) }
+                runCatchingCancellable { EditSnapshotService.rollback(context, id, tool) }
             }
             rollbackMsg = outcome.fold(
                 onSuccess = { if (zh) "已回滚到该快照" else "Rolled back" },

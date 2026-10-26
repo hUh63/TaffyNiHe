@@ -75,6 +75,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 备份与恢复页（UI 同步上游 SOMCP v1.0.21 设计）：
@@ -113,7 +115,7 @@ internal fun SettingsBackupRestorePage(
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             runCatching {
                 val json = settings.toJsonString(maskSecrets = !includeSecrets)
                 val bytes = if (encryptEnabled && encryptPassword.isNotBlank()) {
@@ -144,7 +146,7 @@ internal fun SettingsBackupRestorePage(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             runCatching {
                 val bytes = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { input ->
@@ -183,14 +185,14 @@ internal fun SettingsBackupRestorePage(
     var pendingRestorePath by remember { mutableStateOf<String?>(null) }
 
     val fullBackupRunner: (String?) -> Unit = { pwd ->
-        scope.launch {
+        scope.safeLaunch {
             fullBusy = true
             fullError = null
             fullResult = null
             fullStep = null
             runCatching {
                 FullBackup.backup(context, pwd?.takeIf { it.isNotBlank() }) { step ->
-                    scope.launch(Dispatchers.Main) { fullStep = step }
+                    scope.safeLaunch(Dispatchers.Main) { fullStep = step }
                 }
             }.onSuccess { summary ->
                 fullResult = summary
@@ -205,14 +207,14 @@ internal fun SettingsBackupRestorePage(
     }
 
     val fullRestoreRunner: (File, String?) -> Unit = { file, pwd ->
-        scope.launch {
+        scope.safeLaunch {
             fullBusy = true
             fullError = null
             fullResult = null
             fullStep = null
             runCatching {
                 FullBackup.restore(context, file.absolutePath, pwd?.takeIf { it.isNotBlank() }) { step ->
-                    scope.launch(Dispatchers.Main) { fullStep = step }
+                    scope.safeLaunch(Dispatchers.Main) { fullStep = step }
                 }
             }.onSuccess { summary ->
                 fullResult = summary
@@ -222,7 +224,7 @@ internal fun SettingsBackupRestorePage(
             fullStep = null
             fullBusy = false
             withContext(Dispatchers.IO) {
-                runCatching { file.delete() }
+                runCatchingCancellable { file.delete() }
             }
         }
     }
@@ -232,7 +234,7 @@ internal fun SettingsBackupRestorePage(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             runCatching {
                 val local = withContext(Dispatchers.IO) {
                     val f = File(context.cacheDir, "picked-full-backup-${System.currentTimeMillis()}.zip")
@@ -292,8 +294,8 @@ internal fun SettingsBackupRestorePage(
             confirmButton = {
                 Button(
                     onClick = {
-                        scope.launch {
-                            val bytes = pendingEncryptedBytes ?: return@launch
+                        scope.safeLaunch {
+                            val bytes = pendingEncryptedBytes ?: return@safeLaunch
                             runCatching {
                                 val json = withContext(Dispatchers.IO) {
                                     BackupCrypto.decrypt(bytes, decryptPassword)

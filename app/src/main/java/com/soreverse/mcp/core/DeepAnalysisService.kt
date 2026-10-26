@@ -50,7 +50,7 @@ class DeepAnalysisService(private val appContext: Context) {
     }
 
     suspend fun listModels(settings: SettingsStore): Result<List<String>> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             requireModelCatalogConfigured(settings)
             fetchModelCatalog(settings)
         }.onFailure { AppLog.e("SOMCP-DeepAnalysis", "Model listing failed", it) }
@@ -214,7 +214,7 @@ class DeepAnalysisService(private val appContext: Context) {
     }
 
     private suspend fun analyzeOnce(path: String, settings: SettingsStore, zh: Boolean, request: String): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             if (!McpForegroundService.isRunning()) {
                 error(if (zh) "请先开启 MCP 服务后再进行 AI 深度分析" else "Start the MCP service before AI deep analysis")
             }

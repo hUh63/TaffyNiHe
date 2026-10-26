@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.SettingsStore
 import kotlinx.coroutines.launch
 import com.soreverse.mcp.mcp.ToolCatalog
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 设置根页 / 设置全局搜索 / 开发环境二级页（布局对齐太墟 taixu 个人化设置）。
@@ -549,7 +550,7 @@ internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
                         },
                         subtitle = r?.reason ?: (if (t.zh) "正在校验签名与 APK 完整性" else "Verifying signature and APK integrity"),
                         value = r?.let { if (it.trusted) "OK" else "FAIL" },
-                        onClick = { scope.launch { runCheck() } },
+                        onClick = { scope.safeLaunch { runCheck() } },
                     )
                 }
             }
@@ -563,7 +564,7 @@ internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
                             title = if (t.zh) "未发现异常特征" else "No anomalies detected",
                             subtitle = if (t.zh) "未命中调试器、tracer、脱壳 ROM、hook 帧或过签框架特征" else "No debugger, tracer, unpacking ROM, hook frames or signing-bypass markers",
                             value = null,
-                            onClick = { scope.launch { runCheck() } },
+                            onClick = { scope.safeLaunch { runCheck() } },
                         )
                     }
                 } else {
@@ -574,7 +575,7 @@ internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
                                 title = threat,
                                 subtitle = if (t.zh) "该项只作提示：不影响签名校验结论" else "Informational only: does not change the signature verdict",
                                 value = null,
-                                onClick = { scope.launch { runCheck() } },
+                                onClick = { scope.safeLaunch { runCheck() } },
                             )
                         }
                     }
@@ -583,7 +584,7 @@ internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
         }
         item("retry") {
             androidx.compose.material3.FilledTonalButton(
-                onClick = { scope.launch { runCheck() } },
+                onClick = { scope.safeLaunch { runCheck() } },
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
             ) {

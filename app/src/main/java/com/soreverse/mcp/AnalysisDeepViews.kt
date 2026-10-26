@@ -47,6 +47,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 分析页三个「静态深挖」专属视图: JNI 注册表 / 密文恢复 / 混淆度扫描。
@@ -137,7 +139,7 @@ private fun DeepBusy() {
 /** 调工具（与本包 callMcpTool 同实现；文件名级 private，不跨文件引用）。 */
 private suspend fun deepTool(context: android.content.Context, name: String, args: JSONObject): JSONObject? =
     withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val h = com.soreverse.mcp.mcp.ToolCatalog.byName[name] ?: return@runCatching null
             val tcx = com.soreverse.mcp.mcp.ToolContext(
                 context,
@@ -176,7 +178,7 @@ internal fun StringCipherView(workspaceId: String, zh: Boolean, context: android
         err = ""
         picked = null
         detailJson = ""
-        scope.launch {
+        scope.safeLaunch {
             val r = deepTool(context, "taffy_so_string_decrypt", JSONObject().put("workspaceId", workspaceId).put("action", "scan").put("limit", 60))
             busy = false
             if (deepOk(r)) scanJson = r.toString() else err = deepError(r).ifBlank { "scan failed" }
@@ -187,7 +189,7 @@ internal fun StringCipherView(workspaceId: String, zh: Boolean, context: android
         picked = blob
         detailBusy = true
         detailJson = ""
-        scope.launch {
+        scope.safeLaunch {
             val r = deepTool(
                 context,
                 "taffy_so_string_decrypt",
@@ -418,7 +420,7 @@ internal fun ObfuscScanView(workspaceId: String, zh: Boolean, context: android.c
         if (busy) return
         busy = true
         err = ""
-        scope.launch {
+        scope.safeLaunch {
             val r = deepTool(
                 context,
                 "taffy_so_obfusc_scan",

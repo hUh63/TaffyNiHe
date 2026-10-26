@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 编排运行时的进程内注册表。
@@ -64,7 +65,7 @@ internal object AgentRuntime {
             .put("notes", JSONArray())
         live[runId] = snapshot
 
-        val job = scope.launch {
+        val job = scope.safeLaunch {
             try {
                 val record = AgentOrchestrator.run(
                     ctx = ctx,
@@ -172,7 +173,7 @@ internal object AgentRuntime {
         snapshot.put("nodes", nodes)
         live[runId] = snapshot
 
-        val job = scope.launch {
+        val job = scope.safeLaunch {
             try {
                 val record = AgentOrchestrator.resume(
                     ctx = ctx,

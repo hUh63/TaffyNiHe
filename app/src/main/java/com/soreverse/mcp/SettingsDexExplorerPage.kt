@@ -35,6 +35,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipFile
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 设置 → DEX / APK 浏览器：可视化浏览 APK/DEX 的类与方法（只读）。
@@ -80,9 +82,9 @@ internal fun SettingsDexExplorerPage(t: UiText) {
         classes = emptyList()
         selected = null
         members = emptyList()
-        scope.launch {
+        scope.safeLaunch {
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val names = LinkedHashSet<String>()
                     dexFilesOf(p).forEach { d ->
                         DexFileFactory.loadDexFile(d, Opcodes.getDefault()).classes.forEach { cd -> names.add(cd.type) }
@@ -102,9 +104,9 @@ internal fun SettingsDexExplorerPage(t: UiText) {
         members = emptyList()
         memberError = ""
         memberLoading = true
-        scope.launch {
+        scope.safeLaunch {
             val res = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val list = ArrayList<Pair<String, String>>()
                     var found = false
                     dexFilesOf(path).forEach { d ->
@@ -128,11 +130,11 @@ internal fun SettingsDexExplorerPage(t: UiText) {
 
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             loading = true
             error = ""
             val r = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "input.dex"
                     val f = File(context.cacheDir, "dexx_input_${System.currentTimeMillis()}_$name")
                     context.contentResolver.openInputStream(uri)?.use { i -> f.outputStream().use { o -> i.copyTo(o) } }

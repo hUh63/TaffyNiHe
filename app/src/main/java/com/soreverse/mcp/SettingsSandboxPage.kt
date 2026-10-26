@@ -38,6 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 设置 → 动态沙箱：安装 → 启动 → 看门狗 → 日志/崩溃 → 停止/卸载 的 UI 入口。
@@ -70,7 +71,7 @@ internal fun SettingsSandboxPage(t: UiText) {
         busy = true
         busyMsg = if (zh) "安装中…" else "Installing…"
         result = ""
-        scope.launch {
+        scope.safeLaunch {
             val msg = withContext(Dispatchers.IO) {
                 try {
                     val dir = File(app.filesDir, "sandbox").apply { mkdirs() }
@@ -115,7 +116,7 @@ internal fun SettingsSandboxPage(t: UiText) {
             else -> if (zh) "执行中…" else "Working…"
         }
         result = ""
-        scope.launch {
+        scope.safeLaunch {
             val msg = withContext(Dispatchers.IO) {
                 try {
                     when (op) {

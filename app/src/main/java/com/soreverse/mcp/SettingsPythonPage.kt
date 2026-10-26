@@ -46,6 +46,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 设置 → Python：编辑器 + 控制台 一体（对应 taffy_terminal_exec 的 python 能力 + 内置 Python）。
@@ -77,9 +79,9 @@ internal fun SettingsPythonPage(t: UiText) {
     // 文件加载（.py 文本）
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             val text = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
+                runCatchingCancellable { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
             }
             if (text != null) code = text else output = output + "\n[加载失败]\n"
         }
@@ -163,7 +165,7 @@ internal fun SettingsPythonPage(t: UiText) {
         if (!sessionActive) startSession()
         val proc = sessionProc ?: return
         busy = true
-        scope.launch {
+        scope.safeLaunch {
             val scriptPath = withContext(Dispatchers.IO) {
                 val dir = File(context.filesDir, "python_scripts").apply { mkdirs() }
                 val f = File(dir, "editor_run_${System.currentTimeMillis()}.py")
@@ -180,7 +182,7 @@ internal fun SettingsPythonPage(t: UiText) {
 
     fun saveScript() {
         if (code.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             val name = withContext(Dispatchers.IO) {
                 val dir = File(context.filesDir, "python_scripts").apply { mkdirs() }
                 val f = File(dir, "script_${System.currentTimeMillis()}.py")

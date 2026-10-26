@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import org.json.JSONObject
 import okhttp3.OkHttpClient
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /** 一次编排运行的预算。超限即停止派生/停止工具调用，而不是无限跑下去。 */
 internal class AgentBudget(
@@ -181,7 +182,7 @@ internal object AgentKernel {
                     val effective = inheritWorkspace(name, args, workspaceId())
                     AppLog.i("agent[$nodeId] tool $name args=${effective.toString().take(400)}")
                     val payload = withContext(Dispatchers.IO) {
-                        runCatching { handler.handle(ctx, effective) }
+                        runCatchingCancellable { handler.handle(ctx, effective) }
                             .getOrElse { error ->
                                 AppLog.e("agent[$nodeId] tool failed $name", error)
                                 err("TOOL_EXECUTION_FAILED", error.message ?: error.javaClass.simpleName, "tool", name)

@@ -43,6 +43,7 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.soreverse.mcp.core.safeLaunch
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -86,7 +87,7 @@ internal fun ToolStatsSection(t: UiText, settings: SettingsStore) {
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             runCatching {
                 val text = snapshot.toString(2)
                 withContext(Dispatchers.IO) {
@@ -170,7 +171,7 @@ internal fun TunnelStatsSection(t: UiText) {
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             runCatching {
                 val text = if (statsType == "cloudflare") cfStats.toString(2) else JSONObject().apply {
                     put("type", "bore")

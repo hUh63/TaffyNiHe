@@ -50,6 +50,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * Unidbg 模拟执行操作面板 —— 「⚡模拟」卫星的直接落地界面。
@@ -84,13 +86,13 @@ internal fun UnidbgPanel(
 
     val pickSo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
-            scope.launch {
+            scope.safeLaunch {
                 running = true
                 error = ""
                 result = null
                 backend = ""
                 val r = withContext(Dispatchers.IO) {
-                    runCatching { EngineProvider.get(context).open(uri.toString(), temporary = false) }.getOrNull()
+                    runCatchingCancellable { EngineProvider.get(context).open(uri.toString(), temporary = false) }.getOrNull()
                 }
                 running = false
                 if (r == null) {
@@ -153,15 +155,15 @@ internal fun UnidbgPanel(
         running = true
         error = ""
         result = null
-        scope.launch {
+        scope.safeLaunch {
             val json = try {
                 withContext(Dispatchers.IO) {
-                    runCatching { EngineProvider.get(context).emulate(workspaceId, "", sym, parseArgs(argsText), true) }.getOrNull()
+                    runCatchingCancellable { EngineProvider.get(context).emulate(workspaceId, "", sym, parseArgs(argsText), true) }.getOrNull()
                 }
             } finally {
                 running = false
             }
-            if (json == null) { error = if (zh) "模拟执行异常（引擎未初始化？）" else "Emulate failed (engine unavailable)"; return@launch }
+            if (json == null) { error = if (zh) "模拟执行异常（引擎未初始化？）" else "Emulate failed (engine unavailable)"; return@safeLaunch }
             if (json.optBoolean("ok", false)) {
                 backend = listOf(json.optString("backend"), json.optString("emulator"))
                     .filter { it.isNotBlank() }.distinct().joinToString(" / ")

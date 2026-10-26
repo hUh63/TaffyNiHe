@@ -59,6 +59,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * MCP 桥接设置页（设置 → MCP 桥接）。
@@ -88,7 +89,7 @@ internal fun SettingsApkBridgePage(
     val zh = t.zh
 
     fun refreshSnapshot() {
-        scope.launch {
+        scope.safeLaunch {
             snapshot = withContext(Dispatchers.IO) {
                 bridge.probe()
                 bridge.snapshotJson()
@@ -227,7 +228,7 @@ internal fun SettingsApkBridgePage(
             defaultPrefix = "MCP${configs.size + 1}_",
             onDismiss = { showAddDialog = false },
             onSave = { name, url, token, prefix ->
-                scope.launch {
+                scope.safeLaunch {
                     withContext(Dispatchers.IO) {
                         bridge.probeUrl(name, url, token, prefix)
                     }

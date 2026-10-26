@@ -94,6 +94,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /** Shell 内置命令表（补全用，覆盖常用 unix/Android/塔菲语境命令）。 */
 private val SHELL_CMDS: List<Pair<String, String>> = listOf(
@@ -483,9 +485,9 @@ internal fun SettingsEditorPage(t: UiText) {
 
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             val text = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
+                runCatchingCancellable { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
             }
             if (text != null) {
                 pushUndo(tf.text)
@@ -519,9 +521,9 @@ internal fun SettingsEditorPage(t: UiText) {
     }
 
     fun loadWsFile(path: String) {
-        scope.launch {
+        scope.safeLaunch {
             val text = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val f = File(path)
                     if (f.length() > 64L * 1024 * 1024) null else f.readText()
                 }.getOrNull()
@@ -558,7 +560,7 @@ internal fun SettingsEditorPage(t: UiText) {
 
     /** 重新读快照列表（IO 线程）。 */
     fun reloadCheckpoints(key: String = sessionKey()) {
-        scope.launch {
+        scope.safeLaunch {
             checkpoints = withContext(Dispatchers.IO) { EditorCheckpointStore.list(context, key) }
         }
     }
@@ -568,7 +570,7 @@ internal fun SettingsEditorPage(t: UiText) {
         val text = code
         if (text.isBlank()) return
         val key = sessionKey()
-        scope.launch {
+        scope.safeLaunch {
             withContext(Dispatchers.IO) { EditorCheckpointStore.push(context, key, text, label) }
             checkpoints = withContext(Dispatchers.IO) { EditorCheckpointStore.list(context, key) }
         }
@@ -577,15 +579,15 @@ internal fun SettingsEditorPage(t: UiText) {
     /** rewind：恢复到某个历史点。恢复前先把当前内容压一份「回退前」，保证可再前进回来。 */
     fun restoreCheckpoint(meta: CheckpointMeta) {
         val key = sessionKey()
-        scope.launch {
+        scope.safeLaunch {
             val text = withContext(Dispatchers.IO) { EditorCheckpointStore.read(context, key, meta.id) }
             if (text == null) {
                 appendOut("\n[快照读取失败: #${meta.id}]\n")
-                return@launch
+                return@safeLaunch
             }
             if (text == code) {
                 appendOut("\n[快照 #${meta.id} 与当前内容一致，无需回退]\n")
-                return@launch
+                return@safeLaunch
             }
             runCatching { withContext(Dispatchers.IO) { EditorCheckpointStore.push(context, key, code, if (zh) "回退前" else "before-rewind") } }
             pushUndo(tf.text)
@@ -644,9 +646,9 @@ internal fun SettingsEditorPage(t: UiText) {
     }
 
     fun followCursor() {
-        scope.launch {
+        scope.safeLaunch {
             delay(30)
-            if (viewerMode || editorViewport <= 0) return@launch
+            if (viewerMode || editorViewport <= 0) return@safeLaunch
             val lineIdx = EditorTextOps.lineOf(tf.text, tf.selection.start) - 1
             val lineH = with(density) { 19.sp.toPx() }
             val y = lineIdx * lineH
@@ -771,7 +773,7 @@ internal fun SettingsEditorPage(t: UiText) {
         currentFilePath = first.path
         val p = first.path
         if (p != null) {
-            scope.launch {
+            scope.safeLaunch {
                 val st = withContext(Dispatchers.IO) { FileStampUtil.stamp(File(p)) }
                 if (st != null) fileStamps[p] = st else fileStamps.remove(p)
             }
@@ -860,11 +862,11 @@ internal fun SettingsEditorPage(t: UiText) {
             }
         }
         completing = true
-        scope.launch {
+        scope.safeLaunch {
             val items = mutableListOf<JSONObject>()
             var via = "jedi"
             val lspOk = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     if (!LspClient.ensureStarted(context)) return@runCatching false
                     LspClient.didChange(code)
                     when (kind) {
@@ -892,7 +894,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 if (script2 == null) {
                     completing = false
                     appendOut("\n[代码智能不可用：内置 Python 未就绪]\n")
-                    return@launch
+                    return@safeLaunch
                 }
                 via = if (kind == "defs") "jedi" else "jedi (LSP 回退)"
                 val payload = JSONObject().put("code", code).put("line", ln).put("col", col).put("kind", kind)
@@ -945,9 +947,9 @@ internal fun SettingsEditorPage(t: UiText) {
     }
 
     fun requestDiagnostics() {
-        scope.launch {
+        scope.safeLaunch {
             val ok = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     if (!LspClient.ensureStarted(context)) return@runCatching false
                     LspClient.didChange(code)
                     Thread.sleep(1200)
@@ -1044,7 +1046,7 @@ internal fun SettingsEditorPage(t: UiText) {
         replInput = ""
         appendOut("\n$ $cmd\n")
         busy = true
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
                 if (PermissionManager.isRootAvailable() || PermissionManager.isShizukuGranted()) {
                     RootShell.exec(cmd, timeoutSec = 30)
@@ -1070,7 +1072,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 if (!sessionActive) startSession()
                 sessionProc ?: run { appendOut("\n[内置 Python 不可用]\n"); return }
                 busy = true
-                scope.launch {
+                scope.safeLaunch {
                     val path = withContext(Dispatchers.IO) {
                         val dir = File(context.filesDir, "editor_files").apply { mkdirs() }
                         val f = File(dir, "_run_${System.currentTimeMillis()}.py")
@@ -1084,7 +1086,7 @@ internal fun SettingsEditorPage(t: UiText) {
             CodeHighlighter.Lang.SHELL -> {
                 busy = true
                 appendOut("\n── 运行 Shell ──\n")
-                scope.launch {
+                scope.safeLaunch {
                     val r = withContext(Dispatchers.IO) {
                         if (PermissionManager.isRootAvailable() || PermissionManager.isShizukuGranted()) {
                             RootShell.exec(code, timeoutSec = 30)
@@ -1127,9 +1129,9 @@ internal fun SettingsEditorPage(t: UiText) {
         aiBusy = true
         panel = EditorPanel.CONSOLE
         appendOut("\n── 🤖 AI 助手 ──\n[发送中] $question\n")
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
-                runCatching { EditorAiHelper.ask(EditorAiHelper.config(SettingsStore(context)), code, question, mode.name.lowercase()) }
+                runCatchingCancellable { EditorAiHelper.ask(EditorAiHelper.config(SettingsStore(context)), code, question, mode.name.lowercase()) }
             }
             aiBusy = false
             r.onSuccess { appendOut("$it\n") }
@@ -1140,7 +1142,7 @@ internal fun SettingsEditorPage(t: UiText) {
     /** 真正落盘（冲突对话框的「覆盖」也走这里；forcePath 用于另存为新副本）。 */
     fun writeCurrentFile(forcePath: String? = null) {
         val text = code
-        scope.launch {
+        scope.safeLaunch {
             val result = withContext(Dispatchers.IO) {
                 val target = forcePath ?: currentFilePath
                 if (target != null && File(target).isFile) {
@@ -1177,7 +1179,7 @@ internal fun SettingsEditorPage(t: UiText) {
         val base = srcName.substringBeforeLast('.', srcName)
         val ext = srcName.substringAfterLast('.', mode.ext)
         val text = code
-        scope.launch {
+        scope.safeLaunch {
             val target = File(File(context.filesDir, "editor_files").apply { mkdirs() }, "$base-${System.currentTimeMillis()}.$ext")
             val ok = withContext(Dispatchers.IO) { com.soreverse.mcp.core.AtomicWrite.text(target, text) }
             if (ok) {
@@ -1198,7 +1200,7 @@ internal fun SettingsEditorPage(t: UiText) {
     /** 保存入口（工具条 💾 / 命令 save / 命令面板都走这里）：先查「外部修改」冲突，再落盘。 */
     fun saveFile() {
         if (code.isBlank()) return
-        scope.launch {
+        scope.safeLaunch {
             val target = currentFilePath
             if (target != null) {
                 val known = fileStamps[target]
@@ -1207,7 +1209,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 if (FileStampUtil.changed(known, cur)) {
                     // 打开后文件被外部（MCP 工具 / 终端 / git）改过 —— 交给用户三选一
                     pendingConflict = SaveConflict(target, known, cur)
-                    return@launch
+                    return@safeLaunch
                 }
             }
             writeCurrentFile()
@@ -1215,9 +1217,9 @@ internal fun SettingsEditorPage(t: UiText) {
     }
 
     fun loadFile(name: String) {
-        scope.launch {
+        scope.safeLaunch {
             val text = withContext(Dispatchers.IO) {
-                runCatching { File(File(context.filesDir, "editor_files"), name).readText() }.getOrNull()
+                runCatchingCancellable { File(File(context.filesDir, "editor_files"), name).readText() }.getOrNull()
             }
             if (text != null) {
                 undoStack.clear(); redoStack.clear()
@@ -1240,8 +1242,8 @@ internal fun SettingsEditorPage(t: UiText) {
         val latest = bakDir.listFiles { it -> it.name.startsWith("$name.") && it.name.endsWith(".bak") }
             ?.maxByOrNull { it.lastModified() }
         if (latest == null) { appendOut("\n[没有可回滚的备份]\n") } else {
-            scope.launch {
-                val text = withContext(Dispatchers.IO) { runCatching { latest.readText() }.getOrNull() }
+            scope.safeLaunch {
+                val text = withContext(Dispatchers.IO) { runCatchingCancellable { latest.readText() }.getOrNull() }
                 if (text != null) { pushUndo(tf.text); setCode(text); appendOut("\n[已回滚到备份: ${latest.name}]\n") }
             }
         }
@@ -1454,7 +1456,7 @@ internal fun SettingsEditorPage(t: UiText) {
                             onClick = {
                                 showHistoryMenu = false
                                 val key = sessionKey()
-                                scope.launch {
+                                scope.safeLaunch {
                                     withContext(Dispatchers.IO) { EditorCheckpointStore.clear(context, key) }
                                     reloadCheckpoints(key)
                                 }

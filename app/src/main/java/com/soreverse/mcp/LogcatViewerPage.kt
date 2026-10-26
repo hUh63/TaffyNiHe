@@ -97,6 +97,8 @@ import java.io.FileWriter
 import java.io.InputStreamReader
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /** 单条解析后的日志行。 */
 private data class LogLine(
@@ -366,7 +368,7 @@ internal fun LogcatViewerPage(t: UiText) {
      *  @param initialLastLine 切换前实时流已显示的最后一行——首轮 dump 的 500 行中
      *  该行之前的行已显示过，跳过以避免与实时流尾部重叠。 */
     fun startPolling(initialLastLine: String? = null) {
-        scope.launch(Dispatchers.IO) {
+        scope.safeLaunch(Dispatchers.IO) {
             var failCount = 0
             var lastLine: String? = initialLastLine // 上次轮询最后一行原始文本，用于去重（logcat -d 每次返回完整缓冲区）
             while (running && pollMode) {
@@ -409,7 +411,7 @@ internal fun LogcatViewerPage(t: UiText) {
 
     /** 启动日志读取协程（通道切换时对旧进程 destroy，新进程重新拉起读取循环）。 */
     fun spawnReader(proc: Process) {
-        val job = scope.launch(Dispatchers.IO) {
+        val job = scope.safeLaunch(Dispatchers.IO) {
             try {
                 BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
                     var line = reader.readLine()
@@ -531,7 +533,7 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
             }
         } else {
-            scope.launch(Dispatchers.IO) {
+            scope.safeLaunch(Dispatchers.IO) {
                 val priv = PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
                 if (priv == null) {
                     // 特权不可用：普通流继续；无任何系统权限时降级为应用日志
@@ -549,10 +551,10 @@ internal fun LogcatViewerPage(t: UiText) {
                         }
                         channelInfo = if (zh) "应用日志（无系统权限）" else "App logs (no system permission)"
                     }
-                    return@launch
+                    return@safeLaunch
                 }
                 // 特权就绪且仍在运行：无缝切换到特权流
-                if (!running || pollMode) return@launch
+                if (!running || pollMode) return@safeLaunch
                 runCatching { firstProc.destroy() }
                 process = priv
                 channelError = ""
@@ -670,7 +672,7 @@ internal fun LogcatViewerPage(t: UiText) {
     DisposableEffect(Unit) {
         val listener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { _, grantResult ->
             if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                scope.launch(Dispatchers.IO) {
+                scope.safeLaunch(Dispatchers.IO) {
                     if (running) stop()
                     start() // 重新探测通道：Shizuku 已授权，auto/shizuku 模式生效
                 }
@@ -808,7 +810,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     onClick = {
                         if (m != mode) {
                             // start() 内含特权绑定(可能 await)，须在 IO 线程
-                            scope.launch(Dispatchers.IO) {
+                            scope.safeLaunch(Dispatchers.IO) {
                                 if (running) { stop(); mode = m; start() } else mode = m
                             }
                         }
@@ -966,7 +968,7 @@ internal fun LogcatViewerPage(t: UiText) {
         // 应用列表加载（IO 线程，PackageManager 查询）
         LaunchedEffect(Unit) {
             withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val pm = context.packageManager
                     val apps = pm.getInstalledApplications(0)
                     appList = apps.mapNotNull { ai ->
@@ -1523,7 +1525,7 @@ internal fun LogcatViewerPage(t: UiText) {
                     // 工具栏（固定右）
                     IconButton(onClick = {
                         if (running) stop()
-                        else scope.launch(Dispatchers.IO) { start() }
+                        else scope.safeLaunch(Dispatchers.IO) { start() }
                     }, modifier = Modifier.size(32.dp)) {
                         Icon(
                             if (running) Icons.Default.Stop else Icons.Default.PlayArrow,
@@ -1535,7 +1537,7 @@ internal fun LogcatViewerPage(t: UiText) {
                         paused = !paused
                         persistedPaused = paused
                         // 重进页面后处于待机态时点"继续"→ 重新开始采集
-                        if (!paused && !running) scope.launch(Dispatchers.IO) { start() }
+                        if (!paused && !running) scope.safeLaunch(Dispatchers.IO) { start() }
                     }, modifier = Modifier.size(32.dp)) {
                         Icon(
                             if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
@@ -1697,7 +1699,7 @@ internal fun LogcatViewerPage(t: UiText) {
             confirmButton = {
                 TextButton(onClick = {
                     showReadLogsDialog = false
-                    scope.launch(Dispatchers.IO) {
+                    scope.safeLaunch(Dispatchers.IO) {
                         val granted = tryGrantReadLogs()
                         if (granted && running) { stop(); start() }
                         withContext(Dispatchers.Main) {

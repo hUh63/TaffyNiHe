@@ -48,6 +48,7 @@ import com.soreverse.mcp.core.WorkspacePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 设置 → Git 仓库：完整 Git 集成（走内置 Linux rootfs，proot/chroot 双通道）。
@@ -85,7 +86,7 @@ internal fun SettingsGitPage(t: UiText) {
 
     fun gitRun(script: String, timeoutSec: Long = 90, onDone: (LinuxRootfs.ExecResult) -> Unit) {
         running = true
-        scope.launch {
+        scope.safeLaunch {
             try {
             val r = withContext(Dispatchers.IO) {
                 val ws = repoPath.trim()

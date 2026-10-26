@@ -63,6 +63,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.soreverse.mcp.core.safeLaunch
 
 @Composable
 internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? = null) {
@@ -109,7 +110,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
         contract = ActivityResultContracts.CreateDocument("text/plain"),
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             runCatching {
                 val text = visibleLogs.joinToString("\n") { localizeLogLine(it, t.zh) }
                 withContext(Dispatchers.IO) {

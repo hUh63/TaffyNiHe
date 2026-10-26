@@ -74,6 +74,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import com.soreverse.mcp.core.safeLaunch
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /** 官方插件市场源（GitHub raw；任何提供 index.json 的仓库均可作源）。 */
 private const val DEFAULT_MARKET_URL = "https://raw.githubusercontent.com/hUh63/TaffyNiHe/main/plugins/index.json"
@@ -209,9 +211,9 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         if (url.isBlank()) { marketMsg = if (zh) "请填写市场源地址" else "Market URL required"; marketMsgOk = false; return }
         marketLoading = true
         marketMsg = ""
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
                     conn.connectTimeout = 10000; conn.readTimeout = 15000
                     conn.setRequestProperty("User-Agent", "TaffyNiHe-extensions")
@@ -238,9 +240,9 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         val fileUrl = o.optString("file", "")
         if (fileUrl.isBlank()) { marketMsg = "插件缺少 file 字段"; marketMsgOk = false; return }
         marketLoading = true
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val conn = java.net.URL(fileUrl).openConnection() as java.net.HttpURLConnection
                     conn.connectTimeout = 10000; conn.readTimeout = 60000
                     conn.setRequestProperty("User-Agent", "TaffyNiHe-extensions")
@@ -301,7 +303,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         val kind = XedExtensionConverter.detectKind(file)
         when (kind) {
             "taffy" -> {
-                scope.launch {
+                scope.safeLaunch {
                     val id = file.nameWithoutExtension.replace(Regex("[^A-Za-z0-9_.-]"), "_")
                     val dir = File(pluginsRoot, id)
                     dir.mkdirs()
@@ -319,7 +321,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
                 }
             }
             "xed", "unknown" -> {
-                scope.launch {
+                scope.safeLaunch {
                     val r = withContext(Dispatchers.IO) { XedExtensionConverter.convert(context, file, pluginsRoot) }
                     message = r.message
                     if (r.ok) refresh()
@@ -330,9 +332,9 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.safeLaunch {
             val cached = withContext(Dispatchers.IO) {
-                runCatching {
+                runCatchingCancellable {
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "import.bin"
                     val f = File(context.cacheDir, "import_$name")
                     context.contentResolver.openInputStream(uri)?.use { it.copyTo(f.outputStream()) }
@@ -359,7 +361,7 @@ internal fun SettingsExtensionsPage(t: UiText, onDest: (SettingsDest) -> Unit) {
         if (!pluginPy.isFile) { appendOut("[入口文件不存在: $entry]\n"); return }
         running = true
         appendOut("──── 运行插件: ${dir.name} ────\n")
-        scope.launch {
+        scope.safeLaunch {
             val settings = SettingsStore(context)
             val ws = WorkspacePolicy.workDirPath(context) ?: ""
             // 沙箱: 禁外网（仅放行塔菲 MCP 端口）/ 禁子进程 / 写白名单=工作区+插件目录

@@ -53,6 +53,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.soreverse.mcp.core.safeLaunch
 
 /**
  * 设置 → 本地可执行（execve + jniLibs 通道）。
@@ -103,14 +104,14 @@ internal fun SettingsNativeExecPage(t: UiText) {
     fun refresh() {
         loading = true
         error = ""
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "list")) }
             loading = false
-            if (r == null) { error = if (zh) "工具 taffy_native_exec 未注册" else "taffy_native_exec is not registered"; return@launch }
-            if (!r.optBoolean("ok", false)) { error = errText(r); return@launch }
+            if (r == null) { error = if (zh) "工具 taffy_native_exec 未注册" else "taffy_native_exec is not registered"; return@safeLaunch }
+            if (!r.optBoolean("ok", false)) { error = errText(r); return@safeLaunch }
             payload = r
         }
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "ps")) }
             val arr = r?.optJSONArray("processes")
             procs = (0 until (arr?.length() ?: 0)).mapNotNull { arr!!.optJSONObject(it) }
@@ -127,7 +128,7 @@ internal fun SettingsNativeExecPage(t: UiText) {
         target = null
         busy = true
         outputTitle = if (background) (if (zh) "$name（后台）" else "$name (daemon)") else "$name"
-        scope.launch {
+        scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
                 callTool(
                     JSONObject()
@@ -138,7 +139,7 @@ internal fun SettingsNativeExecPage(t: UiText) {
                 )
             }
             busy = false
-            if (r == null) { output = if (zh) "[UI] 工具未注册" else "[UI] tool not registered"; return@launch }
+            if (r == null) { output = if (zh) "[UI] 工具未注册" else "[UI] tool not registered"; return@safeLaunch }
             if (background) {
                 if (r.optBoolean("ok", false)) {
                     output = "pid=${r.optLong("pid")}\nlog=${r.optString("logFile")}"
@@ -191,7 +192,7 @@ internal fun SettingsNativeExecPage(t: UiText) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ToolChip(if (zh) "刷新" else "Refresh", icon = Icons.Default.Refresh, enabled = !loading, onClick = { refresh() })
                         ToolChip(if (zh) "刷新进程" else "Processes", icon = Icons.Default.List, onClick = {
-                            scope.launch {
+                            scope.safeLaunch {
                                 val r = withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "ps")) }
                                 val arr = r?.optJSONArray("processes")
                                 procs = (0 until (arr?.length() ?: 0)).mapNotNull { arr!!.optJSONObject(it) }
@@ -318,7 +319,7 @@ internal fun SettingsNativeExecPage(t: UiText) {
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ToolChip(if (zh) "日志" else "Log", icon = Icons.Default.Description, onClick = {
-                            scope.launch {
+                            scope.safeLaunch {
                                 val r = withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "log").put("pid", pid.toInt())) }
                                 outputTitle = "${p.optString("name")} · pid=$pid"
                                 output = r?.optString("text").orEmpty().ifBlank { if (zh) "（日志为空）" else "(empty log)" }
@@ -395,7 +396,7 @@ internal fun SettingsNativeExecPage(t: UiText) {
             onConfirm = {
                 val pid = p.optLong("pid")
                 pendingKill = null
-                scope.launch {
+                scope.safeLaunch {
                     withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "kill").put("pid", pid.toInt())) }
                     val r = withContext(Dispatchers.IO) { callTool(JSONObject().put("action", "ps")) }
                     val arr = r?.optJSONArray("processes")

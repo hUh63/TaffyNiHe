@@ -35,6 +35,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import com.soreverse.mcp.core.safeLaunch
 
 internal data class RequestField(val key: String, val value: String)
 
@@ -243,7 +244,7 @@ internal fun SettingsAiDeepPage(
                         if (!loadingModels) {
                             loadingModels = true
                             status = if (t.zh) "正在拉取模型列表…" else "Fetching models…"
-                            scope.launch {
+                            scope.safeLaunch {
                                 val result = deepService.listModels(settings)
                                 loadingModels = false
                                 result.onSuccess {

@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import com.soreverse.mcp.core.runCatchingCancellable
 
 /**
  * 单个子代理的执行器。
@@ -190,7 +191,7 @@ internal class SubAgentRunner(
 
     private suspend fun persistHistory(file: File, messages: List<com.soreverse.mcp.core.RikkaMessage>) {
         withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val dir = file.parentFile
                 if (dir != null && !dir.exists()) dir.mkdirs()
                 val tmp = File(file.parentFile, file.name + ".tmp")

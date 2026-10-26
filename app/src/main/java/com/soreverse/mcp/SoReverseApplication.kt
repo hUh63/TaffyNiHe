@@ -59,6 +59,10 @@ private class EngineReleaseCallbacks : android.app.Application.ActivityLifecycle
     override fun onActivityStopped(activity: android.app.Activity) {
         started = (started - 1).coerceAtLeast(0)
         if (started == 0 && activity.isFinishing && !activity.isChangingConfigurations) {
+            // MCP 前台服务还在跑时不释放：用户退出界面但希望服务继续对外提供工具能力，
+            // 一关引擎后续工具调用就全失败。（旧释放点在塔菲 MainActivity，壳模式下压根走不到，
+            // 所以这个场景此前没被暴露出来。）
+            if (runCatching { com.soreverse.mcp.service.McpForegroundService.isRunning() }.getOrDefault(false)) return
             runCatching { com.soreverse.mcp.core.EngineProvider.close(activity.applicationContext) }
         }
     }

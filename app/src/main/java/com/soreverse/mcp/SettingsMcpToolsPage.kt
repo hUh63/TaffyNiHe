@@ -347,7 +347,6 @@ internal fun SettingsTempWorkspacePage(
                 title = if (t.zh) "$count 个临时工作区" else "$count temp workspaces",
                 subtitle = if (t.zh) "smali-batch / apkeditor-out / extracted / jadx-out 等" else "smali-batch / apkeditor-out / extracted / jadx-out etc.",
                 icon = Icons.Default.Storage,
-                onClick = {},
             )
             for (i in 0 until stats.length()) {
                 val s = stats.getJSONObject(i)
@@ -357,7 +356,6 @@ internal fun SettingsTempWorkspacePage(
                     title = s.optString("name"),
                     subtitle = if (t.zh) "${s.optInt("itemCount")} 项 · ${s.optLong("bytes") / 1024 / 1024} MB" else "${s.optInt("itemCount")} items · ${s.optLong("bytes") / 1024 / 1024} MB",
                     icon = Icons.Default.FolderOpen,
-                    onClick = {},
                 )
             }
         }
@@ -432,7 +430,6 @@ internal fun SettingsWorkspacePage(
                 else
                     if (t.zh) "MCP 工具默认文件访问范围，在「服务配置」中修改" else "Default file scope of MCP tools; change it in Service config",
                 icon = Icons.Default.FolderOpen,
-                onClick = {},
             )
             if (workDir.isNullOrBlank()) {
                 GroupDivider()
@@ -470,7 +467,6 @@ internal fun SettingsWorkspacePage(
                 else
                     "Starting any tunnel lets MCP tools access /sdcard and /storage/emulated/0",
                 icon = Icons.Default.Cloud,
-                onClick = {},
             )
             for (root in roots) {
                 GroupDivider()
@@ -478,7 +474,6 @@ internal fun SettingsWorkspacePage(
                     title = root,
                     subtitle = if (t.zh) "允许访问" else "Allowed",
                     icon = Icons.Default.FolderOpen,
-                    onClick = {},
                 )
             }
         }

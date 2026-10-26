@@ -1,3 +1,53 @@
+## 塔菲逆核 v1.5.9 —— 描边和分隔线一直在被容器底色吃掉；一批「看着能点、点了没反应」的行
+
+### 1. outline / outlineVariant 和容器底色完全同色（全局视觉）
+
+上一版修的是 `secondary` 撞色，顺手把整张 token 表核了一遍，发现描边槽有同样的问题：
+
+```
+深色  outline        = 0xFF3A3A3C   surfaceContainerHighest = 0xFF3A3A3C   ← 一字不差
+深色  outlineVariant = 0xFF2C2C2E   surfaceContainerHigh    = 0xFF2C2C2E   ← 一字不差
+浅色  outlineVariant = 0xFFE5E5EA   surfaceContainerHighest = 0xFFE5E5EA   ← 一字不差
+```
+
+这套 UI 的视觉底就是「1dp 描边 + 细分隔线」，而这两组颜色画在对应容器上等于没画 ——
+所有卡片描边、`GroupDivider`、输入框边框、任务卡描边（`BorderStroke(1.dp, outlineVariant)`
+×多）全都淡到看不见。改成拉开档位：
+
+| 槽 | 浅色 | 深色 |
+|---|---|---|
+| `outline` | `C6C6C8` → `B0B0B6` | `3A3A3C` → `5A5A60` |
+| `outlineVariant` | `E5E5EA` → `CECED6` | `2C2C2E` → `3E3E43` |
+
+### 2. `DataRow` 无论有没有动作都挂了点击
+
+```kotlin
+// 之前：onClick 为 null 也照样注册
+modifier.combinedClickable(onClick = { onClick?.invoke() }, ...)
+```
+
+于是所有传 `onClick = null` 的纯展示行（键值行、诊断结果行）按下去都有水波纹，
+但什么都不会发生 —— 看起来就是「这个 App 点不动」。改成只有真的传了 onClick /
+onLongClick 才挂手势。
+
+### 3. 七处「看着能点、点了没反应」的展示行
+
+`NavRow(onClick = {})` / `DataRow(onClick = {})` 这种写法会把行渲染成可点击（带 chevron
+和水波纹），点下去是空实现：
+
+- 设置 → MCP 工具：当前占用统计（2 行）、工作目录状态、访问策略、允许访问的根路径
+- 设置 → Linux 环境：诊断结果行、注入/转储探针结果行（各 1 处）
+- 设置 → Blutter：`索引 N 个版本` / `已打包 N` 两个状态 chip
+
+全部改成不传 onClick（`NavRow`/`DataRow` 的 onClick 本来就是可空的），Blutter 的
+两个 chip 改 `enabled = false`。
+
+### 4. `TypeChip` 是徽标却带点击
+
+`TypeChip`（分析页到处在用的类型徽标）内部是 `AssistChip(onClick = {})` —— 可点、
+有水波纹、无动作。改为 `enabled = false`，并把 `disabledContainerColor` /
+`disabledLabelColor` 显式指回原来的配色，外观不变但不再假装能点。
+
 ## 塔菲逆核 v1.5.8 —— 首页一屏装完；「图标缺失」其实是一个配色 bug
 
 ### 1. 首页重排：一屏显示全部，不用滑

@@ -191,7 +191,6 @@ internal fun SettingsLinuxPage(t: UiText) {
                             "warn" -> "⚠️"
                             else -> "❌"
                         },
-                        onClick = { },
                     )
                 }
             }
@@ -242,7 +241,6 @@ internal fun SettingsLinuxPage(t: UiText) {
                         title = f.kind,
                         subtitle = f.detail,
                         trailingText = if (f.severity == "warn") "⚠️" else "ℹ️",
-                        onClick = { },
                     )
                 }
             }

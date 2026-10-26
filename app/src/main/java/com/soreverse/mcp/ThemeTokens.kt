@@ -169,8 +169,11 @@ internal fun appLightColors(accent: Color, highContrast: Boolean) = lightColorSc
     surfaceContainer = Color(0xFFFFFFFF),
     surfaceContainerHigh = Color(0xFFF7F7FA),
     surfaceContainerHighest = Color(0xFFE5E5EA),
-    outline = if (highContrast) Color(0xFF8E8E93) else Color(0xFFC6C6C8),
-    outlineVariant = Color(0xFFE5E5EA),
+    // outline / outlineVariant 是「描边与分隔线」的槽。原来 outlineVariant 直接写成
+    // 0xFFE5E5EA，与 surfaceContainerHighest / surfaceVariant **完全同色** —— 画在最上层
+    // 容器上的 1dp 描边和分隔线等于不存在（而这套 UI 的视觉底就是「1dp 描边」）。
+    outline = if (highContrast) Color(0xFF8E8E93) else Color(0xFFB0B0B6),
+    outlineVariant = Color(0xFFCECED6),
     error = Color(0xFFFF3B30),
     onError = Color.White,
     errorContainer = Color(0xFFFFECEA),
@@ -199,8 +202,11 @@ internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Bool
     surfaceContainer = if (pureBlack) Color(0xFF1C1C1E) else Color(0xFF161618),
     surfaceContainerHigh = Color(0xFF2C2C2E),
     surfaceContainerHighest = Color(0xFF3A3A3C),
-    outline = if (highContrast) Color(0xFFAEAEB2) else Color(0xFF3A3A3C),
-    outlineVariant = Color(0xFF2C2C2E),
+    // 同上：outline = 0xFF3A3A3C 与 surfaceContainerHighest **一字不差**，
+    // outlineVariant = 0xFF2C2C2E 与 surfaceContainerHigh **一字不差**，
+    // 深色下卡片描边和分组分隔线全隐形。
+    outline = if (highContrast) Color(0xFFAEAEB2) else Color(0xFF5A5A60),
+    outlineVariant = Color(0xFF3E3E43),
     error = Color(0xFFFF453A),
     onError = Color.White,
     errorContainer = Color(0xFF93000A),

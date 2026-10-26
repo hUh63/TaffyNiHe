@@ -197,6 +197,9 @@ internal fun TerminalPane(
 internal fun TypeChip(text: String, color: Color = MaterialTheme.colorScheme.primary) {
     AssistChip(
         onClick = {},
+        // 纯展示徽标：关掉点击（否则按下去有水波纹但什么都不发生），
+        // disabled 的配色显式指回正常值，避免整块变灰。
+        enabled = false,
         label = {
             Text(
                 text,
@@ -208,6 +211,8 @@ internal fun TypeChip(text: String, color: Color = MaterialTheme.colorScheme.pri
         colors = AssistChipDefaults.assistChipColors(
             containerColor = color.copy(alpha = 0.14f),
             labelColor = color,
+            disabledContainerColor = color.copy(alpha = 0.14f),
+            disabledLabelColor = color,
         ),
         border = null,
     )
@@ -250,11 +255,19 @@ internal fun DataRow(
     onLongClick: (() -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
-    ListItem(
-        modifier = modifier.combinedClickable(
+    // 只有真的有动作才注册点击。原来不管 onClick 是否为 null 都挂 combinedClickable，
+    // 于是 onClick = null 的纯展示行（键值行、诊断结果行）按下去也有水波纹却什么都不发生，
+    // 看起来像"点了没反应的坏按钮"。调用方传了 `{}` 的同样问题由各页自行改成不传。
+    val rowModifier = if (onClick == null && onLongClick == null) {
+        modifier
+    } else {
+        modifier.combinedClickable(
             onClick = { onClick?.invoke() },
             onLongClick = onLongClick?.let { cb -> { cb() } },
-        ),
+        )
+    }
+    ListItem(
+        modifier = rowModifier,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = leading,
         headlineContent = {

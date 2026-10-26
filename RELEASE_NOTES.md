@@ -17,7 +17,7 @@
 | 槽 | 浅色 | 深色 |
 |---|---|---|
 | `outline` | `C6C6C8` → `B0B0B6` | `3A3A3C` → `5A5A60` |
-| `outlineVariant` | `E5E5EA` → `CECED6` | `2C2C2E` → `3E3E43` |
+| `outlineVariant` | `E5E5EA` → `C6C6CE` | `2C2C2E` → `4A4A52` |
 
 ### 2. `DataRow` 无论有没有动作都挂了点击
 

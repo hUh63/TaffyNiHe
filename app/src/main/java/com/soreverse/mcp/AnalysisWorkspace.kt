@@ -7539,7 +7539,7 @@ private suspend fun rzFetch(
         val err = errMessageOf(r.toString())
         if (err.isNotBlank()) return@runCatchingCancellable (null as Any?) to err
         val out = r.optString("stdout").ifBlank { r.optString("text") }.trim()
-        if (out.isBlank()) return@runCatching (null as Any?) to ""
+        if (out.isBlank()) return@runCatchingCancellable (null as Any?) to ""
         val parsed: Any = runCatching {
             if (out.startsWith("[")) JSONArray(out) as Any else JSONObject(out) as Any
         }.getOrElse { return@runCatching (null as Any?) to "输出不是 JSON：${out.take(120)}" }

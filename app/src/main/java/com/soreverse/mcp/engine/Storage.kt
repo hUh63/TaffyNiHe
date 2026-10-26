@@ -146,24 +146,38 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
     }
 
     fun readSource(source: SoSource): ByteArray {
-        // 安全加固：统一的堆预算上限（防单次读取 OOM）
-        val heapBudget = (Runtime.getRuntime().maxMemory() / 8L).coerceIn(8L * 1024 * 1024, 64L * 1024 * 1024)
+        val limit = minOf(MAX_SOURCE_BYTES, heapHeadroomLimit())
         return if (source.source == "apk") {
-            val declaredLimit = source.size.takeIf { it > 0 }?.plus(1L) ?: heapBudget
+            // 上限只按「当前堆余量」算。原来是 maxMemory/8（多数机器 = 32~64MiB），
+            // 等于把 APK 里 >64MiB 的 SO 一律拒掉（Unity 的 libil2cpp.so、UE 的 libUE4.so
+            // 都远超这个数），而同一个 SO 先解到本地再打开却是允许的（本地走 MAX_SOURCE_BYTES）。
+            // 同一个文件不该因为「从哪进」而一半能开一半不能开。
+            val declaredLimit = source.size.takeIf { it > 0 }?.plus(1L) ?: limit
             extractZipEntry(
                 source.treeDocumentUri ?: error("Missing APK document uri"),
                 source.apkEntry ?: error("Missing APK entry"),
-                minOf(declaredLimit, heapBudget),
+                minOf(declaredLimit, limit),
             )
         } else {
             val uri = source.treeDocumentUri ?: error("Missing document uri")
+            // 声明大小 +1 用于识别「读到的比声明多」，但仍不许越过堆余量上限
+            val capped = if (source.size > 0) minOf(limit, source.size + 1) else limit
             if (source.size >= LARGE_FILE_THRESHOLD) {
-                // 安全加固：回退路径加硬上限（防无界 OOM），合法大 SO 不受影响
-                readBytesChannel(uri, source.size) ?: readBytes(uri, MAX_SOURCE_BYTES)
+                readBytesChannel(uri, source.size) ?: readBytes(uri, capped)
             } else {
-                readBytes(uri, MAX_SOURCE_BYTES)
+                readBytes(uri, capped)
             }
         }
+    }
+
+    /**
+     * 当前还能安全读进堆的字节数。/2 是因为解析峰值远高于文件本身：workspace 常驻整份
+     * data，LIEF/xanso 还会再生成副本。下限 16MiB 保证小文件总有得读。
+     */
+    private fun heapHeadroomLimit(): Long {
+        val rt = Runtime.getRuntime()
+        val headroom = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())
+        return (headroom / 2).coerceIn(16L * 1024 * 1024, MAX_SOURCE_BYTES)
     }
 
     /**
@@ -199,24 +213,27 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
      * Returns null if the URI doesn't support file descriptors.
      */
     private fun readBytesChannel(uri: Uri, size: Long): ByteArray? {
-        if (size > 256L * 1024L * 1024L) return null // cap at 256 MiB
+        if (size <= 0L || size > 256L * 1024L * 1024L) return null // cap at 256 MiB
+        if (size > Int.MAX_VALUE.toLong()) return null
         return try {
             resolver.openFileDescriptor(uri, "r")?.use { pfd ->
                 FileInputStream(pfd.fileDescriptor).use { fis ->
                     fis.channel.use { channel ->
-                        val buf = ByteBuffer.allocateDirect(size.toInt())
-                        while (buf.hasRemaining()) {
-                            val n = channel.read(buf)
+                        // 直接读进堆上的 ByteArray：原来先 allocateDirect(size) 再拷一份，
+                        // 峰值内存翻倍；而且 direct 分配失败抛的是 OutOfMemoryError（Error 不是
+                        // Exception），原来的 catch (Exception) 捕不到，会直接把整个进程带崩。
+                        val result = ByteArray(size.toInt())
+                        var read = 0
+                        while (read < result.size) {
+                            val n = channel.read(ByteBuffer.wrap(result, read, result.size - read))
                             if (n < 0) break
+                            read += n
                         }
-                        buf.flip()
-                        val result = ByteArray(buf.remaining())
-                        buf.get(result)
-                        result
+                        if (read == result.size) result else result.copyOf(read)
                     }
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
     }
@@ -429,7 +446,7 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
                 while (true) {
                     val entry = zis.nextEntry ?: break
                     if (!entry.isDirectory && entry.name == entryName) {
-                        if (entry.size > maxBytes) throw ApkAnalysisLimitException("APK entry exceeds $maxBytes byte heap budget")
+                        if (entry.size > maxBytes) throw ApkAnalysisLimitException("APK entry is ${entry.size / 1024 / 1024} MiB, exceeds the ${maxBytes / 1024 / 1024} MiB memory budget（可先把该 SO 解压到本地再打开）")
                         val out = ByteArrayOutputStream(32 * 1024)
                         val buffer = ByteArray(64 * 1024)
                         var total = 0L
@@ -437,7 +454,7 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
                             val count = zis.read(buffer)
                             if (count < 0) break
                             total += count
-                            if (total > maxBytes) throw ApkAnalysisLimitException("APK entry exceeds $maxBytes byte limit")
+                            if (total > maxBytes) throw ApkAnalysisLimitException("APK entry exceeds the ${maxBytes / 1024 / 1024} MiB memory budget（可先把该 SO 解压到本地再打开）")
                             out.write(buffer, 0, count)
                         }
                         return out.toByteArray()

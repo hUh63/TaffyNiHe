@@ -53,6 +53,13 @@ class ElfParser(private val data: ByteArray) {
         }
         val symbols = mutableListOf<SymbolInfo>()
         val dynSymbols = mutableListOf<SymbolInfo>()
+        // 原始下标保真：重定位的 symIndex 指向**未被过滤**的符号表条目。ELF 的
+        // .dynsym[0] 一定是空名符号，一旦按「名字为空就跳过」来收集，列表整体前移
+        // 一格，所有重定位的符号名都会错位（实测 libandroidx.graphics.path.so：
+        // .rela.dyn 里每条 R_AARCH64_RELATIVE 都被标成 __cxa_finalize，
+        // .rela.plt 里 free 被标成 JNI_OnLoad）。这两个表按原始下标存，不参与展示。
+        val rawSymbols = ArrayList<SymbolInfo?>()
+        val rawDynSymbols = ArrayList<SymbolInfo?>()
         for ((index, sec) in sections.withIndex()) {
             if (sec.type != 2L && sec.type != 11L) continue
             val strtab = sections.getOrNull(sec.link)?.let { sectionBytes(it) } ?: ByteArray(0)
@@ -63,6 +70,7 @@ class ElfParser(private val data: ByteArray) {
                 bySize.coerceAtMost(byFile).coerceAtMost(1_000_000L).toInt().coerceAtLeast(0)
             } else 0
             val dest = if (sec.type == 11L) dynSymbols else symbols
+            val raw = if (sec.type == 11L) rawDynSymbols else rawSymbols
             for (i in 0 until count) {
                 val off = (sec.offset + i * sec.entsize).toInt()
                 if (off < 0 || off >= data.size) continue
@@ -88,21 +96,32 @@ class ElfParser(private val data: ByteArray) {
                     shndx = r.u16(off + 14)
                 }
                 val name = cstr(strtab, nameOffset)
-                if (name.isEmpty()) continue
                 val bind = when (info ushr 4) { 0 -> "LOCAL"; 1 -> "GLOBAL"; 2 -> "WEAK"; else -> "OTHER" }
                 val typ = when (info and 0xf) { 0 -> "NOTYPE"; 1 -> "OBJECT"; 2 -> "FUNC"; 6 -> "TLS"; else -> "OTHER" }
                 val vis = when (other and 0x3) { 0 -> "DEFAULT"; 1 -> "INTERNAL"; 2 -> "HIDDEN"; 3 -> "PROTECTED"; else -> "DEFAULT" }
-                dest += SymbolInfo(name, bind, typ, vis, shndx, value, size, shndx == 0, bind != "LOCAL" && shndx != 0)
+                val sym = SymbolInfo(name, bind, typ, vis, shndx, value, size, shndx == 0, bind != "LOCAL" && shndx != 0)
+                while (raw.size <= i) raw.add(null)
+                raw[i] = sym
+                if (name.isEmpty()) continue
+                dest += sym
             }
         }
-        val allSymbols = symbols + dynSymbols
         val relocs = mutableListOf<RelocInfo>()
+        // 重定位的 section 语义 = 它**作用于**哪个节（与 native LIEF 的 reloc.section() 一致），
+        // 不是它来自哪张重定位表。概览里的 PLT 桩计数只认 contains("plt")，两条路径必须同语义。
+        fun sectionOfVa(va: Long): String {
+            if (va <= 0) return ""
+            for (sec in sections) {
+                if (sec.addr > 0 && va >= sec.addr && va - sec.addr < sec.size) return sec.name
+            }
+            return ""
+        }
         for (sec in sections) {
             if (sec.type != 9L && sec.type != 4L) continue
             val symtab = if (sec.link in sections.indices) {
                 val linked = sections[sec.link]
-                if (linked.type == 11L) dynSymbols else symbols
-            } else allSymbols
+                if (linked.type == 11L) rawDynSymbols else rawSymbols
+            } else rawSymbols + rawDynSymbols
             // 上限：伪造 entsize=1 + size=0x7FFFFFFF 会让循环跑 21 亿次（CPU 占满、不抛异常）
             val count = if (sec.entsize > 0) {
                 val bySize = sec.size / sec.entsize
@@ -125,7 +144,13 @@ class ElfParser(private val data: ByteArray) {
                 }
                 val symIndex = if (bits == 64) (info ushr 32).toInt() else (info ushr 8).toInt()
                 val relocType = if (bits == 64) info and 0xffffffffL else info and 0xff
-                relocs += RelocInfo(sec.name, relocOffset, relocType, symtab.getOrNull(symIndex)?.name.orEmpty(), addend)
+                relocs += RelocInfo(
+                    sectionOfVa(relocOffset).ifEmpty { sec.name },
+                    relocOffset,
+                    relocType,
+                    symtab.getOrNull(symIndex)?.name.orEmpty(),
+                    addend,
+                )
             }
         }
         val strings = mutableListOf<StringInfo>()
@@ -133,79 +158,18 @@ class ElfParser(private val data: ByteArray) {
             if (sec.name !in setOf(".rodata", ".strtab", ".dynstr")) continue
             extractStrings(sectionBytes(sec), sec.offset, sec.name, strings)
         }
-        return ElfFile(data, bits, little, type, machine, entry, sections, symbols, dynSymbols, relocs, strings, symbolVersions = parseSymbolVersions(sections, dynSymbols, r))
-    }
-
-    /**
-     * 解析 .gnu.version (SHT_GNU_versym) + .gnu.version_r (verneed) + .gnu.version_d (verdef),
-     * 为每个动态符号关联其版本名（如 GLIBC_2.17）。纯 Kotlin, 不依赖 native。
-     */
-    private fun parseSymbolVersions(sections: List<SectionInfo>, dynSymbols: List<SymbolInfo>, r: Reader): List<SymbolVersionInfo> {
-        val versym = sections.firstOrNull { it.type == 0x6fffffffL } ?: return emptyList()
-        if (dynSymbols.isEmpty()) return emptyList()
-        val idxName = HashMap<Int, String>()
-        // verneed：依赖的版本（如 GLIBC_2.17）
-        sections.firstOrNull { it.type == 0x6ffffffeL }?.let { vn ->
-            val strtab = sections.getOrNull(vn.link)?.let { sectionBytes(it) } ?: ByteArray(0)
-            val end = (vn.offset + vn.size).toInt()
-            var off = vn.offset.toInt()
-            var guard = 0
-            while (off + 16 <= end && off >= 0 && guard++ < 8192) {
-                val cnt = r.u16(off + 2)
-                var aux = off + r.u32(off + 8).toInt()
-                var i = 0
-                while (i < cnt && aux + 16 <= end && aux >= 0) {
-                    idxName[r.u16(aux + 6)] = cstr(strtab, r.u32(aux + 8).toInt())
-                    val next = r.u32(aux + 12).toInt()
-                    if (next == 0) break
-                    aux += next; i++
-                }
-                val nextVn = r.u32(off + 12).toInt()
-                if (nextVn == 0) break
-                off += nextVn
-            }
-        }
-        // verdef：库自定义版本
-        sections.firstOrNull { it.type == 0x6ffffffdL }?.let { vd ->
-            val strtab = sections.getOrNull(vd.link)?.let { sectionBytes(it) } ?: ByteArray(0)
-            val end = (vd.offset + vd.size).toInt()
-            var off = vd.offset.toInt()
-            var guard = 0
-            while (off + 20 <= end && off >= 0 && guard++ < 8192) {
-                val ndx = r.u16(off + 4)
-                val auxOff = off + r.u32(off + 12).toInt()
-                if (auxOff + 8 <= end && auxOff >= 0) idxName[ndx] = cstr(strtab, r.u32(auxOff).toInt())
-                val next = r.u32(off + 16).toInt()
-                if (next == 0) break
-                off += next
-            }
-        }
-        val out = ArrayList<SymbolVersionInfo>()
-        val maxN = if (versym.entsize > 0) (versym.size / versym.entsize).toInt() else (versym.size / 2).toInt()
-        for (i in dynSymbols.indices) {
-            if (i >= maxN) break
-            val eoff = versym.offset.toInt() + i * 2
-            if (eoff < 0 || eoff + 2 > data.size) break
-            val raw = r.u16(eoff)
-            val hidden = (raw and 0x8000) != 0
-            val idx = raw and 0x7fff
-            val vname = when (idx) {
-                0 -> "local"
-                1 -> "global"
-                else -> idxName[idx] ?: "ver$idx"
-            }
-            out.add(SymbolVersionInfo(dynSymbols[i].name, vname, hidden, idx <= 1))
-        }
-        return out
+        return ElfFile(data, bits, little, type, machine, entry, sections, symbols, dynSymbols, relocs, strings, symbolVersions = ElfGnuVersions.parse(data, sections))
     }
 
     private fun sectionBytes(section: SectionInfo): ByteArray {
         if (section.offset < 0 || section.size <= 0) return ByteArray(0)
-        val start = section.offset.toInt().coerceIn(0, data.size)
-        // size 可能大于 Int.MAX_VALUE（u64 读出来的），toInt() 变成负数会让 copyOfRange 抛异常
-        val sizeInt = section.size.coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(0)
-        val end = min(data.size, start + sizeInt)
-        return data.copyOfRange(start, end)
+        val start = section.offset.coerceIn(0L, data.size.toLong()).toInt()
+        // 两点：①size 可能大于 Int.MAX_VALUE（u64 读出来的），先按文件长度夹住；
+        // ②即便夹过，start + size 仍能溢出 Int 回绕成负数（start=1000, size=0x7FFFFF00 即可），
+        // 那时 copyOfRange(start, 负数) 直接抛 IllegalArgumentException —— 畸形 sh_size 就能崩。
+        val sizeCap = section.size.coerceAtMost(data.size.toLong())
+        val end = min(data.size.toLong(), start.toLong() + sizeCap).toInt()
+        return if (end > start) data.copyOfRange(start, end) else ByteArray(0)
     }
 
     private fun extractStrings(bytes: ByteArray, base: Long, section: String, out: MutableList<StringInfo>) {
@@ -259,9 +223,11 @@ class ElfParser(private val data: ByteArray) {
         val entsize: Long,
     ) {
         fun bytes(data: ByteArray): ByteArray {
-            val start = offset.toInt().coerceIn(0, data.size)
-            val end = min(data.size, start + size.toInt().coerceAtLeast(0))
-            return data.copyOfRange(start, end)
+            // 与 sectionBytes 同款：offset/size 都是 u64，start + size 必须走 Long，否则回绕成负数崩溃
+            if (offset < 0 || size <= 0) return ByteArray(0)
+            val start = offset.coerceIn(0L, data.size.toLong()).toInt()
+            val end = min(data.size.toLong(), start.toLong() + size.coerceAtMost(data.size.toLong())).toInt()
+            return if (end > start) data.copyOfRange(start, end) else ByteArray(0)
         }
     }
 

@@ -74,6 +74,16 @@ inline void append_num(std::string& out, const char* key, uint64_t val, bool fir
     out += std::to_string(val);
 }
 
+// 有符号版本：addend 是 int64_t，按 uint64 输出会把 -4 写成 18446744073709551612，
+// Kotlin 侧 optLong 再回绕成别的值（org.json 对大整数会先变 Double）。
+inline void append_snum(std::string& out, const char* key, int64_t val, bool first) {
+    if (!first) out += ",";
+    out += "\"";
+    out += key;
+    out += "\":";
+    out += std::to_string(val);
+}
+
 inline void append_str(std::string& out, const char* key, const std::string& val, bool first) {
     if (!first) out += ",";
     out += "\"";
@@ -108,12 +118,16 @@ std::string build_symbol_json(const LIEF::ELF::Symbol& sym) {
 
 std::string build_reloc_json(const LIEF::ELF::Relocation& reloc) {
     std::string j = "{";
-    append_str(j, "section", "", true);
+    // LIEF 的 section() 是重定位**作用于**的那个节（PLT 重定位落在 .got.plt），
+    // 不是它来自哪张重定位表。这里曾经恒传空串，于是 EngineRuntimeSources 里
+    // `relocations.count { it.section.contains("plt") }` 在主路径永远是 0。
+    const auto* target = reloc.section();
+    append_str(j, "section", target != nullptr ? target->name() : std::string(), true);
     append_num(j, "offset", reloc.address(), false);
     append_num(j, "type", static_cast<uint64_t>(reloc.type()), false);
     const auto* sym = reloc.symbol();
-    append_str(j, "symbol", sym ? sym->name() : "", false);
-    append_num(j, "addend", static_cast<uint64_t>(reloc.addend()), false);
+    append_str(j, "symbol", sym != nullptr ? sym->name() : std::string(), false);
+    append_snum(j, "addend", static_cast<int64_t>(reloc.addend()), false);
     j += "}";
     return j;
 }

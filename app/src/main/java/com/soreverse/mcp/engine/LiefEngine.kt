@@ -149,6 +149,9 @@ class LiefEngine {
             data, bits, littleEndian, type, machine, entry,
             sections, symbols, dynSymbols, relocations, strings,
             programHeaders, dynamicEntries,
+            // 主路径此前不填符号版本（只有 ElfParser 填），taffy_so_versions 在主路径恒空。
+            // 这里按原始 .dynsym 下标对齐，不再依赖被过滤过的 dynSymbols。
+            symbolVersions = ElfGnuVersions.parse(data, sections),
         )
     }
 

@@ -1126,6 +1126,8 @@ object ToolCatalog {
         FileTools.gateway,
         // 塔菲逆核: 通用压缩解压
         ArchiveTools.gateway,
+        // 借鉴 SOMCP v1.0.23 T1 审计批：30 个只读审计工具
+        *AuditTools.ALL.toTypedArray(),
         *DotnetTools.ALL.toTypedArray(),
         // 塔菲逆核: 设备信息/系统/应用/通讯/网络/实用工具(参考mcp-server)
         *DeviceTools.ALL.toTypedArray(),

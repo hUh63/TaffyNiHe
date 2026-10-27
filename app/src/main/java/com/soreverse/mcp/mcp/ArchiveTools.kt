@@ -588,13 +588,22 @@ object ArchiveTools {
         try {
             // Collect new files
             val newEntries = mutableListOf<Pair<String, File>>()
+            var rejected = 0
             for (i in 0 until files.length()) {
                 val f = File(files.getString(i))
                 if (!f.isFile) continue
                 val entryName = if (baseDir.isNotBlank()) {
                     f.absolutePath.removePrefix(File(baseDir).absolutePath + File.separator).removePrefix(File(baseDir).absolutePath)
                 } else f.name
-                newEntries.add(entryName.replace(File.separatorChar, '/') to f)
+                // 条目名必须相对：file 不在 baseDir 之下时 removePrefix 不生效，entryName 会是
+                // "/data/..." 这样的绝对路径；zip 条目名以 / 开头在 Android 侧解包即失败。
+                // 同理拒绝 `..` 段 —— 打包一个符号链接/手滑路径就能写出穿越条目。
+                val safeEntry = entryName.replace(File.separatorChar, '/').trimStart('/')
+                if (safeEntry.isEmpty() || safeEntry.split('/').any { it == ".." }) {
+                    rejected++
+                    continue
+                }
+                newEntries.add(safeEntry to f)
             }
             val existingCount = runCatching { java.util.zip.ZipFile(file).use { it.size() } }.getOrDefault(0)
 
@@ -628,6 +637,7 @@ object ArchiveTools {
                 .put("path", path)
                 .put("added", newEntries.size)
                 .put("applied", applied.size)
+                .put("rejectedNames", rejected)
                 .put("existingEntries", existingCount))
         } catch (e: Exception) {
             tmpFile.delete()

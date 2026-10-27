@@ -1,3 +1,97 @@
+## 塔菲逆核 v1.5.12 —— 工具调用模式 + 设置页重做
+
+### 一、工具调用模式：`full` / `skills_like`
+
+借鉴 SOMCP v1.0.23（PR #174）对齐 AstrBot 的 `tool_schema_mode`。设置 → AI 深度分析 →
+「工具调用」里切换，**AI 深度分析、子代理、`dynamic_analyze_ai`、`static_analyze_ai`
+四条链路同时生效**（`AgentKernel` 单点透传；两个 Service 自己 new 引擎的地方也补了参数，
+漏一处就等于设置形同虚设）。
+
+- **原生调用（`full`，默认）**：走 provider 的 function calling，tools schema 每轮随请求
+  重发。约束最强，行为与之前完全一致。
+- **Skills 风格（`skills_like`）**：不发原生 tools，把工具渲染成 Markdown 文档塞进 system
+  prompt（工具名 + 描述 + `签名` + 参数表），模型用
+  `<tool_call>{"tool":..,"args":{..}}</tool_call>` 发起调用，引擎从文本里解析，结果以
+  `<tool_response>` 的 user 消息回灌。
+
+适合两类场景：中转/小模型不支持 function calling（此前只能整轮失败）；工具很多、
+schema 每轮重发太贵（一次性文档随轮数摊薄）。
+
+**边界如实说**：`skills_like` 依赖模型遵循 `<tool_call>` 约定，约束力弱于 API 级
+function calling。模型如果把调用写成散文，引擎只会忽略解析不了的块，**不会虚构调用**；
+这种情况请切回原生。
+
+顺带修掉两个会让 `skills_like` 直接 400 的真问题（上游版本也有）：
+
+1. `buildOpenAiBody` / `buildAnthropicBody` 无条件写 `"tools": [...]`，空数组时部分
+   OpenAI 兼容中转直接报 `tools must not be empty` —— 而 `skills_like` 走的正是
+   「不发 tools」这条路。现在 `tools.isNotEmpty()` 才写（Gemini 那边本来就有判断）。
+2. 同一模式下消息体仍会写 `tool_calls` / `tool_use` / `tool_result`，引用不存在的工具
+   定义。现在这三类字段只在 `full` 模式写。
+
+### 二、SOMCP 12 项扩容逐一对比
+
+| # | 上游工具 | 塔菲原状 | 本轮 |
+|---|---|---|---|
+| 1 | `workspace_overview` | engine 有 `overview()`，无工具 | ✅ 新增 `taffy_workspace_overview` |
+| 2 | `analyze_outline` | engine 有 `outline()`，无工具 | ✅ 新增 `taffy_analyze_outline` |
+| 3 | `analyze_string_xrefs` | 已有 `taffy_string_xref` | — |
+| 4 | `cache_clear` | engine 有 `clearCaches()`，无工具 | ✅ 新增 `taffy_cache_clear` |
+| 5 | `workspace_export` | engine 有 `snapshotBytes()`，无工具 | ✅ 新增 `taffy_workspace_export`（base64 + SHA-256 + 架构，32 MiB 硬上限） |
+| 6 | `system_logs` | 已有 `taffy_logcat` / `_capture` / `_collect` / `_crash` | — |
+| 7 | `frida_write` | 无 | ⏸ 见下 |
+| 8 | `frida_replace` | 无 | ⏸ 见下 |
+| 9 | `frida_modules` | 无 | ⏸ 见下 |
+| 10 | `frida_script` | 无 | ⏸ 见下 |
+| 11 | `frida_call` 参数类型（int / 指针 / 字符串） | 待核 | ⏸ 见下 |
+| 12 | `static_analyze_ai` | 只有 `taffy_dynamic_analyze_ai` | ✅ 新增，`DeepAnalysisService` 补 `analyzeSync` 阻塞入口 |
+
+**为什么第 7–11 项没做**：Frida 侧四个新 op 全部要在**已 root 的真机上**验证才有意义
+（写内存、`Interceptor.replace`、agent 内 eval 任意 JS）。沙箱里既没有 root 设备也没有
+可复现的注入目标，写出来的代码只能靠"看起来对"交付 —— 而这类操作的失败形态是
+「目标进程静默崩溃」或「hook 装上了但没生效」，事后极难定位。塔菲现有的
+`taffy_dynamic_api(op=frida_hook)` 已经允许传入 JS 片段驱动 `Interceptor/Module/Memory`，
+`frida_script` 想要的能力基本能用它表达。等有真机验证窗口时再补，并在描述里标注需要 root。
+
+### 三、设置页重做（覆盖全部 42 个子页）
+
+问题不在某一页，而在**两套基座**：
+
+| 基座 | 被谁用 | 原问题 | 现在 |
+|---|---|---|---|
+| `GlassGroup` + `NavRow` + `GroupDivider`（`UiComponents.kt`） | 30 个页面的主体内容 | ①卡片色 `surfaceContainer` 与页面底色几乎无差，深色下整页像一张纸；②圆角 `extraLarge`(28dp) 过大，卡片显得臃肿；③组标题 `padding start = 20dp`，比卡内正文（16dp）更靠里，整页看着是歪的；④分隔线 0.5dp + alpha 0.22，几乎看不见，行与行糊成一片；⑤`NavRow` 64dp 高 + 16sp 标题，一屏只能放 6 行 | 卡片 `surfaceContainerHigh` + 圆角 20dp；组标题 12sp/600 且与正文左对齐；分隔线 1dp `outlineVariant`、缩进 16dp；`NavRow` 56dp / 15sp / 图标 22dp |
+| `SettingsScaffold` + `SettingsSection` + `PreferenceSurface` + 行组件（`SettingsKit.kt`） | 15 个页面 | ①`LargeTopAppBar` 大标题未滚动时白占约 96dp；②组内中间行留 4dp 圆角，行与行之间四个小缺口，拼起来不像一张卡而像一堆小方块；③行高 80/96dp（iOS 大行高），设置项一多就翻页翻到手酸 | 顶栏收到 56dp / 标题 20sp 常驻；组内中间行圆角 0（首行上圆 20、末行下圆 20）；行高 54dp（分类 68dp）、标题 15sp / 副标题 12sp |
+
+两套基座的底色与圆角现在一致（`surfaceContainerHigh` / 20dp），所以从 Hub 页点进
+任何子页都不会有"换了套皮肤"的割裂感。
+
+没有页面同时用这两套组件（已核），也没有页面直接引用 `SettingsDensity` 的行高常量，
+所以这次换值不会把某个页面的布局挤坏。
+
+### 四、排查收获
+
+- **`skills_like` 的两个 400 陷阱**（见上，已修）
+- **`static_analyze_ai` 的 `EngineToolHandler` 第三参是 `SettingsStore` 不是 `ToolContext`**
+  —— 第一版照 `dynamic_analyze_ai` 的写法抄了 `ctx.settings`，编译即报
+  `Unresolved reference 'settings' on receiver of type 'SettingsStore'`。两个 Handler 形态
+  不同：`object : ToolHandler` 拿 `ToolContext`，`EngineToolHandler` 只拿 `(engine, args, settings)`。
+- **`DynamicAnalysisService` / `DeepAnalysisService` 各自 new 引擎**，`toolSchemaMode`
+  必须在两处补传；只改 `AgentKernel` 会让「Agent 链路生效、Service 链路失效」，
+  用户切了模式发现一半功能没变。
+
+### 五、关于"把功能整合起来"
+
+塔菲的工具目录已有网关形态（`taffy_rizin_api` / `lief_api` / `unidbg_api` / `dynamic_api` /
+`xanso_api` / `jni_api` …），本轮新增的 35 个工具**没有再套一层网关**，理由：
+
+- 网关把 N 个工具的 schema 压成一个 `when(action)`，AI 需要先知道 action 名才能调用，
+  发现成本反而上升；独立工具名（`taffy_elf_byte_ledger`）本身就是自解释的。
+- 网关的收益是"少占上下文"。但本轮 35 个工具全部是 `ToolClass.EXTRA`，默认精简清单
+  不含它们 —— 上下文只有真正需要时才付出。
+
+网关留给「同一个底层能力的不同参数形态」（如 rizin 的 20 多个命令），而不是「同一主题
+下互不相关的一堆分析」。
+
 ## 塔菲逆核 v1.5.11 —— 借鉴上游 T1 审计批（30 个只读工具）+ 归档工具收口
 
 ### 一、新增 30 个只读审计工具（借鉴 SOMCP v1.0.23 的 T1 批）

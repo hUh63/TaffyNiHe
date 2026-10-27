@@ -1,3 +1,90 @@
+## 塔菲逆核 v1.5.11 —— 借鉴上游 T1 审计批（30 个只读工具）+ 归档工具收口
+
+### 一、新增 30 个只读审计工具（借鉴 SOMCP v1.0.23 的 T1 批）
+
+这批工具全部是「已有 engine 数据 + 纯逻辑计算」，不新增 native、不改动任何现有工具
+行为，统一以 `taffy_` 前缀注册，且全部落在 `ToolClass.EXTRA`（默认精简清单不变，
+AI 客户端的启动上下文不受影响）。按用途分五组：
+
+| 组 | 工具 |
+|---|---|
+| ELF 结构与链接审计 | `elf_abi_profile` `elf_byte_ledger` `elf_section_anomaly` `elf_phdr_invariants` `elf_dynamic_tags` `elf_dt_flags` `elf_hash_tables` `elf_reloc_census` `dt_needed_resolve` `symbol_visibility_audit` |
+| JNI / NDK 画像 | `jni_mangle_codec` `android_ident_note` `ndk_toolchain_fingerprint` `libcxx_variant` |
+| 字符串与加密常量 | `str_encoding_census` `str_literal_classes` `crypto_const_fingerprint` `crypto_hash_constants` `net_endpoint_extract` `file_path_roots` `env_property_keys` |
+| 补丁可行性（只读） | `code_padding_caves` `patch_cave_finder` `patch_length_guard` `patch_apply_verify` |
+| APK 签名 / ZIP / ABI | `apk_sig_verify` `apk_cert_info` `apk_zip_anomaly` `apk_abi_coverage` |
+| 证据 | `evidence_manifest` |
+
+几个实际用法：
+
+- `elf_byte_ledger`：把文件按区间算出「这一段被哪个节/段消费」，直接列出空洞、重叠、
+  越界。加壳样本里「节区表声称的大小」和「真实被映射的字节」不一致，一眼能看出来。
+- `elf_phdr_invariants`：`filesz > memsz`、`PT_LOAD` 重叠、W+X 段、`p_align` 非法——
+  这些畸形在上游是加载器崩溃的原因，在这里是加壳/篡改的指纹。
+- `crypto_const_fingerprint`：按字节精确匹配 AES/SM4 S-box、ChaCha sigma、Blowfish P、
+  MD5 T 表、SHA-256 K/IV、CRC-32、FNV、xxHash、Murmur 常量，命中给出所在节与偏移。
+  弱指标（如单个 S 表）会明确标注为弱，不下「就是 AES」的结论。
+- `patch_cave_finder`：找可写代码洞，但每一条都带 `inExecLoad`（在可执行 PT_LOAD 内）、
+  `relocTargetCovered`（没有重定位指向它）、`holdsEntryPoint`（不含入口点）三个判定，
+  只有全过才 `safeForPatch=true`。**它是只读的**，真正写入仍走 `edit_hex` / `edit_asm`。
+- `apk_zip_anomaly`：从中央目录做 ZIP 异常检查（重复条目、名字含 `..`、零长度、
+  STORED 但带压缩大小、越界偏移）。配合上一版修的对齐问题，重打包前后各跑一次即可
+  确认产物没被写坏。
+- `evidence_manifest`：把输入 sha256、分析范围、调用方声明的 claims 和整份 JSON 的
+  自校验哈希打成一份清单，便于事后复现「这个结论是在哪个文件上得出的」。
+
+### 二、`ElfParser` 补上 program header 与 dynamic 解析
+
+这一条是上面那批的**前置**，也是一个独立的真缺陷：塔菲的纯 Kotlin 解析路径此前
+**从不填** `ElfFile.programHeaders` 与 `dynamicEntries`，只有 LIEF 后端会填。结果是
+「依赖库列表」「PT_DYNAMIC 定位」「W+X 段判定」在无 native 可用时（未支持的架构、
+native 加载失败、部分裁剪构建）全部退化成空——工具不报错，只是安静地给出「没有数据」。
+
+现在两段都在 Kotlin 侧解析，并做了两处防护：`e_phentsize` 只在 32..256 之间才采用
+（否则退回架构默认宽度），`e_phnum` 夹到 4096 条；dynamic 区间按文件长度夹住，
+防伪造 `p_filesz` 把读取推出数组外。
+
+### 三、归档工具收口：`add` / `delete` / `rename` 不再自己重打包
+
+`taffy_archive_add`、`taffy_archive_delete`、`taffy_archive_rename` 此前各自写了一遍
+`ZipOutputStream` + `new ZipEntry(name)`：
+
+- method 是 -1，`putNextEntry` 会设成 DEFLATED —— 拿它改 APK，`resources.arsc` 与
+  `lib/*.so` 就此失去 STORED 与对齐（与上一版修的两处完全同源）
+- `add` 先把整包解压进 `Map<String, ByteArray>`，一个几百 MB 的包直接把进程顶到 OOM
+
+现在三者都走 `core/ZipRepack.copyAll`：保留原条目的 method / extra / 时间戳，
+`lib/*.so` 与 `resources.arsc` 强制 STORED + 4096/4 对齐，内容按流式写。
+
+`ZipRepack` 为此新增两个能力：
+
+- `appendFiles`：按文件流式追加新条目（`append` 只接受 `ByteArray`，加一个大 `.so`
+  就必然 OOM）。新条目的 method 与对齐同样按名字规则推导。
+- `level`：把调用方指定的压缩级别传下去（`taffy_archive_add` 的 `level` 参数此前
+  在改造后会丢失；实现上必须在写第一条之前 `setLevel`）。
+
+另外顺手补了两处：
+
+- `add` 的条目名现在会被规整（去前导 `/`）并拒绝 `..` 段。旧逻辑在文件不在 `baseDir`
+  之下时会把绝对路径写进条目名，Android 侧解包直接失败；返回里新增 `rejectedNames`。
+- `delete` 在没有条目命中时直接返回 `unchanged`，不再无条件重打包整包——旧行为等于
+  把没改动的包也降级成 DEFLATED，纯属自伤。
+
+### 四、`apk_sig_verify` 标记为重活
+
+它要按分块把整包读一遍做两级摘要（`0xa5` 分块树 → `0x5a` 顶层），几百 MB 的 APK
+就是几百 MB 的 SHA-256。此前没占用重活槽，会在并发上限内一直让别人排队。
+
+### 五、上游核对结论（没抄的部分）
+
+| 上游 | 内容 | 结论 |
+|---|---|---|
+| SOMCP #181 | 「最新版用户被永久提示有更新」| **塔菲不受影响**。上游的判据是 `published_at > BuildConfig.RELEASE_PUBLISHED_AT`，而该基线由 release 任务在构建**开始**时注入、发布在**结束**时进行，恒为真。塔菲用的是「同版本 + 发布时间晚于本地忽略记录」，且塔菲根本没有 `RELEASE_PUBLISHED_AT` 这条注入链。 |
+| SOMCP #174 | 工具调用模式 `full` / `skills_like`（工具暴露策略） | 塔菲已有 `ToolClass.LEAN` / `EXTRA` 两层暴露，与本批 30 个工具全部落在 EXTRA 一致，无需再叠一层。 |
+| SOMCP #173 | 12 项工具扩容（Frida 动态侧 + AI 对等入口） | 塔菲对应的动态侧入口（`frida_control` / `dynamic_*`）已存在，本轮未重复。 |
+| taixu v1.6.0 | 网关服务按实例管理 + 端口孤儿回收 | **未采纳**。taixu 回收的是 PRoot 沙箱内的进程树，Android 应用层没有权限去杀「占用端口的其它进程」；塔菲的 MCP 服务在同一进程内 `stop()` 时已释放监听，跨进程残留属无 root 无解场景，只做了错误提示。 |
+| taixu v1.5.0 | 会话版本化 / 审批审计 / 轮改动卡片 | 塔菲对应能力在 `session_audit`、`EditSnapshotService` 里，形态不同，未强行对齐。 |
+
 ## 塔菲逆核 v1.5.10 —— 三条「工具说改好了、APK 却装不上」的链路
 
 这一轮查的是**产物正确性**：工具返回 success + 字节数，但打出来的 APK 装不上、甚至直接

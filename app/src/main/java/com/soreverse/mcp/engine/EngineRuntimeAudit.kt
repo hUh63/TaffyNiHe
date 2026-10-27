@@ -295,7 +295,7 @@ internal fun EngineRuntime.evidenceManifest(workspaceId: String, claims: JSONArr
         .put(
             "generator",
             JSONObject()
-                .put("tool", "SOMCP")
+                .put("tool", "taffy")
                 .put("version", BuildConfig.VERSION_NAME)
                 .put("generatedAt", System.currentTimeMillis())
         )

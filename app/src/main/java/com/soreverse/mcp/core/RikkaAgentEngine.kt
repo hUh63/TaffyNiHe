@@ -456,7 +456,9 @@ internal class RikkaAgentEngine(
                     put("role", message.role)
                     put("content", message.parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text })
                     val calls = message.parts.filterIsInstance<RikkaPart.Tool>()
-                    if (message.role == "assistant" && calls.isNotEmpty()) {
+                    // skills_like 不发原生 tools；若仍写 tool_calls，消息里会引用不存在的工具定义
+                    // （部分中转直接 400）。文本形态的调用已在系统提示词里声明。
+                    if (message.role == "assistant" && calls.isNotEmpty() && !useSkillsLike) {
                         putJsonArray("tool_calls") {
                             calls.forEach { call -> add(buildJsonObject {
                                 put("id", call.id)
@@ -466,19 +468,25 @@ internal class RikkaAgentEngine(
                         }
                     }
                 })
-                message.parts.filterIsInstance<RikkaPart.Tool>().filter { it.result != null }.forEach { call ->
-                    add(buildJsonObject { put("role", "tool"); put("tool_call_id", call.id); put("content", call.result.orEmpty()) })
+                if (!useSkillsLike) {
+                    message.parts.filterIsInstance<RikkaPart.Tool>().filter { it.result != null }.forEach { call ->
+                        add(buildJsonObject { put("role", "tool"); put("tool_call_id", call.id); put("content", call.result.orEmpty()) })
+                    }
                 }
             }
         }
-        putJsonArray("tools") {
-            tools.forEach { tool -> add(buildJsonObject {
-                put("type", "function")
-                put("function", buildJsonObject {
-                    put("name", tool.name); put("description", tool.description)
-                    put("parameters", json.parseToJsonElement(tool.schema.toString()))
-                })
-            }) }
+        // 空数组不能写：OpenAI 兼容中转对 "tools": [] 会直接 400（tools must not be empty），
+        // 而 skills_like 走的正是「不发 tools」这条路。
+        if (tools.isNotEmpty()) {
+            putJsonArray("tools") {
+                tools.forEach { tool -> add(buildJsonObject {
+                    put("type", "function")
+                    put("function", buildJsonObject {
+                        put("name", tool.name); put("description", tool.description)
+                        put("parameters", json.parseToJsonElement(tool.schema.toString()))
+                    })
+                }) }
+            }
         }
         customBody.forEach { (key, value) -> put(key, value) }
     }
@@ -504,15 +512,19 @@ internal class RikkaAgentEngine(
                             message.parts.forEach { part -> when (part) {
                                 is RikkaPart.Text -> add(buildJsonObject { put("type", "text"); put("text", part.text) })
                                 is RikkaPart.Reasoning -> Unit
-                                is RikkaPart.Tool -> add(buildJsonObject {
-                                    put("type", "tool_use"); put("id", part.id); put("name", part.name)
-                                    put("input", runCatching { json.parseToJsonElement(part.arguments) }.getOrElse { JsonObject(emptyMap()) })
-                                })
+                                is RikkaPart.Tool -> if (!useSkillsLike) {
+                                    add(buildJsonObject {
+                                        put("type", "tool_use"); put("id", part.id); put("name", part.name)
+                                        put("input", runCatching { json.parseToJsonElement(part.arguments) }.getOrElse { JsonObject(emptyMap()) })
+                                    })
+                                } else {
+                                    Unit
+                                }
                             } }
                         }
                     })
                     val completed = message.parts.filterIsInstance<RikkaPart.Tool>().filter { it.result != null }
-                    if (completed.isNotEmpty()) {
+                    if (completed.isNotEmpty() && !useSkillsLike) {
                         add(buildJsonObject {
                             put("role", "user")
                             putJsonArray("content") {
@@ -525,7 +537,9 @@ internal class RikkaAgentEngine(
                 }
             }
         }
-        putJsonArray("tools") { tools.forEach { tool -> add(buildJsonObject { put("name", tool.name); put("description", tool.description); put("input_schema", json.parseToJsonElement(tool.schema.toString())) }) } }
+        if (tools.isNotEmpty()) {
+            putJsonArray("tools") { tools.forEach { tool -> add(buildJsonObject { put("name", tool.name); put("description", tool.description); put("input_schema", json.parseToJsonElement(tool.schema.toString())) }) } }
+        }
         customBody.forEach { (key, value) -> put(key, value) }
     }
 

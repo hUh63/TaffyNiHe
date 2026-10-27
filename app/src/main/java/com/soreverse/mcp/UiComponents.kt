@@ -214,7 +214,9 @@ internal fun GlassGroup(
 @Composable
 internal fun GroupDivider() {
     HorizontalDivider(
-        modifier = Modifier.padding(start = 56.dp),
+        // 缩进与卡片内边距一致（16dp）。不做 iOS 式 56dp 图标缩进：这里有一半的分隔线
+        // 用在无图标的输入框/说明文字之间，56dp 会变成一截断头线。
+        modifier = Modifier.padding(start = 16.dp),
         thickness = 1.dp,
         // 0.5dp + alpha 0.22 在深色主题下几乎看不见，行与行糊成一片
         color = MaterialTheme.colorScheme.outlineVariant,

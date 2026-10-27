@@ -7,6 +7,7 @@ import com.android.tools.smali.smali.Smali
 import com.android.tools.smali.smali.SmaliOptions
 import com.soreverse.mcp.core.ApkSigningPolicy
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.ZipRepack
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -233,24 +234,28 @@ object SmaliBatchTool {
                     val apkFile = File(apkPath)
                     val backup = File(apkFile.parentFile, "${apkFile.nameWithoutExtension}.bak.apk")
                     apkFile.copyTo(backup, overwrite = true)
-                    // 重建 ZIP: 替换目标 DEX, 其余条目原样
+                    // 重建 ZIP: 替换目标 DEX, 其余条目原样。
+                    // 必须走 ZipRepack —— 这里原来自己写 ZipOutputStream，`ZipEntry(e.name)`
+                    // 的 method 是 -1（被 putNextEntry 设成 DEFLATED）且丢掉原 extra，于是
+                    // resources.arsc / lib/*.so 全被重新压缩：装不上（或 extractNativeLibs=false
+                    // 的包原生库加载失败），而工具还是报 rebuild 成功。ZipRepack 会保留原
+                    // method/extra 并强制这两类条目 STORED + 4/4096 对齐。
                     val tempApk = File.createTempFile("apk_batch_", ".apk", apkFile.parentFile)
-                    ZipFile(apkFile).use { zf ->
-                        java.util.zip.ZipOutputStream(tempApk.outputStream()).use { zos ->
-                            var replaced = 0
-                            zf.entries().toList().forEach { e ->
-                                zos.putNextEntry(java.util.zip.ZipEntry(e.name))
-                                val nb = newDexBytes[e.name]
-                                if (nb != null) { zos.write(nb); replaced++ } else
-                                    zf.getInputStream(e).use { it.copyTo(zos) }
-                                zos.closeEntry()
-                            }
-                            if (replaced != newDexBytes.size) return@runCatching err("ZIP_MISMATCH", "APK 内 DEX 条目数与重编数不一致", "path", apkPath)
-                        }
+                    val applied = runCatching {
+                        ZipRepack.copyAll(apkFile, tempApk) { name -> newDexBytes[name] }
+                    }.getOrElse { e ->
+                        tempApk.delete()
+                        return@runCatching err(
+                            "ZIP_MISMATCH",
+                            "重建 APK 失败: ${e.message ?: e.javaClass.simpleName}",
+                            "path", apkPath,
+                        )
                     }
-                    apkFile.delete()
-                    tempApk.copyTo(apkFile, overwrite = true)
-                    tempApk.delete()
+                    if (applied.size != newDexBytes.size) {
+                        tempApk.delete()
+                        return@runCatching err("ZIP_MISMATCH", "APK 内 DEX 条目数与重编数不一致", "path", apkPath)
+                    }
+                    ZipRepack.replaceAtomically(tempApk, apkFile)
 
                     val result = JSONObject()
                         .put("action", "rebuild")

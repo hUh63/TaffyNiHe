@@ -91,6 +91,8 @@ internal object ZipRepack {
         output: File,
         skip: (String) -> Boolean = { false },
         append: List<Pair<String, ByteArray>> = emptyList(),
+        appendFiles: List<Pair<String, File>> = emptyList(),
+        level: Int = -1,
         replace: (String) -> ByteArray?,
     ): Set<String> {
         // 返回真正被替换的条目名：调用方据此判断"修改是否落到产物上"。
@@ -100,6 +102,8 @@ internal object ZipRepack {
         val written = HashSet<String>()
         SavedOffsetOutput(BufferedOutputStream(output.outputStream())).use { counting ->
             ZipOutputStream(counting).use { zos ->
+                // 调用方显式要求压缩级别时（archive_add 的 level 参数）必须在写第一条之前设置
+                if (level in 0..9) zos.setLevel(level)
                 ZipFile(input).use { zf ->
                     for (e in zf.entries()) {
                         if (skip(e.name)) continue
@@ -172,6 +176,14 @@ internal object ZipRepack {
                     written.add(name)
                     applied.add(name)
                 }
+                // 按文件追加：内容留在磁盘上，逐条流式写入。归档工具加一个几十 MB 的 .so
+                // 时，把整份读进 ByteArray 会把重打包进程顶上 OOM（APK 里 lib/*.so 就是这种尺寸）。
+                for ((name, source) in appendFiles) {
+                    if (name in written) continue
+                    writeFreshFile(zos, counting, name, source)
+                    written.add(name)
+                    applied.add(name)
+                }
             }
         }
         return applied
@@ -195,6 +207,43 @@ internal object ZipRepack {
         if (extra.isNotEmpty()) entry.extra = extra
         zos.putNextEntry(entry)
         zos.write(bytes)
+        zos.closeEntry()
+    }
+
+    /**
+     * 写一个「原包里不存在」的新条目，内容来自磁盘文件（不整份载入内存）。
+     *
+     * STORED 条目要求 size/crc 在 putNextEntry 之前就绪，所以先扫一遍算 CRC；
+     * 非 STORED 走单遍流式写入。对齐规则与 [writeFresh] 一致。
+     */
+    private fun writeFreshFile(zos: ZipOutputStream, counting: SavedOffsetOutput, name: String, source: File) {
+        val entry = ZipEntry(name)
+        entry.time = source.lastModified()
+        var extra = ByteArray(0)
+        if (requiresStore(name)) {
+            entry.method = ZipEntry.STORED
+            val size = source.length()
+            val crc = CRC32()
+            source.inputStream().use { ins ->
+                val buf = ByteArray(1 shl 16)
+                while (true) {
+                    val n = ins.read(buf)
+                    if (n < 0) break
+                    crc.update(buf, 0, n)
+                }
+            }
+            entry.size = size
+            entry.compressedSize = size
+            entry.crc = crc.value
+            val align = if (isNativeLib(name)) 4096 else 4
+            zos.flush()
+            val nameLen = name.toByteArray(Charsets.UTF_8).size
+            val pad = paddingFor(counting.count, nameLen, extra.size, align)
+            if (pad > 0) extra += alignmentExtra(pad)
+        }
+        if (extra.isNotEmpty()) entry.extra = extra
+        zos.putNextEntry(entry)
+        source.inputStream().use { it.copyTo(zos) }
         zos.closeEntry()
     }
 

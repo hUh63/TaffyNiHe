@@ -586,19 +586,6 @@ object ArchiveTools {
         val tmpFile = File(file.absolutePath + ".tmp")
 
         try {
-            val existing = mutableMapOf<String, Pair<ZipEntry, ByteArray>>()
-            ZipInputStream(FileInputStream(file)).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    if (!entry.isDirectory) {
-                        val ba = readZipEntryCapped(zis)
-                        existing[entry.name] = entry to ba
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-            }
-
             // Collect new files
             val newEntries = mutableListOf<Pair<String, File>>()
             for (i in 0 until files.length()) {
@@ -607,35 +594,41 @@ object ArchiveTools {
                 val entryName = if (baseDir.isNotBlank()) {
                     f.absolutePath.removePrefix(File(baseDir).absolutePath + File.separator).removePrefix(File(baseDir).absolutePath)
                 } else f.name
-                newEntries.add(entryName to f)
+                newEntries.add(entryName.replace(File.separatorChar, '/') to f)
             }
+            val existingCount = runCatching { java.util.zip.ZipFile(file).use { it.size() } }.getOrDefault(0)
 
-            ZipOutputStream(FileOutputStream(tmpFile)).use { zos ->
-                zos.setLevel(level)
-                // Write existing entries
-                for ((name, pair) in existing) {
-                    zos.putNextEntry(ZipEntry(name))
-                    zos.write(pair.second)
-                    zos.closeEntry()
-                }
-                // Write new entries
-                for ((name, f) in newEntries) {
-                    val safeName = name.replace(File.separatorChar, '/')
-                    zos.putNextEntry(ZipEntry(safeName))
-                    f.inputStream().use { it.copyTo(zos) }
-                    zos.closeEntry()
-                }
+            // 走统一重打包器（core/ZipRepack）：保留原条目的 method / extra / 时间戳，
+            // lib/*.so 与 resources.arsc 强制 STORED + 页对齐，新增项按文件流式写入。
+            // 旧实现把整包解压进 Map<String, ByteArray> 再用 new ZipEntry(name) 重写：
+            // ①大 APK 直接 OOM（几千万字节全在堆里）②所有条目被改写为 DEFLATED，
+            // resources.arsc / lib/*.so 就此失去 STORED 与对齐，产物装不上。
+            val applied = com.soreverse.mcp.core.ZipRepack.copyAll(
+                input = file,
+                output = tmpFile,
+                appendFiles = newEntries,
+                level = level,
+            ) { null }
+
+            if (newEntries.isNotEmpty() && applied.isEmpty()) {
+                tmpFile.delete()
+                return@EngineToolHandler err(
+                    "ARCHIVE_ERROR",
+                    "新增条目未落到产物上（条目名为空，或与包内已有条目重名）",
+                    "path", path,
+                )
             }
 
             // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback)
             com.soreverse.mcp.core.WorkspacePolicy.appContext()?.let { c ->
                 runCatching { EditSnapshotService.snapshot(c, "taffy_archive_edit", file.absolutePath) }
             }
-            tmpFile.renameTo(file)
+            com.soreverse.mcp.core.ZipRepack.replaceAtomically(tmpFile, file)
             ok(JSONObject()
                 .put("path", path)
                 .put("added", newEntries.size)
-                .put("existingEntries", existing.size))
+                .put("applied", applied.size)
+                .put("existingEntries", existingCount))
         } catch (e: Exception) {
             tmpFile.delete()
             err("ARCHIVE_ERROR", "添加文件失败: ${e.message}", "path", path)
@@ -676,37 +669,31 @@ object ArchiveTools {
         var kept = 0
 
         try {
-            ZipInputStream(FileInputStream(file)).use { zis ->
-                ZipOutputStream(FileOutputStream(tmpFile)).use { zos ->
-                    zos.setLevel(6)
-                    var entry = zis.nextEntry
-                    while (entry != null) {
-                        val shouldDelete = regexes.any { it.matches(entry.name) }
-                        if (entry.isDirectory) {
-                            if (!shouldDelete) {
-                                zos.putNextEntry(ZipEntry(entry.name))
-                                zos.closeEntry()
-                                kept++
-                            } else deleted++
-                        } else {
-                            val data = readZipEntryCapped(zis)
-                            if (!shouldDelete) {
-                                zos.putNextEntry(ZipEntry(entry.name))
-                                zos.write(data)
-                                zos.closeEntry()
-                                kept++
-                            } else deleted++
-                        }
-                        zis.closeEntry()
-                        entry = zis.nextEntry
-                    }
+            // 先按中央目录统计（只读、不解压），因为 copyAll 的返回值只含「被替换/新增」的条目。
+            java.util.zip.ZipFile(file).use { zf ->
+                for (e in zf.entries()) {
+                    if (regexes.any { it.matches(e.name) }) deleted++ else kept++
                 }
             }
+            if (deleted == 0) {
+                // 没有命中就不必重写：旧实现无条件重打包整包，等于把没改动的包
+                // 也降级成 DEFLATED（丢 STORED/对齐），纯属自伤。
+                tmpFile.delete()
+                return@EngineToolHandler ok(
+                    JSONObject().put("path", path).put("deleted", 0).put("kept", kept).put("unchanged", true)
+                )
+            }
+            com.soreverse.mcp.core.ZipRepack.copyAll(
+                input = file,
+                output = tmpFile,
+                skip = { name -> regexes.any { it.matches(name) } },
+            ) { null }
+
             // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback)
             com.soreverse.mcp.core.WorkspacePolicy.appContext()?.let { c ->
                 runCatching { EditSnapshotService.snapshot(c, "taffy_archive_edit", file.absolutePath) }
             }
-            tmpFile.renameTo(file)
+            com.soreverse.mcp.core.ZipRepack.replaceAtomically(tmpFile, file)
             ok(JSONObject().put("path", path).put("deleted", deleted).put("kept", kept))
         } catch (e: Exception) {
             tmpFile.delete()
@@ -739,45 +726,38 @@ object ArchiveTools {
         if (oldName.isBlank() || newName.isBlank()) return@EngineToolHandler err("INVALID_ARGUMENTS", "oldName 和 newName 必填", "oldName", oldName)
 
         val tmpFile = File(file.absolutePath + ".tmp")
-        var found = false
-
+        val staged = File(file.absolutePath + ".entry.tmp")
         try {
-            ZipInputStream(FileInputStream(file)).use { zis ->
-                ZipOutputStream(FileOutputStream(tmpFile)).use { zos ->
-                    zos.setLevel(6)
-                    var entry = zis.nextEntry
-                    while (entry != null) {
-                        val targetName = if (entry.name == oldName) {
-                            found = true; newName
-                        } else entry.name
-
-                        if (entry.isDirectory) {
-                            zos.putNextEntry(ZipEntry(targetName))
-                            zos.closeEntry()
-                        } else {
-                            val data = readZipEntryCapped(zis)
-                            zos.putNextEntry(ZipEntry(targetName))
-                            zos.write(data)
-                            zos.closeEntry()
-                        }
-                        zis.closeEntry()
-                        entry = zis.nextEntry
-                    }
+            var isDir = false
+            java.util.zip.ZipFile(file).use { zf ->
+                val entry = zf.getEntry(oldName)
+                    ?: return@EngineToolHandler err("ENTRY_NOT_FOUND", "未找到条目: $oldName", "oldName", oldName)
+                isDir = entry.isDirectory
+                if (!isDir) {
+                    zf.getInputStream(entry).use { ins -> staged.outputStream().use { ins.copyTo(it) } }
                 }
             }
-            if (!found) {
-                tmpFile.delete()
-                return@EngineToolHandler err("ENTRY_NOT_FOUND", "未找到条目: $oldName", "oldName", oldName)
-            }
+            // 与 add/delete 同一路径：保留未被改名条目的 method/extra/对齐，
+            // 改名后的内容从磁盘流式写入（旧实现整包解压进内存再全量 DEFLATED 重写）。
+            com.soreverse.mcp.core.ZipRepack.copyAll(
+                input = file,
+                output = tmpFile,
+                skip = { it == oldName },
+                append = if (isDir) listOf(newName to ByteArray(0)) else emptyList(),
+                appendFiles = if (isDir) emptyList() else listOf(newName to staged),
+            ) { null }
+
             // 改动前登记统一快照(供 taffy_edit_snapshot diff/rollback)
             com.soreverse.mcp.core.WorkspacePolicy.appContext()?.let { c ->
                 runCatching { EditSnapshotService.snapshot(c, "taffy_archive_edit", file.absolutePath) }
             }
-            tmpFile.renameTo(file)
+            com.soreverse.mcp.core.ZipRepack.replaceAtomically(tmpFile, file)
             ok(JSONObject().put("path", path).put("oldName", oldName).put("newName", newName))
         } catch (e: Exception) {
             tmpFile.delete()
             err("ARCHIVE_ERROR", "重命名失败: ${e.message}", "path", path)
+        } finally {
+            staged.delete()
         }
     }
 

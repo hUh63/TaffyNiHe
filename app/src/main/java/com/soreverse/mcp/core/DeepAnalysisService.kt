@@ -7,6 +7,7 @@ import com.soreverse.mcp.mcp.ToolCatalog
 import com.soreverse.mcp.mcp.ToolContext
 import com.soreverse.mcp.service.McpForegroundService
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -189,6 +190,15 @@ class DeepAnalysisService(private val appContext: Context) {
         val nextUrl: String?,
     )
 
+    /**
+     * 阻塞入口，供 MCP 工具层调用（工具 handler 是同步的）。
+     *
+     * 与 [DynamicAnalysisService.analyzeSync] 同款模式：内部仍是 [analyze] 的协程实现，
+     * 只是在这里把结果同步取回。工具已被重活闸门限流，阻塞发生在一个专用线程上。
+     */
+    fun analyzeSync(path: String, settings: SettingsStore, zh: Boolean, request: String = ""): Result<String> =
+        runBlocking(Dispatchers.IO) { analyze(path, settings, zh, request) }
+
     suspend fun analyze(path: String, settings: SettingsStore, zh: Boolean, request: String = ""): Result<String> = withContext(Dispatchers.IO) {
         _reportDraft.value = ""
         var lastFailure: Throwable? = null
@@ -230,6 +240,7 @@ class DeepAnalysisService(private val appContext: Context) {
                 temperature = settings.aiTemperature,
                 customHeaders = parseStringMap(settings.aiCustomHeadersJson),
                 customBody = buildAdditionalProperties(settings),
+                toolSchemaMode = settings.aiToolSchemaMode,
             )
             val tools = buildRikkaTools(settings, zh)
             var lastReasoning = ""

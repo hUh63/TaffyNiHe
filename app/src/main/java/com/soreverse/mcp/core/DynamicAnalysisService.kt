@@ -66,7 +66,9 @@ class DynamicAnalysisService(private val appContext: Context) {
                 model = settings.aiModel,
                 temperature = settings.aiTemperature,
                 customHeaders = parseStringMap(settings.aiCustomHeadersJson),
-                customBody = buildAdditionalProperties(settings)
+                customBody = buildAdditionalProperties(settings),
+                // 与 AgentKernel 单点透传保持一致：这条链路自己 new 引擎，漏传就等于设置形同虚设
+                toolSchemaMode = settings.aiToolSchemaMode,
             )
             val tools = buildRikkaTools(settings, zh)
             var lastReasoning = ""

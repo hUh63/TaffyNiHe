@@ -754,6 +754,25 @@ class SettingsStore(context: Context) {
         get() = prefs.getFloat("aiTemperature", 0.2f)
         set(value) = prefs.edit().putFloat("aiTemperature", value.coerceIn(0f, 2f)).apply()
 
+    /**
+     * AI 工具调用模式（对齐 AstrBot 的 `tool_schema_mode`）：
+     *
+     *  - `full`：走 provider 原生 function calling，tools schema 每轮随请求重发；
+     *  - `skills_like`：不发原生 tools，把工具文档写进 system prompt，模型用
+     *    `<tool_call>` 文本发起调用。适合中转/小模型不支持 function calling 的情况。
+     *
+     * 读写都做归一：任何未知值一律落回 `full`，避免设置里留个拼错的字符串让引擎走错分支。
+     */
+    var aiToolSchemaMode: String
+        get() = if (prefs.getString("aiToolSchemaMode", "full").orEmpty().trim().lowercase() == "skills_like") {
+            "skills_like"
+        } else {
+            "full"
+        }
+        set(value) = prefs.edit()
+            .putString("aiToolSchemaMode", if (value.trim().lowercase() == "skills_like") "skills_like" else "full")
+            .apply()
+
     var aiMaxIterations: Int
         get() = prefs.getInt("aiMaxIterations", 28)
         set(value) = prefs.edit().putInt("aiMaxIterations", value.coerceIn(4, 80)).apply()
@@ -904,6 +923,7 @@ class SettingsStore(context: Context) {
                 .put("apiKey", mask(aiApiKey))
                 .put("model", aiModel)
                 .put("temperature", aiTemperature.toDouble())
+                .put("toolSchemaMode", aiToolSchemaMode)
                 .put("maxIterations", aiMaxIterations)
                 .put("historySoftLimit", aiHistorySoftLimit)
                 .put("customHeadersJson", aiCustomHeadersJson)

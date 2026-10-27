@@ -107,6 +107,8 @@ internal object AgentKernel {
         temperature = settings.aiTemperature,
         customHeaders = stringMap(settings.aiCustomHeadersJson),
         customBody = additionalBody(settings),
+        // 单点透传：AI 深度分析、子代理、dynamic_analyze_ai 三条链路同时生效
+        toolSchemaMode = settings.aiToolSchemaMode,
     )
 
     fun missingConfig(settings: SettingsStore): List<String> = buildList {

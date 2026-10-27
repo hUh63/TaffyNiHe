@@ -62,7 +62,22 @@ internal class RikkaAgentEngine(
     private val temperature: Float,
     private val customHeaders: Map<String, String>,
     private val customBody: Map<String, JsonElement>,
+    /**
+     * 工具调用模式，对齐 AstrBot 的 `tool_schema_mode`：
+     *
+     *  - `full`（默认）：走 provider 原生 function calling，tools 数组每轮随请求重发；
+     *  - `skills_like`：不发送原生 tools，把工具以 Markdown 文档写进 system prompt，模型用
+     *    `<tool_call>{"tool":..,"args":{..}}</tool_call>` 发起调用，引擎从文本解析。适合
+     *    「中转/小模型不支持 function calling」或「工具很多、schema 每轮重发太贵」。
+     *
+     * 非法值回落 `full`（与上游一致）。
+     */
+    private val toolSchemaMode: String = "full",
 ) {
+    // 用字面量比较而非常量：属性初始化器对 companion 的前向引用在部分 Kotlin 版本上会踩
+    // "unresolved reference"，而这里只差一个字符串，没必要赌编译器行为。
+    private val useSkillsLike = toolSchemaMode.trim().lowercase() == "skills_like"
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     suspend fun run(
@@ -79,7 +94,10 @@ internal class RikkaAgentEngine(
             initialMessages.toMutableList()
         } else {
             mutableListOf(
-                RikkaMessage("system", listOf(RikkaPart.Text(systemPrompt))),
+                RikkaMessage(
+                    "system",
+                    listOf(RikkaPart.Text(if (useSkillsLike) skillsLikeSystemPrompt(systemPrompt, tools) else systemPrompt)),
+                ),
                 RikkaMessage("user", listOf(RikkaPart.Text(userPrompt))),
             )
         }
@@ -94,12 +112,21 @@ internal class RikkaAgentEngine(
         }
         repeat(maxSteps.coerceIn(1, 256)) {
             var assistant = RikkaMessage("assistant", emptyList())
-            stream(messages, tools).collect { delta ->
+            // skills_like 不发原生 tools：发了模型会改走原生 tool_calls，而提示词里已声明
+            // 「用 <tool_call> 文本」，两套通道并存会让调用形态随机。
+            stream(messages, if (useSkillsLike) emptyList() else tools).collect { delta ->
                 assistant = assistant.copy(parts = mergeParts(assistant.parts, delta))
                 onParts(visibleParts + assistant.parts)
             }
             messages += assistant
-            val calls = assistant.parts.filterIsInstance<RikkaPart.Tool>().filter { it.result == null }
+            val calls = if (useSkillsLike) {
+                // 文本块解析为主；原生 tool_calls 仍作兜底 —— 部分模型即使没收到 tools 参数
+                // 也会按训练习惯输出 tool_calls，直接丢掉等于空转一轮。
+                parseTextToolCalls(assistant) +
+                    assistant.parts.filterIsInstance<RikkaPart.Tool>().filter { it.result == null }
+            } else {
+                assistant.parts.filterIsInstance<RikkaPart.Tool>().filter { it.result == null }
+            }
             if (calls.isEmpty()) {
                 val missing = requiredTools.filterNot(executedTools::contains)
                 if (missing.isNotEmpty()) {
@@ -110,10 +137,15 @@ internal class RikkaAgentEngine(
                     )
                     return@repeat
                 }
-                return assistant.parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }.trim()
+                val text = assistant.parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }.trim()
+                return if (useSkillsLike) stripToolCallBlocks(text) else text
             }
-            executeCalls(messages, tools, executedTools, visibleParts, onParts, onCheckpoint)
-            visibleParts += messages.last().parts
+            if (useSkillsLike) {
+                executeTextCalls(messages, calls, tools, executedTools, visibleParts, onParts, onCheckpoint)
+            } else {
+                executeCalls(messages, tools, executedTools, visibleParts, onParts, onCheckpoint)
+                visibleParts += messages.last().parts
+            }
         }
         error("Maximum tool steps exceeded")
     }
@@ -134,34 +166,7 @@ internal class RikkaAgentEngine(
     ) {
         val calls = messages.last().parts.filterIsInstance<RikkaPart.Tool>().filter { it.result == null }
         calls.forEach { call ->
-            val requestedName = call.name.trim()
-            val shortName = requestedName.substringAfterLast('.').substringAfterLast('/')
-            val tool = tools.firstOrNull { it.name == requestedName }
-                ?: tools.firstOrNull { it.name.equals(requestedName, ignoreCase = true) }
-                ?: tools.firstOrNull { it.name.equals(shortName, ignoreCase = true) }
-            val result = if (tool == null) {
-                JSONObject()
-                    .put("status", "error")
-                    .put("error", "unknown_tool")
-                    .put("tool", requestedName)
-                    .put("available_tools", tools.map { it.name })
-                    .toString()
-            } else {
-                val args = runCatching { JSONObject(call.arguments.ifBlank { "{}" }) }
-                    .getOrElse {
-                        JSONObject()
-                            .put("status", "error")
-                            .put("error", "invalid_arguments")
-                            .put("tool", requestedName)
-                            .put("details", it.message.orEmpty())
-                            .toString()
-                    }
-                if (args is String) {
-                    args
-                } else {
-                    tool.execute(args as JSONObject).also { executedTools += tool.name }
-                }
-            }
+            val result = runToolCall(call, tools, executedTools)
             val completed = call.copy(result = result)
             messages[messages.lastIndex] = messages.last().copy(
                 parts = messages.last().parts.map { if (it is RikkaPart.Tool && it.id == call.id) completed else it },
@@ -169,6 +174,69 @@ internal class RikkaAgentEngine(
             onParts(visibleParts + messages.last().parts)
             onCheckpoint?.invoke(messages.toList())
         }
+    }
+
+    /**
+     * 解析并执行一次工具调用，返回结果字符串。两种模式共用：名字解析（精确 → 忽略大小写 →
+     * 短名）与错误负载（`unknown_tool` / `invalid_arguments`）必须一致，否则同一份提示词
+     * 切换模式后行为会漂移。
+     */
+    private suspend fun runToolCall(
+        call: RikkaPart.Tool,
+        tools: List<RikkaTool>,
+        executedTools: MutableSet<String>,
+    ): String {
+        val requestedName = call.name.trim()
+        val shortName = requestedName.substringAfterLast('.').substringAfterLast('/')
+        val tool = tools.firstOrNull { it.name == requestedName }
+            ?: tools.firstOrNull { it.name.equals(requestedName, ignoreCase = true) }
+            ?: tools.firstOrNull { it.name.equals(shortName, ignoreCase = true) }
+        if (tool == null) {
+            return JSONObject()
+                .put("status", "error")
+                .put("error", "unknown_tool")
+                .put("tool", requestedName)
+                .put("available_tools", tools.map { it.name })
+                .toString()
+        }
+        val args = runCatching { JSONObject(call.arguments.ifBlank { "{}" }) }.getOrElse {
+            return JSONObject()
+                .put("status", "error")
+                .put("error", "invalid_arguments")
+                .put("tool", requestedName)
+                .put("details", it.message.orEmpty())
+                .toString()
+        }
+        return tool.execute(args).also { executedTools += tool.name }
+    }
+
+    /**
+     * skills_like 模式的一个执行回合：模型侧没有原生 tool role，结果以 `<tool_response>`
+     * 的 user 消息回灌，模型据此续写。检查点仍逐个调用落盘（与 full 模式语义一致）。
+     */
+    private suspend fun executeTextCalls(
+        messages: MutableList<RikkaMessage>,
+        calls: List<RikkaPart.Tool>,
+        tools: List<RikkaTool>,
+        executedTools: MutableSet<String>,
+        visibleParts: MutableList<RikkaPart>,
+        onParts: (List<RikkaPart>) -> Unit,
+        onCheckpoint: (suspend (List<RikkaMessage>) -> Unit)?,
+    ) {
+        val rendered = StringBuilder()
+        val resultParts = mutableListOf<RikkaPart>()
+        for (call in calls) {
+            val result = runToolCall(call, tools, executedTools)
+            rendered
+                .append("<tool_response>\n")
+                .append(JSONObject().put("tool", call.name.trim()).put("result", result))
+                .append("\n</tool_response>\n")
+            resultParts += call.copy(name = call.name.trim(), result = result)
+            onParts(visibleParts + resultParts)
+        }
+        visibleParts += resultParts
+        messages += RikkaMessage("user", listOf(RikkaPart.Text(rendered.toString())))
+        onCheckpoint?.invoke(messages.toList())
     }
 
     private fun stream(messages: List<RikkaMessage>, tools: List<RikkaTool>): Flow<List<RikkaPart>> =
@@ -546,5 +614,109 @@ internal class RikkaAgentEngine(
             }
         }
         customBody.forEach { (key, value) -> put(key, value) }
+    }
+
+    // ── skills_like：工具文档渲染 + 文本调用解析 ──
+
+    /**
+     * 从模型文本里抽取 `<tool_call>{"tool":..,"args":{..}}</tool_call>` 块。
+     *
+     * 额外接受「整段就是一个裸 JSON 对象」的退化输出（部分小模型会省掉标签），但只在该
+     * 对象确实带工具名与参数键时才认；其余一切解析失败都被忽略——散文绝不能被当成调用。
+     */
+    private fun parseTextToolCalls(message: RikkaMessage): List<RikkaPart.Tool> {
+        val text = message.parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }
+        if (text.isBlank()) return emptyList()
+        val payloads = TOOL_CALL_BLOCK_REGEX.findAll(text).map { it.groupValues[1].trim() } +
+            listOfNotNull(bareToolCallPayload(text))
+        return payloads.mapIndexedNotNull { index, payload ->
+            val obj = runCatching { JSONObject(payload) }.getOrNull() ?: return@mapIndexedNotNull null
+            val name = obj.optString("tool").ifBlank { obj.optString("name") }.trim()
+            if (name.isBlank()) return@mapIndexedNotNull null
+            val args = obj.optJSONObject("args")
+                ?: obj.optJSONObject("arguments")
+                ?: obj.optJSONObject("parameters")
+                ?: JSONObject()
+            RikkaPart.Tool(id = "skills_call_$index", name = name, arguments = args.toString(), index = index)
+        }.toList()
+    }
+
+    private fun bareToolCallPayload(text: String): String? {
+        val trimmed = text.trim()
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null
+        val obj = runCatching { JSONObject(trimmed) }.getOrNull() ?: return null
+        val hasName = obj.has("tool") || obj.has("name")
+        val hasArgs = obj.optJSONObject("args") != null ||
+            obj.optJSONObject("arguments") != null ||
+            obj.optJSONObject("parameters") != null
+        return if (hasName && hasArgs) trimmed else null
+    }
+
+    /** Anthropic-Skills 风格的 Markdown 工具文档，替代原生 tools 数组。 */
+    private fun skillsLikeSystemPrompt(systemPrompt: String, tools: List<RikkaTool>): String = buildString {
+        append(systemPrompt)
+        append("\n\n# 工具使用（skills-like 模式）\n\n")
+        append("工具以文档形式提供，不走 provider 的原生 function calling。需要调用时，输出一个 ")
+        append("`<tool_call>` 块，块内是**恰好一个** JSON 对象：\n\n")
+        append("```\n<tool_call>\n{\"tool\": \"<工具名>\", \"args\": {\"<参数>\": <值>}}\n</tool_call>\n```\n\n")
+        append("规则：\n")
+        append("- 一次调用多个工具就写多个块，按出现顺序执行；\n")
+        append("- 参数名与类型必须与下方文档一致，未列出的参数不要臆造；\n")
+        append("- 块内不要夹注释、Markdown 围栏或解释文字；\n")
+        append("- 每次调用后结果会以 `<tool_response>` 回灌，据其继续，不要复述原文；\n")
+        append("- 最终回答里不要保留 `<tool_call>` 块。\n\n")
+        append("## 工具清单\n\n")
+        tools.forEach { tool ->
+            append("### ").append(tool.name).append("\n\n")
+            append(tool.description.trim()).append("\n\n")
+            append("签名: ").append(tool.name).append('(').append(schemaParams(tool.schema)).append(")\n\n")
+            append(schemaTable(tool.schema))
+        }
+    }
+
+    private fun schemaParams(schema: JSONObject): String {
+        val properties = schema.optJSONObject("properties") ?: return ""
+        val required = schema.optJSONArray("required")
+        val keys = mutableListOf<String>()
+        properties.keys().forEach { keys += it }
+        return keys.joinToString(", ") { key ->
+            val type = properties.optJSONObject(key)?.optString("type").orEmpty().ifBlank { "any" }
+            val isRequired = required != null && (0 until required.length()).any { required.optString(it) == key }
+            if (isRequired) "$key: $type" else "$key?: $type"
+        }
+    }
+
+    private fun schemaTable(schema: JSONObject): String {
+        val properties = schema.optJSONObject("properties") ?: return "参数: 无\n\n"
+        val required = schema.optJSONArray("required")
+        val sb = StringBuilder("参数:\n")
+        val keys = mutableListOf<String>()
+        properties.keys().forEach { keys += it }
+        keys.forEach { key ->
+            val def = properties.optJSONObject(key)
+            val type = def?.optString("type").orEmpty().ifBlank { "any" }
+            val isRequired = required != null && (0 until required.length()).any { required.optString(it) == key }
+            sb.append("- ").append(key).append(" (").append(type)
+                .append(if (isRequired) ", 必填" else ", 可选").append(')')
+            val desc = def?.optString("description").orEmpty()
+            if (desc.isNotBlank()) sb.append(": ").append(desc)
+            sb.append('\n')
+        }
+        sb.append('\n')
+        return sb.toString()
+    }
+
+    private fun stripToolCallBlocks(text: String): String = text
+        .replace(TOOL_CALL_BLOCK_REGEX, "")
+        .replace("\n{3,}".toRegex(), "\n\n")
+        .trim()
+
+    private companion object {
+        const val TOOL_SCHEMA_SKILLS_LIKE = "skills_like"
+        private val TOOL_CALL_BLOCK_REGEX = Regex("<tool_call>\\s*([\\s\\S]*?)\\s*</tool_call>")
     }
 }

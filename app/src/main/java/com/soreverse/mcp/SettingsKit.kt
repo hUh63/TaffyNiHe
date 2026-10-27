@@ -22,22 +22,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -46,39 +45,46 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * 设置界面基座（对齐太墟 taixu `feature/settings` 的 Personalization 体系）。
+ * 设置界面基座。**所有设置子页共用这一份**，改这里等于改 40+ 个页面。
  *
- * 三件事决定了它的观感，改动前先读这段：
+ * 视觉决定（v1.5.12 重做）：
  *
- *  1. **大标题滚动收起**：`LargeTopAppBar` + `exitUntilCollapsed`，页面上下滚动时
- *     标题从 34sp 收到 22sp 并入 top bar，给内容留出阅读高度；
- *  2. **分组不是一张大卡**：一组的第一行用外圆角（extraLarge）、中间行用小圆角
- *     （extraSmall），视觉上连成一张卡又不做嵌套；组标题在卡片外、primary 色；
- *  3. **行高与图标**：分类入口 96dp + 48dp tonal 图标瓦片（secondaryContainer），
- *     普通条目 80dp + 24dp 单色图标；右侧 value 是「状态摘要」而不是开关。
+ *  1. **顶栏收到 56dp**：原来用 `LargeTopAppBar` 的大标题，未滚动时白占约 96dp 高度，
+ *     一屏少看两行设置。现在标题 20sp 常驻，返回键 40dp 触控区；
+ *  2. **一组就是一张卡**：组内各行共用 `surfaceContainerHigh`，首行上圆角 20dp、
+ *     末行下圆角 20dp、中间行圆角 **0** —— 原来中间行留 4dp 圆角，行与行之间会看到
+ *     四个小缺口，拼起来不像一张卡而是「一堆小方块」；
+ *  3. **行高压到 54/68dp**：原来是 80/96dp 的 iOS 大行高，设置项又多，翻页翻到手酸。
+ *     副标题仍然保留（那是信息，不是装饰），只是字号收到 12sp。
+ *
+ * 图标色：分类入口用 secondaryContainer 瓦片（40dp），普通条目用 primary 单色 22dp。
+ * 不把所有行都染成 primary —— 满屏彩色图标会让「哪个是入口、哪个是开关」失去层次。
  */
 internal object SettingsDensity {
-    val categoryMinHeight = 96.dp
-    val rowMinHeight = 80.dp
-    val rowHorizontalPadding = 20.dp
-    val rowVerticalPadding = 14.dp
-    val iconSize = 24.dp
-    val tileSize = 48.dp
-    val iconGap = 12.dp
-    val textGap = 4.dp
-    val cardPadding = 16.dp
-    val sectionGap = 20.dp
+    val categoryMinHeight = 68.dp
+    val rowMinHeight = 54.dp
+    val rowHorizontalPadding = 16.dp
+    val rowVerticalPadding = 10.dp
+    val iconSize = 22.dp
+    val tileSize = 40.dp
+    val iconGap = 14.dp
+    val textGap = 2.dp
+    val cardPadding = 14.dp
+    val sectionGap = 14.dp
+    val groupCorner = 20.dp
+    val innerCorner = 0.dp
+    val listPadding = 16.dp
 }
 
 @Composable
 internal fun settingsTitleStyle(): TextStyle =
-    MaterialTheme.typography.titleMedium.copy(lineHeight = 22.sp, letterSpacing = 0.sp)
+    MaterialTheme.typography.titleSmall.copy(lineHeight = 20.sp, letterSpacing = 0.sp)
 
 @Composable
 internal fun settingsSupportingStyle(): TextStyle =
-    MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp, letterSpacing = 0.sp)
+    MaterialTheme.typography.bodySmall.copy(lineHeight = 17.sp, letterSpacing = 0.sp)
 
-/** 设置页外壳：大标题 + 懒加载列表（底部留 32dp，键盘弹出时自动让位）。 */
+/** 设置页外壳：常驻标题栏 + 懒加载列表（底部留 32dp，键盘弹出时自动让位）。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsScaffold(
@@ -89,14 +95,20 @@ internal fun SettingsScaffold(
     itemSpacing: androidx.compose.ui.unit.Dp = SettingsDensity.sectionGap,
     content: LazyListScope.() -> Unit,
 ) {
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
-        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+        modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
-            LargeTopAppBar(
+            TopAppBar(
                 title = {
-                    Text(title, fontWeight = FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        title,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 20.sp,
+                        letterSpacing = 0.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 },
                 navigationIcon = {
                     if (onBack != null) {
@@ -104,7 +116,7 @@ internal fun SettingsScaffold(
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = null,
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(22.dp),
                             )
                         }
                     }
@@ -112,15 +124,19 @@ internal fun SettingsScaffold(
                 actions = actions,
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
                 ),
-                scrollBehavior = scrollBehavior,
             )
         },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).imePadding(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(
+                start = SettingsDensity.listPadding,
+                end = SettingsDensity.listPadding,
+                top = 4.dp,
+                bottom = 32.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(itemSpacing),
         ) {
             if (!statusText.isNullOrBlank()) {
@@ -140,11 +156,13 @@ internal fun SettingsScaffold(
 /** 组标题（primary 小标题，压在卡片外面）+ 组内各行。 */
 @Composable
 internal fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             title,
-            modifier = Modifier.padding(start = 20.dp, bottom = 12.dp),
-            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(start = 4.dp),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.3.sp,
             color = MaterialTheme.colorScheme.primary,
         )
         content()
@@ -154,8 +172,9 @@ internal fun SettingsSection(title: String, content: @Composable ColumnScope.() 
 /**
  * 组内一行的外壳。
  *
- * `first` / `last` 决定四个角用外圆角还是内圆角：一组行的顶行上方圆、底行下方圆，
- * 中间行只留小圆角，拼起来就是「一张卡」但不产生嵌套卡片。
+ * `first` / `last` 决定上下用外圆角还是直角：一组行的顶行上方圆、底行下方圆，
+ * 中间行直角 —— 拼起来是「一张卡」，且不产生嵌套卡片。左右始终是直角，
+ * 圆角由组的首末行提供。
  */
 @Composable
 internal fun PreferenceSurface(
@@ -164,17 +183,15 @@ internal fun PreferenceSurface(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val outer = MaterialTheme.shapes.extraLarge
-    val inner = MaterialTheme.shapes.extraSmall
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(
-            topStart = if (first) outer.topStart else inner.topStart,
-            topEnd = if (first) outer.topEnd else inner.topEnd,
-            bottomStart = if (last) outer.bottomStart else inner.bottomStart,
-            bottomEnd = if (last) outer.bottomEnd else inner.bottomEnd,
+            topStart = if (first) SettingsDensity.groupCorner else SettingsDensity.innerCorner,
+            topEnd = if (first) SettingsDensity.groupCorner else SettingsDensity.innerCorner,
+            bottomStart = if (last) SettingsDensity.groupCorner else SettingsDensity.innerCorner,
+            bottomEnd = if (last) SettingsDensity.groupCorner else SettingsDensity.innerCorner,
         ),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         onClick = onClick ?: {},
         enabled = onClick != null,
@@ -183,7 +200,7 @@ internal fun PreferenceSurface(
     }
 }
 
-/** 分类入口行：48dp 图标瓦片 + 标题 + 状态摘要 + 副标题 + chevron。 */
+/** 分类入口行：40dp 图标瓦片 + 标题 + 状态摘要 + 副标题 + chevron。 */
 @Composable
 internal fun SettingsCategoryRow(
     icon: ImageVector,
@@ -200,15 +217,15 @@ internal fun SettingsCategoryRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(SettingsDensity.iconGap),
     ) {
-        androidx.compose.material3.Surface(
-            shape = MaterialTheme.shapes.large,
+        Surface(
+            shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.secondaryContainer,
         ) {
             Box(Modifier.size(SettingsDensity.tileSize), contentAlignment = Alignment.Center) {
                 Icon(
                     icon,
                     contentDescription = null,
-                    modifier = Modifier.size(SettingsDensity.iconSize + 2.dp),
+                    modifier = Modifier.size(SettingsDensity.iconSize),
                     tint = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
             }
@@ -220,70 +237,14 @@ internal fun SettingsCategoryRow(
                     Modifier.weight(1f),
                     style = settingsTitleStyle(),
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (value != null) {
                     Text(
                         value,
                         Modifier.widthIn(max = 104.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(
-            Icons.Default.ChevronRight,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-/** 普通条目行：24dp 单色图标 + 标题 + 副标题 + 可选状态摘要。 */
-@Composable
-internal fun SettingsItemRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    value: String? = null,
-    onClick: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth()
-            .heightIn(min = SettingsDensity.rowMinHeight)
-            .clickable(onClick = onClick)
-            .padding(horizontal = SettingsDensity.rowHorizontalPadding, vertical = SettingsDensity.rowVerticalPadding),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(SettingsDensity.iconGap),
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(SettingsDensity.iconSize), tint = MaterialTheme.colorScheme.primary)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SettingsDensity.textGap)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    title,
-                    Modifier.weight(1f),
-                    style = settingsTitleStyle(),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (value != null) {
-                    Text(
-                        value,
-                        Modifier.widthIn(max = 96.dp),
-                        style = MaterialTheme.typography.labelMedium,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -301,13 +262,76 @@ internal fun SettingsItemRow(
         Icon(
             Icons.Default.ChevronRight,
             contentDescription = null,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(16.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
-/** 开关行：整行可点（role=Switch），右侧是带对勾的开关。 */
+/** 普通条目行：22dp 单色图标 + 标题 + 副标题 + 可选状态摘要。 */
+@Composable
+internal fun SettingsItemRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    value: String? = null,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .heightIn(min = SettingsDensity.rowMinHeight)
+            .clickable(onClick = onClick)
+            .padding(horizontal = SettingsDensity.rowHorizontalPadding, vertical = SettingsDensity.rowVerticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SettingsDensity.iconGap),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(SettingsDensity.iconSize),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SettingsDensity.textGap)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    title,
+                    Modifier.weight(1f),
+                    style = settingsTitleStyle(),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (value != null) {
+                    Text(
+                        value,
+                        Modifier.widthIn(max = 96.dp),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    style = settingsSupportingStyle(),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** 开关行：整行可点（role=Switch），右侧是开关。 */
 @Composable
 internal fun SettingsToggleRow(
     icon: ImageVector,
@@ -336,12 +360,18 @@ internal fun SettingsToggleRow(
                 title,
                 style = settingsTitleStyle(),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                subtitle,
-                style = settingsSupportingStyle(),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f),
-            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    style = settingsSupportingStyle(),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }

@@ -1128,6 +1128,8 @@ object ToolCatalog {
         ArchiveTools.gateway,
         // 借鉴 SOMCP v1.0.23 T1 审计批：30 个只读审计工具
         *AuditTools.ALL.toTypedArray(),
+        // 借鉴 SOMCP #173：引擎已实现但缺工具壳的四项 + AI 静态对等入口
+        *WorkspaceExtrasTools.ALL.toTypedArray(),
         *DotnetTools.ALL.toTypedArray(),
         // 塔菲逆核: 设备信息/系统/应用/通讯/网络/实用工具(参考mcp-server)
         *DeviceTools.ALL.toTypedArray(),

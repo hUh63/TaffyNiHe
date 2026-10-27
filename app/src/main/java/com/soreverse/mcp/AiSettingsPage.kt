@@ -151,6 +151,7 @@ internal fun SettingsAiDeepPage(
     var modelQuery by rememberSaveable { mutableStateOf("") }
     var status by remember { mutableStateOf("") }
     var loadingModels by remember { mutableStateOf(false) }
+    var toolSchemaMode by rememberSaveable { mutableStateOf(settings.aiToolSchemaMode) }
 
     SettingsScaffold(
         title = if (t.zh) "AI 深度分析" else "AI deep analysis",
@@ -189,6 +190,31 @@ internal fun SettingsAiDeepPage(
                     endpoint = preset
                     settings.aiEndpoint = endpoint
                 }
+            }
+        }
+        GlassGroup(
+            title = if (t.zh) "工具调用" else "Tool calling",
+            footer = if (t.zh) {
+                "原生调用：走 provider 的 function calling，约束最强，但工具 schema 每轮随请求重发；" +
+                    "Skills 风格：把工具写成 Markdown 文档注入系统提示词，模型用 <tool_call> 文本发起调用，" +
+                    "适合不支持 function calling 的中转/小模型，工具多时也更省 token。" +
+                    "模型不遵循 <tool_call> 约定时请切回原生——那条路是 API 级约束，不会写成散文。"
+            } else {
+                "Native: provider-level function calling (strongest constraint, full schema resent every turn). " +
+                    "Skills-like: tools documented as Markdown inside the system prompt and invoked via <tool_call> blocks " +
+                    "(works with gateways/models lacking function calling; cheaper for large tool sets). " +
+                    "If the model ignores the <tool_call> convention, switch back to native."
+            },
+        ) {
+            ChipRow(
+                listOf(
+                    "full" to if (t.zh) "原生调用" else "Native",
+                    "skills_like" to if (t.zh) "Skills 风格" else "Skills-like",
+                ),
+                toolSchemaMode,
+            ) { chip ->
+                toolSchemaMode = chip
+                settings.aiToolSchemaMode = chip
             }
         }
         GlassGroup(footer = if (t.zh) "OpenAI 兼容: DeepSeek / Moonshot / Kimi / GLM / Groq / OpenRouter / xAI 等；Anthropic 兼容: 多数中转站；Gemini 为 Google 原生协议。自定义 headers/body 用于服务商差异字段。" else "OpenAI-compatible: DeepSeek/Moonshot/Kimi/GLM/Groq/OpenRouter/xAI; Anthropic-compatible gateways; native Gemini. Use custom headers/body for vendor-specific fields.") {

@@ -1,14 +1,12 @@
 package com.soreverse.mcp.mcp
 
+import com.soreverse.mcp.core.ZipRepack
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
-import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
-import java.util.zip.ZipOutputStream
 
 /**
  * 塔菲逆核: APK zip 级条目替换。
@@ -25,7 +23,15 @@ object ApkZipTool {
 
     data class ReplaceResult(val replaced: Boolean, val added: Boolean, val entryCount: Int, val newBytes: Int)
 
-    /** 纯逻辑：流式重写 zip，替换 [entry] 为 [newBytes]，丢弃旧签名条目。可单测。 */
+    /**
+     * 纯逻辑：重写 zip，替换 [entry] 为 [newBytes]，丢弃旧 v1 签名条目。可单测。
+     *
+     * 走 [ZipRepack] 而不是自己再写一遍 ZipOutputStream 循环：这个函数原来用
+     * `ZipEntry(name)` 重建每一个条目，结果全部被重新 DEFLATED、并丢掉原 extra ——
+     * 回填 .so 时页对齐没了（`extractNativeLibs=false` 的包装不上或 mmap 失败），
+     * `resources.arsc` 被重新压缩则直接 INSTALL_PARSE_FAILED_UNEXPECTED_EXCEPTION。
+     * 而工具照样返回 success，用户拿到的是一个装不上的包。
+     */
     fun replaceEntry(
         inputApk: File,
         outputApk: File,
@@ -34,47 +40,31 @@ object ApkZipTool {
         addIfMissing: Boolean,
     ): ReplaceResult {
         require(inputApk.isFile) { "input apk not found: ${inputApk.path}" }
-        var replaced = false
-        var added = false
-        var count = 0
-        ZipFile(inputApk).use { zip ->
-            FileOutputStream(outputApk).use { fos ->
-                ZipOutputStream(fos).use { zos ->
-                    for (e in zip.entries()) {
-                        val name = e.name
-                        if (isSignatureEntry(name)) continue
-                        count++
-                        if (name == entry) {
-                            write(zos, name, e.time, newBytes)
-                            replaced = true
-                        } else {
-                            zos.putNextEntry(entryOf(name, e.time))
-                            zip.getInputStream(e).use { it.copyTo(zos) }
-                            zos.closeEntry()
-                        }
-                    }
-                    if (!replaced && addIfMissing) {
-                        write(zos, entry, -1L, newBytes)
-                        replaced = true
-                        added = true
-                        count++
-                    }
+        var existed = false
+        val applied = ZipRepack.copyAll(
+            input = inputApk,
+            output = outputApk,
+            replace = { name ->
+                if (name == entry) {
+                    existed = true
+                    newBytes
+                } else {
+                    null
                 }
+            },
+            skip = { isSignatureEntry(it) },
+            append = if (addIfMissing) listOf(entry to newBytes) else emptyList(),
+        )
+        val replaced = entry in applied
+        val added = replaced && !existed
+        val entryCount = runCatching {
+            ZipFile(inputApk).use { z ->
+                var n = 0
+                for (e in z.entries()) if (!isSignatureEntry(e.name)) n++
+                n
             }
-        }
-        return ReplaceResult(replaced, added, count, newBytes.size)
-    }
-
-    private fun entryOf(name: String, time: Long): ZipEntry {
-        val oe = ZipEntry(name)
-        if (time >= 0L) oe.time = time
-        return oe
-    }
-
-    private fun write(zos: ZipOutputStream, name: String, time: Long, bytes: ByteArray) {
-        zos.putNextEntry(entryOf(name, time))
-        zos.write(bytes)
-        zos.closeEntry()
+        }.getOrDefault(0) + if (added) 1 else 0
+        return ReplaceResult(replaced, added, entryCount, newBytes.size)
     }
 
     /** 旧 v1 签名文件（重写后必须删除，否则与新签名冲突）。 */

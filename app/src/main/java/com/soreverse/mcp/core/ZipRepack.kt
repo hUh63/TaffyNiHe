@@ -20,7 +20,8 @@ import java.util.zip.ZipOutputStream
  * 改一个字节就把它们重新压缩，安装器直接拒装（INSTALL_PARSE_FAILED_UNEXPECTED_EXCEPTION）
  * 或原生库加载失败，而工具还返回「字节已写入」。
  *
- * 这里保留原压缩方式与 extra，并对上述两类条目强制 STORED + 4 字节对齐。
+ * 这里保留原压缩方式与 extra，并对上述两类条目强制 STORED + 4/4096 字节对齐。
+ * 所有需要「重写整个 APK」的工具都应该走这里，不要再自己写一遍 ZipOutputStream 循环。
  */
 internal object ZipRepack {
 
@@ -46,6 +47,15 @@ internal object ZipRepack {
         return out
     }
 
+    /** 数据起始偏移要满足 [align]，返回需要追加的填充字节数（0 = 已对齐）。 */
+    private fun paddingFor(count: Long, nameLen: Int, extraLen: Int, align: Int): Int {
+        val base = count + 30 + nameLen + extraLen
+        var pad = ((align - (base % align).toInt()) % align)
+        // 填充块本身最少 6 字节（4 字节头 + 至少 2 字节体），1..5 会写出非法 extra
+        if (pad in 1..5) pad += align
+        return pad
+    }
+
     /**
      * 用 [src] 原子替换 [dst]（同目录 rename）。旧实现用 copyTo(overwrite=true)，
      * 写回中途被杀/磁盘满会把用户的原 APK 变成半截文件。
@@ -66,18 +76,32 @@ internal object ZipRepack {
     /**
      * 逐条复制 [input] 到 [output]，[replace] 返回非 null 时用其替换该条目的内容。
      * 调用方负责保证 [output] 与 [input] 不是同一个文件。
+     *
+     * @param skip 命中则整条丢弃（典型用途：丢掉失效的旧 v1 签名 META-INF/*）。
+     * @param append 需要新增的条目（原包里没有的）。新 `lib/*.so`、`resources.arsc`
+     *   同样按 STORED + 对齐写，否则新加的库在 `extractNativeLibs=false` 的包里加载失败。
+     * @return 真正落到产物上的条目名（被替换的 + 被新增的）。
      */
-    fun copyAll(input: File, output: File, replace: (String) -> ByteArray?): Set<String> {
+    fun copyAll(
+        input: File,
+        output: File,
+        replace: (String) -> ByteArray?,
+        skip: (String) -> Boolean = { false },
+        append: List<Pair<String, ByteArray>> = emptyList(),
+    ): Set<String> {
         // 返回真正被替换的条目名：调用方据此判断"修改是否落到产物上"。
         // 旧实现无返回值，entryName 与 zip 条目名一旦不一致就整包原样复制，
         // 工具仍返回 success=true + 新字节数（报告与产物不一致）。
         val applied = HashSet<String>()
+        val written = HashSet<String>()
         SavedOffsetOutput(BufferedOutputStream(output.outputStream())).use { counting ->
             ZipOutputStream(counting).use { zos ->
                 ZipFile(input).use { zf ->
                     for (e in zf.entries()) {
+                        if (skip(e.name)) continue
                         val override = replace(e.name)
                         if (override != null) applied.add(e.name)
+                        written.add(e.name)
                         val store = e.method == ZipEntry.STORED || requiresStore(e.name)
                         val entry = ZipEntry(e.name).apply {
                             time = e.time
@@ -116,11 +140,9 @@ internal object ZipRepack {
                             if (align > 0) {
                                 zos.flush()
                                 val nameLen = e.name.toByteArray(Charsets.UTF_8).size
-                                val base = counting.count + 30 + nameLen + extra.size
-                                var pad = ((align - (base % align).toInt()) % align)
+                                val pad = paddingFor(counting.count, nameLen, extra.size, align)
                                 // 填充必须是合法的 alignment extra 块（id 0xd935），裸追加
                                 // 字节会让严格解析器判定 extra 结构损坏
-                                if (pad in 1..5) pad += align
                                 if (pad > 0) extra += alignmentExtra(pad)
                             }
                             entry.extra = extra
@@ -139,9 +161,37 @@ internal object ZipRepack {
                         zos.closeEntry()
                     }
                 }
+                // 追加原包里不存在的条目（如回填一条新的 lib/<abi>/x.so）
+                for ((name, bytes) in append) {
+                    if (name in written) continue
+                    writeFresh(zos, counting, name, bytes)
+                    written.add(name)
+                    applied.add(name)
+                }
             }
         }
         return applied
+    }
+
+    /** 写一个「原包里不存在」的新条目：method 与对齐按名字规则推导。 */
+    private fun writeFresh(zos: ZipOutputStream, counting: SavedOffsetOutput, name: String, bytes: ByteArray) {
+        val entry = ZipEntry(name)
+        var extra = ByteArray(0)
+        if (requiresStore(name)) {
+            entry.method = ZipEntry.STORED
+            entry.size = bytes.size.toLong()
+            entry.compressedSize = bytes.size.toLong()
+            entry.crc = CRC32().apply { update(bytes) }.value
+            val align = if (isNativeLib(name)) 4096 else 4
+            zos.flush()
+            val nameLen = name.toByteArray(Charsets.UTF_8).size
+            val pad = paddingFor(counting.count, nameLen, extra.size, align)
+            if (pad > 0) extra += alignmentExtra(pad)
+        }
+        if (extra.isNotEmpty()) entry.extra = extra
+        zos.putNextEntry(entry)
+        zos.write(bytes)
+        zos.closeEntry()
     }
 
     private class SavedOffsetOutput(out: OutputStream) : FilterOutputStream(out) {

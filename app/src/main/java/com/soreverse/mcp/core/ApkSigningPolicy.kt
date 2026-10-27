@@ -73,8 +73,11 @@ object ApkSigningPolicy {
                 val cdSize = readUInt32(out, eocd + 12)
                 // 把 signing block 插入中央目录之前
                 insertBytes(out, cdOffset.toLong(), block)
-                // 修正 EOCD 中央目录偏移
-                writeUInt32(out, eocd + 16, cdOffset + block.size)
+                // 修正 EOCD 中央目录偏移。注意 insertBytes 是在 cdOffset 处插入，
+                // EOCD 整体后移了 block.size 字节 —— 必须写**新**位置。原来写的是旧 eocd
+                // 偏移，改的是中央目录里的字节：产物 zip 直接损坏（连解析都解析不了），
+                // 而不是"签名校验失败"这种可诊断的错误。
+                writeUInt32(out, eocd + block.size + 16, cdOffset + block.size)
                 cdSize // 返回中央目录大小（信息性）
             } finally {
                 out.close()

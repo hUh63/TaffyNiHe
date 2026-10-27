@@ -81,14 +81,17 @@ internal object ZipRepack {
      *   .SF / .RSA / .DSA / .EC / .MF）。
      * @param append 需要新增的条目（原包里没有的）。新增的 native 库与 resources.arsc
      *   同样按 STORED + 对齐写，否则新加的库在 `extractNativeLibs=false` 的包里加载失败。
+     * @param replace 必须放在**最后一个**参数：现有调用方全都在用 trailing lambda
+     *   （`copyAll(a, b) { name -> ... }`），Kotlin 的尾随 lambda 只对应最后一个形参，
+     *   中间夹默认参数会让 lambda 绑到 append 上。
      * @return 真正落到产物上的条目名（被替换的 + 被新增的）。
      */
     fun copyAll(
         input: File,
         output: File,
-        replace: (String) -> ByteArray?,
         skip: (String) -> Boolean = { false },
         append: List<Pair<String, ByteArray>> = emptyList(),
+        replace: (String) -> ByteArray?,
     ): Set<String> {
         // 返回真正被替换的条目名：调用方据此判断"修改是否落到产物上"。
         // 旧实现无返回值，entryName 与 zip 条目名一旦不一致就整包原样复制，

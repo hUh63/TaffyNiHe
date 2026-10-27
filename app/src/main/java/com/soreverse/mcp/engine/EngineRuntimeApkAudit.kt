@@ -66,7 +66,8 @@ internal fun EngineRuntime.loadApkAuditInput(path: String): Pair<ByteArray, JSON
     return bytes to null
 }
 
-private fun apkAuditEnvelope(path: String, bytes: ByteArray, payload: JSONObject): JSONObject = ok(
+// 必须挂在 EngineRuntime 上：sha256 是 runtime 的成员，top-level 函数里取不到。
+private fun EngineRuntime.apkAuditEnvelope(path: String, bytes: ByteArray, payload: JSONObject): JSONObject = ok(
     JSONObject()
         .put("path", path)
         .put("size", bytes.size)

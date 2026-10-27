@@ -473,7 +473,10 @@ object AuditTools {
             "解析并校验 APK v2/v3 签名块：重算分块摘要并验证签名",
             "Parse and verify APK Signing Block v2/v3: recompute the chunked content digests (0xa5/0x5a spec tree) and verify signer signatures against the embedded certificate.",
             "workspace",
-            ToolClass.EXTRA
+            ToolClass.EXTRA,
+            // 要按 1 MiB 分块把整包读一遍做两级摘要，几百 MB 的 APK 就是几百 MB 的 SHA-256：
+            // 不占重活槽会让其它请求在并发上限内一直排队等它。
+            heavy = true
         ) {
             objectSchema(
                 props {

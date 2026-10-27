@@ -241,9 +241,12 @@ object SmaliBatchTool {
                     // 的包原生库加载失败），而工具还是报 rebuild 成功。ZipRepack 会保留原
                     // method/extra 并强制这两类条目 STORED + 4/4096 对齐。
                     val tempApk = File.createTempFile("apk_batch_", ".apk", apkFile.parentFile)
-                    val applied = runCatching {
-                        ZipRepack.copyAll(apkFile, tempApk) { name -> newDexBytes[name] }
-                    }.getOrElse { e ->
+                    // 不用嵌套 runCatching：这里的 return@runCatching 必须绑到**最外层**
+                    // （rebuild 的大 runCatching），套一层会绑到内层的 Set<String> 上，类型对不上。
+                    val applied: Set<String>
+                    try {
+                        applied = ZipRepack.copyAll(apkFile, tempApk) { name -> newDexBytes[name] }
+                    } catch (e: Exception) {
                         tempApk.delete()
                         return@runCatching err(
                             "ZIP_MISMATCH",

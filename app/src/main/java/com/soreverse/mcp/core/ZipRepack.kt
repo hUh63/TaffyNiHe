@@ -77,8 +77,9 @@ internal object ZipRepack {
      * 逐条复制 [input] 到 [output]，[replace] 返回非 null 时用其替换该条目的内容。
      * 调用方负责保证 [output] 与 [input] 不是同一个文件。
      *
-     * @param skip 命中则整条丢弃（典型用途：丢掉失效的旧 v1 签名 META-INF/*）。
-     * @param append 需要新增的条目（原包里没有的）。新 `lib/*.so`、`resources.arsc`
+     * @param skip 命中则整条丢弃（典型用途：丢掉失效的旧 v1 签名条目，即 META-INF 下的
+     *   .SF / .RSA / .DSA / .EC / .MF）。
+     * @param append 需要新增的条目（原包里没有的）。新增的 native 库与 resources.arsc
      *   同样按 STORED + 对齐写，否则新加的库在 `extractNativeLibs=false` 的包里加载失败。
      * @return 真正落到产物上的条目名（被替换的 + 被新增的）。
      */

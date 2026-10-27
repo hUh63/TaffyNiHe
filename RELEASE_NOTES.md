@@ -1,3 +1,68 @@
+## 塔菲逆核 v1.5.10 —— 三条「工具说改好了、APK 却装不上」的链路
+
+这一轮查的是**产物正确性**：工具返回 success + 字节数，但打出来的 APK 装不上、甚至直接
+损坏。三处都在 zip 结构层面，读代码时不显眼，把产物跑一遍立刻现形。
+
+### 1. `taffy_apk_replace_native`：回填 SO 之后的 APK 装不上
+
+这是回填 patched .so 的标准链路（`taffy_so_inject_code` → `replace_native` → `sign`），
+但它自己又写了一遍 ZipOutputStream 循环：
+
+```kotlin
+zos.putNextEntry(java.util.zip.ZipEntry(e.name))   // method = -1 → DEFLATED，extra 被丢掉
+```
+
+`new ZipEntry(name)` 的 method 是 -1，`putNextEntry` 会把它设成 DEFLATED。于是整包每个
+条目的压缩方式都被重写：
+
+- `resources.arsc` 变成 DEFLATED —— Android 要求它必须是 STORED，安装直接
+  `INSTALL_PARSE_FAILED_UNEXPECTED_EXCEPTION`
+- `lib/*.so` 变成 DEFLATED 且失去页对齐 —— `extractNativeLibs=false` 的包装不上，
+  或运行期 mmap 失败
+
+同仓库的 `core/ZipRepack` 早就有正确实现（保留 method/extra、对这两类条目强制 STORED +
+4/4096 对齐、写合法的 0xd935 填充块），`taffy_apk_patch_bytes` 与 `taffy_smali_edit` 都在用
+—— 只有这条链路漏了。
+
+沙箱复刻，同一输入 APK 替换同一个 .so：
+
+| 产物 | resources.arsc | lib/arm64-v8a/liba.so |
+|---|---|---|
+| 旧 | **DEFLATED** | **DEFLATED**，off%4096=208 |
+| 新 | STORED，4 对齐 | STORED，off%4096=0 |
+
+### 2. `taffy_smali_batch` 的 rebuild：同一个根因的第二处
+
+smali 批量重编后把 dex 写回 APK 时，同样是自己写 ZipOutputStream + `ZipEntry(e.name)`，
+后果一致。更糟的是 `wantSign=false` 时它还会把原 APK 的 v2/v3 签名块复制到这份被改坏的
+zip 上（`copyV2V3Blocks`），签名必然校验失败、且报错完全不指向真因。
+
+改为 `ZipRepack.copyAll` + `replaceAtomically`，条目数校验用返回的 applied 集合。
+
+### 3. 保留 V2/V3 签名块时 EOCD 偏移写错 → 产物 zip 直接损坏
+
+`ApkSigningPolicy.copyV2V3Blocks` 把签名块插到中央目录之前，再修正 EOCD 里的
+「中央目录偏移」字段 —— 但它写的是**插入前**的 EOCD 位置：
+
+```kotlin
+val eocd = locateEocd(out)          // 插入前的 EOCD 偏移
+insertBytes(out, cdOffset, block)   // 在 cdOffset 处插入 → EOCD 整体后移 block.size
+writeUInt32(out, eocd + 16, ...)    // ← 实际改的是中央目录里的字节
+```
+
+沙箱复刻：对一个正常 zip 走旧逻辑，产物报
+`BadZipFile: Bad magic number for central directory`；改成 `eocd + block.size + 16` 之后
+解析正常、内容正确。
+
+### 4. `ZipRepack.copyAll` 增加 skip / append
+
+- `skip`：整条丢弃（用于丢掉失效的 META-INF v1 签名条目）
+- `append`：新增原本不存在的条目，新增的 native 库同样按 STORED + 页对齐写
+- `replace` 保持在**最后一个**参数位（现有调用方全部使用尾随 lambda，Kotlin 的尾随
+  lambda 只对应最后一个形参）
+
+对齐算法抽成 `paddingFor` 供「复制已有条目」与「新增条目」两条路径复用。
+
 ## 塔菲逆核 v1.5.9 —— 描边和分隔线一直在被容器底色吃掉；一批「看着能点、点了没反应」的行
 
 ### 1. outline / outlineVariant 和容器底色完全同色（全局视觉）

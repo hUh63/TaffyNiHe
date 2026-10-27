@@ -148,8 +148,8 @@ object WorkspaceExtrasTools {
                 },
             )
         }
-    ) { _, a, ctx ->
-        // EngineToolHandler 的第三参是 SettingsStore，不是 ToolContext；取 Context 走统一入口
+    ) { _, a, settings ->
+        // EngineToolHandler 的第三参就是 SettingsStore（不是 ToolContext）；Context 走统一入口取
         val appContext = com.soreverse.mcp.core.WorkspacePolicy.appContext()
             ?: return@EngineToolHandler err("CONTEXT_UNAVAILABLE", "应用上下文不可用", "path", a.str("path"))
         val target = a.str("path").ifBlank { a.str("workspaceId") }
@@ -157,7 +157,7 @@ object WorkspaceExtrasTools {
             return@EngineToolHandler err("INVALID_ARGUMENT", "path 或 workspaceId 至少给一个", "path", "")
         }
         DeepAnalysisService(appContext)
-            .analyzeSync(target, ctx.settings, zh = true, request = a.str("request"))
+            .analyzeSync(target, settings, zh = true, request = a.str("request"))
             .fold(
                 onSuccess = { ok(JSONObject().put("report", it).put("target", target)) },
                 onFailure = { err("STATIC_AI_FAILED", it.message ?: "AI static analysis failed", "path", target) },

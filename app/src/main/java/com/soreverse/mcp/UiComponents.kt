@@ -53,7 +53,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.sp
 
 /**
  * 通用页面组件地基 —— **全部基于 Material 3 官方组件**（详见 docs/exbin-ui-spec.md）。
@@ -177,21 +176,25 @@ internal fun GlassGroup(
     footer: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val metrics = LocalUiMetrics.current
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (!title.isNullOrBlank()) {
             Text(
                 title,
-                // 太墟式：组标题在卡片外、primary 色（不是卡内灰标题）
-                style = MaterialTheme.typography.titleSmall,
+                // 组标题在卡片外、primary 色；start 与卡内正文左对齐（卡内 padding 16，这里 16）。
+                // 原来写 20dp 是「标题比正文更靠里」，整页看起来是歪的。
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.3.sp,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 20.dp, bottom = 4.dp),
+                modifier = Modifier.padding(start = 16.dp),
             )
         }
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.extraLarge,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = RoundedCornerShape(20.dp),
+            // 原来用 surfaceContainer：与 surface 的色差极小，深色主题下整页像一张白纸，
+            // 分组全靠标题撑着。surfaceContainerHigh 才有「卡片浮在背景上」的层次。
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(Modifier.fillMaxWidth(), content = content)
@@ -199,9 +202,10 @@ internal fun GlassGroup(
         if (!footer.isNullOrBlank()) {
             Text(
                 footer,
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 2.dp),
+                modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
     }
@@ -210,9 +214,10 @@ internal fun GlassGroup(
 @Composable
 internal fun GroupDivider() {
     HorizontalDivider(
-        modifier = Modifier.padding(start = 16.dp),
-        thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f),
+        modifier = Modifier.padding(start = 56.dp),
+        thickness = 1.dp,
+        // 0.5dp + alpha 0.22 在深色主题下几乎看不见，行与行糊成一片
+        color = MaterialTheme.colorScheme.outlineVariant,
     )
 }
 
@@ -231,16 +236,16 @@ internal fun NavRow(
     val resolvedTint = iconTint ?: MaterialTheme.colorScheme.primary
     ListItem(
         modifier = Modifier
-            .heightIn(min = 64.dp)
+            .heightIn(min = 56.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint, modifier = Modifier.size(24.dp)) } },
+        leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint, modifier = Modifier.size(22.dp)) } },
         headlineContent = {
             Text(
                 title,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         },
@@ -279,6 +284,7 @@ internal fun NavRow(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }

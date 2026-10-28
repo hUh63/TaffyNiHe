@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.readChildText
 import com.soreverse.mcp.core.PythonRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -120,14 +121,14 @@ internal fun SettingsPythonPage(t: UiText) {
         sessionActive = true
         val sb = StringBuilder(output)
         Thread {
-            val buf = ByteArray(4096)
             try {
-                while (sessionProc === proc) {
-                    val n = proc.inputStream.read(buf)
-                    if (n < 0) break
-                    val text = String(buf, 0, n, Charsets.UTF_8).replace("$marker\n", "").replace(marker, "")
-                    synchronized(sb) { sb.append(text); if (sb.length > 20000) sb.delete(0, sb.length - 20000) }
-                    output = sb.toString()
+                readChildText(proc.inputStream, { sessionProc === proc }) { chunk ->
+                    val text = chunk.replace("$marker\n", "").replace(marker, "")
+                    output = synchronized(sb) {
+                        sb.append(text)
+                        if (sb.length > 20000) sb.delete(0, sb.length - 20000)
+                        sb.toString()
+                    }
                 }
             } catch (_: Exception) {
             } finally {

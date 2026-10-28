@@ -148,9 +148,23 @@ internal fun SettingsBackupRestorePage(
         if (uri == null) return@rememberLauncherForActivityResult
         scope.safeLaunch {
             runCatching {
+                // 设置备份是一段 JSON（含密钥时也就几百 KB）。原来无上限 readBytes()，
+                // 用户误选一个几百 MB 的视频也会整块读进内存 —— 先按大小挡掉。
                 val bytes = withContext(Dispatchers.IO) {
+                    val limit = 16L * 1024 * 1024
+                    val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                    if (size > limit) error("文件 ${size / 1024 / 1024} MiB，超出设置备份上限 16 MiB")
                     context.contentResolver.openInputStream(uri)?.use { input ->
-                        input.readBytes()
+                        val buf = java.io.ByteArrayOutputStream()
+                        val chunk = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(chunk)
+                            if (n < 0) break
+                            val room = limit.toInt() - buf.size()
+                            if (room <= 0) break
+                            buf.write(chunk, 0, minOf(n, room))
+                        }
+                        buf.toByteArray()
                     } ?: error("Cannot read input file")
                 }
                 if (BackupCrypto.isEncrypted(bytes)) {

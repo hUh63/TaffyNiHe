@@ -4,8 +4,8 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.concurrent.thread
 
@@ -113,7 +113,8 @@ class HttpCaptureServer(
     private val lock = Any()
     private val entries = ArrayDeque<Entry>()
     private val listeners = mutableListOf<(Entry) -> Unit>()
-    private val formatter = SimpleDateFormat("HH:mm:ss", Locale.US)
+    /** 线程安全的时间戳格式（原来的 SimpleDateFormat 需要每处手动加锁，WS 路径漏了一处）。 */
+    private val formatter = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.US)
     /** 已建立的客户端连接：stop() 必须一起关掉，否则代理在后台继续转发/记录。 */
     private val activeSockets = java.util.Collections.synchronizedSet(HashSet<Socket>())
 
@@ -251,9 +252,7 @@ class HttpCaptureServer(
     }
 
     private fun record(method: String, host: String, path: String, status: String, bytes: Long, elapsedMs: Long, isHttps: Boolean, reqHeaders: String = "", respHeaders: String = "", isWs: Boolean = false) {
-        // SimpleDateFormat 非线程安全：多个 capture-conn 线程并发 format 会抛
-        // ArrayIndexOutOfBounds/NumberFormatException，该条记录被外层 catch 吞掉后"凭空消失"
-        val timeText = synchronized(formatter) { formatter.format(Date()) }
+        val timeText = LocalTime.now().format(formatter)
         val e = Entry(timeText, method, host, path, status, bytes, elapsedMs, isHttps, reqHeaders, respHeaders, isWs)
         synchronized(lock) {
             entries.addLast(e)
@@ -395,7 +394,7 @@ class HttpCaptureServer(
             if (isWsUpgrade && status == "101") {
                 // ── WebSocket：握手成功 → 双向持久透传 + 旁路帧解析 ──
                 val t0ws = System.currentTimeMillis()
-                val entryWs = Entry(formatter.format(Date()), "WS", host, path, "101", 0L, 0L, false,
+                val entryWs = Entry(LocalTime.now().format(formatter), "WS", host, path, "101", 0L, 0L, false,
                     reqHeaders = headerLines.joinToString("\n"), respHeaders = statusLine + "\n" + respHeaders.joinToString("\n"), isWs = true)
                 synchronized(lock) {
                     entries.addLast(entryWs)

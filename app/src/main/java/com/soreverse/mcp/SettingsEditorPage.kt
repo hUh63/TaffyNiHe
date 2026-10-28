@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.soreverse.mcp.core.readChildText
 import com.soreverse.mcp.core.EditorAiHelper
 import com.soreverse.mcp.core.LspClient
 import com.soreverse.mcp.core.PermissionManager
@@ -486,6 +487,22 @@ internal fun SettingsEditorPage(t: UiText) {
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.safeLaunch {
+            // 系统选择器可以选到任意文件：一次 readBytes() 把 1 GB 的 SO 读进内存就是 OOM，
+            // 几十 MB 的文本塞进 BasicTextField 则是整个界面卡死。先看大小再决定。
+            val limit = 8L * 1024 * 1024
+            val size = withContext(Dispatchers.IO) {
+                runCatchingCancellable {
+                    context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                }.getOrDefault(-1L)
+            }
+            if (size > limit) {
+                android.widget.Toast.makeText(
+                    context,
+                    "文件 ${size / 1024 / 1024} MiB，编辑器上限 8 MiB —— 大文件请用「分析」页或终端处理",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                return@safeLaunch
+            }
             val text = withContext(Dispatchers.IO) {
                 runCatchingCancellable { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
             }
@@ -1013,14 +1030,10 @@ internal fun SettingsEditorPage(t: UiText) {
         sessionProc = proc
         sessionActive = true
         Thread {
-            val buf = ByteArray(4096)
             try {
-                while (sessionProc === proc) {
-                    val n = proc.inputStream.read(buf)
-                    if (n < 0) break
-                    val text = String(buf, 0, n, Charsets.UTF_8).replace("$marker\n", "").replace(marker, "")
-                    output = output + text
-                    if (output.length > 20000) output = output.takeLast(20000)
+                readChildText(proc.inputStream, { sessionProc === proc }) { chunk ->
+                    val text = chunk.replace("$marker\n", "").replace(marker, "")
+                    output = (output + text).takeLast(20000)
                 }
             } catch (_: Exception) {
             } finally {
@@ -1051,12 +1064,7 @@ internal fun SettingsEditorPage(t: UiText) {
                 if (PermissionManager.isRootAvailable() || PermissionManager.isShizukuGranted()) {
                     RootShell.exec(cmd, timeoutSec = 30)
                 } else {
-                    runCatching {
-                        val p = ProcessBuilder("/system/bin/sh", "-c", cmd).redirectErrorStream(true).start()
-                        val out = p.inputStream.readBytes().decodeToString()
-                        p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-                        RootShell.Result(p.exitValue(), out, "")
-                    }.getOrElse { RootShell.Result(-1, "", it.message ?: "执行失败") }
+                    execShellCaptured(cmd)
                 }
             }
             appendOut(r.stdout.ifEmpty { "(无输出, exit=${r.code})" } + "\n")
@@ -1091,12 +1099,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         if (PermissionManager.isRootAvailable() || PermissionManager.isShizukuGranted()) {
                             RootShell.exec(code, timeoutSec = 30)
                         } else {
-                            runCatching {
-                                val p = ProcessBuilder("/system/bin/sh", "-c", code).redirectErrorStream(true).start()
-                                val out = p.inputStream.readBytes().decodeToString()
-                                p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-                                RootShell.Result(p.exitValue(), out, "")
-                            }.getOrElse { RootShell.Result(-1, "", it.message ?: "执行失败") }
+                            execShellCaptured(code)
                         }
                     }
                     appendOut(r.stdout.ifEmpty { "(无输出, exit=${r.code})" } + "\n")
@@ -2360,3 +2363,40 @@ private fun flattenTree(
         out.add(Triple(childRel, false, depth))
     }
 }
+
+/**
+ * 非 root 路径执行 sh 命令并捕获输出。
+ *
+ * 原来是 `p.inputStream.readBytes()` —— 整块读进内存。编辑器控制台里一条 `cat /dev/zero`、
+ * 递归 `find /`、或者 `yes`，就能把进程直接撑爆（OOM 崩掉整个 App）。
+ * 现在按 4 MiB 截断并提示，超时未退出则 destroyForcibly，避免进程一直挂着往管道里写。
+ */
+private fun execShellCaptured(cmd: String, timeoutSec: Long = 30L): RootShell.Result = runCatching {
+    val p = ProcessBuilder("/system/bin/sh", "-c", cmd).redirectErrorStream(true).start()
+    val limit = 4 * 1024 * 1024
+    val out = java.io.ByteArrayOutputStream()
+    val chunk = ByteArray(64 * 1024)
+    try {
+        while (true) {
+            val n = p.inputStream.read(chunk)
+            if (n < 0) break
+            val room = limit - out.size()
+            if (room <= 0) break
+            out.write(chunk, 0, minOf(n, room))
+        }
+    } catch (_: Exception) {
+    }
+    val finished = p.waitFor(timeoutSec, java.util.concurrent.TimeUnit.SECONDS)
+    if (!finished) runCatching { p.destroyForcibly() }
+    val text = out.toByteArray().decodeToString()
+    val clipped = if (out.size() >= limit) {
+        "$text\n…(输出超过 ${limit / 1024 / 1024} MiB，已截断；需要完整输出请重定向到文件)"
+    } else {
+        text
+    }
+    RootShell.Result(
+        if (finished) runCatching { p.exitValue() }.getOrDefault(-1) else -1,
+        clipped,
+        if (finished) "" else "命令超时（${timeoutSec}s）已终止",
+    )
+}.getOrElse { RootShell.Result(-1, "", it.message ?: "执行失败") }

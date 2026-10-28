@@ -4,9 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
-import java.text.SimpleDateFormat
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import java.util.ArrayDeque
-import java.util.Date
 import java.util.Locale
 
 object AppLog {
@@ -16,7 +16,11 @@ object AppLog {
     private const val MAX_LINE_LEN = 4096
     private val lock = Any()
     private val lines = ArrayDeque<String>(MAX_LINES)
-    private val formatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    // SimpleDateFormat 非线程安全，而 AppLog 是全局日志设施：任何线程都可能同时写。
+    // 之前 format 调用在锁外，并发时会抛 ArrayIndexOutOfBounds / 输出错乱的时间戳。
+    // DateTimeFormatter 不可变且线程安全，直接换掉，不需要再加锁。
+    private val formatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.US)
+    private fun nowText(): String = LocalTime.now().format(formatter)
     private var app: Context? = null
     // 延迟 + 容错：部分运行环境（纯 JVM 单元测试、极早期初始化）没有 Android Looper。
     // 此时 mainHandler 为 null，分发退回同步路径 —— 日志设施绝不在初始化阶段抛错拖垮上层。
@@ -68,9 +72,9 @@ object AppLog {
         val raw = message
         val clipped = if (raw.length > MAX_LINE_LEN) raw.substring(0, MAX_LINE_LEN) + "…(${raw.length})" else raw
         val nextLine = if (tag.isNullOrBlank()) {
-            "${formatter.format(Date())} $level $clipped"
+            "${nowText()} $level $clipped"
         } else {
-            "${formatter.format(Date())} $level $tag: $clipped"
+            "${nowText()} $level $tag: $clipped"
         }
         synchronized(lock) {
             if (lines.size == MAX_LINES) lines.removeFirst()

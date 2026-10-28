@@ -47,7 +47,10 @@ object AtomicWrite {
         // 最后兜底：renameTo，再不行就直接覆盖（并删临时文件）
         if (runCatching { tmp.renameTo(target) }.getOrDefault(false)) return true
         val ok = runCatching {
-            target.writeBytes(tmp.readBytes())
+            // 流式复制：兜底路径原来 tmp.readBytes() 整块进内存，遇上 1 GB 的 SO 备份就是 OOM。
+            tmp.inputStream().use { input ->
+                target.outputStream().use { out -> input.copyTo(out, 64 * 1024) }
+            }
             true
         }.getOrDefault(false)
         runCatching { tmp.delete() }

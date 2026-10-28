@@ -53,6 +53,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.readChildText
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.termview.TerminalScreen
 import com.soreverse.mcp.core.PythonRuntime
@@ -180,18 +181,15 @@ internal fun SettingsTerminalPage(t: UiText) {
         }
         val sb = StringBuilder(sessionOutput)
         Thread {
-            val buf = ByteArray(4096)
             try {
-                while (sessionProc === proc) {
-                    val n = proc.inputStream.read(buf)
-                    if (n < 0) break
-                    var text = String(buf, 0, n, Charsets.UTF_8)
-                    text = text.replace("$marker\n", "").replace(marker, "")
-                    synchronized(sb) {
+                readChildText(proc.inputStream, { sessionProc === proc }) { chunk ->
+                    val text = chunk.replace("$marker\n", "").replace(marker, "")
+                    // 快照在锁内取：sb 由本线程改、UI 线程读 toString()，并发会读到半成品。
+                    sessionOutput = synchronized(sb) {
                         sb.append(text)
                         if (sb.length > 12000) sb.delete(0, sb.length - 12000)
+                        sb.toString()
                     }
-                    sessionOutput = sb.toString()
                 }
             } catch (_: Exception) {
             } finally {

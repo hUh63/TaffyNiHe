@@ -283,17 +283,19 @@ object NativeExec {
 
     private fun drain(input: InputStream, sink: StringBuilder, limit: Int, truncated: AtomicBoolean) {
         runCatching {
-            val buf = ByteArray(8192)
+            // 按字符解码（原来按字节切再 decode，8 KiB 边界落在汉字中间就是乱码）。
+            val reader = java.io.InputStreamReader(input, Charsets.UTF_8)
+            val buf = CharArray(4096)
             while (true) {
-                val n = input.read(buf)
+                val n = reader.read(buf)
                 if (n < 0) break
                 if (sink.length + n > limit) {
                     val room = (limit - sink.length).coerceAtLeast(0)
-                    if (room > 0) sink.append(String(buf, 0, room, Charsets.UTF_8))
+                    if (room > 0) sink.append(buf, 0, room)
                     truncated.set(true)
                     // 继续读空，避免子进程因管道写满而阻塞
                 } else {
-                    sink.append(String(buf, 0, n, Charsets.UTF_8))
+                    sink.append(buf, 0, n)
                 }
             }
         }

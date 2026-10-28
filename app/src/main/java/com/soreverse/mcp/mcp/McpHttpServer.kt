@@ -755,6 +755,12 @@ $historyRows
             val cause = e.cause ?: e
             AppLog.e("Tool $name threw an unexpected error", cause)
             err("TOOL_ERROR", "Tool '$name' failed unexpectedly: ${cause.message}", "tool", name)
+        } catch (e: InterruptedException) {
+            // 服务端线程被中断（stop()/进程收尾）时原来直接把 InterruptedException 抛给 Ktor，
+            // 客户端拿到的是连接中断而不是结构化错误；并且中断标志被吞掉。
+            Thread.currentThread().interrupt()
+            future.cancel(true)
+            err("TOOL_INTERRUPTED", "Tool '$name' was interrupted; the server may be shutting down.", "tool", name)
         }
     }
 
@@ -954,8 +960,11 @@ $historyRows
     private fun spillToolResult(text: String): String {
         val dir = java.io.File(context.filesDir, "tool-results").apply { mkdirs() }
         dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(20)?.forEach { it.delete() }
-        val f = java.io.File(dir, "result-" + System.currentTimeMillis() + ".json")
-        f.writeText(text)
+        // 文件名只用毫秒时间戳会撞：MCP 允许并发调用非 heavy 工具，同一毫秒落盘两个大结果时
+        // 后写的会把前一个直接覆盖（客户端拿到的 savedTo 指向别人的内容）。加 nanoTime 区分，
+        // 并且用原子写 —— 客户端可能在我们写完之前就按路径去读。
+        val f = java.io.File(dir, "result-" + System.currentTimeMillis() + "-" + System.nanoTime() + ".json")
+        if (!com.soreverse.mcp.core.AtomicWrite.text(f, text)) f.writeText(text)
         return f.absolutePath
     }
 

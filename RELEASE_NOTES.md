@@ -1,3 +1,61 @@
+## 塔菲逆核 v1.5.16 —— 签名摘要对账实测，外加两处并发小修
+
+这一版主体是**验证**：把挂了几轮的「`apk_sig_verify` 的 content digest 与 apksig 是否一致」
+落到实处，顺带修掉排查中撞见的两处并发缺陷。
+
+### 一、`apk_sig_verify` 的 content digest 与 apksig 实测一致（挂账项关闭）
+
+做法：用 apksig 库对一个真实 APK 签 v2+v3，再按 spec 独立重算 content digest，
+与签名块里存的 digest 逐字节比对。
+
+```
+signed.apk: size=8395 eocd=8373 cd=8192 blockStart=4096
+  pairs: {0x7109871a: 1377, 0xf05368c0: 1377, 0x42726577: 1274}   ← v2 / v3 / source-stamp
+  v2 sha256: chunks=3 signed=b55b4857… computed=b55b4857… MATCH=True
+  v3 sha256: chunks=3 signed=b55b4857… computed=b55b4857… MATCH=True
+```
+
+然后把 entries 区第 100 字节翻转一位再算：
+
+```
+  v2 sha256: chunks=3 signed=b55b4857… computed=b34bf5b6… MATCH=False
+```
+
+结论：
+
+- 三段落划分（`[0, blockStart)` / 中央目录 / 打了补丁的 EOCD）与 spec 一致；
+- `blockStart = cdOffset - 8 - sizeFooter` 与块头尾 size 自校验一致；
+- 单字节篡改能被检出。
+
+也就是说「内容与签名不一致」这个信号本来就是可信的，不需要改实现。
+
+### 二、大结果落盘会并发撞名（修）
+
+工具输出超过 `toolResultMaxChars` 时会落盘到 `filesDir/tool-results/`，文件名原来只有
+毫秒时间戳：`result-<millis>.json`。MCP 允许并发调用非 heavy 工具，**同一毫秒内落盘两个大结果时，
+后写的直接覆盖前一个** —— 客户端拿着 `savedTo` 去读，读到的是别人的结果。
+
+改成 `result-<millis>-<nanos>.json`，并且走 `AtomicWrite`（客户端可能在我们写完之前就按路径读）。
+
+### 三、工具调用漏捕 `InterruptedException`（修）
+
+`future.get(timeout)` 的 catch 链里有 Timeout / Execution，唯独没有 `InterruptedException`。
+服务端 `stop()` 或进程收尾中断工作线程时，异常会直接抛给 Ktor，客户端看到的是**连接中断**
+而不是结构化错误；同时中断标志也被吞掉。
+
+现在返回 `TOOL_INTERRUPTED` 并 `Thread.currentThread().interrupt()` 恢复中断状态。
+
+### 四、顺手核实过、确认没问题的（不改代码）
+
+| 项 | 结论 |
+|---|---|
+| 路径策略覆盖 | 上一版新增的 30 个审计工具 + 5 个 workspace 工具，读的参数只有 `path`/`filePath`（都在 `PATH_KEYS` 里），其余是 `workspaceId`/`locator`/`editSessionId`/`pathHint`/`request`（非路径键）。没有绕过 `WorkspacePolicy`。 |
+| 工具异常链 | `ExecutionException` → `TOOL_ERROR`，`TimeoutException` → `TOOL_TIMEOUT`。heavy 许可是由任务自身在 `finally` 里释放，不会因调用方超时而泄漏（另一个 heavy 工具也就进不来）。 |
+| 取消传播 | `FullBackup`、`AgentOrchestrator`、`SubAgentRunner` 都是先 `catch (CancellationException)` 再 rethrow，取消不会被当成"失败节点"。 |
+| `ToolStats` 增长 | 按工具名聚合（上限 = 工具目录大小），不会随调用次数膨胀；落盘 15s 节流。 |
+
+---
+
 ## 塔菲逆核 v1.5.15 —— 并发竞争、中文乱码与无上限读取
 
 这一版全是排查出来的既有缺陷，没有新功能。三类问题，都能在真机上把 App 弄崩或弄花。

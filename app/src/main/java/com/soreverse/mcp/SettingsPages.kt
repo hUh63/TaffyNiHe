@@ -1,6 +1,18 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -377,7 +389,14 @@ internal fun SettingsRootPage(
     }
 }
 
-/** 开发环境二级页：把原来根页里 7 行摊平成三组，带状态摘要（对齐太墟 Linux 环境页）。 */
+/**
+ * 开发环境融合页 —— 把原先 6 个「进入」箭头融合成一页内的 6 个 pane。
+ *
+ * 之前改一次终端字号要点三次（设置 → 开发环境 → 终端执行），中间两层都只是目录，
+ * 每一层除了箭头没有别的信息。现在 Linux / 终端 / 可执行 / 编辑器 / Git / 扩展 在同一页
+ * 用页签直接切；重活（装发行版、开会话、跑可执行文件、提交推送、装插件）仍在各自 pane
+ * 里就地完成，不再有第三层。
+ */
 @Composable
 internal fun SettingsDevEnvPage(
     t: UiText,
@@ -385,52 +404,118 @@ internal fun SettingsDevEnvPage(
     onOpenEditor: () -> Unit,
     onBack: () -> Unit,
 ) {
-    SettingsScaffold(title = if (t.zh) "开发环境" else "Dev environment", onBack = onBack) {
-        item("runtime") {
-            SettingsSection(if (t.zh) "运行环境" else "Runtime") {
-                PreferenceSurface(first = true, last = false) {
-                    CategoryEntry(t, SettingsDest.Linux, if (t.zh) "发行版、根文件系统与启动参数" else "Distro, rootfs, boot args", null, onDest)
-                }
-                PreferenceSurface(first = false, last = false) {
-                    CategoryEntry(t, SettingsDest.Terminal, if (t.zh) "软键、字号与配色" else "Keys, font size, colors", null, onDest)
-                }
-                PreferenceSurface(first = false, last = true) {
-                    CategoryEntry(t, SettingsDest.NativeExec, if (t.zh) "在私有目录直接运行 PIE 可执行文件" else "Run PIE binaries from app dir", null, onDest)
-                }
-            }
-        }
-        item("tools") {
-            SettingsSection(if (t.zh) "开发工具" else "Tooling") {
-                PreferenceSurface(first = true, last = false) {
-                    SettingsCategoryRow(
-                        icon = settingsIcon(SettingsDest.Python),
-                        title = settingsTitle(t, SettingsDest.Python),
-                        subtitle = if (t.zh) "多标签代码编辑、行号与搜索" else "Multi-tab editor",
-                        value = null,
-                        onClick = onOpenEditor,
+    val zh = t.zh
+    var pane by rememberSaveable { mutableIntStateOf(0) }
+    val labels = listOf(
+        "Linux",
+        if (zh) "终端" else "Terminal",
+        if (zh) "可执行" else "Native",
+        if (zh) "编辑器" else "Editor",
+        "Git",
+        if (zh) "扩展" else "Ext",
+    )
+    ToolPageScaffold(
+        title = if (zh) "开发环境" else "Dev environment",
+        subtitle = if (zh) "Linux · 终端 · 可执行 · 编辑器 · Git · 扩展"
+        else "Linux · terminal · native · editor · Git · extensions",
+        onBack = onBack,
+        actions = {
+            if (pane == 3) {
+                IconButton(onClick = onOpenEditor) {
+                    Icon(
+                        Icons.Default.Code,
+                        if (zh) "打开编辑器" else "Open editor",
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                 }
-                PreferenceSurface(first = false, last = false) {
-                    CategoryEntry(t, SettingsDest.Git, if (t.zh) "克隆、提交、分支与推送" else "Clone, commit, branch, push", null, onDest)
+            }
+        },
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            ScrollableTabRow(
+                selectedTabIndex = pane,
+                edgePadding = 8.dp,
+                containerColor = MaterialTheme.colorScheme.background,
+                divider = {},
+            ) {
+                labels.forEachIndexed { i, label ->
+                    Tab(
+                        selected = pane == i,
+                        onClick = { pane = i },
+                        text = { Text(label, fontSize = 13.sp, maxLines = 1) },
+                    )
                 }
-                PreferenceSurface(first = false, last = true) {
-                    CategoryEntry(t, SettingsDest.Extensions, if (t.zh) "插件安装、权限与运行审计" else "Plugins, permissions, audit", null, onDest)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            Box(Modifier.fillMaxSize()) {
+                when (pane) {
+                    0 -> SettingsLinuxPage(t)
+                    1 -> SettingsTerminalPage(t)
+                    2 -> SettingsNativeExecPage(t)
+                    3 -> DevEnvEditorPane(t, onOpenEditor)
+                    4 -> SettingsGitPage(t)
+                    else -> SettingsExtensionsPage(t, onDest)
                 }
             }
         }
-        // 这里原本还有一组「工作区」（默认目录 / 临时工作区），与根页「应用与设备」分组完全重复。
-        // 同一个设置项出现在两条路径上，用户会怀疑两边写入的不是同一个值 —— 改成指路。
-        item("workspace-hint") {
-            Text(
-                if (t.zh) {
-                    "工作区目录、缓存上限与设置备份在「设置 → 应用与设备」里，这里不再重复一份。"
-                } else {
-                    "Workspace directory, cache limits and settings backup live under Settings → App & device."
+    }
+}
+
+/**
+ * 编辑器 pane —— 编辑器本体是顶栏独立全屏页（多标签、行号、搜索），塞进页签只会两层工具栏，
+ * 所以这里放它真正需要的两件事：入口与常驻偏好。
+ */
+@Composable
+private fun DevEnvEditorPane(t: UiText, onOpenEditor: () -> Unit) {
+    val zh = t.zh
+    val context = LocalContext.current
+    val prefs = remember {
+        context.getSharedPreferences("taffy_editor_prefs", android.content.Context.MODE_PRIVATE)
+    }
+    var confirmExit by remember { mutableStateOf(prefs.getBoolean("editor_confirm_exit", true)) }
+    var orderCount by remember {
+        mutableIntStateOf(runCatching { EditorCommands.order(context).size }.getOrDefault(0))
+    }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        GlassGroup(title = if (zh) "编辑器" else "Editor") {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (zh) {
+                        "多标签代码编辑器是顶栏上的独立页面：行号、搜索替换、跳转、格式化、批量缩进都在那边。这里只留常驻偏好。"
+                    } else {
+                        "The multi-tab editor is a full screen of its own. These are its persistent preferences."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                PrimaryActionButton(
+                    if (zh) "打开编辑器" else "Open editor",
+                    onOpenEditor,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        GlassGroup(title = if (zh) "偏好" else "Preferences") {
+            ToggleRow(
+                if (zh) "离开前确认" else "Confirm before leaving",
+                confirmExit,
+            ) { checked ->
+                confirmExit = checked
+                prefs.edit().putBoolean("editor_confirm_exit", checked).apply()
+            }
+            GroupDivider()
+            NavRow(
+                if (zh) "重置工具条顺序" else "Reset toolbar order",
+                if (zh) "当前 $orderCount 项，恢复默认排序" else "$orderCount items, restore default order",
+                Icons.Default.Restore,
+                onClick = {
+                    runCatching { EditorCommands.resetToolbar(context) }
+                    orderCount = runCatching { EditorCommands.order(context).size }.getOrDefault(orderCount)
                 },
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
     }

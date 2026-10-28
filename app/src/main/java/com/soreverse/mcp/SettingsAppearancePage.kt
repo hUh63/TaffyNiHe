@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -18,7 +19,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 internal fun SettingsAppearancePage(
@@ -87,13 +90,17 @@ internal fun SettingsAppearancePage(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        GlassGroup(title = t.language) {
+        // 语言 / 主题 / 强调色 / 密度 / 圆角 / 字号 / 动效 原来是七张单行卡——
+        // 每一张卡只有一行 chip，整页像七个标签贴纸。都是「选一个值」的同构控件，
+        // 按「外观（颜色与语言）」和「布局与文字（尺寸与动效）」合成两张卡。
+        GlassGroup(title = if (t.zh) "外观" else "Appearance") {
+            ChipFieldLabel(t.language)
             ChipRow(listOf("system" to if (t.zh) "跟随系统" else "System", "zh" to "中文", "en" to "English"), language, onLanguage)
-        }
-        GlassGroup(title = t.theme) {
+            GroupDivider()
+            ChipFieldLabel(t.theme)
             ChipRow(listOf("system" to if (t.zh) "跟随系统" else "System", "light" to if (t.zh) "浅色" else "Light", "dark" to if (t.zh) "深色" else "Dark"), themeMode, onTheme)
-        }
-        GlassGroup(title = if (t.zh) "强调色" else "Accent") {
+            GroupDivider()
+            ChipFieldLabel(if (t.zh) "强调色" else "Accent")
             ChipRow(
                 listOf(
                     "pink" to if (t.zh) "粉" else "Pink",
@@ -111,7 +118,8 @@ internal fun SettingsAppearancePage(
                 onAccent,
             )
         }
-        GlassGroup(title = if (t.zh) "布局密度" else "Density") {
+        GlassGroup(title = if (t.zh) "布局与文字" else "Layout & text") {
+            ChipFieldLabel(if (t.zh) "布局密度" else "Density")
             ChipRow(
                 listOf(
                     "compact" to if (t.zh) "紧凑" else "Compact",
@@ -121,8 +129,8 @@ internal fun SettingsAppearancePage(
                 uiDensity,
                 onDensity,
             )
-        }
-        GlassGroup(title = if (t.zh) "圆角" else "Corners") {
+            GroupDivider()
+            ChipFieldLabel(if (t.zh) "圆角" else "Corners")
             ChipRow(
                 listOf(
                     "small" to if (t.zh) "小" else "Small",
@@ -133,8 +141,8 @@ internal fun SettingsAppearancePage(
                 cornerStyle,
                 onCorner,
             )
-        }
-        GlassGroup(title = if (t.zh) "字号" else "Text size") {
+            GroupDivider()
+            ChipFieldLabel(if (t.zh) "字号" else "Text size")
             ChipRow(
                 listOf(
                     "xsmall" to if (t.zh) "特小" else "XS",
@@ -146,8 +154,8 @@ internal fun SettingsAppearancePage(
                 textScale,
                 onTextScale,
             )
-        }
-        GlassGroup(title = if (t.zh) "动效" else "Motion") {
+            GroupDivider()
+            ChipFieldLabel(if (t.zh) "动效" else "Motion")
             ChipRow(
                 listOf(
                     "system" to if (t.zh) "跟随系统" else "System",
@@ -171,5 +179,17 @@ internal fun SettingsAppearancePage(
             }
         }
     }
+
 }
 
+/** 分组卡内部的字段小标题：与 [ChipRow] 的 14dp 横向内边距对齐，比组标题低一层。 */
+@Composable
+private fun ChipFieldLabel(text: String) {
+    Text(
+        text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, top = 12.dp),
+    )
+}

@@ -154,35 +154,17 @@ internal fun SettingsServiceConfigPage(
                 })
             }
         }
-        GlassGroup(title = if (t.zh) "网页测试" else "Web test") {
-            val shape = RoundedCornerShape(AppShape.md)
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                shape = shape,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (t.zh) "浏览器测试" else "Browser test",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    PrimaryActionButton(if (t.zh) "打开测试" else "Open test", {
-                        val baseUrl = "http://127.0.0.1:${settings.port}/mcp"
-                        val testUrl = if (settings.authEnabled) "$baseUrl?token=${settings.accessToken}" else baseUrl
-                        openInBrowser(context, testUrl)
-                    })
-                }
-            }
-        }
-        GlassGroup(title = if (t.zh) "全部地址" else "All endpoints") {
+        // 「网页测试」原本是独立一张卡，只有一个「打开测试」按钮 —— 而下面每个地址
+        // 都有自己的「测试」按钮，属于同一功能的两个入口。合并成一张「访问入口」卡：
+        // 地址列表 + 客户端配置（后者原来是第三张卡）。三张卡变一张。
+        GlassGroup(
+            title = if (t.zh) "访问入口" else "Endpoints",
+            footer = if (t.zh) {
+                "点地址复制；「测试」用浏览器打开。桌面客户端优先用下方 NPX / UVX 配置。"
+            } else {
+                "Tap an address to copy; Test opens it in a browser. Prefer the NPX/UVX config below for desktop clients."
+            },
+        ) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 endpoints.forEach { endpoint ->
                     val display = displayEndpoint(endpoint, t.zh)
@@ -210,26 +192,8 @@ internal fun SettingsServiceConfigPage(
                     )
                 }
             }
-        }
-        GlassGroup(title = if (t.zh) "客户端配置" else "Client configuration", footer = if (t.zh) "桌面客户端优先使用 NPX 或 UVX 配置" else "Prefer NPX or UVX for desktop clients") {
+            GroupDivider()
             Text(clientConfig(preferred, settings), modifier = Modifier.padding(14.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-            FlowRow(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryActionButton(if (t.zh) "复制 NPX" else "Copy NPX", { copy(context, clientConfig(preferred, settings), t.copied) })
-                PrimaryActionButton(if (t.zh) "复制 UVX" else "Copy UVX", { copy(context, clientConfigUvx(preferred, settings), t.copied) })
-                SecondaryActionButton(if (t.zh) "复制直连" else "Copy direct") { copy(context, clientConfigDirect(preferred, settings), t.copied) }
-                SecondaryActionButton(if (t.zh) "导出 stdio 桥" else "Export stdio bridge") {
-                    val path = exportStdioBridge(context)
-                    Toast.makeText(
-                        context,
-                        if (path != null) {
-                            if (t.zh) "已导出：$path（在电脑上 python3 运行）" else "Saved to $path"
-                        } else {
-                            if (t.zh) "导出失败" else "Export failed"
-                        },
-                        Toast.LENGTH_LONG,
-                    ).show()
-                }
-            }
         }
         GlassGroup(title = if (t.zh) "访问控制" else "Access control", footer = if (t.zh) "修改端口、绑定地址或 Token 后需重启服务。" else "Restart the service after changing port, bind address, or token.") {
             // v1.3.7: 原「MCP 访问控制」独立页与本分组完全重复，已合并到此处；保留其「谁能连接」说明

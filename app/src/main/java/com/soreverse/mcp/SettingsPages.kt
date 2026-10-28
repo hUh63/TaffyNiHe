@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.SettingsStore
 import kotlinx.coroutines.launch
 import com.soreverse.mcp.mcp.ToolCatalog
@@ -329,8 +330,10 @@ internal fun SettingsRootPage(
             }
         }
 
+        // 原来是「诊断与关于」一张 8 行卡：排障时要往下扫过 4 条法务/致谢条目，
+        // 找东西全靠眼力。拆成两张卡——「诊断」是日常会用到的，「关于」是低频只读。
         item("diagnostics") {
-            SettingsSection(if (t.zh) "诊断与关于" else "Diagnostics & about") {
+            SettingsSection(if (t.zh) "诊断" else "Diagnostics") {
                 PreferenceSurface(first = true, last = false) {
                     CategoryEntry(t, SettingsDest.SelfCheck, if (t.zh) "完整性结论与运行环境探针" else "Integrity verdict and runtime probes", null, onDest)
                 }
@@ -340,10 +343,15 @@ internal fun SettingsRootPage(
                 PreferenceSurface(first = false, last = false) {
                     CategoryEntry(t, SettingsDest.LogcatViewer, if (t.zh) "日志抓取与过滤" else "Log capture and filter", null, onDest)
                 }
-                PreferenceSurface(first = false, last = false) {
+                PreferenceSurface(first = false, last = true) {
                     CategoryEntry(t, SettingsDest.Updates, if (t.zh) "检查更新、通道与校验和" else "Update check, channel, checksum", null, onDest)
                 }
-                PreferenceSurface(first = false, last = false) {
+            }
+        }
+
+        item("about") {
+            SettingsSection(if (t.zh) "关于" else "About") {
+                PreferenceSurface(first = true, last = false) {
                     CategoryEntry(t, SettingsDest.Help, if (t.zh) "工具说明与常见问题" else "Tool docs and FAQ", null, onDest)
                 }
                 PreferenceSurface(first = false, last = false) {
@@ -410,15 +418,20 @@ internal fun SettingsDevEnvPage(
                 }
             }
         }
-        item("workspace") {
-            SettingsSection(if (t.zh) "工作区" else "Workspace") {
-                PreferenceSurface(first = true, last = false) {
-                    CategoryEntry(t, SettingsDest.Workspace, if (t.zh) "默认目录与扫描范围" else "Default dir and scan scope", null, onDest)
-                }
-                PreferenceSurface(first = false, last = true) {
-                    CategoryEntry(t, SettingsDest.TempWorkspace, if (t.zh) "缓存上限与清理" else "Cache limit and cleanup", null, onDest)
-                }
-            }
+        // 这里原本还有一组「工作区」（默认目录 / 临时工作区），与根页「应用与设备」分组完全重复。
+        // 同一个设置项出现在两条路径上，用户会怀疑两边写入的不是同一个值 —— 改成指路。
+        item("workspace-hint") {
+            Text(
+                if (t.zh) {
+                    "工作区目录、缓存上限与设置备份在「设置 → 应用与设备」里，这里不再重复一份。"
+                } else {
+                    "Workspace directory, cache limits and settings backup live under Settings → App & device."
+                },
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
         }
     }
 }

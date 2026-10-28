@@ -57,7 +57,11 @@ private val DYNAMIC_METHODS = JSONArray(
         "frida_hook",
         "frida_call",
         "frida_read",
-        "frida_backtrace"
+        "frida_backtrace",
+        "frida_modules",
+        "frida_write",
+        "frida_replace",
+        "frida_script"
     )
 )
 
@@ -119,6 +123,10 @@ internal fun EngineRuntime.dynamicDispatch(
                                     "frida_call",
                                     "frida_read",
                                     "frida_backtrace",
+                                    "frida_modules",
+                                    "frida_write",
+                                    "frida_replace",
+                                    "frida_script",
                                     "frida_close"
                                 )
                             )
@@ -219,12 +227,16 @@ internal fun EngineRuntime.dynamicDispatch(
             val sessionId = args.optString(0)
             val symbolName = method.ifBlank { args.optString(1) }
             val callArgs = args.optString(2).ifBlank { "[]" }
+            // args[3] = 返回类型（int / pointer / int64 / uint64 ...）；缺省 int。
+            // 参数形态由 agent 侧推导：数字→int、"0x.."→pointer、其它字符串→allocUtf8String。
+            val returnType = args.optString(3, "int").ifBlank { "int" }
             frida.invokeRpc(
                 sessionId,
                 "callFunction",
                 JSONObject()
                     .put("functionName", symbolName)
                     .put("argsJson", callArgs)
+                    .put("returnType", returnType)
             ).put("fridaSessionId", sessionId).put("symbolName", symbolName)
         }
 
@@ -243,6 +255,65 @@ internal fun EngineRuntime.dynamicDispatch(
             val sessionId = args.optString(0)
             frida.invokeRpc(sessionId, "registers", JSONObject())
                 .put("fridaSessionId", sessionId)
+        }
+
+        // ── Frida 写入/替换/枚举/脚本（需 root 真机 + 已 frida_open 的会话）──
+
+        "frida_modules" -> {
+            val sessionId = args.optString(0)
+            frida.invokeRpc(sessionId, "enumerateModules", JSONObject())
+                .put("fridaSessionId", sessionId)
+                .put("note", "base/size 为模块基址与映射大小；可直接用于 frida_read / frida_write 的地址计算")
+        }
+
+        "frida_write" -> {
+            val sessionId = args.optString(0)
+            val addr = method.ifBlank { args.optString(1) }
+            val hex = args.optString(2)
+            if (addr.isBlank() || hex.isBlank()) {
+                err(
+                    "INVALID_ARGUMENT",
+                    "frida_write needs both an address (args[1] or method) and a hex payload (args[2])",
+                    "args", args.toString().take(200)
+                )
+            } else {
+                frida.invokeRpc(
+                    sessionId,
+                    "writeMemory",
+                    JSONObject().put("ptrStr", addr).put("hex", hex)
+                ).put("fridaSessionId", sessionId).put("address", addr)
+            }
+        }
+
+        "frida_replace" -> {
+            val sessionId = args.optString(0)
+            val target = method.ifBlank { args.optString(1) }
+            val retValue = if (args.length() > 2) args.optInt(2, 0) else 0
+            if (target.isBlank()) {
+                err("INVALID_ARGUMENT", "frida_replace needs a target: a 0x address or an export name", "target", target)
+            } else {
+                frida.invokeRpc(
+                    sessionId,
+                    "replaceFunction",
+                    JSONObject().put("ptrStr", target).put("retValue", retValue)
+                ).put("fridaSessionId", sessionId).put("target", target)
+                    .put("note", "替换体固定返回 int（retValue）；需要更复杂的逻辑请用 frida_script 自行 Interceptor.replace")
+            }
+        }
+
+        "frida_script" -> {
+            val sessionId = args.optString(0)
+            val source = args.optString(1)
+            if (source.isBlank()) {
+                err(
+                    "INVALID_ARGUMENT",
+                    "frida_script needs a JavaScript expression or statement block in args[1]",
+                    "args", args.toString().take(120)
+                )
+            } else {
+                frida.invokeRpc(sessionId, "evalScript", JSONObject().put("source", source))
+                    .put("fridaSessionId", sessionId)
+            }
         }
 
         else -> err("UNKNOWN_ACTION", "Unknown dynamic-analysis op", "op", op)

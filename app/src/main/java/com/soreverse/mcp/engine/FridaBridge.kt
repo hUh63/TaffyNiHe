@@ -1056,9 +1056,21 @@ internal class FridaBridge(private val context: Context) {
         "callFunction" -> JSONArray()
             .put(params.optString("functionName"))
             .put(params.optString("argsJson"))
+            .put(params.optString("returnType", "int"))
         "readMemory" -> JSONArray()
             .put(params.optString("ptrStr"))
             .put(params.optInt("size", 256))
+        // 新增四个 op 必须显式列参数顺序：走 else 分支是按 JSONObject.names() 顺序排的，
+        // 而 names() 不保证顺序，参数一错位就是把模板地址当长度用。
+        "enumerateModules" -> JSONArray()
+        "writeMemory" -> JSONArray()
+            .put(params.optString("ptrStr"))
+            .put(params.optString("hex"))
+        "replaceFunction" -> JSONArray()
+            .put(params.optString("ptrStr"))
+            .put(params.optInt("retValue", 0))
+        "evalScript" -> JSONArray()
+            .put(params.optString("source"))
         else -> JSONArray().apply {
             val arr = params.names()
             if (arr != null) for (i in 0 until arr.length()) put(params.opt(arr.getString(i)))
@@ -1079,6 +1091,9 @@ internal class FridaBridge(private val context: Context) {
         return """
         'use strict';
         const __events = [];
+        // Interceptor.replace 的 NativeCallback 必须被 JS 侧持有，否则会被 GC 掉、
+        // 目标函数随即跳回原实现（表现为「replace 好像没生效」）。
+        const __replaced = [];
         let __lastContext = null;
 
         function resolveExport(name) {
@@ -1086,7 +1101,7 @@ internal class FridaBridge(private val context: Context) {
             try { return Module.getExportByName('$moduleName', name); } catch (e) {}
             // Fall back to scanning every loaded module for the export.
             const mods = Process.enumerateModules();
-            for (const i = 0; i !== mods.length; i++) {
+            for (let i = 0; i !== mods.length; i++) {
                 try {
                     const found = Module.findExportByName(mods[i].name, name);
                     if (found) return found;
@@ -1120,14 +1135,55 @@ internal class FridaBridge(private val context: Context) {
                 __events.length = 0;
                 return { events: snapshot };
             },
-            callFunction(functionName, argsJson) {
+            callFunction(functionName, argsJson, returnType) {
                 const addr = resolveExport('' + functionName);
                 if (!addr) return { error: 'export-not-found' };
-                const args = JSON.parse('' + argsJson).map(function (n) { return n | 0; });
-                const types = new Array(Math.max(args.length, 1)).fill('int');
-                const fn = new NativeFunction(addr, 'int', types);
-                const retval = fn.apply(null, args);
-                return { retval: retval };
+                const spec = JSON.parse('' + argsJson);
+                if (!Array.isArray(spec)) return { error: 'args-must-be-array' };
+                // 参数按形态推导类型，不再一律 n|0：
+                //   数字            -> int
+                //   "0x1234"        -> pointer
+                //   其它字符串      -> allocUtf8String + pointer（原实现把字符串也 |0 成 0，
+                //                      导出里凡是要 char* 的都调不通）
+                //   {string|pointer|int|uint64} -> 显式指定
+                const values = [];
+                const types = [];
+                const keep = [];
+                for (let i = 0; i !== spec.length; i++) {
+                    const v = spec[i];
+                    if (typeof v === 'number') {
+                        values.push(v | 0); types.push('int');
+                    } else if (typeof v === 'string') {
+                        if (/^0x[0-9a-fA-F]+$/.test(v)) {
+                            values.push(ptr(v)); types.push('pointer');
+                        } else {
+                            const s = Memory.allocUtf8String(v); keep.push(s);
+                            values.push(s); types.push('pointer');
+                        }
+                    } else if (v && typeof v === 'object') {
+                        if (v.string !== undefined) {
+                            const s = Memory.allocUtf8String('' + v.string); keep.push(s);
+                            values.push(s); types.push('pointer');
+                        } else if (v.pointer !== undefined) {
+                            values.push(ptr('' + v.pointer)); types.push('pointer');
+                        } else if (v.int !== undefined) {
+                            values.push(v.int | 0); types.push('int');
+                        } else if (v.uint64 !== undefined) {
+                            values.push(uint64('' + v.uint64)); types.push('uint64');
+                        } else {
+                            return { error: 'unsupported-arg', index: i };
+                        }
+                    } else {
+                        return { error: 'unsupported-arg', index: i };
+                    }
+                }
+                const rt = '' + (returnType || 'int');
+                const fn = new NativeFunction(addr, rt, types);
+                const retval = fn.apply(null, values);
+                if (rt === 'pointer' || rt === 'int64' || rt === 'uint64') {
+                    return { retval: retval.toString(), returnType: rt };
+                }
+                return { retval: retval, returnType: rt };
             },
             readMemory(ptrStr, size) {
                 const p = ptr('' + ptrStr);
@@ -1144,6 +1200,61 @@ internal class FridaBridge(private val context: Context) {
                     };
                 } catch (e) {
                     return { error: 'backtrace-failed: ' + e };
+                }
+            },
+            enumerateModules() {
+                const out = [];
+                const mods = Process.enumerateModules();
+                for (let i = 0; i !== mods.length; i++) {
+                    const m = mods[i];
+                    out.push({ name: m.name, base: m.base.toString(), size: m.size, path: m.path || null });
+                }
+                return { modules: out, count: out.length };
+            },
+            writeMemory(ptrStr, hex) {
+                const clean = ('' + hex).replace(/[^0-9a-fA-F]/g, '');
+                if (clean.length === 0 || clean.length % 2 !== 0) return { error: 'invalid-hex' };
+                const target = ptr('' + ptrStr);
+                const buf = new Uint8Array(clean.length / 2);
+                for (let i = 0; i !== buf.length; i++) buf[i] = parseInt(clean.substr(i * 2, 2), 16);
+                try {
+                    Memory.writeByteArray(target, buf);
+                } catch (e) {
+                    return { error: 'write-failed: ' + e };
+                }
+                return { written: buf.length, address: target.toString() };
+            },
+            replaceFunction(ptrStr, retValue) {
+                // 地址或导出名都接受：先看是不是 0x 开头，否则当作导出名解析
+                const key = '' + ptrStr;
+                const resolved = /^0x[0-9a-fA-F]+$/.test(key) ? null : resolveExport(key);
+                if (!resolved && !/^0x[0-9a-fA-F]+$/.test(key)) return { error: 'symbol-not-found' };
+                const target = resolved || ptr(key);
+                const cb = new NativeCallback(function () { return retValue | 0; }, 'int', []);
+                try {
+                    Interceptor.replace(target, cb);
+                } catch (e) {
+                    return { error: 'replace-failed: ' + e };
+                }
+                __replaced.push(cb);
+                return { replaced: target.toString(), retValue: retValue | 0 };
+            },
+            evalScript(source) {
+                try {
+                    // 包一层括号：既要支持表达式（'Process.id'），也要支持语句块（'var x=1; x+1'）
+                    const fn = new Function('return (' + source + '\n)');
+                    const value = fn();
+                    if (value === undefined) return { result: null, kind: 'undefined' };
+                    if (value === null) return { result: null, kind: 'null' };
+                    const t = typeof value;
+                    if (t === 'number' || t === 'string' || t === 'boolean') return { result: value, kind: t };
+                    try {
+                        return { result: JSON.parse(JSON.stringify(value)), kind: t };
+                    } catch (e2) {
+                        return { result: String(value), kind: t };
+                    }
+                } catch (e) {
+                    return { error: 'eval-failed: ' + e };
                 }
             }
         };

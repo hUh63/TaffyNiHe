@@ -1,3 +1,74 @@
+## 塔菲逆核 v1.5.13 —— Frida 写入/替换/枚举/脚本 + 设置页去重
+
+### 一、Frida 动态侧补齐四个 op（`taffy_dynamic_api`）
+
+| op | 作用 | 位置参数 |
+|---|---|---|
+| `frida_modules` | 枚举目标进程已加载模块（name / base / size / path） | `[sessionId]` |
+| `frida_write` | 十六进制写内存 | `[sessionId, address, hex]`（hex 奇数位直接拒） |
+| `frida_replace` | `Interceptor.replace`，替换体固定返回 int | `[sessionId, target, retValue]`，target 支持 `0x` 地址或导出名 |
+| `frida_script` | 在已注入的 agent 内执行任意 JS 表达式/语句块 | `[sessionId, source]` |
+
+`frida_call` 的参数类型也修了：原来 `args.map(n => n | 0)` 把所有参数截成 32 位整数，
+**凡是要 `char*` 的导出都调不通**（字符串传进去变成 0）。现在按形态推导：
+
+- 数字 → `int`
+- `"0x1234"` → `pointer`
+- 其他字符串 → `allocUtf8String` + `pointer`（agent 侧保活，函数返回后才释放）
+- 对象可显式写 `{"string":…}` / `{"pointer":…}` / `{"int":…}` / `{"uint64":…}`
+
+另外新增可选的第 4 个参数 `returnType`（`int` / `pointer` / `int64` / `uint64`），
+64 位返回值不再被强转成 int 而丢高位。
+
+### 二、顺手修掉 agent 里的一个必崩 bug
+
+`resolveExport` 的模块回退扫描写的是：
+
+```js
+for (const i = 0; i !== mods.length; i++) {  // i++ 对 const 赋值 → TypeError
+```
+
+第一次在目标进程里解析不到导出时就会抛，`hookFunction` / `callFunction` 全部失败。
+改成 `let i`。这个 bug 从上游一路带过来，因为平时 hook 的都是能在指定模块里直接命中的导出，
+走不到回退分支。
+
+### 三、设置页去重与重设计
+
+**发现并修掉的重复**：
+
+1. **工作区（默认目录 / 缓存上限）在两条路径上都能进** —— 根页「应用与设备」一组，
+   开发环境二级页又有一组「工作区」。同一个设置项出现在两处，用户会怀疑两边写入的
+   不是同一个值。开发环境页删掉该组，改成一行指路文案。
+2. **服务配置页的「网页测试」是独立一张卡，只有一个「打开测试」按钮** —— 而同一页
+   每个地址卡片都有自己的「测试」按钮，是同一功能的第二个入口。删掉该组，把
+   「全部地址」与「客户端配置」合并成一张「访问入口」卡（6 组 → 4 组）。
+3. **外观页 7 张单行卡** —— 语言、主题、强调色、密度、圆角、字号、动效各占一张卡，
+   每张只有一行 chip，整页像七个标签贴纸。按语义合成两张：
+   「外观」（语言 / 主题 / 强调色）+「布局与文字」（密度 / 圆角 / 字号 / 动效），
+   卡内用字段小标题 + 分隔线分组（7 卡 → 4 卡，含预设与开关）。
+4. **「诊断与关于」一张 8 行卡** —— 排障时要往下扫过 4 条法务/致谢条目才能找到
+   「运行统计」。拆成「诊断」（完整性自检 / 运行统计 / 日志 / 更新）与
+   「关于」（帮助 / 致谢 / 免责 / 版本）两张卡。
+
+**新增的局部组件** `ChipFieldLabel`：分组卡内部的字段小标题（12sp / SemiBold /
+onSurfaceVariant / start 16dp），与 `ChipRow` 的 14dp 内边距对齐。原来多张单行卡
+合并后，卡内需要区分「这一段是哪个设置」，没有这层小标题会分不清。
+
+### 四、排查记录
+
+- **agent JS 的 `for (const i…)` 自增**（见上，必崩）
+- **`callFunction` 的 `n | 0` 截断**（见上，字符串参数全废）
+- 新 op 的参数必须显式列进 `rpcArgs` 的 `when` 分支：走 `else` 分支是按
+  `JSONObject.names()` 顺序排的，而它不保证顺序 —— 参数一错位就是把模板地址当长度用。
+
+### 五、仍需真机验证
+
+这批 op 的失败形态是「目标进程静默崩溃」或「hook 装上了但没生效」，沙箱里没有可复现的
+注入目标。代码路径已按 Frida 官方 API 写（`Memory.writeByteArray` 收 `Uint8Array`、
+`Interceptor.replace` 的回调必须 JS 侧持引用防 GC），但**没有在真机上跑过**。
+第一次使用时建议先用 `frida_modules` 确认会话通、再用 `frida_script("Process.arch")`
+确认 eval 通道，最后才碰 `frida_write` / `frida_replace`。
+
 ## 塔菲逆核 v1.5.12 —— 工具调用模式 + 设置页重做
 
 ### 一、工具调用模式：`full` / `skills_like`

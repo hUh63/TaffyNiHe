@@ -32,6 +32,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -78,6 +79,7 @@ internal fun settingsIndex(zh: Boolean): List<SettingsEntry> {
         e(SettingsDest.Probe, if (zh) "外部探针" else "External probe", if (zh) "连通性自检地址" else "Connectivity self-check URL", "probe url 探针 连通 自检", if (zh) "服务与连接" else "Service"),
         e(SettingsDest.AiDeep, if (zh) "AI 深度分析" else "AI deep analysis", if (zh) "大模型端点、密钥、模型与提示词" else "Endpoint, key, model, prompt", "ai llm openai 大模型 密钥 提示词 深度", if (zh) "服务与连接" else "Service"),
         // 逆向分析
+        e(SettingsDest.Reverse, if (zh) "逆向分析（合并页）" else "Reverse analysis (combined)", if (zh) "反汇编、调试、抓包、沙箱、编排、Flutter 一页切换" else "Disasm, debug, capture, sandbox, workflow, Flutter in one page", "逆向 reverse 分析 反汇编 调试 抓包 沙箱 工作流 flutter 合并", if (zh) "逆向分析" else "Reverse"),
         e(SettingsDest.Rizin, "Rizin", if (zh) "反汇编、函数与图分析引擎" else "Disassembly and graph engine", "rizin 反汇编 引擎 图 cfg", if (zh) "逆向分析" else "Reverse"),
         e(SettingsDest.Edbg, "eDBG", if (zh) "ELF 调试器与断点" else "ELF debugger and breakpoints", "edbg 调试 debugger 断点 elf", if (zh) "逆向分析" else "Reverse"),
         e(SettingsDest.Capture, if (zh) "抓包" else "Capture", if (zh) "HTTP(S) 代理与请求记录" else "HTTP(S) proxy and capture", "capture proxy http 抓包 代理 证书", if (zh) "逆向分析" else "Reverse"),
@@ -145,6 +147,25 @@ private fun SettingsSearchPill(t: UiText, onClick: () -> Unit) {
 }
 
 /** 根页顶部的运行态摘要：服务端口 / 工具数 / 鉴权。 */
+/**
+ * 纯展示状态标签 —— 不接点击。
+ *
+ * 之前这张卡用 AssistChip(onClick = {}) 承载「端口 / 工具数 / 鉴权」，用户看得见水波纹、
+ * 点下去什么都不发生；信息型内容不该长成按钮。warning 用于需要被看见的负向状态（鉴权关闭）。
+ */
+@Composable
+private fun StatusPill(text: String, warning: Boolean = false) {
+    val container = if (warning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
+    val content = if (warning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
+    Surface(shape = MaterialTheme.shapes.small, color = container, contentColor = content) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
 @Composable
 private fun SettingsStatusCard(settings: SettingsStore, t: UiText) {
     Card(
@@ -164,22 +185,12 @@ private fun SettingsStatusCard(settings: SettingsStore, t: UiText) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(
-                    onClick = {},
-                    label = { Text(if (t.zh) "端口 ${settings.port}" else "Port ${settings.port}", style = MaterialTheme.typography.labelMedium) },
-                )
-                AssistChip(
-                    onClick = {},
-                    label = { Text(if (t.zh) "${ToolCatalog.ALL.size} 个工具" else "${ToolCatalog.ALL.size} tools", style = MaterialTheme.typography.labelMedium) },
-                )
-                AssistChip(
-                    onClick = {},
-                    label = {
-                        Text(
-                            if (settings.authEnabled) (if (t.zh) "鉴权已开启" else "Auth on") else (if (t.zh) "鉴权关闭" else "Auth off"),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    },
+                // 这三条是纯信息，原来用 AssistChip(onClick = {}) 是「有水波纹、点了什么都不发生」的假按钮。
+                StatusPill(if (t.zh) "端口 ${settings.port}" else "Port ${settings.port}")
+                StatusPill(if (t.zh) "${ToolCatalog.ALL.size} 个工具" else "${ToolCatalog.ALL.size} tools")
+                StatusPill(
+                    if (settings.authEnabled) (if (t.zh) "鉴权已开启" else "Auth on") else (if (t.zh) "鉴权关闭" else "Auth off"),
+                    warning = !settings.authEnabled,
                 )
             }
         }

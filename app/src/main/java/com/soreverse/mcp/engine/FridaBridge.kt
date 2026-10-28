@@ -1241,7 +1241,9 @@ internal class FridaBridge(private val context: Context) {
             },
             evalScript(source) {
                 try {
-                    // 包一层括号：既要支持表达式（'Process.id'），也要支持语句块（'var x=1; x+1'）
+                    // 只接受**表达式**（'Process.id'、'Process.enumerateModules().length'）。
+                    // 不能包成 'return (' + 语句块 + ')'——那对 'var x=1; x+1' 是语法错误。
+                    // 多语句请自己写 IIFE：(function(){ ...; return value })()
                     const fn = new Function('return (' + source + '\n)');
                     const value = fn();
                     if (value === undefined) return { result: null, kind: 'undefined' };
@@ -1254,7 +1256,10 @@ internal class FridaBridge(private val context: Context) {
                         return { result: String(value), kind: t };
                     }
                 } catch (e) {
-                    return { error: 'eval-failed: ' + e };
+                    return {
+                        error: 'eval-failed: ' + e,
+                        hint: 'source 必须是单个 JS 表达式；多语句请用 IIFE：(function(){ ...; return value })()'
+                    };
                 }
             }
         };

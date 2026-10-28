@@ -63,7 +63,8 @@ object DynamicApiTool {
                     "frida_modules=[sessionId]；" +
                     "frida_write=[sessionId, address, hex]（hex 形如 \"1f2003d5\"，奇数位会被拒）；" +
                     "frida_replace=[sessionId, target, retValue]（替换体固定返回 int）；" +
-                    "frida_script=[sessionId, source]（source 是 JS 表达式或语句块）；" +
+                    "frida_script=[sessionId, source]（source 必须是单个 JS **表达式**，如 \"Process.enumerateModules().length\"；" +
+                    "多语句请写 IIFE：(function(){ ...; return value })()）；" +
                     "frida_call=[sessionId, symbol, argsArrayJson, returnType?]，参数形态：" +
                     "数字→int、\"0x..\"→pointer、其它字符串→allocUtf8String、对象可显式写 {string|pointer|int|uint64}。" +
                     "Positional args for the Frida write/replace/script ops follow the same order shown above."

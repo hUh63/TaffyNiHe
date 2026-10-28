@@ -1,3 +1,50 @@
+## 塔菲逆核 v1.5.15 —— 并发竞争、中文乱码与无上限读取
+
+这一版全是排查出来的既有缺陷，没有新功能。三类问题，都能在真机上把 App 弄崩或弄花。
+
+### 一、共享 `SimpleDateFormat` 的并发竞争（2 处）
+
+`SimpleDateFormat` 不是线程安全的，两个线程同时 `format` 会抛
+`ArrayIndexOutOfBoundsException` / 输错得离谱的时间戳。
+
+| 位置 | 症状 |
+|---|---|
+| `AppLog` | 全局日志设施，任何线程都可能同时写；`format` 调用还在锁**外**。并发时该条日志直接丢失（异常被上层吞掉），日志时间也可能错乱。 |
+| `HttpCaptureServer` | 普通请求路径加了 `synchronized(formatter)`，**WebSocket 101 那条路径漏了**——WS 记录会偶发丢失。 |
+
+两处都换成不可变、线程安全的 `java.time.format.DateTimeFormatter`，不再需要任何锁。
+
+### 二、子进程输出按字节切再解码 → 中文乱码（4 处）
+
+`proc.inputStream.read(ByteArray(4096))` 之后 `String(buf, 0, n, UTF_8)`：4 KiB 的字节边界
+一旦正好落在某个 3 字节汉字中间，两块各解出半个字符，输出的中文就变成一串 `�`。
+
+终端页、Python REPL、编辑器控制台、本地可执行日志（`NativeExec.drain`）都有这个问题。
+统一改成 `InputStreamReader`（内部 CharsetDecoder 会跨块保留未完成的字节），抽到
+`core/StreamText.kt` 的 `readChildText()` 一处实现。
+
+顺带修了终端/Python 页的另一处竞争：`sb.append()` 在锁内、`sb.toString()` 在锁外——UI 线程
+可能读到 StringBuilder 的半成品（轻则显示错乱，重则 `StringIndexOutOfBoundsException`）。现在快照在锁内取。
+
+### 三、无上限读取（4 处，都能 OOM）
+
+| 位置 | 原来的行为 | 现在 |
+|---|---|---|
+| 编辑器「打开文件」 | 系统选择器选到 1 GB 的 SO，`readBytes()` 一次读进内存 → 崩 | 先查大小，超过 8 MiB 明确提示「大文件请用分析页或终端」 |
+| 编辑器控制台执行命令 | `p.inputStream.readBytes()`，`cat /dev/zero`、递归 `find /` 直接 OOM；且读不完就一直挂着等进程退出 | 4 MiB 截断并提示；`waitFor` 超时后 `destroyForcibly()` |
+| 设置备份导入 | 误选一个大视频也整块读进内存 | 16 MiB 上限（设置 JSON 含密钥也只有几百 KB） |
+| `AtomicWrite` 兜底路径 | 三种 move 都失败时 `target.writeBytes(tmp.readBytes())` 整块读 | 64 KiB 流式复制 |
+
+### 四、Blutter 详情内联进逆向分析页签
+
+上一版把「逆向分析」融成 6 个页签后，Blutter 页签还留了一个「版本与覆盖详情」的跳转——
+点进去再按返回，会直接退回设置根页而不是回到融合页（`settingsDest` 是单值，没有栈）。
+
+现在 `SettingsBlutterPage` 支持 `embedded = true`：矩阵与覆盖统计直接内联在页签内，
+不再出现第二层顶栏，也不再有一次"跳走就回不来"的操作。
+
+---
+
 ## 塔菲逆核 v1.5.14 —— 设置子页融合：两层纯目录变成一页六页签
 
 这一版没有加功能，改的是「找东西的成本」。

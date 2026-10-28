@@ -14,7 +14,7 @@ internal enum class SettingsDest {
     Root, ServiceConfig, Appearance, KeepAlive, Limits, Export, Audit, Blutter, Tunnel, ApkBridge, AiDeep, Updates, Probe, ToolStats, TunnelStats, Credits, Disclaimer, About, BackupRestore,
     ApkSign, TempWorkspace, Workspace, Permissions, LogcatViewer, Edbg, Rizin, Capture,
     Linux, Terminal, Sandbox, Python, Git, Extensions, DexExplorer, ApkEdit, Snapshots, Workflow, Help, NativeExec,
-    Search, DevEnv, SelfCheck,
+    Search, DevEnv, SelfCheck, Reverse,
 }
 
 /** 页面间轻量桥：扩展页 → 编辑器（打开指定插件文件）。 */

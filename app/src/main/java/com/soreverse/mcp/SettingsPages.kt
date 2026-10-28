@@ -1,6 +1,8 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.Memory
+import org.json.JSONObject
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
@@ -258,23 +260,10 @@ internal fun SettingsRootPage(
 
         item("reverse") {
             SettingsSection(if (t.zh) "逆向分析" else "Reverse engineering") {
-                PreferenceSurface(first = true, last = false) {
-                    CategoryEntry(t, SettingsDest.Rizin, if (t.zh) "反汇编、函数与图分析引擎" else "Disassembly and graph engine", null, onDest)
-                }
-                PreferenceSurface(first = false, last = false) {
-                    CategoryEntry(t, SettingsDest.Edbg, if (t.zh) "ELF 调试器与断点" else "ELF debugger and breakpoints", null, onDest)
-                }
-                PreferenceSurface(first = false, last = false) {
-                    CategoryEntry(t, SettingsDest.Capture, if (t.zh) "HTTP(S) 代理与请求记录" else "HTTP(S) proxy and capture", null, onDest)
-                }
-                PreferenceSurface(first = false, last = false) {
-                    CategoryEntry(t, SettingsDest.Sandbox, if (t.zh) "Unidbg 模拟执行环境" else "Unidbg emulation", null, onDest)
-                }
-                PreferenceSurface(first = false, last = false) {
-                    CategoryEntry(t, SettingsDest.Workflow, if (t.zh) "把分析步骤串成可复用流程" else "Chain analysis steps", null, onDest)
-                }
-                PreferenceSurface(first = false, last = true) {
-                    CategoryEntry(t, SettingsDest.Blutter, if (t.zh) "Flutter / Dart AOT 快照分析" else "Flutter / Dart AOT analysis", null, onDest)
+                // 原来这里是 6 个箭头（Rizin / eDBG / 抓包 / 沙箱 / 工作流 / Blutter），点进去还要再点一次。
+                // 现在 6 项在同一个页面的 6 个 pane 里直接切，根页只留一个入口。
+                PreferenceSurface(first = true, last = true) {
+                    CategoryEntry(t, SettingsDest.Reverse, if (t.zh) "反汇编 · 调试 · 抓包 · 沙箱 · 编排 · Flutter" else "Disasm · debug · capture · sandbox · workflow · Flutter", if (t.zh) "6 项" else "6 items", onDest)
                 }
             }
         }
@@ -384,6 +373,110 @@ internal fun SettingsRootPage(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 逆向分析融合页 —— 根页「逆向分析」组原来 6 个箭头，每一项点进去才见到内容。
+ *
+ * 现在 Rizin / eDBG / 抓包 / 沙箱 / 工作流 / Blutter 在同一个页面的 6 个 pane 里切换，
+ * 反汇编、挂断点、看抓包、跑模拟、编排流程都是就地完成；Blutter 的版本矩阵属于低频细节，
+ * 给它一个详情入口而不是把两张表塞进页签。
+ */
+@Composable
+internal fun SettingsReversePage(
+    t: UiText,
+    onDest: (SettingsDest) -> Unit,
+    onBack: () -> Unit,
+) {
+    val zh = t.zh
+    var pane by rememberSaveable { mutableIntStateOf(0) }
+    val labels = listOf(
+        "Rizin",
+        "eDBG",
+        if (zh) "抓包" else "Capture",
+        if (zh) "沙箱" else "Sandbox",
+        if (zh) "工作流" else "Workflow",
+        "Blutter",
+    )
+    ToolPageScaffold(
+        title = if (zh) "逆向分析" else "Reverse engineering",
+        subtitle = if (zh) "反汇编 · 调试 · 抓包 · 沙箱 · 编排 · Flutter"
+        else "Disasm · debug · capture · sandbox · workflow · Flutter",
+        onBack = onBack,
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            ScrollableTabRow(
+                selectedTabIndex = pane,
+                edgePadding = 8.dp,
+                containerColor = MaterialTheme.colorScheme.background,
+                divider = {},
+            ) {
+                labels.forEachIndexed { i, label ->
+                    Tab(
+                        selected = pane == i,
+                        onClick = { pane = i },
+                        text = { Text(label, fontSize = 13.sp, maxLines = 1) },
+                    )
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            Box(Modifier.fillMaxSize()) {
+                when (pane) {
+                    0 -> RizinPage(t)
+                    1 -> EdbgPage(t)
+                    2 -> CapturePage(t)
+                    3 -> SettingsSandboxPage(t)
+                    4 -> SettingsWorkflowPage(t, onDest)
+                    else -> ReverseBlutterPane(t, onDest)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Blutter pane —— 版本矩阵与覆盖统计是低频细节（两屏表格），页签里只放「装了几套、能覆盖哪些」
+ * 和去详情页的入口；高频的「分析一个 APK」在分析页的 Flutter 视图里做。
+ */
+@Composable
+private fun ReverseBlutterPane(t: UiText, onDest: (SettingsDest) -> Unit) {
+    val zh = t.zh
+    val context = LocalContext.current.applicationContext
+    val manifest = remember {
+        runCatching {
+            JSONObject(context.assets.open("blutter/runners.json").bufferedReader().use { it.readText() })
+        }.getOrNull()
+    }
+    val runnerCount = manifest?.optJSONArray("runners")?.length() ?: 0
+    val aliasCount = manifest?.optJSONArray("snapshotAliases")?.length() ?: 0
+    val matrix = manifest?.optString("matrixVersion").orEmpty().ifBlank { "?" }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        GlassGroup(title = if (zh) "Flutter / Dart AOT" else "Flutter / Dart AOT") {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (zh) {
+                        "内置 $runnerCount 套 Runner（矩阵 $matrix）与 $aliasCount 条快照别名，用于解析 libapp.so 的 Dart AOT 快照。真要分析文件，走「分析」页的 Flutter 视图。"
+                    } else {
+                        "$runnerCount embedded runners (matrix $matrix) and $aliasCount snapshot aliases for Dart AOT snapshots. Run an analysis from the Flutter view on the Analyse tab."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        GlassGroup(title = if (zh) "Runner 矩阵" else "Runner matrix") {
+            NavRow(
+                if (zh) "版本与覆盖详情" else "Versions and coverage",
+                if (zh) "$runnerCount 套 Runner · $aliasCount 条别名 · 未收录原因" else "$runnerCount runners · $aliasCount aliases · unsupported reasons",
+                Icons.Default.Memory,
+                onClick = { onDest(SettingsDest.Blutter) },
             )
         }
     }

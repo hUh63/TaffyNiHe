@@ -109,6 +109,7 @@ internal fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) 
     SettingsDest.Help -> if (t.zh) "帮助" else "Help"
     SettingsDest.Search -> if (t.zh) "搜索设置" else "Search settings"
     SettingsDest.DevEnv -> if (t.zh) "开发环境" else "Dev environment"
+    SettingsDest.Reverse -> if (t.zh) "逆向分析" else "Reverse analysis"
     SettingsDest.SelfCheck -> if (t.zh) "自检" else "Self check"
 }
 
@@ -208,6 +209,7 @@ internal fun SettingsHub(
             SettingsDest.Search -> SettingsSearchPage(t, onDest, onBack)
             SettingsDest.SelfCheck -> SettingsSelfCheckPage(t, onBack)
             SettingsDest.DevEnv -> SettingsDevEnvPage(t, onDest, onOpenEditor, onBack)
+            SettingsDest.Reverse -> SettingsReversePage(t, onDest, onBack)
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings, onBack)
             SettingsDest.ToolStats -> SettingsScaffold(
                 title = if (t.zh) "运行统计" else "Runtime stats",
@@ -336,6 +338,7 @@ internal fun SettingsHub(
 internal fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
     SettingsDest.Search -> Icons.Default.Search
     SettingsDest.DevEnv -> Icons.Default.Build
+    SettingsDest.Reverse -> Icons.Default.BugReport
     SettingsDest.SelfCheck -> Icons.Default.Security
     SettingsDest.ServiceConfig -> Icons.Default.Settings
     SettingsDest.ApkBridge -> Icons.Default.Link

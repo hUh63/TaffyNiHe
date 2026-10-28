@@ -1,6 +1,7 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.material.icons.filled.Memory
 import org.json.JSONObject
 import androidx.compose.foundation.layout.Box
@@ -404,6 +405,8 @@ internal fun SettingsReversePage(
 ) {
     val zh = t.zh
     var pane by rememberSaveable { mutableIntStateOf(0) }
+    // 页签来回切时保留各 pane 的 rememberSaveable 状态（否则填了一半的路径、展开的列表都会重置）
+    val paneState = rememberSaveableStateHolder()
     val labels = listOf(
         "Rizin",
         "eDBG",
@@ -435,13 +438,15 @@ internal fun SettingsReversePage(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
             Box(Modifier.fillMaxSize()) {
-                when (pane) {
-                    0 -> RizinPage(t)
-                    1 -> EdbgPage(t)
-                    2 -> CapturePage(t)
-                    3 -> SettingsSandboxPage(t)
-                    4 -> SettingsWorkflowPage(t, onDest)
-                    else -> ReverseBlutterPane(t, onDest)
+                paneState.SaveableStateProvider(pane) {
+                    when (pane) {
+                        0 -> RizinPage(t)
+                        1 -> EdbgPage(t)
+                        2 -> CapturePage(t)
+                        3 -> SettingsSandboxPage(t)
+                        4 -> SettingsWorkflowPage(t, onDest)
+                        else -> ReverseBlutterPane(t, onDest)
+                    }
                 }
             }
         }
@@ -510,6 +515,8 @@ internal fun SettingsDevEnvPage(
 ) {
     val zh = t.zh
     var pane by rememberSaveable { mutableIntStateOf(0) }
+    // 页签来回切时保留各 pane 的 rememberSaveable 状态（否则填了一半的路径、展开的列表都会重置）
+    val paneState = rememberSaveableStateHolder()
     val labels = listOf(
         "Linux",
         if (zh) "终端" else "Terminal",
@@ -552,13 +559,15 @@ internal fun SettingsDevEnvPage(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
             Box(Modifier.fillMaxSize()) {
-                when (pane) {
-                    0 -> SettingsLinuxPage(t)
-                    1 -> SettingsTerminalPage(t)
-                    2 -> SettingsNativeExecPage(t)
-                    3 -> DevEnvEditorPane(t, onOpenEditor)
-                    4 -> SettingsGitPage(t)
-                    else -> SettingsExtensionsPage(t, onDest)
+                paneState.SaveableStateProvider(pane) {
+                    when (pane) {
+                        0 -> SettingsLinuxPage(t)
+                        1 -> SettingsTerminalPage(t)
+                        2 -> SettingsNativeExecPage(t)
+                        3 -> DevEnvEditorPane(t, onOpenEditor)
+                        4 -> SettingsGitPage(t)
+                        else -> SettingsExtensionsPage(t, onDest)
+                    }
                 }
             }
         }

@@ -2,8 +2,6 @@ package com.soreverse.mcp
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import androidx.compose.material.icons.filled.Memory
-import org.json.JSONObject
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
@@ -445,55 +443,10 @@ internal fun SettingsReversePage(
                         2 -> CapturePage(t)
                         3 -> SettingsSandboxPage(t)
                         4 -> SettingsWorkflowPage(t, onDest)
-                        else -> ReverseBlutterPane(t, onDest)
+                        else -> SettingsBlutterPage(t, onBack = {}, embedded = true)
                     }
                 }
             }
-        }
-    }
-}
-
-/**
- * Blutter pane —— 版本矩阵与覆盖统计是低频细节（两屏表格），页签里只放「装了几套、能覆盖哪些」
- * 和去详情页的入口；高频的「分析一个 APK」在分析页的 Flutter 视图里做。
- */
-@Composable
-private fun ReverseBlutterPane(t: UiText, onDest: (SettingsDest) -> Unit) {
-    val zh = t.zh
-    val context = LocalContext.current.applicationContext
-    val manifest = remember {
-        runCatching {
-            JSONObject(context.assets.open("blutter/runners.json").bufferedReader().use { it.readText() })
-        }.getOrNull()
-    }
-    val runnerCount = manifest?.optJSONArray("runners")?.length() ?: 0
-    val aliasCount = manifest?.optJSONArray("snapshotAliases")?.length() ?: 0
-    val matrix = manifest?.optString("matrixVersion").orEmpty().ifBlank { "?" }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        GlassGroup(title = if (zh) "Flutter / Dart AOT" else "Flutter / Dart AOT") {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    if (zh) {
-                        "内置 $runnerCount 套 Runner（矩阵 $matrix）与 $aliasCount 条快照别名，用于解析 libapp.so 的 Dart AOT 快照。真要分析文件，走「分析」页的 Flutter 视图。"
-                    } else {
-                        "$runnerCount embedded runners (matrix $matrix) and $aliasCount snapshot aliases for Dart AOT snapshots. Run an analysis from the Flutter view on the Analyse tab."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        GlassGroup(title = if (zh) "Runner 矩阵" else "Runner matrix") {
-            NavRow(
-                if (zh) "版本与覆盖详情" else "Versions and coverage",
-                if (zh) "$runnerCount 套 Runner · $aliasCount 条别名 · 未收录原因" else "$runnerCount runners · $aliasCount aliases · unsupported reasons",
-                Icons.Default.Memory,
-                onClick = { onDest(SettingsDest.Blutter) },
-            )
         }
     }
 }

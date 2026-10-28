@@ -1,6 +1,9 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,7 +29,12 @@ import org.json.JSONObject
  * 4 套 Runner（Dart 3.11.5 / 3.12.2 / 3.13.0 / 3.13.1）脱节了。
  */
 @Composable
-internal fun SettingsBlutterPage(t: UiText, onBack: () -> Unit) {
+internal fun SettingsBlutterPage(
+    t: UiText,
+    onBack: () -> Unit,
+    /** 融合页内联模式：不画自己的折叠大标题，由外层页签提供容器。 */
+    embedded: Boolean = false,
+) {
     val zh = t.zh
     val context = LocalContext.current.applicationContext
     val manifest = remember {
@@ -50,15 +58,14 @@ internal fun SettingsBlutterPage(t: UiText, onBack: () -> Unit) {
             .take(4)
     }
 
-    SettingsScaffold(
-        title = if (t.zh) "Blutter" else "Blutter",
-        onBack = onBack,
-    ) {
-        item("content") {
-            Column(
-                Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+    val body: @Composable () -> Unit = {
+        Column(
+            Modifier.fillMaxWidth().padding(
+                horizontal = if (embedded) 12.dp else 0.dp,
+                vertical = if (embedded) 10.dp else 0.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         GlassGroup(title = if (zh) "内置 Runner" else "Embedded runners") {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (manifest == null) {
@@ -139,8 +146,17 @@ internal fun SettingsBlutterPage(t: UiText, onBack: () -> Unit) {
                 )
             }
         }
-    
-            }
+        }
+    }
+    if (embedded) {
+        // 内联进融合页的页签：自己撑满并滚动，不出现第二层顶栏。
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { body() }
+    } else {
+        SettingsScaffold(
+            title = if (t.zh) "Blutter" else "Blutter",
+            onBack = onBack,
+        ) {
+            item("content") { body() }
         }
     }
 }

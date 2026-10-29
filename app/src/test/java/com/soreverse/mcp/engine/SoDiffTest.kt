@@ -18,12 +18,23 @@ class SoDiffTest {
     @Test
     fun identicalInputsAreIdentical() {
         val r = SoDiff.diff(base, base)
-        val s = r.getJSONObject("summary")
-        assertTrue(s.getBoolean("identical"))
-        assertTrue(s.getBoolean("abiMatch"))
-        assertEquals("identical", s.getString("verdict"))
-        assertEquals(0L, s.getLong("sizeDelta"))
-        assertEquals(0, s.getJSONObject("sections").getJSONArray("changed").length())
+        val topKeys = r.keys().asSequence().toList().sorted().joinToString(",")
+        val s = r.optJSONObject("summary")
+        assertNotNull("summary is not an object; top keys=[$topKeys]", s)
+        val sKeys = s!!.keys().asSequence().toList().sorted().joinToString(",")
+        assertEquals("summary keys=[$sKeys]", true, s.optBoolean("identical"))
+        assertEquals("summary keys=[$sKeys]", true, s.optBoolean("abiMatch"))
+        assertEquals("summary keys=[$sKeys]", "identical", s.optString("verdict"))
+        assertEquals("summary keys=[$sKeys]", 0L, s.optLong("sizeDelta"))
+        val sections = r.optJSONObject("sections")
+        assertNotNull("sections is not an object; top keys=[$topKeys]", sections)
+        val changed = sections!!.optJSONArray("changed")
+        assertNotNull(
+            "sections.changed is not an array; sections keys=[" +
+                sections.keys().asSequence().toList().sorted().joinToString(",") + "]",
+            changed,
+        )
+        assertEquals(0, changed!!.length())
     }
 
     @Test

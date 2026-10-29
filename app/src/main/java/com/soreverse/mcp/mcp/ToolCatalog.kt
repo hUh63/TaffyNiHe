@@ -1232,6 +1232,8 @@ object ToolCatalog {
         *PluginTool.ALL.toTypedArray(),
         // 塔菲逆核: SO 结构对比(节区/导出/导入/依赖/版本差分)
         *SoDiffTools.ALL.toTypedArray(),
+        // 塔菲逆核: DEX 索引查询(13 种类型一次遍历，纯 dexlib2)
+        *DexIndexTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

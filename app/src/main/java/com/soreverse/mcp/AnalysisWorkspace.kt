@@ -468,6 +468,8 @@ internal fun AnalysisWorkspace(
 
                         "sodiff" -> SoDiffView(zh = zh, context = context)
 
+                        "dexindex" -> DexIndexView(zh = zh, context = context)
+
                         "insnexp" -> InsnExplainView(zh = zh, context = context)
 
                         "asm2c" -> AsmToPseudoCView(zh = zh, context = context)
@@ -2993,6 +2995,8 @@ private val analysisOverflowViews = listOf(
     "hardening", "unpack", "export", "flutter", "analyze", "edit", "calc", "iapp", "ollvm",
     "hex", "results", "tools", "funcdetail", "funcinfo", "comments", "funcsig",
     "asm", "insnexp", "regs", "asm2c", "asm2flow", "base", "demangle", "strdec", "xor", "bytediff", "strcipher", "obfscan", "agentrun",
+    // 上一批的 sodiff 漏登记在这里 → 视图存在但菜单点不到，本轮补上
+    "sodiff", "dexindex",
 )
 
 /** 菜单分组标题（不可点）。 */

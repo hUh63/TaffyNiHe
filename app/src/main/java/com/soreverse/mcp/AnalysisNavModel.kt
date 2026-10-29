@@ -66,6 +66,7 @@ internal val analysisNavItems = listOf(
     AnalysisNavItem("strdec", "解码", "Dec", Icons.Filled.DataObject),
     AnalysisNavItem("bytediff", "差分", "Diff", Icons.Filled.CompareArrows),
     AnalysisNavItem("sodiff", "SO对比", "SODiff", Icons.Filled.Inventory2),
+    AnalysisNavItem("dexindex", "DEX查询", "DEX", Icons.Filled.Search),
     AnalysisNavItem("insnexp", "指令", "Insn", Icons.Filled.Description),
     AnalysisNavItem("asm2c", "译C", "→C", Icons.Filled.Transform),
     AnalysisNavItem("asm2flow", "框图", "Flow", Icons.Filled.Inventory2),

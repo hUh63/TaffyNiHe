@@ -69,6 +69,8 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
     var dexCount by remember { mutableIntStateOf(0) }
     var queryError by remember { mutableStateOf<String?>(null) }
     var searched by remember { mutableStateOf(false) }
+    // 上一次查询的指纹：改完类型/关键字再点「继续加载」时，不能把两次查询的结果拼在一起。
+    var lastKey by remember { mutableStateOf("") }
 
     val typeLabel = DexIndex.TYPE_LABELS_ZH[type] ?: type
     val needKeyword = type in DexIndex.KEYWORD_REQUIRED
@@ -79,7 +81,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
         scope.safeLaunch {
             val out = withContext(Dispatchers.IO) {
                 runCatching {
-                    val dst = File(context.cacheDir, "dexindex_src.bin")
+                    val dst = File(context.cacheDir, "dexindex_src_${System.nanoTime()}.bin")
                     val limit = 512L * 1024 * 1024
                     var total = 0L
                     context.contentResolver.openInputStream(uri)?.use { input ->
@@ -103,7 +105,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                 srcFile = f
                 srcName = name
                 srcSize = size
-                hits = emptyList(); matched = 0; searched = false; queryError = null
+                hits = emptyList(); matched = 0; searched = false; queryError = null; lastKey = ""
             } ?: run { fileError = out.exceptionOrNull()?.message ?: (if (zh) "读取失败" else "Read failed") }
         }
     }
@@ -124,9 +126,12 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
 
     fun runSearch(append: Boolean) {
         val f = srcFile ?: return
+        val key = "$type$keyword$exclude$regex$caseSensitive"
+        val realAppend = append && key == lastKey
+        lastKey = key
         busy = true
         queryError = null
-        val offset = if (append) hits.size else 0
+        val offset = if (realAppend) hits.size else 0
         scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
                 DexIndex.search(
@@ -145,9 +150,9 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
             searched = true
             if (r.error != null) {
                 queryError = r.error
-                if (!append) { hits = emptyList(); matched = 0 }
+                if (!realAppend) { hits = emptyList(); matched = 0 }
             } else {
-                hits = if (append) hits + r.hits else r.hits
+                hits = if (realAppend) hits + r.hits else r.hits
                 matched = r.matched
                 scannedClasses = r.scannedClasses
                 scannedMethods = r.scannedMethods
@@ -191,8 +196,8 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                 if (srcFile != null) {
                     IconButton(onClick = {
                         srcFile?.delete(); srcFile = null; srcName = ""; srcSize = 0
-                        hits = emptyList(); matched = 0; searched = false
-                    }, modifier = Modifier.size(32.dp)) {
+                        hits = emptyList(); matched = 0; searched = false; lastKey = ""
+                    }, enabled = !busy && !loading, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Filled.Clear, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant)
                     }
                 }

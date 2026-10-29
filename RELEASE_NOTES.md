@@ -1,3 +1,55 @@
+## 塔菲逆核 v1.5.17 —— SO 结构对比（MCP 工具 + 分析页视图）
+
+把「SO 对比」那类小工具的能力整合进来，但走塔菲自己的解析器，不是再写一份。
+
+### 一、`taffy_so_diff`：结构级差分
+
+| 维度 | 内容 |
+|---|---|
+| 概览 | 文件大小、`.text` 大小、导出/导入数量、是否逐字节相同、ABI 是否一致 |
+| 节区 | 新增 / 删除 / 变化（size、type、flags 三项，变化项按 \|Δ\| 排序） |
+| 导出符号 | 新增 / 删除 / 变化（size、type、bind）+ 相同计数 |
+| 导入符号 | 新增 / 删除 + 相同计数 |
+| 依赖库 | DT_NEEDED 新增 / 删除 |
+| 符号版本 | `.gnu.version*` 里的版本名新增 / 删除 |
+
+并给一个判定，避免「看起来一样」被误读：
+
+| verdict | 含义 |
+|---|---|
+| `identical` | 逐字节相同（SHA-256 相等） |
+| `same-structure` | 结构完全一致，只有内容字节变了 |
+| `code-only` | 只有 `.text` 变化，导出接口没动 |
+| `structure-changed` | 节区/符号/依赖发生了变化 |
+| `abi-mismatch` | bits / machine / endianness 不同，两个文件本来就不该直接比 |
+
+参数：`pathA`、`pathB`（工作区路径或 `content://`）、`limit`（每类最多返回条数，默认 200）。
+单文件读取上限 192 MiB——超过就报错而不是悄悄截断（截断的 ELF 解析结果全是垃圾）。
+**只比结构不比字节**，字节级用 `taffy_read_hexdump`。
+
+### 二、分析页「SO 结构对比」视图（view key `sodiff`）
+
+- 两个文件卡：从系统选择器选 ELF／SO，显示文件名与大小，可「重选 / 交换 A/B / 清空」
+- 摘要条：判定徽章 + `大小 / .text / 导出 / 导入` 四个增量（±N）
+- 四个页签：节区 / 导出 / 导入 / 依赖，每行按 `+ 新增 / − 删除 / ~ 变化` 三色标注，右侧给 Δ 大小
+- 顶部搜索框按名称过滤
+- 没有「原始 JSON / 文本」兜底出口——每个页签都是为它自己的数据类型排的版
+
+### 三、路径策略补 `pathA` / `pathB`
+
+`WorkspacePolicy.PATH_KEYS` 是工具参数的白名单：键名不在里面，参数就**整体不走工作区校验**。
+「两输入」类工具的第二个路径（`pathA`/`pathB`）此前没有登记位置，这类新工具一加就会绕过策略。
+现在补上了，注释也写清楚为什么必须加。
+
+### 四、架构：导航模型抽出 `AnalysisNavModel.kt`
+
+`AnalysisWorkspace.kt` 已经 13.8k 行，`tools/arch-policy.py` 对存量文件的规则是「行数增长即 ERROR」。
+这次把 `AnalysisNavItem` + `analysisNavItems`（58 行）抽到独立文件并改成 `internal`，
+新增的 `sodiff` 条目直接加在新文件里——AnalysisWorkspace 净减 58 行，新增 1 行 when 分支。
+以后再加分析页视图，改 `AnalysisNavModel.kt`，不要往那个 1.3 万行的文件里塞。
+
+---
+
 ## 塔菲逆核 v1.5.16 —— 签名摘要对账实测，外加两处并发小修
 
 这一版主体是**验证**：把挂了几轮的「`apk_sig_verify` 的 content digest 与 apksig 是否一致」

@@ -1,5 +1,8 @@
 package com.soreverse.mcp
 
+import com.soreverse.mcp.engine.DBusMessage
+import com.soreverse.mcp.engine.FridaBridge
+import com.soreverse.mcp.engine.Gvariant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

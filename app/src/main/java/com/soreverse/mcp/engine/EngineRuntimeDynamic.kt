@@ -560,9 +560,17 @@ private fun EngineRuntime.dynamicSessionIds(): JSONArray = fridaSessionsView().o
 
 private fun EngineRuntime.fridaTargetFromArgs(raw: Any?): FridaTarget {
     val json = raw as? JSONObject ?: JSONObject()
+    // 端口默认值不要写死 27042：taffy_frida_control action=port 允许把 frida-server 改到别的端口，
+    // 这里跟着 FridaManager 的实际配置走 —— 否则用户改完端口，动态分析这边永远连的是旧端口，
+    // 表现成「server 明明在跑却报 frida 不可用」。
+    val defaultPort = runCatching {
+        com.soreverse.mcp.core.WorkspacePolicy.appContext()?.let {
+            com.soreverse.mcp.core.FridaManager.currentPort(it)
+        }
+    }.getOrNull() ?: 27042
     return FridaTarget(
         host = json.str("host", "127.0.0.1"),
-        port = json.int("port", 27042).coerceIn(1, 65535),
+        port = json.int("port", defaultPort).coerceIn(1, 65535),
         connectTimeoutMillis = json.int("connectTimeoutMillis", 5_000).toLong(),
         readTimeoutMillis = json.int("readTimeoutMillis", 15_000).toLong()
     )

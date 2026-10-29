@@ -62,7 +62,9 @@ object DynamicApiTool {
                     "for frida_replace the target (0x address or export name), either here or in args[1]."
                 "args" str "位置参数（JSON 数组字符串）。analyze 时数组首元素为参数对象：" +
                     "{ backend, targetFunction, args, trace, dumpSize, dumpAddress, moduleName, fridaMode, fridaTarget/host/port }。" +
-                    "frida_open=[{ host, port, moduleName, mode: attach|spawn, targetIdentifier, script?, retaddr? }]；" +
+                    "frida_open=[{ host, port, moduleName, mode: attach|spawn, targetIdentifier, script?, retaddr?, argv?, envp?, cwd?, stdio?, fridaInterface? }]；" +
+                    "spawn 的 argv/envp 是字符串数组、cwd 是路径、stdio 是 0(inherit)/1(pipe)；" +
+                    "fridaInterface 用于指定 D-Bus 接口版本后缀（\"17\"/\"16\"/\"\"=无后缀），不传则自动协商；" +
                     "mode=spawn 时 targetIdentifier 必须填**要启动的包名或可执行路径**（attach 模式则是 pid/进程名）；" +
                     "spawn 走 Device.Spawn→Attach→注入→Resume，成功时返回 pid/spawned/resumed；" +
                     "Frida 写/替换/脚本类 op 的位置约定：" +

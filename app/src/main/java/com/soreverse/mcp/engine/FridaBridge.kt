@@ -513,7 +513,14 @@ internal class FridaSession(val id: String, val target: FridaTarget, val connect
 
     // Host/agent-session/script handles negotiated against the daemon.
     internal var agentPath: String = "/re/frida/HostSession"
-    internal var agentIfcVersion: Int = FridaBridge.INTERFACE_VERSION
+    /**
+     * HostSession / AgentSession 接口名的版本后缀。
+     *
+     * frida 把它作为接口名的一部分（`re.frida.HostSession17`），而且**接口版本号与
+     * frida 主版本不是一回事**；更老的 frida 干脆没有后缀（`re.frida.HostSession`）。
+     * 所以这里存字符串而不是 Int —— 空串表示"无后缀"那种老命名。
+     */
+    internal var ifcSuffix: String = FridaBridge.INTERFACE_VERSION.toString()
     internal var scriptId: Int = -1
 
     /**
@@ -560,7 +567,7 @@ internal class FridaBridge(private val context: Context) {
                         FridaTransport.callMessage(
                             session.nextSerial.getAndIncrement(),
                             session.agentPath,
-                            "re.frida.AgentSession${session.agentIfcVersion}",
+                            "re.frida.AgentSession${session.ifcSuffix}",
                             "DestroyScript",
                             "(u)",
                             body
@@ -573,7 +580,7 @@ internal class FridaBridge(private val context: Context) {
                         FridaTransport.callMessage(
                             session.nextSerial.getAndIncrement(),
                             session.agentPath,
-                            "re.frida.AgentSession${session.agentIfcVersion}",
+                            "re.frida.AgentSession${session.ifcSuffix}",
                             "Close",
                             "()",
                             ByteArray(0)
@@ -649,11 +656,18 @@ internal class FridaBridge(private val context: Context) {
      * Establish a session: upgrade, ping the host session, resolve the target
      * pid, attach, deploy and load the agent script, then register the session.
      */
-    /** 已协商成功的 HostSession 接口版本（0 = 未协商）。 */
+    /** 已协商成功的接口版本后缀（null = 未协商）。 */
     @Volatile
-    private var negotiatedIfcVersion: Int = 0
+    private var negotiatedIfcSuffix: String? = null
 
-    fun createSession(target: FridaTarget, mode: String, targetIdentifier: String, script: String): FridaSession {
+    fun createSession(
+        target: FridaTarget,
+        mode: String,
+        targetIdentifier: String,
+        script: String,
+        spawnOptions: List<Pair<String, SpawnOpt>> = emptyList(),
+        interfaceSuffix: String? = null,
+    ): FridaSession {
         val connection = connect(target)
         var session: FridaSession? = null
         var spawnedPid = -1
@@ -672,7 +686,7 @@ internal class FridaBridge(private val context: Context) {
             sendPing(s)
 
             // 2) 确认 HostSession 接口版本（16.x / 17.x 的接口名不同，硬编码会直接失联）
-            negotiateInterfaceVersion(s)
+            negotiateInterfaceVersion(s, interfaceSuffix)
 
             if (isSpawnMode(mode)) {
                 // spawn 模式：先起进程并让它停在入口，再 attach + 注入脚本，最后 resume。
@@ -684,7 +698,7 @@ internal class FridaBridge(private val context: Context) {
                         "spawn mode needs targetIdentifier = package name or executable path"
                     )
                 }
-                spawnedPid = spawnRequest(s, program)
+                spawnedPid = spawnRequest(s, program, spawnOptions)
                 s.processId = spawnedPid
                 s.spawnedPid = spawnedPid
                 attachAgent(s)
@@ -730,23 +744,30 @@ internal class FridaBridge(private val context: Context) {
      * 撞 UnknownInterface，表现为"Frida 不可用"，而实际只是版本名对不上。
      * 这里按 17 → 16 依次用 EnumerateProcesses 做一次真实握手，第一个通的就用它。
      */
-    private fun negotiateInterfaceVersion(session: FridaSession) {
-        val cached = negotiatedIfcVersion
-        if (cached > 0) {
-            // 同一台设备的 frida-server 版本不会中途变，缓存命中就省掉这次枚举 RTT
-            session.agentIfcVersion = cached
+    private fun negotiateInterfaceVersion(session: FridaSession, explicit: String?) {
+        // 显式指定优先：遇到还没被覆盖的 frida 版本时，用户可以直接告诉我们用哪个后缀
+        if (explicit != null) {
+            session.ifcSuffix = explicit
+            enumerateProcesses(session)
+            negotiatedIfcSuffix = explicit
             return
         }
-        val candidates = intArrayOf(FridaBridge.INTERFACE_VERSION, 16)
+        val cached = negotiatedIfcSuffix
+        if (cached != null) {
+            // 同一台设备的 frida-server 版本不会中途变，缓存命中就省掉这次枚举 RTT
+            session.ifcSuffix = cached
+            return
+        }
+        // 现行版本 → 上一代 → 没有版本后缀的老命名
+        val candidates = listOf(FridaBridge.INTERFACE_VERSION.toString(), "16", "")
             .distinct()
-            .filter { it > 0 }
         var last: Throwable? = null
-        for (v in candidates) {
-            session.agentIfcVersion = v
+        for (suffix in candidates) {
+            session.ifcSuffix = suffix
             try {
                 enumerateProcesses(session)
-                negotiatedIfcVersion = v
-                AppLog.i("Frida interface negotiated: HostSession$v")
+                negotiatedIfcSuffix = suffix
+                AppLog.i("Frida interface negotiated: HostSession$suffix")
                 return
             } catch (e: Throwable) {
                 last = e
@@ -754,8 +775,9 @@ internal class FridaBridge(private val context: Context) {
         }
         throw FridaConnectionException(
             "frida-server 接口不兼容：已尝试 " +
-                candidates.joinToString("/") { "HostSession$it" } +
-                "，最后一次错误：${last?.message ?: "unknown"}",
+                candidates.joinToString("/") { "re.frida.HostSession$it" } +
+                "。可用 fridaInterface 参数显式指定后缀（例如 \"17\"，空串表示无后缀）。" +
+                "最后一次错误：${last?.message ?: "unknown"}",
             last
         )
     }
@@ -765,7 +787,7 @@ internal class FridaBridge(private val context: Context) {
         val reply = callForReply(
             session,
             "/re/frida/HostSession",
-            "re.frida.HostSession${session.agentIfcVersion}",
+            "re.frida.HostSession${session.ifcSuffix}",
             "Attach",
             "ua{sv}",
             attachBody(session.processId)
@@ -788,12 +810,16 @@ internal class FridaBridge(private val context: Context) {
      * （argv 只有 program、stdio=inherit、cwd/env 继承 daemon），返回 `u` 即 pid。
      * 这也是 Android 上最常见的形式：program 直接给包名，交给系统的 ActivityManager 起进程。
      */
-    private fun spawnRequest(session: FridaSession, program: String): Int {
-        val body = spawnBody(program)
+    private fun spawnRequest(
+        session: FridaSession,
+        program: String,
+        options: List<Pair<String, SpawnOpt>>,
+    ): Int {
+        val body = spawnBody(program, options)
         val reply = callForReply(
             session,
             "/re/frida/HostSession",
-            "re.frida.HostSession${session.agentIfcVersion}",
+            "re.frida.HostSession${session.ifcSuffix}",
             "Spawn",
             "sa{sv}",
             body
@@ -813,7 +839,7 @@ internal class FridaBridge(private val context: Context) {
         callForReply(
             session,
             "/re/frida/HostSession",
-            "re.frida.HostSession${session.agentIfcVersion}",
+            "re.frida.HostSession${session.ifcSuffix}",
             "Resume",
             "u",
             body
@@ -826,7 +852,7 @@ internal class FridaBridge(private val context: Context) {
         callForReply(
             session,
             "/re/frida/HostSession",
-            "re.frida.HostSession${session.agentIfcVersion}",
+            "re.frida.HostSession${session.ifcSuffix}",
             "Kill",
             "u",
             body
@@ -890,7 +916,7 @@ internal class FridaBridge(private val context: Context) {
             FridaTransport.callMessage(
                 serial,
                 "/re/frida/HostSession",
-                "re.frida.HostSession${session.agentIfcVersion}",
+                "re.frida.HostSession${session.ifcSuffix}",
                 "Ping",
                 "u",
                 body,
@@ -904,7 +930,7 @@ internal class FridaBridge(private val context: Context) {
         val reply = callForReply(
             session,
             "/re/frida/HostSession",
-            "re.frida.HostSession${session.agentIfcVersion}",
+            "re.frida.HostSession${session.ifcSuffix}",
             "EnumerateProcesses",
             "a{sv}",
             Gvariant.W().apply { u32(0) }.b.toByteArray()
@@ -969,7 +995,7 @@ internal class FridaBridge(private val context: Context) {
         val reply = callForReply(
             session,
             session.agentPath,
-            "re.frida.AgentSession${session.agentIfcVersion}",
+            "re.frida.AgentSession${session.ifcSuffix}",
             "CreateScript",
             "sa{sv}",
             body
@@ -984,7 +1010,7 @@ internal class FridaBridge(private val context: Context) {
         callForReply(
             session,
             session.agentPath,
-            "re.frida.AgentSession${session.agentIfcVersion}",
+            "re.frida.AgentSession${session.ifcSuffix}",
             "LoadScript",
             "(u)",
             body
@@ -1003,7 +1029,7 @@ internal class FridaBridge(private val context: Context) {
             FridaTransport.callMessage(
                 serial,
                 session.agentPath,
-                "re.frida.AgentSession${session.agentIfcVersion}",
+                "re.frida.AgentSession${session.ifcSuffix}",
                 "PostMessages",
                 "a(i(u)sbay)u",
                 body,
@@ -1480,14 +1506,74 @@ internal class FridaBridge(private val context: Context) {
 // 但这三件事本身只是字节运算和字符串判定。
 // ─────────────────────────────────────────────────────────────────────────
 
+/** HostSpawnOptions 里一个值：只支持 frida 实际用到的三种 GVariant 类型。 */
+internal sealed class SpawnOpt {
+    /** `s`：cwd 等 */
+    internal data class Str(val value: String) : SpawnOpt()
+
+    /** `u`：stdio 等 */
+    internal data class U32(val value: Int) : SpawnOpt()
+
+    /** `as`：argv / envp */
+    internal data class StrArray(val value: List<String>) : SpawnOpt()
+}
+
 /**
- * Spawn 的 body 编码：`s` program + 空 `a{sv}` options。
- * 这是整条 spawn 链路上唯一没有真机兜底的环节，所以钉死字节序列做单测。
+ * Spawn 的 body 编码：`(s program, a{sv} options)`。
+ *
+ * 这是整条 spawn 链路上唯一没有真机兜底的环节，所以每个字节都以 GLib 的
+ * `g_dbus_message_to_blob()` 产物为 golden 钉死在单测里。
+ *
+ * GVariant 的三个坑（都是踩出来的）：
+ *  1. `a{sv}` 是变长成员，前面要写 **framing offset**（= 数组数据的字节数），
+ *     framing 本身 4 对齐，但**数组数据起点要 8 对齐**（`{sv}` 的元素对齐是 8）。
+ *     少做这一步，短名字（如 "x"）会生成 12 字节而正确值是 16 字节 → frida 解不出 body。
+ *  2. `variant`(`v`) 的值前面也有一层 framing：`s` 报的是**不含 NUL 的长度**，
+ *     `as` 报的是**含各元素 NUL 的总字节数**，定长类型（`u`）恒为 0。
+ *  3. variant 的类型签名是 `g` 类型（单字节长度 + 内容 + NUL），不是 u32。
  */
-internal fun spawnBody(program: String): ByteArray = Gvariant.W().apply {
-    str(program)   // s program
-    u32(0)         // a{sv} options（空 = 默认）
-}.b.toByteArray()
+internal fun spawnBody(program: String, options: List<Pair<String, SpawnOpt>> = emptyList()): ByteArray {
+    val arr = Gvariant.W()
+    for ((key, value) in options) {
+        arr.pad(8)                 // dict entry 对齐 8
+        arr.str(key)               // key 是 s
+        when (value) {
+            is SpawnOpt.Str -> {
+                arr.g("s")
+                arr.pad(4)
+                val raw = value.value.toByteArray(Charsets.UTF_8)
+                arr.u32(raw.size)      // 字符串的 framing = 长度（不含 NUL）
+                arr.b.write(raw)
+                arr.raw(0)             // NUL terminator
+            }
+            is SpawnOpt.U32 -> {
+                // 定长类型**不写** framing 槽：值直接跟在签名之后（对齐 4）。
+                // 多写 4 个 0 会让后面的 dict entry 整体错位，frida 侧解出来就是乱的。
+                arr.g("u")
+                arr.pad(4)
+                arr.i32(value.value)
+            }
+            is SpawnOpt.StrArray -> {
+                arr.g("as")
+                arr.pad(4)
+                val elems = Gvariant.W()
+                for (item in value.value) elems.str(item)
+                val eb = elems.b.toByteArray()
+                arr.u32(eb.size)       // as 的 framing = 元素区总字节数（含各元素 NUL）
+                arr.b.write(eb)
+            }
+        }
+    }
+    val arrBytes = arr.b.toByteArray()
+
+    val w = Gvariant.W()
+    w.str(program)                 // s program
+    w.pad(4)
+    w.u32(arrBytes.size)           // a{sv} framing
+    w.pad(8)                       // 数组数据起点对齐 8（空数组也要，否则总长会短 4 字节）
+    w.b.write(arrBytes)
+    return w.b.toByteArray()
+}
 
 /** spawn / spawn-suspended 都走挂起启动路径。 */
 internal fun isSpawnMode(mode: String): Boolean {

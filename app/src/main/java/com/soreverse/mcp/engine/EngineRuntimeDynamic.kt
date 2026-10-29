@@ -197,7 +197,16 @@ internal fun EngineRuntime.dynamicDispatch(
             val mode = params.str("mode", "attach")
             val targetIdentifier = params.str("targetIdentifier", "com.example.target")
             val script = params.str("script").ifBlank { frida.defaultAgentHtml(moduleName, params.bool("retaddr", false)) }
-            val session = frida.createSession(target, mode, targetIdentifier, script)
+            // spawn 的 HostSpawnOptions：argv/envp/cwd/stdio 是 frida 实际会用的字段，
+            // 其余键不认（传了也没用），所以只挑这四个。
+            val spawnOptions = buildSpawnOptions(params)
+            // fridaInterface：显式指定 D-Bus 接口版本后缀（"" = 老版本的无后缀命名）。
+            // 没传就让 FridaBridge 自己协商（17 → 16 → 无后缀）。
+            val ifaceSuffix: String? =
+                if (params.has("fridaInterface")) params.optString("fridaInterface") else null
+            val session = frida.createSession(
+                target, mode, targetIdentifier, script, spawnOptions, ifaceSuffix,
+            )
             val spawned = session.spawnedPid > 0
             val payload = JSONObject()
                 .put("fridaSessionId", session.id)
@@ -209,6 +218,7 @@ internal fun EngineRuntime.dynamicDispatch(
                 .put("resumed", session.resumed)
                 .put("agentPath", session.agentPath)
                 .put("scriptLoaded", session.scriptLoaded)
+                .put("spawnOptions", JSONArray(spawnOptions.map { it.first }))
             // spawn 的语义要说清楚：脚本是在进程入口、Application 初始化之前就位后才放行的
             if (spawned) {
                 payload.put(
@@ -579,3 +589,23 @@ private fun EngineRuntime.fridaTargetFromArgs(raw: Any?): FridaTarget {
 private fun JSONObject.int(name: String, default: Int): Int = if (has(name)) optInt(name, default) else default
 
 private fun JSONObject.bool(name: String, default: Boolean): Boolean = if (has(name)) optBoolean(name, default) else default
+
+/** 从 frida_open 的参数对象里挑出 HostSpawnOptions 支持的四个字段（保持声明顺序）。 */
+private fun buildSpawnOptions(params: JSONObject): List<Pair<String, SpawnOpt>> {
+    val out = ArrayList<Pair<String, SpawnOpt>>()
+    params.optJSONArray("argv")?.let { out += "argv" to SpawnOpt.StrArray(it.toStringList()) }
+    params.optJSONArray("envp")?.let { out += "envp" to SpawnOpt.StrArray(it.toStringList()) }
+    val cwd = params.str("cwd")
+    if (cwd.isNotBlank()) out += "cwd" to SpawnOpt.Str(cwd)
+    if (params.has("stdio")) out += "stdio" to SpawnOpt.U32(params.optInt("stdio", 0))
+    return out
+}
+
+private fun JSONArray.toStringList(): List<String> {
+    val out = ArrayList<String>(length())
+    for (i in 0 until length()) {
+        val v = optString(i)
+        if (v.isNotEmpty()) out.add(v)
+    }
+    return out
+}

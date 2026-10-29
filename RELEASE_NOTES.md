@@ -1,3 +1,102 @@
+## 塔菲逆核 v1.5.20 —— Frida spawn 模式（挂起启动 → 注入 → 放行）
+
+上一版明确留白的那件事，这次做完了。
+
+---
+
+### 一、spawn：能 hook 到 Application 初始化之前
+
+attach 模式的根本限制是**只能附加到已经在跑的进程**——等你 attach 上去，`Application.onCreate`、
+壳的 `attachBaseContext`、完整性校验、反调试探测全都跑完了。spawn 模式解决的就是这个：
+
+```
+Device.Spawn(program)  → 进程在入口挂起（还没执行任何 Java 代码）
+  → HostSession.Attach(pid)
+  → CreateScript + LoadScript（agent 就位）
+  → Device.Resume(pid)  → 进程才真正开始跑
+```
+
+顺序是硬约束：**先 resume 就白搭了**，脚本必须在放行之前就位。
+
+`taffy_dynamic_api` 的用法：
+
+```
+op=frida_open  args=[{ "mode": "spawn", "targetIdentifier": "com.target.app" }]
+```
+
+`mode=spawn` 时 `targetIdentifier` 的含义变了——不是 pid/进程名，而是**要启动的包名或可执行路径**。
+返回里会带 `pid / spawned / resumed / agentPath / scriptLoaded`，能直接确认走到哪一步。
+
+DBus 侧签名不是我猜的，取自 frida-core `src/host-session-service.vala`：
+
+```vala
+public abstract async uint spawn (string program, HostSpawnOptions options, Cancellable?)
+```
+
+也就是 `Spawn(s program, a{sv} options) → u`，与已经在真机上跑通的 `Attach(ua{sv})` 同一套
+GVariant 写入器。`options` 传空字典 = 全部默认（argv 只有 program、stdio 继承 daemon），
+这是 Android 上最常见的形式：program 给包名，交给系统起进程。
+
+**两个必须做的收尾**，否则会留下"看不见的故障"：
+
+- spawn 成功但 attach/注入/resume 任一步失败 → **Kill 掉那个挂起的进程**。不杀的话设备上会留一个
+  卡在入口、没有界面的进程，用户只会看到"应用无响应"，根本不会想到是 frida 留下的。
+- `closeSession` 时若 `spawnedPid > 0 && !resumed` → 先 Kill 再关连接。连接一关就再也发不出去 Kill 了。
+
+### 二、spawn 之后不能立刻 hook
+
+spawn 只是把进程叫起来，"目标 .so 还没 dlopen"是常态。`action=analyze backend=frida fridaMode=spawn`
+原来会立刻 `hookFunction`，结果必然是 `export-not-found`——这不是用户用错了，是工具的顺序不对。
+
+现在 analyze 在 spawn 分支里先轮询 `enumerateModules` 等目标模块出现（最多 20s），
+返回 `moduleWaited`；等不到会给出明确提示而不是抛一个难懂的错误。
+
+---
+
+### 三、本轮排查修掉的四个真问题
+
+**1. HostSession 接口版本写死 17 → frida-server 16.x 完全失联**
+frida 的 D-Bus 接口名带主版本号（`re.frida.HostSession16` / `HostSession17`），代码里硬编码 17。
+跑 16.x 的设备上**每一次调用**都撞 `UnknownInterface`，对外表现成"frida 不可用"——
+而 server 明明在跑、root 也有，用户根本无从判断是版本名对不上。
+现在按 17 → 16 依次用 `EnumerateProcesses` 做一次真实握手，成功后缓存，稳态不额外付 RTT。
+
+**2. `frida_scan` 必然超时**
+RPC 超时是全局 15s，而扫 256 MiB 只在小进程里才 15s 内跑完。大 App 上会稳定报"超时"，
+实际扫描还在继续——用户看到的是"扫描失败"。现在 RPC 支持按操作覆盖超时，`frida_scan` 用 60s。
+
+**3. 动态分析的 frida 端口不跟配置走**
+`taffy_frida_control action=port` 可以把 frida-server 改到别的端口，但 `fridaTargetFromArgs` 的默认端口
+写死 27042 → 改完端口后动态分析永远连旧的，表现还是"server 在跑却报不可用"。
+现在默认值读 `FridaManager.currentPort()`。
+
+**4. `taffy_dex_index action=stats` 白建几百万个对象**
+"统计规模"原来是拿 `class_use + limit=1` 复用 search 跑的：命中判定仍然会为**每条指令** new 一个 `Hit`
+再丢掉，几十万方法的大包就是几百万个临时对象，只为拿四个数字。
+改成独立轻量路径，只数不建。
+
+---
+
+### 四、spawn 的可验证部分做了单测
+
+spawn 唯一没有真机兜底的环节是 GVariant body 编码（`s` + 空 `a{sv}`）和 mode 判定。
+新增 `FridaSpawnTest`：钉死字节序列（含 4 字节对齐填充）、`bodyUint` 的小端读取与短 body 保护、
+`isSpawnMode` 的各种写法。顺带把这三个纯函数从类里提到文件顶层——
+`FridaBridge` 是 class（构造要 Android Context），单测没法实例化它。
+
+---
+
+### 已知未做
+
+- `HostSpawnOptions` 只传了空字典。要指定 `argv` / `env` / `cwd` / `stdio` 需要写非空 `a{sv}`
+  （variant 还有一层自己的嵌套编码），Android 上 spawn 包名用不到，等有真实需求再做。
+- spawn 在真机上的端到端链路我没有设备验证，只保证了协议签名有源码依据、字节编码有单测、
+  失败路径有回收与明确错误信息。如果真机仍失败，返回的错误会指出是 Spawn / Attach / Resume 哪一步。
+- `frida-server` 16.x 的接口协商只有 17→16 两个候选；更老的版本（15.x 及以前）接口名相同但
+  方法集不同，未覆盖。
+
+---
+
 ## 塔菲逆核 v1.5.19 —— DEX 索引查询 · SO 函数级差分 · Frida 内存扫描
 
 这一版把三件事做进去了：一个「不依赖 native 的 DEX 全量查询」、把 SO 对比从「结构变了」

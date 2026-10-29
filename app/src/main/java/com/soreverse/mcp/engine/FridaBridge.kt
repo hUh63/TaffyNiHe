@@ -833,21 +833,6 @@ internal class FridaBridge(private val context: Context) {
         )
     }
 
-    /**
-     * Spawn 的 body 编码：`s` program + 空 `a{sv}` options。
-     * 抽出来是为了能单测字节序列 —— 这是整条 spawn 链路上唯一没有真机兜底的环节。
-     */
-    internal fun spawnBody(program: String): ByteArray = Gvariant.W().apply {
-        str(program)   // s program
-        u32(0)         // a{sv} options（空 = 默认）
-    }.b.toByteArray()
-
-    /** spawn / spawn-suspended 都走挂起启动路径。 */
-    internal fun isSpawnMode(mode: String): Boolean {
-        val m = mode.trim().lowercase().replace("-", "_").replace(" ", "_")
-        return m == "spawn" || m == "spawn_suspended" || m == "spawnsuspended" || m == "suspended"
-    }
-
     fun closeSession(id: String) {
         val s = sessions.remove(id) ?: return
         // 只 spawn 了没 resume（或者上一轮 resume 失败）时先 Kill：
@@ -1162,11 +1147,6 @@ internal class FridaBridge(private val context: Context) {
             }
         }
         return ""
-    }
-
-    internal fun bodyUint(reply: DBusMessage): Int {
-        if (reply.body.size >= 4) return Gvariant.le4(reply.body, 0)
-        return -1
     }
 
     private fun attachBody(pid: Int): ByteArray = Gvariant.W().apply {
@@ -1492,4 +1472,31 @@ internal class FridaBridge(private val context: Context) {
         };
         """.trimIndent()
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// spawn 链路上与连接无关的纯逻辑：放顶层才能被单元测试直接覆盖。
+// FridaBridge 是 class（构造需要 Android Context），单测没法实例化它，
+// 但这三件事本身只是字节运算和字符串判定。
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Spawn 的 body 编码：`s` program + 空 `a{sv}` options。
+ * 这是整条 spawn 链路上唯一没有真机兜底的环节，所以钉死字节序列做单测。
+ */
+internal fun spawnBody(program: String): ByteArray = Gvariant.W().apply {
+    str(program)   // s program
+    u32(0)         // a{sv} options（空 = 默认）
+}.b.toByteArray()
+
+/** spawn / spawn-suspended 都走挂起启动路径。 */
+internal fun isSpawnMode(mode: String): Boolean {
+    val m = mode.trim().lowercase().replace("-", "_").replace(" ", "_")
+    return m == "spawn" || m == "spawn_suspended" || m == "spawnsuspended" || m == "suspended"
+}
+
+/** 读一个方法的 u32 返回值（pid 等）；body 不足 4 字节返回 -1。 */
+internal fun bodyUint(reply: DBusMessage): Int {
+    if (reply.body.size >= 4) return Gvariant.le4(reply.body, 0)
+    return -1
 }

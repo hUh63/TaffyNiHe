@@ -1,8 +1,10 @@
 package com.soreverse.mcp
 
 import com.soreverse.mcp.engine.DBusMessage
-import com.soreverse.mcp.engine.FridaBridge
 import com.soreverse.mcp.engine.Gvariant
+import com.soreverse.mcp.engine.bodyUint
+import com.soreverse.mcp.engine.isSpawnMode
+import com.soreverse.mcp.engine.spawnBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -19,19 +21,19 @@ class FridaSpawnTest {
 
     @Test
     fun spawnModeAcceptsCommonSpellings() {
-        assertTrue(FridaBridge.isSpawnMode("spawn"))
-        assertTrue(FridaBridge.isSpawnMode("SPAWN"))
-        assertTrue(FridaBridge.isSpawnMode(" spawn "))
-        assertTrue(FridaBridge.isSpawnMode("spawn-suspended"))
-        assertTrue(FridaBridge.isSpawnMode("spawn_suspended"))
-        assertFalse(FridaBridge.isSpawnMode("attach"))
-        assertFalse(FridaBridge.isSpawnMode(""))
-        assertFalse(FridaBridge.isSpawnMode("attached"))
+        assertTrue(isSpawnMode("spawn"))
+        assertTrue(isSpawnMode("SPAWN"))
+        assertTrue(isSpawnMode(" spawn "))
+        assertTrue(isSpawnMode("spawn-suspended"))
+        assertTrue(isSpawnMode("spawn_suspended"))
+        assertFalse(isSpawnMode("attach"))
+        assertFalse(isSpawnMode(""))
+        assertFalse(isSpawnMode("attached"))
     }
 
     @Test
     fun spawnBodyEncodesStringThenEmptyDictionary() {
-        val body = FridaBridge.spawnBody("com.a")
+        val body = spawnBody("com.a")
         // s "com.a"  → u32 len=5 + "com.a" + NUL（长度字段本身就对齐，无前置填充）
         // a{sv} 空   → 补到 4 对齐后 4 字节 0
         val expected = byteArrayOf(
@@ -46,7 +48,7 @@ class FridaSpawnTest {
     @Test
     fun spawnBodyPadsBeforeEmptyDictionary() {
         // 长度 1 的 program：str 占 4+1+1=6 字节 → 补 2 字节 → 再 4 字节 0
-        val body = FridaBridge.spawnBody("x")
+        val body = spawnBody("x")
         assertEquals(12, body.size)
         assertEquals(1, body[0].toInt())
         assertEquals('x'.code.toByte(), body[4])
@@ -58,13 +60,13 @@ class FridaSpawnTest {
     fun bodyUintReadsLittleEndianPid() {
         // 1337 = 0x539 → 39 05 00 00
         val msg = DBusMessage(2, 0, 1, emptyMap(), byteArrayOf(0x39, 0x05, 0, 0))
-        assertEquals(1337, FridaBridge.bodyUint(msg))
+        assertEquals(1337, bodyUint(msg))
     }
 
     @Test
     fun bodyUintRejectsShortBody() {
         val msg = DBusMessage(2, 0, 1, emptyMap(), byteArrayOf(1, 2))
-        assertEquals(-1, FridaBridge.bodyUint(msg))
+        assertEquals(-1, bodyUint(msg))
     }
 
     @Test

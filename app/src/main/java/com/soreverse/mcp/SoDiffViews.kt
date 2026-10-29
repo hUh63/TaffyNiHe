@@ -167,6 +167,7 @@ internal fun SoDiffView(zh: Boolean, context: android.content.Context) {
                     if (zh) "导出" else "Exports",
                     if (zh) "导入" else "Imports",
                     if (zh) "依赖" else "Needed",
+                    if (zh) "函数" else "Functions",
                 )
                 TabRow(selectedTabIndex = tab, containerColor = cs.background) {
                     labels.forEachIndexed { i, label ->
@@ -436,7 +437,7 @@ private fun buildRows(r: JSONObject, tab: Int, query: String): List<DiffRowUi> {
             addSection(im.optJSONArray("added"), '+', { o -> "${o.optString("type")} · ${o.optString("bind")}" }, { "" })
             addSection(im.optJSONArray("removed"), '-', { o -> "${o.optString("type")} · ${o.optString("bind")}" }, { "" })
         }
-        else -> {
+        3 -> {
             val need = r.optJSONObject("needed") ?: JSONObject()
             listOf("added" to '+' as Char, "removed" to '-' as Char).forEach { (k, kind) ->
                 val arr = need.optJSONArray(k) ?: return@forEach
@@ -453,6 +454,23 @@ private fun buildRows(r: JSONObject, tab: Int, query: String): List<DiffRowUi> {
                     if (match(n)) out += DiffRowUi(kind, n, "符号版本", "")
                 }
             }
+        }
+        else -> {
+            // 函数级差分：这是 taffy_so_diff 与 taffy_byte_diff 的分界
+            // —— 这里给「哪个函数变了、从第几字节开始变」，字节级定位交给 HEX/差分视图。
+            val fn = r.optJSONObject("functions") ?: JSONObject()
+            addSection(fn.optJSONArray("changed"), '~',
+                { o ->
+                    val d = o.optLong("firstDiff", -1L)
+                    val from = if (d >= 0L) "首差 +0x${java.lang.Long.toHexString(d)}" else "内容不同"
+                    "$from · ${o.optLong("sizeA")} B"
+                },
+                { o -> fmtDelta(o.optLong("delta")) })
+            addSection(fn.optJSONArray("resized"), '~',
+                { o -> "大小 ${o.optLong("sizeA")} → ${o.optLong("sizeB")} B" },
+                { o -> fmtDelta(o.optLong("delta")) })
+            addSection(fn.optJSONArray("added"), '+', { o -> "${o.optLong("sizeB")} B" }, { "" })
+            addSection(fn.optJSONArray("removed"), '-', { o -> "${o.optLong("sizeA")} B" }, { "" })
         }
     }
     return out

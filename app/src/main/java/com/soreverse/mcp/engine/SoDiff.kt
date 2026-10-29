@@ -106,6 +106,34 @@ internal object SoDiff {
             if (importsB[name] == null) impRemoved += symbolJson(name, sa)
         }
 
+        // ── 函数级差分：把「差异」落到具体函数上 ──
+        // 结构对比只能告诉你 .text 变了；这里回答「哪个函数变了、从第几字节开始变」，
+        // 也就是 taffy_so_diff 与 taffy_byte_diff 的分工边界：前者给函数，后者给字节区间。
+        val (funcA, noSizeA) = functionsOf(ea)
+        val (funcB, noSizeB) = functionsOf(eb)
+        val fnAdded = mutableListOf<JSONObject>()
+        val fnRemoved = mutableListOf<JSONObject>()
+        val fnResized = mutableListOf<JSONObject>()
+        val fnChanged = mutableListOf<JSONObject>()
+        var fnSame = 0
+        for ((name, fb) in funcB) {
+            val fa = funcA[name]
+            if (fa == null) {
+                fnAdded += funcEntry(name, null, fb)
+                continue
+            }
+            if (fa.size != fb.size) {
+                fnResized += funcEntry(name, fa, fb)
+                continue
+            }
+            val d = firstDiffOffset(aData, fa.start, bData, fb.start, fa.size)
+            if (d == null) fnSame++ else fnChanged += funcEntry(name, fa, fb).put("firstDiff", d)
+        }
+        for ((name, fa) in funcA) {
+            if (funcB[name] == null) fnRemoved += funcEntry(name, fa, null)
+        }
+        val fnChangedSorted = fnChanged.sortedByDescending { it.optLong("sizeA") }
+
         // ── 依赖库 / 符号版本 ──
         val needA = ElfAudit.neededList(aData, ea)
         val needB = ElfAudit.neededList(bData, eb)
@@ -140,7 +168,8 @@ internal object SoDiff {
 
         val truncated = secChangedSorted.size > lim || expAdded.size > lim || expRemoved.size > lim ||
             expChanged.size > lim || impAdded.size > lim || impRemoved.size > lim ||
-            secAdded.size > lim || secRemoved.size > lim
+            secAdded.size > lim || secRemoved.size > lim || fnChangedSorted.size > lim ||
+            fnAdded.size > lim || fnRemoved.size > lim || fnResized.size > lim
 
         val summary = JSONObject()
             .put("identical", identical)
@@ -175,6 +204,16 @@ internal object SoDiff {
             )
             .put("needed", JSONObject().put("added", needAdded.size).put("removed", needRemoved.size))
             .put("versions", JSONObject().put("added", verAdded.size).put("removed", verRemoved.size))
+            .put(
+                "functions",
+                JSONObject()
+                    .put("added", fnAdded.size)
+                    .put("removed", fnRemoved.size)
+                    .put("resized", fnResized.size)
+                    .put("changed", fnChanged.size)
+                    .put("same", fnSame)
+                    .put("unknownSize", noSizeA + noSizeB),
+            )
 
         val sectionsJson = JSONObject()
             .put("added", arr(secAdded))
@@ -200,8 +239,74 @@ internal object SoDiff {
             .put("imports", importsJson)
             .put("needed", JSONObject().put("added", JSONArray(needAdded)).put("removed", JSONArray(needRemoved)))
             .put("versions", JSONObject().put("added", JSONArray(verAdded)).put("removed", JSONArray(verRemoved)))
+            .put(
+                "functions",
+                JSONObject()
+                    .put("added", arr(fnAdded.sortedBy { it.optString("name") }))
+                    .put("removed", arr(fnRemoved.sortedBy { it.optString("name") }))
+                    .put("resized", arr(fnResized.sortedByDescending { it.optLong("delta") }))
+                    .put("changed", arr(fnChangedSorted)),
+            )
             .put("limit", lim)
             .put("truncated", truncated)
+    }
+
+    /** 函数在文件里的字节区间（已把 VA 换算成文件偏移）。 */
+    private data class FuncSpan(val name: String, val start: Long, val size: Long)
+
+    /** VA → 文件偏移：只认同一个 PROGBITS 节区内的落点。 */
+    private fun vaToFileOffset(e: ElfFile, va: Long): Long? {
+        for (s in e.sections) {
+            if (s.type != 1L) continue          // SHT_PROGBITS
+            if (s.size <= 0L || s.addr == 0L) continue
+            if (va >= s.addr && va < s.addr + s.size) return s.offset + (va - s.addr)
+        }
+        return null
+    }
+
+    /**
+     * 收集函数区间。size==0 的符号（strip 过的库里很常见）无法安全界定边界，
+     * 单独计数而不是猜一个长度——猜错会把相邻函数的差异算到它头上。
+     */
+    private fun functionsOf(e: ElfFile): Pair<Map<String, FuncSpan>, Int> {
+        val best = LinkedHashMap<String, SymbolInfo>()
+        for (s in e.symbols + e.dynSymbols) {
+            if (!(s.type.equals("FUNC", true) || s.type.equals("IFUNC", true))) continue
+            if (s.name.isBlank()) continue
+            val cur = best[s.name]
+            if (cur == null || s.size > cur.size) best[s.name] = s
+        }
+        var unknown = 0
+        val out = LinkedHashMap<String, FuncSpan>()
+        for (s in best.values) {
+            if (s.size <= 0L) { unknown++; continue }
+            val off = vaToFileOffset(e, s.value)
+            if (off == null) { unknown++; continue }
+            out[s.name] = FuncSpan(s.name, off, s.size)
+        }
+        return out to unknown
+    }
+
+    /** 首个不同字节的相对偏移；完全一致返回 null。越界也返回 null（不猜）。 */
+    private fun firstDiffOffset(a: ByteArray, ao: Long, b: ByteArray, bo: Long, size: Long): Long? {
+        if (ao < 0L || bo < 0L || size <= 0L) return null
+        if (ao + size > a.size || bo + size > b.size) return null
+        var i = 0L
+        while (i < size) {
+            if (a[(ao + i).toInt()] != b[(bo + i).toInt()]) return i
+            i++
+        }
+        return null
+    }
+
+    private fun funcEntry(name: String, a: FuncSpan?, b: FuncSpan?): JSONObject {
+        val sa = a?.size ?: 0L
+        val sb = b?.size ?: 0L
+        return JSONObject()
+            .put("name", name)
+            .put("sizeA", sa)
+            .put("sizeB", sb)
+            .put("delta", sb - sa)
     }
 
     private fun exportsOf(e: ElfFile): Map<String, SymbolInfo> {

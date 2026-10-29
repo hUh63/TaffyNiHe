@@ -22,11 +22,15 @@ object SoDiffTools {
         override val meta = ToolMeta(
             "taffy_so_diff",
             "【SO 结构对比】两个 ELF/SO 的结构级差异：文件大小、.text、导出符号、导入符号、" +
-                "依赖库（DT_NEEDED）、符号版本，并给出 identical / same-structure / code-only / " +
-                "structure-changed / abi-mismatch 判定。只比结构不比字节（字节级用 taffy_read_hexdump）。",
-            "Structural diff of two ELF/So files: size, .text, exports, imports, DT_NEEDED and " +
-                "symbol versions, with a verdict (identical / same-structure / code-only / " +
-                "structure-changed / abi-mismatch). Structure only, not byte-level.",
+                "依赖库（DT_NEEDED）、符号版本、以及**函数级差异**（哪些函数新增/删除/大小变化/内容变化，" +
+                "内容变化还带首个不同字节相对函数起点的偏移 firstDiff），并给出 identical / same-structure / " +
+                "code-only / structure-changed / abi-mismatch 判定。" +
+                "分工：本工具回答「差异落在哪个函数」，要定位到具体字节区间/hexdump 请用 taffy_byte_diff 或 taffy_read_hexdump。",
+            "Structural diff of two ELF files: size, .text, exports, imports, DT_NEEDED, symbol " +
+                "versions, plus per-function diff (added / removed / resized / content-changed with the " +
+                "first differing byte offset inside the function). Verdict: identical / same-structure / " +
+                "code-only / structure-changed / abi-mismatch. Tells you WHICH function changed; use " +
+                "taffy_byte_diff for byte-range level diffing.",
             "analyze",
             ToolClass.EXTRA,
         ) {

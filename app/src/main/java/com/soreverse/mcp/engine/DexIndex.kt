@@ -384,17 +384,20 @@ internal object DexIndex {
         return if (n.isEmpty()) 1 else (n.toIntOrNull() ?: Int.MAX_VALUE)
     }
 
+    // 显式取非空局部变量：`var s = t`（t: String?）在 K2 下会被推断成 String?，
+    // 随后 s.startsWith(...) 直接编译报错。用 `t ?: return` 拿到非空 String 最稳。
     internal fun typeToName(t: String?): String {
-        if (t == null || t.isEmpty()) return ""
-        var s = t
+        val raw: String = t ?: return ""
+        if (raw.isEmpty()) return ""
+        var s: String = raw
         while (s.startsWith("[")) s = s.substring(1)
         return if (s.startsWith("L") && s.endsWith(";")) s.substring(1, s.length - 1).replace('/', '.') else s
     }
 
     internal fun readableType(t: String?): String {
-        if (t == null) return "?"
+        val raw: String = t ?: return "?"
         var dim = 0
-        var s = t
+        var s: String = raw
         while (s.startsWith("[")) { dim++; s = s.substring(1) }
         val base = when (s) {
             "V" -> "void"; "Z" -> "boolean"; "B" -> "byte"; "S" -> "short"

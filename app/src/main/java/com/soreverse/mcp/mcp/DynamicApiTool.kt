@@ -24,14 +24,14 @@ object DynamicApiTool {
             "【独立动态分析网关】unidbg 模拟 + Frida 真机：手动加载 .so/函数到执行上下文→执行→" +
                 "采集寄存器/内存/hook/回溯/trace，返回结构化 dynamicRun 供独立分析。" +
                 "action=status/roots/methods/capabilities 做探测；action=dispatch 用 op 指定细粒度操作" +
-                "（frida_status/sessions/open/close/hook/call/read/backtrace/modules/write/replace/script，" +
+                "（frida_status/sessions/open/close/hook/call/read/scan/backtrace/modules/write/replace/script，" +
                 "unidbg_session_*）；" +
                 "action=analyze 一键编排（backend=unidbg|frida）。Frida 需设备侧 frida-server 可达。",
             "Standalone dynamic-analysis gateway: manually load a target .so/function into an execution " +
                 "context (Unidbg emulated memory or a live Frida process), run it, and collect runtime " +
                 "evidence (registers/memory/hook/backtrace/trace) as a structured dynamicRun envelope. " +
                 "action=status/roots/methods/capabilities probe; action=dispatch routes fine-grained ops " +
-                "(frida_status/sessions/open/close/hook/call/read/backtrace/modules/write/replace/script, " +
+                "(frida_status/sessions/open/close/hook/call/read/scan/backtrace/modules/write/replace/script, " +
                 "unidbg_session_*); " +
                 "action=analyze orchestrates load->call->collect (backend=unidbg|frida).",
             "emulate", ToolClass.EXTRA, heavy = true,
@@ -50,7 +50,7 @@ object DynamicApiTool {
                 "editSessionId" str "编辑会话 ID（可空）"
                 "op" str "dispatch 的子操作：frida_status | frida_sessions | frida_open | frida_close | " +
                     "frida_hook | frida_call | frida_read | frida_backtrace | frida_modules | " +
-                    "frida_write | frida_replace | frida_script | unidbg_session_open | " +
+                    "frida_write | frida_replace | frida_scan | frida_script | unidbg_session_open | " +
                     "unidbg_session_call | unidbg_session_dump | unidbg_session_registers | " +
                     "unidbg_session_trace | unidbg_session_close"
                 "method" str "子操作的第二参数（一般是符号名）。frida_write 可用它传地址；" +
@@ -63,6 +63,8 @@ object DynamicApiTool {
                     "frida_modules=[sessionId]；" +
                     "frida_write=[sessionId, address, hex]（hex 形如 \"1f2003d5\"，奇数位会被拒）；" +
                     "frida_replace=[sessionId, target, retValue]（替换体固定返回 int）；" +
+                    "frida_scan=[sessionId, pattern, maxResults?]（Frida 字节特征，如 \"48 8b ?? ??\"，?? 通配；" +
+                    "扫只读页、预算 256 MiB，返回 address/module/rangesScanned/truncated）；" +
                     "frida_script=[sessionId, source]（source 必须是单个 JS **表达式**，如 \"Process.enumerateModules().length\"；" +
                     "多语句请写 IIFE：(function(){ ...; return value })()）；" +
                     "frida_call=[sessionId, symbol, argsArrayJson, returnType?]，参数形态：" +

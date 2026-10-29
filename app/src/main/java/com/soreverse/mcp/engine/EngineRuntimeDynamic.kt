@@ -61,6 +61,7 @@ private val DYNAMIC_METHODS = JSONArray(
         "frida_modules",
         "frida_write",
         "frida_replace",
+        "frida_scan",
         "frida_script"
     )
 )
@@ -126,6 +127,7 @@ internal fun EngineRuntime.dynamicDispatch(
                                     "frida_modules",
                                     "frida_write",
                                     "frida_replace",
+                                    "frida_scan",
                                     "frida_script",
                                     "frida_close"
                                 )
@@ -298,6 +300,31 @@ internal fun EngineRuntime.dynamicDispatch(
                     JSONObject().put("ptrStr", target).put("retValue", retValue)
                 ).put("fridaSessionId", sessionId).put("target", target)
                     .put("note", "替换体固定返回 int（retValue）；需要更复杂的逻辑请用 frida_script 自行 Interceptor.replace")
+            }
+        }
+
+        // 进程内字节特征扫描（frida_scan）：mode 里给 Frida 的 pattern，
+        // 如 "48 8b ?? ??"（?? 是通配）。预算上限 256 MiB，扫不完会标 truncated 而不是卡死。
+        "frida_scan" -> {
+            val sessionId = args.optString(0)
+            val pattern = method.ifBlank { args.optString(1) }
+            if (pattern.isBlank()) {
+                err(
+                    "INVALID_ARGUMENT",
+                    "frida_scan needs a scan pattern (args[1] or method), e.g. \"48 8b ?? ??\"",
+                    "pattern",
+                    pattern
+                )
+            } else {
+                val maxResults = args.optInt(2, 64)
+                frida.invokeRpc(
+                    sessionId,
+                    "scanMemory",
+                    JSONObject()
+                        .put("pattern", pattern)
+                        .put("maxResults", maxResults.coerceIn(1, 512))
+                        .put("maxBytes", 256 * 1024 * 1024)
+                ).put("fridaSessionId", sessionId).put("pattern", pattern)
             }
         }
 

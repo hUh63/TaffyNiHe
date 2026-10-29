@@ -26,14 +26,29 @@ import java.util.zip.ZipFile
 object LocalDexInspectTools {
 
     /** 把 content:// URI / 绝对路径 / APK / dex 路径统一处理为 dex 文件列表（APK 会解压提取所有 classes*.dex）。 */
-    private data class InspectSources(val dexFiles: List<File>, val originLabel: String, val fromUri: Boolean)
+    private data class InspectSources(
+        val dexFiles: List<File>,
+        val originLabel: String,
+        val fromUri: Boolean,
+        /** 本次调用独占的临时目录，调用方用完必须删（见 handle 的 finally）。 */
+        val work: File? = null,
+    )
 
     /**
-     * 本次调用的工作目录。每次进入都先清空上一次的残留：这些中间文件此前写到源 APK 同目录，
-     * 既污染用户可见目录，又因为各条提前 return 分支没有 finally 而永久累积。
+     * 本次调用**独占**的工作目录。
+     *
+     * 原来是一个固定目录 + 进入时 deleteRecursively()：两个客户端同时调
+     * taffy_dex_inspect 时，后进来的调用会把先进来那次已经解压好的 dex 删掉，
+     * 先来的那次随即在 loadDexFiles 里报"解析失败"——一个只在并发下出现、
+     * 单机复现不了的随机故障。改成每次一个唯一子目录，各删各的。
+     * 崩溃/强杀留下的旧目录交给 TempJanitor（前缀 dexinspect_）按过期时间清。
      */
-    private fun workDir(ctx: android.content.Context): File =
-        File(ctx.cacheDir, "dexinspect_work").apply { deleteRecursively(); mkdirs() }
+    private fun workDir(ctx: android.content.Context): File {
+        val root = File(ctx.cacheDir, "dexinspect_work").apply { mkdirs() }
+        val dir = File(root, "run_${System.currentTimeMillis()}_${System.nanoTime() % 100000L}")
+        dir.mkdirs()
+        return dir
+    }
 
     private fun resolveSources(ctx: android.content.Context, path: String): InspectSources {
         val work = workDir(ctx)
@@ -52,7 +67,7 @@ object LocalDexInspectTools {
     private fun resolveFromFile(file: File, label: String, fromUri: Boolean, work: File): InspectSources {
         if (!file.exists()) throw IllegalStateException("文件不存在: $label")
         val name = file.name.lowercase()
-        if (name.endsWith(".dex")) return InspectSources(listOf(file), label, fromUri)
+        if (name.endsWith(".dex")) return InspectSources(listOf(file), label, fromUri, work)
         if (name.endsWith(".apk") || name.endsWith(".jar") || name.endsWith(".zip")) {
             val dexFiles = mutableListOf<File>()
             ZipFile(file).use { zip ->
@@ -66,10 +81,10 @@ object LocalDexInspectTools {
                 }
             }
             if (dexFiles.isEmpty()) throw IllegalStateException("APK/JAR 中未发现 dex 文件")
-            return InspectSources(dexFiles, label, fromUri)
+            return InspectSources(dexFiles, label, fromUri, work)
         }
         // 兜底：当作 dex 文件尝试
-        return InspectSources(listOf(file), label, fromUri)
+        return InspectSources(listOf(file), label, fromUri, work)
     }
 
     private fun loadDexFiles(sources: List<File>): List<DexBackedDexFile> {
@@ -211,8 +226,11 @@ object LocalDexInspectTools {
             if (path.isBlank()) return err("INVALID_ARGUMENT", "需要 path 参数（APK 或 dex 路径）", "action", action)
             val limit = args.intValue("limit", 500).coerceIn(1, 10000)
             com.soreverse.mcp.core.TempJanitor.sweep(ctx.context, listOf("dexinspect_"))
+            var work: File? = null
+            try {
             return runCatching {
                 val sources = resolveSources(ctx.context, path)
+                work = sources.work
                 val dexes = loadDexFiles(sources.dexFiles)
                 if (dexes.isEmpty()) return err("NO_DEX", "未能加载任何 dex 文件", "action", action)
                 val out = JSONObject()
@@ -239,6 +257,10 @@ object LocalDexInspectTools {
                 out.put("ok", true)
                 out
             }.getOrElse { e -> err("DEX_INSPECT_FAILED", "解析失败: ${e.message}", "action", action) }
+            } finally {
+                // 显式删除：sweep 是"过期清理"，不该让本次调用的产物在缓存里躺一小时
+                work?.let { runCatching { it.deleteRecursively() } }
+            }
         }
     }
 

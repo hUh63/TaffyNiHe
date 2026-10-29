@@ -1060,6 +1060,10 @@ internal class FridaBridge(private val context: Context) {
         "readMemory" -> JSONArray()
             .put(params.optString("ptrStr"))
             .put(params.optInt("size", 256))
+        "scanMemory" -> JSONArray()
+            .put(params.optString("pattern"))
+            .put(params.optInt("maxResults", 64))
+            .put(params.optInt("maxBytes", 256 * 1024 * 1024))
         // 新增四个 op 必须显式列参数顺序：走 else 分支是按 JSONObject.names() 顺序排的，
         // 而 names() 不保证顺序，参数一错位就是把模板地址当长度用。
         "enumerateModules" -> JSONArray()
@@ -1189,6 +1193,49 @@ internal class FridaBridge(private val context: Context) {
                 const p = ptr('' + ptrStr);
                 const bytes = Memory.readByteArray(p, size | 0);
                 return { hex: bytes ? hexdump(p, { offset: 0, length: size, ansi: false }) : null };
+            },
+            // 进程内字节特征扫描：逆向里找密钥/魔数/校验逻辑最直接的一步。
+            // 预算控制是必须的：Process.enumerateRanges('r--') 在真实 App 上动辄几百个
+            // range 上百 MB，无上限扫会把目标进程按在地上几秒到几十秒。
+            scanMemory(pattern, maxResults, maxBytes) {
+                const pat = '' + pattern;
+                if (!pat) return { error: 'empty-pattern' };
+                const limit = Math.min(Math.max((maxResults | 0) || 64, 1), 512);
+                const budget = Math.min(Math.max((maxBytes | 0) || (256 * 1024 * 1024), 1), 1024 * 1024 * 1024);
+                const results = [];
+                let scanned = 0;
+                let rangesScanned = 0;
+                let truncated = false;
+                let rs = [];
+                try { rs = Process.enumerateRanges('r--'); } catch (e) { return { error: 'enumerate-failed: ' + e }; }
+                for (let i = 0; i !== rs.length; i++) {
+                    if (results.length >= limit) { truncated = true; break; }
+                    const remain = budget - scanned;
+                    if (remain <= 0) { truncated = true; break; }
+                    const r = rs[i];
+                    const total = r.size.toNumber ? r.size.toNumber() : Number(r.size);
+                    const size = Math.min(total, remain);
+                    rangesScanned++;
+                    let hits = [];
+                    try { hits = Memory.scanSync(r.base, size, pat); } catch (e) { hits = []; }
+                    for (let k = 0; k !== hits.length; k++) {
+                        if (results.length >= limit) { truncated = true; break; }
+                        let modName = null;
+                        try {
+                            const m = Process.findModuleByAddress(hits[k].address);
+                            modName = m ? m.name : null;
+                        } catch (e) {}
+                        results.push({ address: hits[k].address.toString(), module: modName });
+                    }
+                    scanned += size;
+                }
+                return {
+                    matches: results.length,
+                    results: results,
+                    rangesScanned: rangesScanned,
+                    bytesScanned: scanned,
+                    truncated: truncated
+                };
             },
             registers() {
                 if (!__lastContext) return { error: 'no-context-captured-yet' };

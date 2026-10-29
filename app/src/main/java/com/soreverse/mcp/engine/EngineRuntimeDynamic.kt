@@ -198,13 +198,25 @@ internal fun EngineRuntime.dynamicDispatch(
             val targetIdentifier = params.str("targetIdentifier", "com.example.target")
             val script = params.str("script").ifBlank { frida.defaultAgentHtml(moduleName, params.bool("retaddr", false)) }
             val session = frida.createSession(target, mode, targetIdentifier, script)
-            ok(
-                JSONObject()
-                    .put("fridaSessionId", session.id)
-                    .put("target", target.toString())
-                    .put("mode", mode)
-                    .put("targetIdentifier", targetIdentifier)
-            )
+            val spawned = session.spawnedPid > 0
+            val payload = JSONObject()
+                .put("fridaSessionId", session.id)
+                .put("target", target.toString())
+                .put("mode", mode)
+                .put("targetIdentifier", targetIdentifier)
+                .put("pid", session.processId)
+                .put("spawned", spawned)
+                .put("resumed", session.resumed)
+                .put("agentPath", session.agentPath)
+                .put("scriptLoaded", session.scriptLoaded)
+            // spawn 的语义要说清楚：脚本是在进程入口、Application 初始化之前就位后才放行的
+            if (spawned) {
+                payload.put(
+                    "note",
+                    "spawn: 进程在入口挂起 → attach → 注入脚本 → resume；hook 覆盖 Application 初始化之前的逻辑"
+                )
+            }
+            ok(payload)
         }
 
         "frida_close" -> {
@@ -323,7 +335,9 @@ internal fun EngineRuntime.dynamicDispatch(
                     JSONObject()
                         .put("pattern", pattern)
                         .put("maxResults", maxResults.coerceIn(1, 512))
-                        .put("maxBytes", 256 * 1024 * 1024)
+                        .put("maxBytes", 256 * 1024 * 1024),
+                    // 扫 256 MiB 只在很小的进程里才会 15s 内跑完；默认超时会把"还在扫"误报成超时
+                    timeoutMillis = 60_000L,
                 ).put("fridaSessionId", sessionId).put("pattern", pattern)
             }
         }
@@ -449,7 +463,8 @@ private fun EngineRuntime.dynamicAnalyze(workspaceId: String, editSessionId: Str
             if (processTarget.isBlank()) {
                 return@guarded err(
                     "INVALID_ARGUMENT",
-                    "Frida dynamic analysis requires fridaTarget (pid or process name) to attach to a live process",
+                    "Frida dynamic analysis requires fridaTarget: a pid/process name for mode=attach, "
+                        + "or the package name / executable path to launch for mode=spawn",
                     "fridaTarget",
                     ""
                 )
@@ -462,6 +477,37 @@ private fun EngineRuntime.dynamicAnalyze(workspaceId: String, editSessionId: Str
                 frida.defaultAgentHtml(moduleName, retaddr)
             )
             run.put("fridaSessionId", session.id)
+            run.put("spawned", session.spawnedPid > 0)
+            if (session.spawnedPid > 0) {
+                // spawn 之后目标进程才刚开始跑，目标 .so 通常还没 dlopen。
+                // 此时直接 hookFunction 只会拿到 export-not-found —— 等模块出现再动手，
+                // 而不是把这个必然失败的操作丢给用户去猜。
+                val waitDeadline = System.currentTimeMillis() + 20_000L
+                var appeared = false
+                while (System.currentTimeMillis() < waitDeadline) {
+                    val mods = runCatching {
+                        frida.invokeRpc(session.id, "enumerateModules", JSONObject())
+                    }.getOrNull()
+                    val arr = mods?.optJSONArray("modules")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            if (arr.optJSONObject(i)?.optString("name") == moduleName) {
+                                appeared = true
+                                break
+                            }
+                        }
+                    }
+                    if (appeared) break
+                    Thread.sleep(200L)
+                }
+                run.put("moduleWaited", appeared)
+                if (!appeared) {
+                    run.put(
+                        "moduleWaitNote",
+                        "20s 内未加载 $moduleName：hook 可能失败（spawn 早期可用 frida_hook 挂在 dlopen 之后再取）"
+                    )
+                }
+            }
             // 2) Hook the target function and call it live.
             val hook = frida.invokeRpc(
                 session.id,

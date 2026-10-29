@@ -504,6 +504,10 @@ internal object FridaTransport {
 internal class FridaSession(val id: String, val target: FridaTarget, val connection: FridaConnection, val mode: String, val targetIdentifier: String) {
     var processId: Int = -1
     var scriptLoaded: Boolean = false
+    /** spawn 模式下由 Device.Spawn 创建出来的 pid（attach 模式为 -1）。 */
+    internal var spawnedPid: Int = -1
+    /** spawn 之后是否已经 Resume；false 时关会话必须 Kill，否则目标永远挂在入口。 */
+    internal var resumed: Boolean = false
     val collectedMessages = ConcurrentHashMap<String, JSONArray>()
     private val _closed = AtomicBoolean(false)
 
@@ -511,6 +515,12 @@ internal class FridaSession(val id: String, val target: FridaTarget, val connect
     internal var agentPath: String = "/re/frida/HostSession"
     internal var agentIfcVersion: Int = FridaBridge.INTERFACE_VERSION
     internal var scriptId: Int = -1
+
+    /**
+     * 单次 RPC 的超时覆盖（毫秒，0 = 用 target 默认）。
+     * 内存扫描这类操作在真实 App 上可能远超 15s 默认值，按操作类型放宽而不是全局调高。
+     */
+    internal var rpcTimeoutOverrideMillis: Long = 0L
 
     /** Serializes the write + read pair of each RPC call ([FridaBridge.invokeRpc]). */
     internal val ioLock = Any()
@@ -641,52 +651,199 @@ internal class FridaBridge(private val context: Context) {
      */
     fun createSession(target: FridaTarget, mode: String, targetIdentifier: String, script: String): FridaSession {
         val connection = connect(target)
+        var session: FridaSession? = null
+        var spawnedPid = -1
         try {
             FridaTransport.negotiate(connection)
-            val session = FridaSession(
+            val s = FridaSession(
                 UUID.randomUUID().toString().substring(0, 8),
                 target,
                 connection,
                 mode,
                 targetIdentifier
             )
+            session = s
 
             // 1) Ping the host session to init the service.
-            sendPing(session)
+            sendPing(s)
 
-            // 2) Resolve + attach a real target process.
-            session.processId = resolvePid(session, targetIdentifier)
-            val attachBody = attachBody(session.processId)
-            val attachReply = callForReply(
-                session,
-                "/re/frida/HostSession",
-                "re.frida.HostSession${session.agentIfcVersion}",
-                "Attach",
-                "ua{sv}",
-                attachBody
-            )
-            val handle = bodyString(attachReply)
-            session.agentPath = "/re/frida/AgentSession/$handle"
-            if (handle.isEmpty()) {
-                throw FridaConnectionException("Frida daemon returned an empty AgentSession handle")
+            // 2) 确认 HostSession 接口版本（16.x / 17.x 的接口名不同，硬编码会直接失联）
+            negotiateInterfaceVersion(s)
+
+            if (isSpawnMode(mode)) {
+                // spawn 模式：先起进程并让它停在入口，再 attach + 注入脚本，最后 resume。
+                // 顺序不能颠倒 —— 先 resume 的话 Application.onCreate 早就跑完了，
+                // spawn 的全部意义（hook 初始化之前的逻辑）就没了。
+                val program = targetIdentifier.trim()
+                if (program.isEmpty()) {
+                    throw FridaConnectionException(
+                        "spawn mode needs targetIdentifier = package name or executable path"
+                    )
+                }
+                spawnedPid = spawnRequest(s, program)
+                s.processId = spawnedPid
+                s.spawnedPid = spawnedPid
+                attachAgent(s)
+                s.scriptId = createScript(s, script)
+                loadScript(s, s.scriptId)
+                s.scriptLoaded = true
+                // 脚本就位之后才放行
+                resumeRequest(s, spawnedPid)
+                s.resumed = true
+                spawnedPid = -1 // 已成功接管，catch 里不需要再回收
+            } else {
+                // attach 模式：pid 或进程名 → 绑定已有进程
+                s.processId = resolvePid(s, targetIdentifier)
+                attachAgent(s)
+                s.scriptId = createScript(s, script)
+                loadScript(s, s.scriptId)
+                s.scriptLoaded = true
             }
 
-            // 3) Create + load the agent script.
-            session.scriptId = createScript(session, script)
-            loadScript(session, session.scriptId)
-            session.scriptLoaded = true
-
-            sessions[session.id] = session
-            AppLog.i("Frida session ${session.id}: pid=${session.processId} path=${session.agentPath} scriptId=${session.scriptId}")
-            return session
+            sessions[s.id] = s
+            AppLog.i(
+                "Frida session ${s.id}: mode=$mode pid=${s.processId} " +
+                    "path=${s.agentPath} scriptId=${s.scriptId} resumed=${s.resumed}"
+            )
+            return s
         } catch (error: Exception) {
+            // spawn 成功但后续失败（attach/注入/resume）：必须杀掉那个挂起的进程。
+            // 否则设备上会留一个卡在入口、没有界面的进程，用户只会看到「应用无响应」。
+            val s = session
+            if (spawnedPid > 0 && s != null) {
+                runCatching { killRequest(s, spawnedPid) }
+            }
             runCatching { connection.close() }
             throw error
         }
     }
 
+    /**
+     * 协商 HostSession 接口版本。
+     *
+     * frida-core 的 D-Bus 接口名带主版本号（`re.frida.HostSession16` / `HostSession17`），
+     * 原来这里硬编码 17 —— 于是跑 frida-server 16.x 的设备上**每一次调用**都会
+     * 撞 UnknownInterface，表现为"Frida 不可用"，而实际只是版本名对不上。
+     * 这里按 17 → 16 依次用 EnumerateProcesses 做一次真实握手，第一个通的就用它。
+     */
+    private fun negotiateInterfaceVersion(session: FridaSession) {
+        val candidates = intArrayOf(FridaBridge.INTERFACE_VERSION, 16)
+            .distinct()
+            .filter { it > 0 }
+        var last: Throwable? = null
+        for (v in candidates) {
+            session.agentIfcVersion = v
+            try {
+                enumerateProcesses(session)
+                AppLog.i("Frida interface negotiated: HostSession$v")
+                return
+            } catch (e: Throwable) {
+                last = e
+            }
+        }
+        throw FridaConnectionException(
+            "frida-server 接口不兼容：已尝试 " +
+                candidates.joinToString("/") { "HostSession$it" } +
+                "，最后一次错误：${last?.message ?: "unknown"}",
+            last
+        )
+    }
+
+    /** HostSession.Attach：把 pid 绑成 AgentSession，脚本都挂在这个 handle 上。 */
+    private fun attachAgent(session: FridaSession) {
+        val reply = callForReply(
+            session,
+            "/re/frida/HostSession",
+            "re.frida.HostSession${session.agentIfcVersion}",
+            "Attach",
+            "ua{sv}",
+            attachBody(session.processId)
+        )
+        val handle = bodyString(reply)
+        if (handle.isEmpty()) {
+            throw FridaConnectionException("Frida daemon returned an empty AgentSession handle")
+        }
+        session.agentPath = "/re/frida/AgentSession/$handle"
+    }
+
+    /**
+     * Device.Spawn：让目标停在进程入口（Application 还没跑），返回 pid。
+     *
+     * 签名取自 frida-core `src/host-session-service.vala`：
+     * ```
+     * public abstract async uint spawn (string program, HostSpawnOptions options, Cancellable?)
+     * ```
+     * `HostSpawnOptions` 在 D-Bus 上作为 `a{sv}` 传输，**空字典 = 全部默认**
+     * （argv 只有 program、stdio=inherit、cwd/env 继承 daemon），返回 `u` 即 pid。
+     * 这也是 Android 上最常见的形式：program 直接给包名，交给系统的 ActivityManager 起进程。
+     */
+    private fun spawnRequest(session: FridaSession, program: String): Int {
+        val body = Gvariant.W().apply {
+            str(program)   // s program
+            u32(0)         // a{sv} options（空 = 默认）
+        }.b.toByteArray()
+        val reply = callForReply(
+            session,
+            "/re/frida/HostSession",
+            "re.frida.HostSession${session.agentIfcVersion}",
+            "Spawn",
+            "sa{sv}",
+            body
+        )
+        val pid = bodyUint(reply)
+        if (pid <= 0) {
+            throw FridaConnectionException(
+                "Frida Spawn returned pid=$pid for '$program' (is the package installed and frida-server running as root?)"
+            )
+        }
+        return pid
+    }
+
+    /** Device.Resume：放行被 spawn 挂起的进程。 */
+    private fun resumeRequest(session: FridaSession, pid: Int) {
+        val body = Gvariant.W().apply { u32(pid) }.b.toByteArray()
+        callForReply(
+            session,
+            "/re/frida/HostSession",
+            "re.frida.HostSession${session.agentIfcVersion}",
+            "Resume",
+            "u",
+            body
+        )
+    }
+
+    /** Device.Kill：回收 spawn 出来的进程（失败清理与关会话用）。 */
+    private fun killRequest(session: FridaSession, pid: Int) {
+        val body = Gvariant.W().apply { u32(pid) }.b.toByteArray()
+        callForReply(
+            session,
+            "/re/frida/HostSession",
+            "re.frida.HostSession${session.agentIfcVersion}",
+            "Kill",
+            "u",
+            body
+        )
+    }
+
+    /** spawn / spawn-suspended 都走挂起启动路径。 */
+    private fun isSpawnMode(mode: String): Boolean {
+        val m = mode.trim().lowercase().replace("-", "_").replace(" ", "_")
+        return m == "spawn" || m == "spawn_suspended" || m == "spawnsuspended" || m == "suspended"
+    }
+
+    private fun bodyUint(reply: DBusMessage): Int {
+        val b = reply.body
+        return if (b.size >= 4) Gvariant.le4(b, 0) else -1
+    }
+
     fun closeSession(id: String) {
-        sessions.remove(id)?.close()
+        val s = sessions.remove(id) ?: return
+        // 只 spawn 了没 resume（或者上一轮 resume 失败）时先 Kill：
+        // 连接一关就再也发不出 Kill 了，目标会永远停在入口。
+        if (s.spawnedPid > 0 && !s.resumed) {
+            runCatching { killRequest(s, s.spawnedPid) }
+        }
+        s.close()
     }
 
     /** Closes every tracked session. */
@@ -698,11 +855,17 @@ internal class FridaBridge(private val context: Context) {
      * Invoke `rpc.exports.<operation>` on the injected agent by posting a
      * frida:rpc "call" message and waiting for the matching sink reply.
      */
-    fun invokeRpc(sessionId: String, operation: String, params: JSONObject): JSONObject {
+    fun invokeRpc(
+        sessionId: String,
+        operation: String,
+        params: JSONObject,
+        timeoutMillis: Long = 0L,
+    ): JSONObject {
         val session = sessions[sessionId]
             ?: throw IllegalStateException("Frida session $sessionId not found")
         if (session.closed) throw IllegalStateException("Frida session $sessionId is closed")
         return synchronized(session.ioLock) {
+            session.rpcTimeoutOverrideMillis = timeoutMillis
             val args = rpcArgs(session, operation, params)
             val payload = JSONArray()
                 .put("frida:rpc")
@@ -858,7 +1021,12 @@ internal class FridaBridge(private val context: Context) {
      * with `["frida:rpc", <id>, "ok"|"error", ...]`.
      */
     private fun waitForRpcReply(session: FridaSession, operation: String): JSONObject {
-        val deadline = System.currentTimeMillis() + session.target.readTimeoutMillis
+        val budget = if (session.rpcTimeoutOverrideMillis > 0L) {
+            session.rpcTimeoutOverrideMillis
+        } else {
+            session.target.readTimeoutMillis
+        }
+        val deadline = System.currentTimeMillis() + budget
         val collected = JSONArray()
         while (System.currentTimeMillis() < deadline) {
             val msg = FridaTransport.readMessage(session.connection)

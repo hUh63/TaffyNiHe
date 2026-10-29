@@ -232,6 +232,45 @@ internal object DexIndex {
     private fun fail(cap: Int, msg: String) =
         Result(emptyList(), 0, 0, cap, 0, 0, 0L, 0, false, msg)
 
+    /**
+     * 只统计规模（dex 数 / 类 / 方法 / 指令），**不构造任何 Hit**。
+     *
+     * 原来「统计」是拿 class_use + limit=1 复用 search 跑一遍：命中判定仍然会为
+     * 每条指令 new 一个 Hit 再丢掉，几十万方法的大包就是几百万个临时对象，
+     * 白付 GC 代价只为拿四个数字。这里走独立路径，只数不建。
+     */
+    fun stats(path: String, tmpDir: File? = null): Result {
+        val file = File(path)
+        if (!file.isFile) return fail(0, "文件不存在: $path")
+        val dexes = ArrayList<Pair<String, DexFile>>()
+        val temps = ArrayList<File>()
+        var classes = 0
+        var methods = 0
+        var insns = 0L
+        try {
+            loadDexes(file, dexes, temps, tmpDir)
+            if (dexes.isEmpty()) return fail(0, "未在文件中找到 dex")
+            for ((_, dex) in dexes) {
+                for (cd in dex.classes) {
+                    classes++
+                    for (m in cd.methods) {
+                        methods++
+                        val impl = m.implementation ?: continue
+                        for (unused in impl.instructions) insns++
+                    }
+                }
+            }
+            return Result(emptyList(), 0, 0, 0, classes, methods, insns, dexes.size, false)
+        } catch (e: Throwable) {
+            if (e is OutOfMemoryError) throw e
+            return Result(emptyList(), 0, 0, 0, classes, methods, insns, dexes.size, false,
+                "统计失败: ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            dexes.clear()
+            for (t in temps) runCatching { t.delete() }
+        }
+    }
+
     // ---------------------------------------------------------------- 指令匹配
 
     private fun matchInstruction(

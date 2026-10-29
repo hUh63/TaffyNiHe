@@ -68,12 +68,8 @@ object DexIndexTool {
             if (path.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 path", "path", "")
 
             if (action == "stats") {
-                // stats = 用 class 类型但不要求 keyword：直接走一次空关键字扫描不合适，
-                // 这里用 "class_use" 的 limit=1 拿到规模统计即可（扫描量一致）。
-                val r = DexIndex.search(
-                    path = path, type = "class_use", keyword = "",
-                    limit = 1, offset = 0, tmpDir = File(ctx.context.cacheDir, "dexindex"),
-                )
+                // 独立轻量路径：只数类/方法/指令，不构造 Hit
+                val r = DexIndex.stats(path, File(ctx.context.cacheDir, "dexindex"))
                 if (r.error != null) return err("DEX_SCAN_FAILED", r.error, "path", path)
                 return ok(JSONObject()
                     .put("action", "stats")

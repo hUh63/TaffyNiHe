@@ -26,14 +26,17 @@ object DynamicApiTool {
                 "action=status/roots/methods/capabilities 做探测；action=dispatch 用 op 指定细粒度操作" +
                 "（frida_status/sessions/open/close/hook/call/read/scan/backtrace/modules/write/replace/script，" +
                 "unidbg_session_*）；" +
-                "action=analyze 一键编排（backend=unidbg|frida）。Frida 需设备侧 frida-server 可达。",
+                "action=analyze 一键编排（backend=unidbg|frida）。Frida 需设备侧 frida-server 可达；"
+                + "frida_open 支持 mode=spawn：进程在入口挂起→注入脚本→resume，可 hook Application 初始化之前的逻辑。",
             "Standalone dynamic-analysis gateway: manually load a target .so/function into an execution " +
                 "context (Unidbg emulated memory or a live Frida process), run it, and collect runtime " +
                 "evidence (registers/memory/hook/backtrace/trace) as a structured dynamicRun envelope. " +
                 "action=status/roots/methods/capabilities probe; action=dispatch routes fine-grained ops " +
                 "(frida_status/sessions/open/close/hook/call/read/scan/backtrace/modules/write/replace/script, " +
                 "unidbg_session_*); " +
-                "action=analyze orchestrates load->call->collect (backend=unidbg|frida).",
+                "action=analyze orchestrates load->call->collect (backend=unidbg|frida). "
+                + "frida_open supports mode=spawn: the process is suspended at entry, the script is injected, then resumed — "
+                + "so hooks cover logic that runs before Application init.",
             "emulate", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
@@ -59,6 +62,9 @@ object DynamicApiTool {
                     "for frida_replace the target (0x address or export name), either here or in args[1]."
                 "args" str "位置参数（JSON 数组字符串）。analyze 时数组首元素为参数对象：" +
                     "{ backend, targetFunction, args, trace, dumpSize, dumpAddress, moduleName, fridaMode, fridaTarget/host/port }。" +
+                    "frida_open=[{ host, port, moduleName, mode: attach|spawn, targetIdentifier, script?, retaddr? }]；" +
+                    "mode=spawn 时 targetIdentifier 必须填**要启动的包名或可执行路径**（attach 模式则是 pid/进程名）；" +
+                    "spawn 走 Device.Spawn→Attach→注入→Resume，成功时返回 pid/spawned/resumed；" +
                     "Frida 写/替换/脚本类 op 的位置约定：" +
                     "frida_modules=[sessionId]；" +
                     "frida_write=[sessionId, address, hex]（hex 形如 \"1f2003d5\"，奇数位会被拒）；" +

@@ -933,7 +933,9 @@ internal class FridaBridge(private val context: Context) {
             "re.frida.HostSession${session.ifcSuffix}",
             "EnumerateProcesses",
             "a{sv}",
-            Gvariant.W().apply { u32(0) }.b.toByteArray()
+            // 空 a{sv} 的权威字节是 8 字节：framing(0) + 4 字节对齐填充。
+            // 只发 4 字节在真机上也能work（frida 侧对空数组宽松），但按规范补全更稳。
+            Gvariant.W().apply { u32(0); pad(8) }.b.toByteArray()
         )
         return parseEnumerate(reply.body)
     }
@@ -988,10 +990,9 @@ internal class FridaBridge(private val context: Context) {
     }
 
     private fun createScript(session: FridaSession, source: String): Int {
-        val body = Gvariant.W().apply {
-            str(source)
-            u32(0) // options a{sv} (empty)
-        }.b.toByteArray()
+        // CreateScript(s source, a{sv} options) 与 Spawn(s program, a{sv} options) 同构，
+        // 复用同一个编码器 —— 手拼 `str + u32(0)` 会漏掉 a{sv} 数据起点的 8 对齐。
+        val body = spawnBody(source)
         val reply = callForReply(
             session,
             session.agentPath,

@@ -1,3 +1,86 @@
+## 塔菲逆核 v1.5.19 —— DEX 索引查询 · SO 函数级差分 · Frida 内存扫描
+
+这一版把三件事做进去了：一个「不依赖 native 的 DEX 全量查询」、把 SO 对比从「结构变了」
+推进到「哪个函数变了」，以及 Frida 侧补上面向真实目标的内存特征扫描。
+
+---
+
+### 一、`taffy_dex_index` + 分析页「DEX查询」
+
+以前查 DEX 只有两条路：`taffy_dex_xref` 必须先给出 className+methodName（只能回答单个方法的
+to/from），`taffy_dex_search`(DexKit) 走 native 且只按特征字符串反查。**缺的是"全量索引式查询"**：
+一次遍历，回答「谁 new 了这个类 / 谁读写了这个字段 / 谁重写了这个方法」。
+
+新增 13 种查询类型：
+
+| 类别 | 类型 |
+|---|---|
+| 声明 | `class` `method` `field` |
+| 字面量 | `string`（含字段初值 / 注解元素 / `.source`） `int`（支持 `0x` 与负数） `code`（smali 片段） |
+| 引用 | `new_instance` `field_get` `field_put` `field_any` `method_call` `method_override` `class_use` |
+
+引用型可以**省略关键字 = 列全部**（看实例化热点、看谁实现了某接口方法）。配套：
+`exclude` 排除包前缀、`regex` / `caseSensitive`、`limit`/`offset` 分页（返回真实 `matched` 总数与 `nextOffset`）。
+
+`method_override` 需要祖先链，所以这一类会额外建一次全类表，沿 superclass 走最多 32 层、
+并检查祖先与自己实现的接口——不是简单的"同名即重写"。
+
+分析页侧栏新增「DEX查询」：选 APK/DEX → 类型下拉（引用型标注「可空」）→ 关键字 →
+结果按「类名 / 成员 / 命中细节 / 所在 dex」四行显示，点一行复制签名，超过一页给「继续加载」。
+没有 JSON/文本兜底出口。
+
+### 二、SO 对比：从「结构变了」到「哪个函数变了」
+
+`taffy_so_diff` 原来只能说 `.text` 变了。现在多了**函数级差分**：
+
+- `added` / `removed` / `resized` / `changed`（内容变）/ `same`，另计 `unknownSize`
+  （strip 过的库里 `st_size == 0` 的符号无法安全界定边界，单列计数而不是猜一个长度——
+  猜错会把相邻函数的差异算到它头上）；
+- `changed` 里带 `firstDiff`：首个不同字节相对函数起点的偏移，可以直接拿去 HEX 视图定位。
+
+分工也就明确了：**本工具回答"哪个函数"，`taffy_byte_diff` 回答"哪些字节"**。
+分析页 SO 对比多了「函数」页签。
+
+### 三、Frida：`frida_scan`（进程内字节特征扫描）
+
+`taffy_dynamic_api` 的 op 增加 `frida_scan=[sessionId, pattern, maxResults?]`，
+pattern 用 Frida 语法（`48 8b ?? ??`，`??` 通配），扫只读页、预算 256 MiB，
+返回 `address / module / rangesScanned / bytesScanned / truncated`。
+
+预算不是摆设：真实 App 上 `Process.enumerateRanges('r--')` 动辄几百个 range 上百 MB，
+无上限扫会把目标进程按住几秒到几十秒——而用户只会觉得"hook 卡死了"。
+所以扫不完明确标 `truncated`，而不是悄悄截断或拖死。
+
+---
+
+### 四、本轮排查修掉的两个真问题
+
+**1. `sodiff` 视图存在但菜单点不到（上一版引入）**
+分析页的「更多视图」只渲染 `analysisOverflowViews` 里登记的 key。上一版加了导航项和
+`when(view)` 分支，却漏了这个列表——视图代码在、编译通过、测试通过，**用户就是点不进去**。
+本轮补登记，并把「视图加了三处要改」这件事写进注释。
+
+**2. `taffy_dex_inspect` 并发下互相删文件**
+工作目录是固定的 `dexinspect_work`，每次进入先 `deleteRecursively()`。两个客户端同时调用时，
+后进来的那次会把先进来那次已经解压好的 dex 删掉，先来的随即在 `loadDexFiles` 报"解析失败"——
+一个只在并发下出现、单机永远复现不了的随机故障。
+改成每次一个唯一子目录、各删各的（`finally` 显式清理，崩溃残留交给 `TempJanitor` 按过期时间扫）。
+
+顺带修了 DEX 视图自己的三个边界：改完关键字再点「继续加载」会把两次查询结果拼在一起（加查询指纹）、
+扫描中清空按钮会把正在读的文件删掉（busy 时禁用）、缓存文件固定名可能覆盖仍在被读的旧文件（唯一命名）。
+
+---
+
+### 已知未做
+
+- `frida_scan` 只扫只读页（`r--`）；扫 `rw-` 堆/匿名映射需要用户显式承担卡顿风险，留作显式开关。
+- Frida `spawn` 模式（挂起启动后 attach，用于 hook `Application.onCreate` 之前的逻辑）
+  仍未接——它需要改 DBus Device 接口调用链，而这一层在当前环境无法做真机验证，
+  不愿意在没有实测的情况下往里塞协议代码。
+- SO 函数级差分只按符号名对齐；两侧符号被 strip 掉时只能靠节区级结果。
+
+---
+
 ## 塔菲逆核 v1.5.18 —— 按路径取文件不再把整棵工作区树扫一遍
 
 排查时顺手发现的一处性能缺陷（不影响正确性，但会让人误以为"打开文件卡住了"）。

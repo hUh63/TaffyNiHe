@@ -649,6 +649,10 @@ internal class FridaBridge(private val context: Context) {
      * Establish a session: upgrade, ping the host session, resolve the target
      * pid, attach, deploy and load the agent script, then register the session.
      */
+    /** 已协商成功的 HostSession 接口版本（0 = 未协商）。 */
+    @Volatile
+    private var negotiatedIfcVersion: Int = 0
+
     fun createSession(target: FridaTarget, mode: String, targetIdentifier: String, script: String): FridaSession {
         val connection = connect(target)
         var session: FridaSession? = null
@@ -727,6 +731,12 @@ internal class FridaBridge(private val context: Context) {
      * 这里按 17 → 16 依次用 EnumerateProcesses 做一次真实握手，第一个通的就用它。
      */
     private fun negotiateInterfaceVersion(session: FridaSession) {
+        val cached = negotiatedIfcVersion
+        if (cached > 0) {
+            // 同一台设备的 frida-server 版本不会中途变，缓存命中就省掉这次枚举 RTT
+            session.agentIfcVersion = cached
+            return
+        }
         val candidates = intArrayOf(FridaBridge.INTERFACE_VERSION, 16)
             .distinct()
             .filter { it > 0 }
@@ -735,6 +745,7 @@ internal class FridaBridge(private val context: Context) {
             session.agentIfcVersion = v
             try {
                 enumerateProcesses(session)
+                negotiatedIfcVersion = v
                 AppLog.i("Frida interface negotiated: HostSession$v")
                 return
             } catch (e: Throwable) {
@@ -778,10 +789,7 @@ internal class FridaBridge(private val context: Context) {
      * 这也是 Android 上最常见的形式：program 直接给包名，交给系统的 ActivityManager 起进程。
      */
     private fun spawnRequest(session: FridaSession, program: String): Int {
-        val body = Gvariant.W().apply {
-            str(program)   // s program
-            u32(0)         // a{sv} options（空 = 默认）
-        }.b.toByteArray()
+        val body = spawnBody(program)
         val reply = callForReply(
             session,
             "/re/frida/HostSession",
@@ -825,15 +833,19 @@ internal class FridaBridge(private val context: Context) {
         )
     }
 
+    /**
+     * Spawn 的 body 编码：`s` program + 空 `a{sv}` options。
+     * 抽出来是为了能单测字节序列 —— 这是整条 spawn 链路上唯一没有真机兜底的环节。
+     */
+    internal fun spawnBody(program: String): ByteArray = Gvariant.W().apply {
+        str(program)   // s program
+        u32(0)         // a{sv} options（空 = 默认）
+    }.b.toByteArray()
+
     /** spawn / spawn-suspended 都走挂起启动路径。 */
-    private fun isSpawnMode(mode: String): Boolean {
+    internal fun isSpawnMode(mode: String): Boolean {
         val m = mode.trim().lowercase().replace("-", "_").replace(" ", "_")
         return m == "spawn" || m == "spawn_suspended" || m == "spawnsuspended" || m == "suspended"
-    }
-
-    private fun bodyUint(reply: DBusMessage): Int {
-        val b = reply.body
-        return if (b.size >= 4) Gvariant.le4(b, 0) else -1
     }
 
     fun closeSession(id: String) {
@@ -1152,7 +1164,7 @@ internal class FridaBridge(private val context: Context) {
         return ""
     }
 
-    private fun bodyUint(reply: DBusMessage): Int {
+    internal fun bodyUint(reply: DBusMessage): Int {
         if (reply.body.size >= 4) return Gvariant.le4(reply.body, 0)
         return -1
     }

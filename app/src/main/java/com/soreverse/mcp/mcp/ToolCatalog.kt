@@ -1230,6 +1230,8 @@ object ToolCatalog {
         *com.soreverse.mcp.mcp.agent.AgentApiTool.ALL.toTypedArray(),
         // 塔菲逆核: 统一插件平台(清单/诊断/运行校验/审计，只读)
         *PluginTool.ALL.toTypedArray(),
+        // 塔菲逆核: SO 结构对比(节区/导出/导入/依赖/版本差分)
+        *SoDiffTools.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

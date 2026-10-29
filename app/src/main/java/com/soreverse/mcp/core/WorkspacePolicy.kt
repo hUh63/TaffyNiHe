@@ -34,6 +34,8 @@ object WorkspacePolicy {
         "srcPath", "dstPath", "inFile", "outFile",
         // APK/DEX 类工具的路径参数此前不在白名单里，等于整体绕过工作区策略。
         "inputApk", "outputApk", "apkPath", "apkFile", "dexPath", "dexFile", "outDex",
+        // SO 对比这类"两输入"工具的两个路径参数，缺了就整体绕过工作区策略。
+        "pathA", "pathB",
     )
 
     /** 参数递归预检的最大深度，防止超深嵌套造成的栈/CPU 放大。 */

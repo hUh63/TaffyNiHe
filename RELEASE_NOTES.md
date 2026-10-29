@@ -1,3 +1,37 @@
+## 塔菲逆核 v1.5.18 —— 按路径取文件不再把整棵工作区树扫一遍
+
+排查时顺手发现的一处性能缺陷（不影响正确性，但会让人误以为"打开文件卡住了"）。
+
+### 症状与根因
+
+`Storage.readFile(relativePath)` 与 `Storage.fileSize(relativePath)` 都是**先全树递归 walk，
+再在里面比较路径**。也就是说：
+
+- 工作区里放一个解包过的 APK（几千个文件），按路径取其中**一个**文件，也要做几千次
+  SAF `DocumentsContract` query；
+- 更糟的是命中之后**不会停**：`found = uri` 之后 walk 继续把剩下的目录走完；
+- 而 `Blutter` / APK 审计 / 打开 APK 的路径都是 **先 `fileSize` 再 `readFile`** —— 同一棵树走两遍。
+
+用户感受就是：明明只是打开一个文件，进度条却磨了很久，还看不出在等什么。
+
+### 修法
+
+`walk()` 改成返回 `Boolean`，`onFile` 也返回 `Boolean`：
+
+```kotlin
+private fun walk(..., onFile: (Uri, String, String, Long, Long) -> Boolean): Boolean
+```
+
+- `readFile` / `fileSize`：找到目标路径就 `false`，整个遍历立刻向上返回；
+- 子目录递归：`if (!keepScanning) return false`，不再继续兄弟目录；
+- `fingerprint` / `listSos` / `listSosWithFingerprint` 这类"要全部结果"的扫描：
+  lambda 末尾返回 `true`，行为与之前完全一致。
+
+顺带确认一个语义点：工作区里的 `relativePath` 是 `prefix/name` 的全路径，本身唯一，
+所以"命中即停"不会改变最终取到哪个文件——原来那种"遍历到最后一次赋值"的行为等价。
+
+---
+
 ## 塔菲逆核 v1.5.17 —— SO 结构对比（MCP 工具 + 分析页视图）
 
 把「SO 对比」那类小工具的能力整合进来，但走塔菲自己的解析器，不是再写一份。

@@ -68,6 +68,7 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
             if (displayName.endsWith(".so", ignoreCase = true) || (options.scanApks && displayName.endsWith(".apk", ignoreCase = true))) {
                 out += FileFingerprint(relativePath, size, modified)
             }
+            true
         } }.onFailure { AppLog.w("Failed to fingerprint work directory: ${it.message}") }
         return out.sortedWith(compareBy<FileFingerprint> { it.path }.thenBy { it.modified }.thenBy { it.size })
     }
@@ -81,6 +82,7 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
             } else if (options.scanApks && displayName.endsWith(".apk", ignoreCase = true)) {
                 apkPaths += ApkCandidate(relativePath, docUri, size, modified)
             }
+            true
         } }.onFailure { AppLog.w("Failed to scan work directory: ${it.message}") }
 
         // Scan APKs in parallel
@@ -115,6 +117,7 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
                 apkPaths += ApkCandidate(relativePath, docUri, size, modified)
                 fingerprints += FileFingerprint(relativePath, size, modified)
             }
+            true
         } }.onFailure { AppLog.w("Failed to scan work directory: ${it.message}") }
 
         // Scan APKs in parallel
@@ -326,7 +329,12 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
     fun readFile(relativePath: String, maxBytes: Long = Long.MAX_VALUE): ByteArray {
         var found: Uri? = null
         walk(treeUri, "", 0, ScanOptions(scanApks = true, scanSubdirectories = true, maxDepth = 32)) { uri, _, path, _, _ ->
-            if (path == relativePath) found = uri
+            if (path == relativePath) {
+                found = uri
+                false
+            } else {
+                true
+            }
         }
         return readBytes(found ?: error("File not found in work directory: $relativePath"), maxBytes)
     }
@@ -341,7 +349,12 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
     fun fileSize(relativePath: String): Long? = runCatching {
         var found: Long? = null
         walk(treeUri, "", 0, ScanOptions(scanApks = true, scanSubdirectories = true, maxDepth = 32)) { _, _, path, size, _ ->
-            if (path == relativePath) found = size
+            if (path == relativePath) {
+                found = size
+                false
+            } else {
+                true
+            }
         }
         found
     }.getOrNull()
@@ -466,7 +479,18 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
         error("Entry not found: $entryName")
     }
 
-    private fun walk(dirUri: Uri, prefix: String, depth: Int, options: ScanOptions, onFile: (Uri, String, String, Long, Long) -> Unit) {
+    /**
+     * 递归遍历工作区。[onFile] 返回 false 表示「已经找到我要的，别再往下扫了」——
+     * [readFile] / [fileSize] 以前命中之后仍然把整棵树走完：工作区里放一个解包过的 APK
+     * （几千个文件）时，一次按路径取文件就是几千次 SAF query。
+     */
+    private fun walk(
+        dirUri: Uri,
+        prefix: String,
+        depth: Int,
+        options: ScanOptions,
+        onFile: (Uri, String, String, Long, Long) -> Boolean,
+    ): Boolean {
         val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
         val documentId = if (dirUri == treeUri) {
             treeDocumentId
@@ -502,14 +526,17 @@ class WorkDirectory(private val context: Context, private val treeUri: Uri) {
                 val rel = if (prefix.isBlank()) name else "$prefix/$name"
                 if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                     if (options.scanSubdirectories && depth < options.maxDepth) {
-                        runCatching { walk(docUri, rel, depth + 1, options, onFile) }
+                        val keepScanning = runCatching { walk(docUri, rel, depth + 1, options, onFile) }
                             .onFailure { AppLog.w("Failed to scan directory $rel: ${it.message}") }
+                            .getOrDefault(true)
+                        if (!keepScanning) return false
                     }
                 } else if (size <= options.skipFilesLargerThanBytes || name.endsWith(".so", ignoreCase = true)) {
-                    onFile(docUri, name, rel, size, modified)
+                    if (!onFile(docUri, name, rel, size, modified)) return false
                 }
             }
         }
+        return true
     }
 
     private fun readBytes(uri: Uri, maxBytes: Long = Long.MAX_VALUE): ByteArray {

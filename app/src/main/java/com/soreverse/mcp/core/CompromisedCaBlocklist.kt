@@ -20,6 +20,7 @@
 
 package com.soreverse.mcp.core
 
+import java.io.File
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.cert.CertificateException
@@ -225,6 +226,64 @@ object CompromisedCaBlocklist {
     /** Every certificate asserted to hold one of the leaked keys. */
     val compromisedKeys: List<CompromisedKey> get() = COMPROMISED_KEYS
 
+    // ── 外部补充表 ────────────────────────────────────────────────────────
+    // 内置表只能随发版更新，而泄漏公告是按天走的。这里允许从应用私有目录读一份补充表，
+    // 命中逻辑与内置表完全一致（仍按 SPKI 公钥哈希），只是不需要重新发 APK。
+
+    @Volatile
+    private var extraBySpki: Map<String, CompromisedKey> = emptyMap()
+
+    /** 外部补充表当前生效的公钥条数。 */
+    val extraKeyCount: Int get() = extraBySpki.size
+
+    /** 外部补充表当前生效的条目（只读快照）。 */
+    val extraKeys: List<CompromisedKey> get() = extraBySpki.values.toList()
+
+    /**
+     * 读一份补充表并替换当前的外加集合。
+     *
+     * 两种写法都认（键可省略）：
+     * ```
+     * { "keys": [ { "subjectCn": "...", "usage": "...", "spkiSha256Hex": "AB..." } ] }
+     * { "spkiSha256": [ "AB...", "CD..." ] }
+     * ```
+     * 只接受 64 位十六进制的 SPKI SHA-256（SHA-256 = 32 字节）；其它条目丢弃。
+     * 返回生效条数；文件不存在或解析失败返回 0（此时黑名单退化成只剩内置表，不影响连接）。
+     */
+    fun loadExtra(file: File?): Int {
+        if (file == null || !file.isFile) {
+            extraBySpki = emptyMap()
+            return 0
+        }
+        val loaded = runCatching {
+            val root = org.json.JSONObject(file.readText(Charsets.UTF_8))
+            val out = LinkedHashMap<String, CompromisedKey>()
+            root.optJSONArray("keys")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val item = arr.optJSONObject(i) ?: continue
+                    val spki = item.optString("spkiSha256Hex").trim().uppercase()
+                    if (spki.length != 64 || !spki.all { it in "0123456789ABCDEF" }) continue
+                    out[spki] = CompromisedKey(
+                        item.optString("subjectCn").ifBlank { "extra-" + (i + 1) },
+                        item.optString("usage").ifBlank { "extra" },
+                        spki,
+                        emptyList()
+                    )
+                }
+            }
+            root.optJSONArray("spkiSha256")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val spki = arr.optString(i).trim().uppercase()
+                    if (spki.length != 64 || !spki.all { it in "0123456789ABCDEF" }) continue
+                    out.putIfAbsent(spki, CompromisedKey("extra-" + (i + 1), "extra", spki, emptyList()))
+                }
+            }
+            out
+        }.getOrDefault(emptyMap())
+        extraBySpki = loaded
+        return loaded.size
+    }
+
     fun isBlocked(cert: X509Certificate): Boolean = matchedKey(cert) != null
 
     /**
@@ -233,7 +292,9 @@ object CompromisedCaBlocklist {
      * cross-signature, and any re-encoding of either.
      */
     fun matchedKey(cert: X509Certificate): CompromisedKey? {
-        BY_SPKI[sha256Hex(publicKeyEncoding(cert))]?.let { return it }
+        val spki = sha256Hex(publicKeyEncoding(cert))
+        BY_SPKI[spki]?.let { return it }
+        extraBySpki[spki]?.let { return it }
         return BY_CERT_DER[sha256Hex(certEncoding(cert))]
     }
 

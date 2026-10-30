@@ -1234,6 +1234,7 @@ object ToolCatalog {
         *SoDiffTools.ALL.toTypedArray(),
         // 塔菲逆核: DEX 索引查询(13 种类型一次遍历，纯 dexlib2)
         *DexIndexTool.ALL.toTypedArray(),
+        *DexRenameTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

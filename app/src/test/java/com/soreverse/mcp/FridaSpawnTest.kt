@@ -259,6 +259,71 @@ class FridaSpawnTest {
         )
     }
 
+    /**
+     * aux 的嵌套字典：`a{sv}` 的变长值本身又是一个 `a{sv}`，要在 variant 里再套一层
+     * framing + 8 对齐。早先嵌套对象是 json 序列化当字符串带的（frida 侧收到的是文本），
+     * 这三个 case 钉住「按真实类型写」的字节形状。
+     */
+    @Test
+    fun nestedAuxEncodesRecursively() {
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 42 00 00 00 03 00 00 00 61 75 " +
+            "78 00 05 61 7b 73 76 7d 00 00 2a 00 00 00 00 00 00 00 03 00 00 00 " +
+            "63 66 67 00 05 61 7b 73 76 7d 00 00 12 00 00 00 00 00 00 00 01 00 " +
+            "00 00 6b 00 01 73 00 00 00 00 01 00 00 00 76 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf("aux" to SpawnOpt.Dict(mapOf("cfg" to SpawnOpt.Dict(mapOf("k" to SpawnOpt.Str("v")))))),
+                ),
+            "nested aux",
+        )
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 5a 00 00 00 03 00 00 00 61 75 " +
+            "78 00 05 61 7b 73 76 7d 00 00 42 00 00 00 00 00 00 00 04 00 00 00 " +
+            "64 65 65 70 00 05 61 7b 73 76 7d 00 2a 00 00 00 00 00 00 00 03 00 " +
+            "00 00 63 66 67 00 05 61 7b 73 76 7d 00 00 12 00 00 00 00 00 00 00 " +
+            "01 00 00 00 6b 00 01 73 00 00 00 00 01 00 00 00 76 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf(
+                        "aux" to SpawnOpt.Dict(
+                            mapOf(
+                                "deep" to SpawnOpt.Dict(
+                                    mapOf("cfg" to SpawnOpt.Dict(mapOf("k" to SpawnOpt.Str("v"))))
+                                )
+                            )
+                        )
+                    ),
+                ),
+            "two-level aux",
+        )
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 6a 00 00 00 03 00 00 00 61 75 " +
+            "78 00 05 61 7b 73 76 7d 00 00 52 00 00 00 00 00 00 00 03 00 00 00 " +
+            "6d 69 78 00 05 61 7b 73 76 7d 00 00 3a 00 00 00 00 00 00 00 01 00 " +
+            "00 00 6e 00 01 75 00 00 00 00 07 00 00 00 01 00 00 00 6c 00 02 61 " +
+            "73 00 00 00 06 00 00 00 01 00 00 00 61 00 00 00 01 00 00 00 73 00 " +
+            "01 73 00 00 00 00 01 00 00 00 78 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf(
+                        "aux" to SpawnOpt.Dict(
+                            mapOf(
+                                "mix" to SpawnOpt.Dict(
+                                    mapOf(
+                                        "n" to SpawnOpt.U32(7),
+                                        "l" to SpawnOpt.StrArray(listOf("a")),
+                                        "s" to SpawnOpt.Str("x"),
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                ),
+            "mixed aux",
+        )
+    }
+
     @Test
     fun bodyUintReadsLittleEndianPid() {
         // 1337 = 0x539

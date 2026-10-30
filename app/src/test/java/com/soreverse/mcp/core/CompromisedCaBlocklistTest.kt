@@ -15,6 +15,7 @@
 package com.soreverse.mcp.core
 
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.security.MessageDigest
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
@@ -174,6 +175,57 @@ class CompromisedCaBlocklistTest {
         val client = OkHttpClient.Builder().withCompromisedCaBlocklist().build()
         assertSame(factory, client.sslSocketFactory)
     }
+
+    /**
+     * 外部补充表：泄漏公告按天走，内置表只能随发版更新。这里把 AAA 根自己的 SPKI
+     * 写进补充表（上一个测试已经断言它不在内置表里），验证「不发版也能加新的拦截对象」。
+     */
+    @Test
+    fun externalBlocklistAddsKeysWithoutRebuilding() {
+        assertTrue(!CompromisedCaBlocklist.isBlocked(aaaRoot))
+        val spki = MessageDigest.getInstance("SHA-256").digest(aaaRoot.publicKey.encoded)
+            .joinToString("") { "%02X".format(it) }
+        val file = File.createTempFile("tls-blocklist", ".json")
+        try {
+            file.writeText("""{"spkiSha256":["$spki","not-a-hash"]}""")
+            // 非法条目被丢弃，只留一条
+            assertEquals(1, CompromisedCaBlocklist.loadExtra(file))
+            assertEquals(1, CompromisedCaBlocklist.extraKeyCount)
+            assertTrue(CompromisedCaBlocklist.isBlocked(aaaRoot))
+        } finally {
+            file.delete()
+            // 必须复位：object 是单例，残留会把后续测试和真实连接一起带歪
+            assertEquals(0, CompromisedCaBlocklist.loadExtra(null))
+        }
+        assertTrue(!CompromisedCaBlocklist.isBlocked(aaaRoot))
+    }
+
+    @Test
+    fun externalBlocklistAcceptsTheVerboseShape() {
+        val file = File.createTempFile("tls-blocklist-keys", ".json")
+        try {
+            file.writeText(
+                """{"keys":[{"subjectCn":"X","usage":"tls","spkiSha256Hex":"%s"},
+                   {"subjectCn":"bad","spkiSha256Hex":"zz"}]}""".format(EXTRA_TEST_SPKI)
+            )
+            assertEquals(1, CompromisedCaBlocklist.loadExtra(file))
+            val key = CompromisedCaBlocklist.extraKeys.single()
+            assertEquals("X", key.subjectCn)
+            assertEquals(EXTRA_TEST_SPKI, key.spkiSha256Hex)
+        } finally {
+            file.delete()
+            CompromisedCaBlocklist.loadExtra(null)
+        }
+    }
+
+    @Test
+    fun missingExternalBlocklistIsNotAnError() {
+        assertEquals(0, CompromisedCaBlocklist.loadExtra(File("/nonexistent/tls-blocklist.json")))
+        assertEquals(0, CompromisedCaBlocklist.extraKeyCount)
+    }
+
+    /** 一个格式合法（64 位十六进制）的 SPKI 哈希，只用于验证补充表的解析与生效。 */
+    private val EXTRA_TEST_SPKI: String = "A".repeat(64)
 
     private fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes)
         .joinToString("") { "%02X".format(it) }

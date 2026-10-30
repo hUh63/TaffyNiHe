@@ -1,6 +1,7 @@
 package com.soreverse.mcp
 
 import com.soreverse.mcp.core.AppLog
+import com.soreverse.mcp.core.CompromisedCaBlocklist
 import com.soreverse.mcp.core.CrashReporter
 import com.soreverse.mcp.core.IntegrityGuard
 import com.soreverse.mcp.core.PermissionManager
@@ -18,6 +19,13 @@ class SoReverseApplication : TaiXuApplication() {
             .onFailure { android.util.Log.e("SoReverseApplication", "Taixu bootstrap failed", it) }
         if (CrashReporter.isCrashProcess()) return
         AppLog.init(this)
+        // TLS 拉黑补充表：泄漏公告按天走，内置表只能随发版更新。应用私有目录下放一份
+        // tls-blocklist-extra.json（格式见 CompromisedCaBlocklist.loadExtra）就能补，
+        // 读失败只是退化成只有内置表，不影响任何连接。
+        runCatching {
+            val extra = CompromisedCaBlocklist.loadExtra(java.io.File(filesDir, "tls-blocklist-extra.json"))
+            if (extra > 0) AppLog.i("TLS 补充黑名单已加载: $extra 个公钥")
+        }
         CrashReporter.install(this)
         val settings = SettingsStore(this)
         ToolStats.setPersistEnabled(settings.toolStatsPersist)

@@ -605,22 +605,38 @@ private fun buildSpawnOptions(params: JSONObject): List<Pair<String, SpawnOpt>> 
     val cwd = params.str("cwd")
     if (cwd.isNotBlank()) out += "cwd" to SpawnOpt.Str(cwd)
     if (params.has("stdio")) out += "stdio" to SpawnOpt.U32(params.optInt("stdio", 0))
-    params.optJSONObject("aux")?.let { aux ->
-        val dict = LinkedHashMap<String, SpawnOpt>()
-        for (key in aux.keys()) {
-            when (val v = aux.opt(key)) {
-                is String -> dict[key] = SpawnOpt.Str(v)
-                is Int -> dict[key] = SpawnOpt.U32(v)
-                is Long -> dict[key] = SpawnOpt.U32(v.toInt())
-                is Boolean -> dict[key] = SpawnOpt.U32(if (v) 1 else 0)
-                is JSONArray -> dict[key] = SpawnOpt.StrArray(v.toStringList())
-                is JSONObject -> dict[key] = SpawnOpt.Str(v.toString())  // aux 只做一层，嵌套对象按字符串带
-                else -> {}
-            }
-        }
-        if (dict.isNotEmpty()) out += "aux" to SpawnOpt.Dict(dict)
-    }
+    spawnDict(params.optJSONObject("aux"))?.let { out += "aux" to it }
     return out
+}
+
+/** aux 的最大嵌套深度：frida 侧是普通 a{sv}，超深结构只会撑爆单个 body，没必要。 */
+private const val AUX_MAX_DEPTH = 4
+
+private fun spawnDict(obj: JSONObject?, depth: Int = 0): SpawnOpt.Dict? {
+    if (obj == null || depth > AUX_MAX_DEPTH) return null
+    val dict = LinkedHashMap<String, SpawnOpt>()
+    for (key in obj.keys()) {
+        spawnValue(obj.opt(key), depth)?.let { dict[key] = it }
+    }
+    return if (dict.isEmpty()) null else SpawnOpt.Dict(dict)
+}
+
+/**
+ * 把一个 JSON 值转成 GVariant：字符串 → `s`、整数/布尔 → `u`、数组 → `as`、
+ * 对象 → 嵌套 `a{sv}`（递归，最深 [AUX_MAX_DEPTH] 层）。
+ *
+ * 早先嵌套对象是 json 序列化后当字符串带过去的，frida 侧拿到的是文本而不是字典；
+ * 现在按真实类型写，`{"aux":{"cfg":{"k":"v"}}}` 在 frida 那边解出来就是嵌套字典。
+ */
+private fun spawnValue(value: Any?, depth: Int): SpawnOpt? = when (value) {
+    is String -> SpawnOpt.Str(value)
+    is Int -> SpawnOpt.U32(value)
+    is Long -> SpawnOpt.U32(value.toInt())
+    is Boolean -> SpawnOpt.U32(if (value) 1 else 0)
+    is JSONArray -> SpawnOpt.StrArray(value.toStringList())
+    is JSONObject -> spawnDict(value, depth + 1)
+    is Double -> SpawnOpt.Str(value.toString())
+    else -> null
 }
 
 private fun JSONArray.toStringList(): List<String> {

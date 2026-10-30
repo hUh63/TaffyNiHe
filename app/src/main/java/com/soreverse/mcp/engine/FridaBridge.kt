@@ -671,8 +671,12 @@ internal class FridaBridge(private val context: Context) {
         val connection = connect(target)
         var session: FridaSession? = null
         var spawnedPid = -1
+        // 记录失败发生在哪一步：spawn / attach / script / resume 的失败现象很像（都只是
+        // "连不上"），但排查方向完全不同 —— 没有阶段信息时用户只能靠猜。
+        var stage = "connect"
         try {
             FridaTransport.negotiate(connection)
+            stage = "ping"
             val s = FridaSession(
                 UUID.randomUUID().toString().substring(0, 8),
                 target,
@@ -686,6 +690,7 @@ internal class FridaBridge(private val context: Context) {
             sendPing(s)
 
             // 2) 确认 HostSession 接口版本（16.x / 17.x 的接口名不同，硬编码会直接失联）
+            stage = "negotiate"
             negotiateInterfaceVersion(s, interfaceSuffix)
 
             if (isSpawnMode(mode)) {
@@ -698,21 +703,28 @@ internal class FridaBridge(private val context: Context) {
                         "spawn mode needs targetIdentifier = package name or executable path"
                     )
                 }
+                stage = "spawn"
                 spawnedPid = spawnRequest(s, program, spawnOptions)
                 s.processId = spawnedPid
                 s.spawnedPid = spawnedPid
+                stage = "attach"
                 attachAgent(s)
+                stage = "script"
                 s.scriptId = createScript(s, script)
                 loadScript(s, s.scriptId)
                 s.scriptLoaded = true
                 // 脚本就位之后才放行
+                stage = "resume"
                 resumeRequest(s, spawnedPid)
                 s.resumed = true
                 spawnedPid = -1 // 已成功接管，catch 里不需要再回收
             } else {
                 // attach 模式：pid 或进程名 → 绑定已有进程
+                stage = "resolve"
                 s.processId = resolvePid(s, targetIdentifier)
+                stage = "attach"
                 attachAgent(s)
+                stage = "script"
                 s.scriptId = createScript(s, script)
                 loadScript(s, s.scriptId)
                 s.scriptLoaded = true
@@ -732,8 +744,34 @@ internal class FridaBridge(private val context: Context) {
                 runCatching { killRequest(s, spawnedPid) }
             }
             runCatching { connection.close() }
-            throw error
+            val hint = stageHint(stage, error)
+            throw if (hint != null && error is FridaConnectionException) {
+                FridaConnectionException("[$stage] ${error.message}。$hint", error)
+            } else {
+                error
+            }
         }
+    }
+
+    /**
+     * 按失败阶段给可操作提示。
+     *
+     * 实测里最容易误判的两处：
+     *  - spawn 失败最常见的原因不是接口版本，而是 frida-server 没以 root 运行，或者
+     *    targetIdentifier 给了个"看起来像包名"的字符串其实没装；
+     *  - attach 失败常见于 spawn 出来的进程立刻自己退了（壳的完整性校验、缺少 rooted 环境），
+     *    这时 frida 侧报的是"找不到进程"，但真正的原因是目标已经死了。
+     */
+    private fun stageHint(stage: String, error: Throwable): String? = when (stage) {
+        "spawn" -> "spawn 需要 frida-server 以 root 运行（或目标应用 debuggable）；" +
+            "确认 targetIdentifier 是**已安装**的包名或设备上存在的可执行路径，" +
+            "并留意设备上是否弹了 root 授权框。"
+        "attach" -> "spawn 出来的进程可能在注入前就退出了（壳的完整性校验 / 目标自身崩溃）；" +
+            "先用 attach 模式手动起一下应用，确认它能正常跑起来。"
+        "script" -> "脚本本身可能有问题：用 frida_check 校验语法，或先用不含 hook 的空脚本跑通链路。"
+        "resume" -> "resume 失败通常意味着进程在挂起期间已被回收；检查设备内存与是否被系统杀掉。"
+        "resolve" -> "attach 模式需要目标进程**已经在跑**：先手动启动应用，再按包名/pid 附加。"
+        else -> null
     }
 
     /**

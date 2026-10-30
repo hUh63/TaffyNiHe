@@ -249,12 +249,57 @@ class McpHttpServer(private val context: Context, private val port: Int, private
                 }
             }
         }.start(wait = false)
+        // ktor 的 start(wait=false) 只把 bind 交到后台协程：端口被占用时异常落在那个协程里，
+        // 这里不会收到——前台服务于是照常显示「运行中」，而端口根本没人在听（客户端永远连不上，
+        // 用户只能看到「连接被拒绝」）。启动后显式探测一次，把「静默失败」变成可读异常，
+        // 由 McpForegroundService 的 onFailure 走 stopSelf，服务状态与真实监听保持一致。
+        val probeHost = when (host.trim()) {
+            "0.0.0.0", "::", "[::]", "" -> "127.0.0.1"
+            else -> host.trim()
+        }
+        if (!awaitListening(probeHost, port, 2_000)) {
+            val occupied = probeListening(probeHost, port)
+            runCatching { engine?.stop(gracePeriodMillis = 200, timeoutMillis = 800) }
+            engine = null
+            throw IllegalStateException(
+                if (occupied) {
+                    "端口 $port 已被其他进程占用（绑定地址 $host），MCP 服务未启动；换一个端口或关掉占用方后重试"
+                } else {
+                    "MCP 服务未能在 $host:$port 上开始监听（2s 内未就绪），请看日志确认绑定地址是否合法"
+                }
+            )
+        }
         val settings = SettingsStore(context)
         reconfigureHeavyPermits(settings.maxConcurrentTools)
         ToolStats.setPersistEnabled(settings.toolStatsPersist)
         AppLog.i("Ktor MCP server listening on $host:$port/mcp (permits=${settings.maxConcurrentTools})")
         ensureBridgeProbed()
         apkBridge.startHealthMonitor()
+    }
+
+    /** 端口上是否有人 accept（用于启动校验）。 */
+    private fun probeListening(h: String, p: Int, timeoutMs: Int = 250): Boolean = try {
+        java.net.Socket().use {
+            it.connect(java.net.InetSocketAddress(h, p), timeoutMs)
+            true
+        }
+    } catch (_: Throwable) {
+        false
+    }
+
+    /** 在 [budgetMs] 内轮询等待端口开始监听；ktor 的 bind 是异步的，只能轮询。 */
+    private fun awaitListening(h: String, p: Int, budgetMs: Int): Boolean {
+        val deadline = System.currentTimeMillis() + budgetMs
+        while (System.currentTimeMillis() < deadline) {
+            if (probeListening(h, p)) return true
+            try {
+                Thread.sleep(50)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return probeListening(h, p)
+            }
+        }
+        return probeListening(h, p)
     }
 
     fun stop() {

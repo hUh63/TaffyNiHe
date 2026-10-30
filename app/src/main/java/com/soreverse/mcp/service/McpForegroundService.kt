@@ -206,7 +206,28 @@ class McpForegroundService : Service() {
             running = false
             activePort = -1
             activeHost = ""
-            AppLog.e("Failed to start MCP server", it)
+            val reason = it.message?.takeIf(String::isNotBlank) ?: it.javaClass.simpleName
+            AppLog.e("Failed to start MCP server: $reason", it)
+            // 前台服务停了就看不到任何提示，用户只会觉得「点了开关没反应」。
+            // 留一条可滑走的失败通知，把真实原因（端口被占用 / 绑定地址非法）说清楚。
+            runCatching {
+                val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                val builder = if (Build.VERSION.SDK_INT >= 26) {
+                    Notification.Builder(this, CHANNEL_ID)
+                } else {
+                    Notification.Builder(this)
+                }
+                nm.notify(
+                    START_FAILURE_NOTIFICATION_ID,
+                    builder
+                        .setContentTitle("塔菲逆核 · MCP 启动失败")
+                        .setContentText(reason)
+                        .setStyle(Notification.BigTextStyle().bigText(reason))
+                        .setSmallIcon(com.soreverse.mcp.R.drawable.ic_stat_somcp)
+                        .setAutoCancel(true)
+                        .build()
+                )
+            }
             stopSelf()
             return false
         }
@@ -758,6 +779,9 @@ class McpForegroundService : Service() {
         const val ACTION_STOP = "com.soreverse.mcp.STOP"
         const val ACTION_REFRESH_FLOATING = "com.soreverse.mcp.FLOATING"
         private const val CHANNEL_ID = "so_reverse_mcp"
+
+        /** 启动失败通知的固定 id：反复失败只覆盖同一条，不堆通知。 */
+        private const val START_FAILURE_NOTIFICATION_ID = 0x7A11
         private const val AUTO_SNAP_DELAY = 3000L
         private const val BUBBLE_SIZE_DP = 36
         @Volatile private var running: Boolean = false

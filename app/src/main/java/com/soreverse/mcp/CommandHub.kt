@@ -178,7 +178,7 @@ internal fun CommandHubScreen(
         Card(
             modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp).fillMaxWidth(),
             shape = RoundedCornerShape(AppShape.lg),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp)) {
@@ -347,7 +347,7 @@ private fun SectionHeader(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 12.dp, top = 13.dp, bottom = 5.dp),
+            .padding(start = 14.dp, end = 12.dp, top = 13.dp, bottom = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -355,7 +355,7 @@ private fun SectionHeader(
             modifier = Modifier.weight(1f),
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.primary,
         )
         if (action != null && onAction != null) {
             Row(
@@ -395,10 +395,10 @@ private fun WorkbenchGrid(
                     Card(
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp)
+                            .height(56.dp)
                             .clickable { onNavigate(sat.tab, sat.toolCategory) },
                         shape = RoundedCornerShape(AppShape.md),
-                        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+                        colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     ) {
                         Row(
@@ -560,7 +560,7 @@ private fun ServiceArea(
                     Card(
                         modifier = Modifier.weight(1f).clickable { cell.onClick() },
                         shape = RoundedCornerShape(AppShape.md),
-                        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+                        colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     ) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -596,7 +596,7 @@ private fun ServiceArea(
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(AppShape.md),
-            colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+            colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Row(

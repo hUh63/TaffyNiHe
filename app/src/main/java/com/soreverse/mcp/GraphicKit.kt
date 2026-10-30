@@ -268,12 +268,14 @@ internal fun DataRow(
     }
     ListItem(
         modifier = rowModifier,
+        // Exbin item_list_card：内边距 14dp、标题 TitleSmall(14sp)，比 M3 默认 16dp/16sp 更紧凑
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 6.dp),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = leading,
         headlineContent = {
             Text(
                 title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleSmall,
                 color = cs.onSurface,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,

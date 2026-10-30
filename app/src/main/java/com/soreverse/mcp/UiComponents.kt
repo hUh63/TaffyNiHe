@@ -77,8 +77,9 @@ internal fun ScreenHeader(
             Column {
                 Text(
                     title,
-                    // 太墟式：无副标题的设置子页用大标题（24sp 常规字重），标题本身就是视觉锚点
-                    style = if (subtitle.isNullOrBlank()) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
+                    // Exbin 的顶栏就是 MaterialToolbar + TitleMedium(16sp) 常规字重，
+                    // 没有「大标题」这一档 —— 之前 24sp 的 headlineSmall 只属于太墟的视觉语言。
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Normal,
                     color = titleColor ?: MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -132,7 +133,7 @@ internal fun ToolPageScaffold(
                     Column {
                         Text(
                             title,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Normal,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
@@ -161,7 +162,7 @@ internal fun ToolPageScaffold(
                     }
                 },
                 actions = { actions?.invoke() },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
             )
         },
     ) { innerPad ->
@@ -191,10 +192,9 @@ internal fun GlassGroup(
         }
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            // 原来用 surfaceContainer：与 surface 的色差极小，深色主题下整页像一张白纸，
-            // 分组全靠标题撑着。surfaceContainerHigh 才有「卡片浮在背景上」的层次。
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            // Exbin `item_detail.xml`：cornerRadius 10dp / elevation 0 / stroke 0 / bg colorSurfaceVariant
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(Modifier.fillMaxWidth(), content = content)
@@ -216,7 +216,7 @@ internal fun GroupDivider() {
     HorizontalDivider(
         // 缩进与卡片内边距一致（16dp）。不做 iOS 式 56dp 图标缩进：这里有一半的分隔线
         // 用在无图标的输入框/说明文字之间，56dp 会变成一截断头线。
-        modifier = Modifier.padding(start = 16.dp),
+        modifier = Modifier.padding(start = 12.dp),
         thickness = 1.dp,
         // 0.5dp + alpha 0.22 在深色主题下几乎看不见，行与行糊成一片
         color = MaterialTheme.colorScheme.outlineVariant,
@@ -238,7 +238,7 @@ internal fun NavRow(
     val resolvedTint = iconTint ?: MaterialTheme.colorScheme.primary
     ListItem(
         modifier = Modifier
-            .heightIn(min = 56.dp)
+            .heightIn(min = 48.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint, modifier = Modifier.size(22.dp)) } },

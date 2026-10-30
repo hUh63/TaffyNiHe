@@ -12,29 +12,36 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/**
+ * 调色板 —— 数值全部取自 Exbin（com.exbin.app）`res/values/colors.xml` 的 preset_*。
+ *
+ * 浅色用 preset_*_primary（蓝 #1A6EF0），深色用 md_theme_dark_primary（绿 #66D39A）——
+ * Exbin 从 v1.4.6 起深色就是「深绿底 + 绿主色」，这是两套 UI 观感差异最大的一处。
+ */
 internal object AppPalette {
-    val blue = Color(0xFF0A84FF)
-    val teal = Color(0xFF64D2FF)
-    val indigo = Color(0xFF5E5CE6)
-    val purple = Color(0xFFBF5AF2)
-    val green = Color(0xFF30D158)
-    val orange = Color(0xFFFF9F0A)
-    val red = Color(0xFFFF453A)
-    val yellow = Color(0xFFFFD60A)
-    val pink = Color(0xFFFF375F)
-    val mono = Color(0xFF8E8E93)
+    val blue = Color(0xFF1A6EF0)
+    val teal = Color(0xFF006C4C)
+    val indigo = Color(0xFF6750A4)
+    val purple = Color(0xFF6750A4)
+    val green = Color(0xFF006C4C)
+    val orange = Color(0xFFC56500)
+    val red = Color(0xFFC00000)
+    val yellow = Color(0xFFC56500)
+    val pink = Color(0xFF9D3A6E)
+    val mono = Color(0xFF7E8E80)
 
     fun accent(name: String, dark: Boolean): Color = when (name) {
-        "teal" -> if (dark) Color(0xFF64D2FF) else Color(0xFF0891B2)
-        "indigo" -> if (dark) Color(0xFF5E5CE6) else Color(0xFF4F46E5)
-        "purple" -> if (dark) Color(0xFFBF5AF2) else Color(0xFF9333EA)
-        "green" -> if (dark) Color(0xFF30D158) else Color(0xFF16A34A)
-        "orange" -> if (dark) Color(0xFFFF9F0A) else Color(0xFFEA580C)
-        "red" -> if (dark) Color(0xFFFF453A) else Color(0xFFDC2626)
-        "yellow" -> if (dark) Color(0xFFFFD60A) else Color(0xFFCC9A00)
-        "pink" -> if (dark) Color(0xFFFF375F) else Color(0xFFFF2D55)
-        "mono" -> if (dark) Color(0xFFD1D1D6) else Color(0xFF3A3A3C)
-        else -> if (dark) Color(0xFF0A84FF) else Color(0xFF007AFF)
+        "blue" -> if (dark) Color(0xFF66D39A) else Color(0xFF1A6EF0)
+        "teal" -> if (dark) Color(0xFF66D39A) else Color(0xFF006C4C)
+        "indigo" -> if (dark) Color(0xFFB9A8E0) else Color(0xFF6750A4)
+        "purple" -> if (dark) Color(0xFFCBB6E8) else Color(0xFF6750A4)
+        "green" -> if (dark) Color(0xFF66D39A) else Color(0xFF006C4C)
+        "orange" -> if (dark) Color(0xFFFFB868) else Color(0xFFC56500)
+        "red" -> if (dark) Color(0xFFFFB4AB) else Color(0xFFC00000)
+        "yellow" -> if (dark) Color(0xFFF5C84C) else Color(0xFFC56500)
+        "pink" -> if (dark) Color(0xFFF0A8C8) else Color(0xFF9D3A6E)
+        "mono" -> if (dark) Color(0xFFB7CCB8) else Color(0xFF44474E)
+        else -> if (dark) Color(0xFF66D39A) else Color(0xFF1A6EF0)
     }
 }
 
@@ -63,11 +70,13 @@ internal object AppText {
 
     private fun scaled(base: Float) = (base * scaleState).sp
 
-    val label get() = scaled(11f)        // 辅助标签/说明
-    val body get() = scaled(12f)         // 正文
-    val bodyStrong get() = scaled(13f)   // 强调正文/次级标题
-    val title get() = scaled(15f)        // 区块标题
-    val headline get() = scaled(18f)     // 页面标题
+    // 字号对齐 Exbin 的 M3 textAppearance：LabelSmall 11 / BodySmall 12 /
+    // BodyMedium 14 / TitleSmall 14 / TitleMedium 16 / 数值展示 22。
+    val label get() = scaled(11f)        // 辅助标签/说明（LabelSmall）
+    val body get() = scaled(12f)         // 正文（BodySmall）
+    val bodyStrong get() = scaled(14f)   // 强调正文/次级标题（BodyMedium / TitleSmall）
+    val title get() = scaled(14f)        // 区块标题（TitleSmall）
+    val headline get() = scaled(16f)     // 页面标题（TitleMedium，Exbin toolbar）
     val display get() = scaled(22f)      // 数字/大标题
 }
 
@@ -145,72 +154,89 @@ internal fun scaledTypography(scale: Float): Typography {
     )
 }
 
+/**
+ * 浅色方案 —— 逐 token 取自 Exbin `preset_blue_*`（Material Theme Builder 对 #1A6EF0 的输出）。
+ *
+ * surfaceContainer* 在 Exbin 的 XML 里没有显式定义（M3 组件按 tonal palette 派生），
+ * 这里用同一套 neutral 色调的标准档位补齐，保证「卡片比背景亮/暗一档」的关系一致。
+ * 卡片底色按 Exbin `item_detail.xml` 用的是 **surfaceVariant**，不是 surface。
+ */
 internal fun appLightColors(accent: Color, highContrast: Boolean) = lightColorScheme(
     primary = accent,
-    onPrimary = Color.White,
-    primaryContainer = accent.copy(alpha = 0.12f),
-    onPrimaryContainer = Color(0xFF0B1B33),
-    // M3 的 secondary 是**强调色槽**（次要但必须可见），不是「次级背景」。
-    // 这里原来填的是 iOS 的 secondarySystemBackground 灰（E8E8ED），与 background
-    // F2F2F7 几乎同色 —— 任何拿它当图标/按钮底色的地方都直接隐形（首页两个功能格
-    // 的图标、eDBG「部署」按钮在浅色下都看不见）。
-    secondary = Color(0xFF56607A),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFF2F2F7),
-    onSecondaryContainer = Color(0xFF1C1C1E),
-    tertiary = AppPalette.indigo,
-    onTertiary = Color.White,
-    background = Color(0xFFF2F2F7),
-    onBackground = if (highContrast) Color(0xFF000000) else Color(0xFF1C1C1E),
-    surface = Color(0xFFFFFFFF),
-    onSurface = if (highContrast) Color(0xFF000000) else Color(0xFF1C1C1E),
-    surfaceVariant = Color(0xFFE5E5EA),
-    onSurfaceVariant = if (highContrast) Color(0xFF3A3A3C) else Color(0xFF636366),
-    surfaceContainer = Color(0xFFFFFFFF),
-    surfaceContainerHigh = Color(0xFFF7F7FA),
-    surfaceContainerHighest = Color(0xFFE5E5EA),
-    // outline / outlineVariant 是「描边与分隔线」的槽。原来 outlineVariant 直接写成
-    // 0xFFE5E5EA，与 surfaceContainerHighest / surfaceVariant **完全同色** —— 画在最上层
-    // 容器上的 1dp 描边和分隔线等于不存在（而这套 UI 的视觉底就是「1dp 描边」）。
-    outline = if (highContrast) Color(0xFF8E8E93) else Color(0xFFB0B0B6),
-    outlineVariant = Color(0xFFC6C6CE),
-    error = Color(0xFFFF3B30),
-    onError = Color.White,
-    errorContainer = Color(0xFFFFECEA),
-    onErrorContainer = Color(0xFF93000A),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFD9E2FF),
+    onPrimaryContainer = Color(0xFF001B3E),
+    secondary = Color(0xFF535F70),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFD7E3F7),
+    onSecondaryContainer = Color(0xFF101C2B),
+    tertiary = Color(0xFF6B5778),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFF2DAFF),
+    onTertiaryContainer = Color(0xFF251431),
+    error = Color(0xFFBA1A1A),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+    background = Color(0xFFFEFBFF),
+    onBackground = if (highContrast) Color(0xFF000000) else Color(0xFF1B1B1F),
+    surface = Color(0xFFFEFBFF),
+    onSurface = if (highContrast) Color(0xFF000000) else Color(0xFF1B1B1F),
+    surfaceVariant = Color(0xFFE0E2EC),
+    onSurfaceVariant = if (highContrast) Color(0xFF2A2D33) else Color(0xFF44474E),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF5F2FA),
+    surfaceContainer = Color(0xFFEFEDF4),
+    surfaceContainerHigh = Color(0xFFE9E7EF),
+    surfaceContainerHighest = Color(0xFFE3E1E9),
+    outline = if (highContrast) Color(0xFF44474E) else Color(0xFF74777F),
+    outlineVariant = Color(0xFFC4C6D0),
+    inverseSurface = Color(0xFF303034),
+    inverseOnSurface = Color(0xFFF2F0F4),
+    inversePrimary = Color(0xFFB0C6FF),
+    surfaceTint = accent,
 )
 
+/**
+ * 深色方案 —— 逐 token 取自 Exbin `md_theme_dark_*`（深绿底 #0F1F15 + 绿主色 #66D39A）。
+ *
+ * pureBlack 仍保留：用户显式要纯黑时把背景压到 #000000，但卡片/描边仍用 Exbin 的绿灰档位，
+ * 否则纯黑下所有层次都会消失。
+ */
 internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Boolean) = darkColorScheme(
     primary = accent,
-    onPrimary = Color.White,
-    primaryContainer = accent.copy(alpha = 0.18f),
-    onPrimaryContainer = Color(0xFFE8F1FF),
-    // 同上：原来是 0xFF2C2C2E，和 surfaceContainerHigh **一字不差**，
-    // 深色主题下用 secondary 着色的图标/按钮等于完全不可见。
-    secondary = Color(0xFFA8B3C7),
-    onSecondary = Color(0xFF1C1C1E),
-    secondaryContainer = Color(0xFF3A3A3C),
-    onSecondaryContainer = Color(0xFFF5F5F7),
-    tertiary = Color(0xFF5E5CE6),
-    onTertiary = Color.White,
-    background = if (pureBlack) Color(0xFF000000) else Color(0xFF0B0B0D),
-    onBackground = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFF5F5F7),
-    surface = if (pureBlack) Color(0xFF1C1C1E) else Color(0xFF161618),
-    onSurface = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFF5F5F7),
-    surfaceVariant = Color(0xFF2C2C2E),
-    onSurfaceVariant = if (highContrast) Color(0xFFD1D1D6) else Color(0xFF8E8E93),
-    surfaceContainer = if (pureBlack) Color(0xFF1C1C1E) else Color(0xFF161618),
-    surfaceContainerHigh = Color(0xFF2C2C2E),
-    surfaceContainerHighest = Color(0xFF3A3A3C),
-    // 同上：outline = 0xFF3A3A3C 与 surfaceContainerHighest **一字不差**，
-    // outlineVariant = 0xFF2C2C2E 与 surfaceContainerHigh **一字不差**，
-    // 深色下卡片描边和分组分隔线全隐形。
-    outline = if (highContrast) Color(0xFFAEAEB2) else Color(0xFF5A5A60),
-    outlineVariant = Color(0xFF4A4A52),
-    error = Color(0xFFFF453A),
-    onError = Color.White,
+    onPrimary = Color(0xFF003824),
+    primaryContainer = Color(0xFF005236),
+    onPrimaryContainer = Color(0xFF88F0B6),
+    secondary = Color(0xFFB7CCB8),
+    onSecondary = Color(0xFF223527),
+    secondaryContainer = Color(0xFF384B3D),
+    onSecondaryContainer = Color(0xFFD2E8D3),
+    tertiary = Color(0xFFA4C7AE),
+    onTertiary = Color(0xFF0E2F18),
+    tertiaryContainer = Color(0xFF26472F),
+    onTertiaryContainer = Color(0xFFBFE3C7),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
     onErrorContainer = Color(0xFFFFDAD6),
+    background = if (pureBlack) Color(0xFF000000) else Color(0xFF0F1F15),
+    onBackground = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFD5E5D8),
+    surface = if (pureBlack) Color(0xFF000000) else Color(0xFF0F1F15),
+    onSurface = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFD5E5D8),
+    surfaceVariant = Color(0xFF2A3A2E),
+    onSurfaceVariant = if (highContrast) Color(0xFFD5E5D8) else Color(0xFFB7CCB8),
+    surfaceContainerLowest = Color(0xFF0A1410),
+    surfaceContainerLow = Color(0xFF17251C),
+    surfaceContainer = Color(0xFF1B2A20),
+    surfaceContainerHigh = Color(0xFF25342A),
+    surfaceContainerHighest = Color(0xFF2F3E34),
+    outline = if (highContrast) Color(0xFFB7CCB8) else Color(0xFF7E8E80),
+    outlineVariant = Color(0xFF3D4D40),
+    inverseSurface = Color(0xFFD5E5D8),
+    inverseOnSurface = Color(0xFF0F1F15),
+    inversePrimary = Color(0xFF1A6EF0),
+    surfaceTint = accent,
 )
 
 internal fun statusSuccess(dark: Boolean = false): Color = if (dark) Color(0xFF30D158) else Color(0xFF34C759)

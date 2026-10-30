@@ -1,3 +1,78 @@
+## 塔菲逆核 v1.5.24 —— 留白清零 · 全站 UI 对齐 Exbin
+
+### 一、三项留白做完
+
+**1）重命名的字符串常量级联（`renameStrings`）**
+
+上一版留的尾巴是「不处理字符串常量里的反射类名」。现在补上了：`const-string` / `const-string/jumbo` 里与旧类名**完全相等**的两种写法（`Lcom/foo/Bar;` 与 `com.foo.Bar`）会一起改掉。
+
+刻意不做子串替换——`"I love com.foo.Bar"` 这种日志文案不该被动。沙箱端到端验证：
+
+```
+BEFORE  "Lc/D;"   "c.D"   "prefix Lc/D; suffix"
+AFTER   "Lx/Y;"   "x.Y"   "prefix Lc/D; suffix"   ← 第三项不动
+```
+
+**2）DEX 浏览器加了重命名表单**
+
+类详情页新增「重命名此类」入口：点开输入新类名（点分），确认后原子写回并留 `.bak.apk`，完成后自动重载类树。这是本页唯一的写操作，所以单独做了二次确认 + 处理中禁用。
+
+**3）`frida_selftest` 一站式自检**
+
+之前只能靠「失败信息」反推，现在 `dynamic_analyze` 的 `op=frida_selftest` 会把 attach/spawn 之前的每一关单独跑一遍并计时：
+
+```
+connect   → TCP + D-Bus 连接
+transport → D-Bus AUTH/HELLO
+ping      → HostSession.Ping
+negotiate → 17 / 16 / 无后缀 三种接口名逐个试，报告哪个通、能看到多少进程
+spawn     → 可选：给一个包名就做真实 spawn 探测（随即 kill 回收，不留挂起进程）
+```
+
+哪一关卡住一目了然。这也间接把「spawn 真机验证」的留白填掉了——没有设备无法替你跑，但你现在可以在设备上一条命令跑完并拿到逐步结论。
+
+### 二、全站 UI 统一到 Exbin
+
+配色和基座组件都换成 Exbin（com.exbin.app）的精确值：
+
+| 项 | 之前（iOS / 太墟风） | 现在（Exbin） |
+|---|---|---|
+| 浅色主色 | `#0A84FF` | `#1A6EF0`（`preset_blue_primary`） |
+| 浅色底 / 卡 | `#F2F2F7` / `#F7F7FA` | `#FEFBFF` / **`#E0E2EC`（surfaceVariant）** |
+| 深色主色 | `#0A84FF` | **`#66D39A`（Exbin 深色是绿）** |
+| 深色底 / 卡 | `#0B0B0D` / `#2C2C2E` | `#0F1F15` / `#2A3A2E` |
+| 卡片圆角 | 20dp | **12dp**（`item_detail` 10–12dp） |
+| 卡片描边 | 1dp | **无**（Exbin stroke 0 / elevation 0） |
+| 顶栏标题 | 24sp 大标题（太墟式） | **TitleMedium 16sp 常规字重**（MaterialToolbar 同款） |
+| 列表行标题 | BodyLarge 16sp | **TitleSmall 14sp** |
+| 字号档位 | 11/12/13/15/18/22 | 11/12/**14**/**14**/**16**/22（对齐 M3 textAppearance） |
+
+表面看只是换色，实际改动最大的是 **surfaceContainer\* 全套重新给了 Exbin 色调的档位**：之前深色下 `outline` 与 `surfaceContainerHighest` 一字不差，1dp 描边等于不存在；现在 `outline #7E8E80` / `outlineVariant #3D4D40` 与任何容器都有可见色差。
+
+首页也一起换了：卡片从 `surfaceContainerHigh` 改 `surfaceVariant`，分组标题从 `onSurfaceVariant` 改 `primary`（Exbin 的组标题就是主色），工作台磁贴 48→56dp。
+
+### 三、继续排查：三个新问题
+
+**1）`taffy_dex_rename` 在大 APK 上的内存峰值**
+旧实现先把 APK 里所有 `classesN.dex` 读进内存，改完再把所有结果留着——峰值是 dex 总量的 **两倍**。10 个 dex × 30MB 就是 600MB，必 OOM。改成「读一个 → 改 → 存结果 → 丢原始」。
+
+**2）重命名后没有提示签名失效**
+改完 dex 的 APK 装不上（v1/v2 签名全废），但工具没告诉用户。现在返回体带 `signature` 字段，明确写「装到设备前必须用 `taffy_apk_sign` 重签」。
+
+**3）`frida_selftest` 的阶段记错**
+`connect` 之后的任何异常（transport / ping / 协商）都被 catch 记成「connect 失败」，排查方向直接跑偏。改成用 stage 变量记录真实阶段。
+
+顺带修了一个编译期问题：`ListItem` 没有 `contentPadding` 参数（原本想把行内边距压到 14dp，最后放弃——为 2dp 差异自绘不值得）。
+
+---
+
+### 已知未做
+
+- 导航架构仍是底部 `NavigationBar`（Exbin 用 80dp `NavigationRail` 侧栏）。手机上一只手够不到侧栏，这条按「样式统一但架构保留」处理；要连架构一起换请单说。
+- 编辑器 / 日志流 / CFG 画布 / 终端面板保留各自的专业配色（Exbin 的代码区也是硬编码 VSCode 配色，本来就一致）。
+
+---
+
 ## 塔菲逆核 v1.5.23 —— Dex Editor 整合收尾 · 三项留白清零
 
 这一版把「Dex Editor 到底整合完整没有」这个问用源码逐个对了一遍，补掉唯一的实质缺口（dex 符号重命名），顺手把上一版列的三个留白全部清掉。

@@ -648,11 +648,16 @@ internal class FridaBridge(private val context: Context) {
             .put("target", target.host + ":" + target.port)
         var connection: FridaConnection? = null
         var checkedOut: FridaSession? = null
+        // catch 里要知道是哪一步炸的：connect 之后的异常（transport/ping/协商）以前一律
+        // 记成 "connect 失败"，排查方向会被带偏。
+        var stage = "connect"
         try {
             connection = connect(target)
             record("connect", true, "TCP + D-Bus 连接建立")
+            stage = "transport"
             FridaTransport.negotiate(connection)
             record("transport", true, "D-Bus AUTH/HELLO 通过")
+            stage = "ping"
             val session = FridaSession("diagnose", target, connection, "attach", "-")
             checkedOut = session
             sendPing(session)
@@ -704,7 +709,7 @@ internal class FridaBridge(private val context: Context) {
             }
             report.put("ok", used != null)
         } catch (e: Throwable) {
-            record("connect", false, e.message ?: e.javaClass.simpleName)
+            record(stage, false, e.message ?: e.javaClass.simpleName)
             report.put("ok", false)
         } finally {
             runCatching { connection?.close() }

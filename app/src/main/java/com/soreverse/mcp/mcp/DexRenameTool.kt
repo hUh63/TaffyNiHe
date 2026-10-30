@@ -80,13 +80,18 @@ object DexRenameTool {
             val renameStrings = args.optBoolean("renameStrings", false)
             val isApk = file.name.endsWith(".apk", true) || file.name.endsWith(".zip", true)
 
-            val slots = if (isApk) readApkDexes(file) else listOf(DexSlot(null, file.readBytes()))
-            if (slots.isEmpty()) return err("NO_DEX", "没有找到任何 dex（APK 里没有 classes*.dex）", "path", path)
-
             val perDex = JSONArray()
             val replaced = LinkedHashMap<String, ByteArray>()
             var total = 0
-            for (slot in slots) {
+            var dexCount = 0
+            // 逐个 dex「读→改→存结果→丢原始」：大 APK 里所有 classesN.dex 合起来能到几百 MB，
+            // 一次全读进内存再全留下结果，峰值是 dex 总量的两倍，容易 OOM。
+            val slots: List<Pair<String?, ByteArray>> =
+                if (isApk) apkDexEntries(file) else listOf(null to file.readBytes())
+            if (slots.isEmpty()) return err("NO_DEX", "没有找到任何 dex（APK 里没有 classes*.dex）", "path", path)
+            for ((entryName, rawBytes) in slots) {
+                dexCount++
+                val slot = DexSlot(entryName, rawBytes)
                 val temp = File.createTempFile("rename_in_", ".dex")
                 try {
                     temp.writeBytes(slot.bytes)
@@ -116,6 +121,7 @@ object DexRenameTool {
                 .put("action", action)
                 .put("dryRun", dryRun)
                 .put("totalRenamed", total)
+                .put("dexCount", dexCount)
                 .put("dexes", perDex)
                 .put("changedDex", changed)
             if (total == 0) {
@@ -154,7 +160,11 @@ object DexRenameTool {
                 }
                 ZipRepack.replaceAtomically(temp, target)
                 temp.delete()
-                ok(payload.put("path", target.absolutePath).put("backup", backup.absolutePath))
+                ok(
+                    payload.put("path", target.absolutePath)
+                        .put("backup", backup.absolutePath)
+                        .put("signature", "META-INF 签名已失效：装到设备前必须用 taffy_apk_sign 重签（v1/v2/v3）")
+                )
             } catch (e: Throwable) {
                 temp.delete()
                 err("APK_WRITE_FAILED", "写回 APK 失败: ${e.message}", "path", target.absolutePath)
@@ -164,14 +174,15 @@ object DexRenameTool {
 
     private class DexSlot(val entryName: String?, val bytes: ByteArray)
 
-    private fun readApkDexes(apk: File): List<DexSlot> {
-        val out = ArrayList<DexSlot>()
+    /** 按顺序读出 APK 里的 classesN.dex（调用方逐个消费后即可释放，不长期持有全部）。 */
+    private fun apkDexEntries(apk: File): List<Pair<String?, ByteArray>> {
+        val out = ArrayList<Pair<String?, ByteArray>>()
         ZipFile(apk).use { zf ->
             val entries = zf.entries().toList()
                 .filter { it.name.matches(Regex("classes\\d*\\.dex")) }
                 .sortedBy { it.name }
             for (entry in entries) {
-                out += DexSlot(entry.name, zf.getInputStream(entry).use { it.readBytes() })
+                out += entry.name to zf.getInputStream(entry).use { it.readBytes() }
             }
         }
         return out

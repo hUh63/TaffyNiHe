@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -229,16 +231,54 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                     )
                 }
             } else {
-                val filtered = classes.filter { it.contains(query.trim(), ignoreCase = true) }
+                // 包树：dex 是「包 → 类」的两级结构，平铺一列几万个类名只能靠搜索找。
+                // 按包分组后可折叠，搜索时自动展开命中项（否则命中被折叠的包里也看不到）。
+                val q = query.trim()
+                val groups = remember(classes, q) {
+                    val filtered = if (q.isEmpty()) classes else classes.filter { it.contains(q, ignoreCase = true) }
+                    filtered.groupBy { cls ->
+                        val body = cls.removePrefix("L").removeSuffix(";")
+                        val idx = body.lastIndexOf('/')
+                        if (idx < 0) "" else body.substring(0, idx).replace('/', '.')
+                    }.toSortedMap()
+                }
+                var collapsed by remember { mutableStateOf(emptySet<String>()) }
                 LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(filtered, key = { it }) { c ->
-                        GlassGroup {
-                            DataRow(
-                                title = c.substringAfterLast('/').removePrefix("L").removeSuffix(";").ifBlank { c },
-                                subtitle = c,
-                                onClick = { openClass(c) },
-                                onLongClick = { openClass(c) },
-                            )
+                    groups.forEach { (pkg, list) ->
+                        val isCollapsed = q.isEmpty() && pkg in collapsed
+                        item(key = "pkg:" + pkg) {
+                            GlassGroup {
+                                DataRow(
+                                    title = pkg.ifBlank { if (zh) "(默认包)" else "(default)" },
+                                    subtitle = if (zh) "${list.size} 个类" else "${list.size} classes",
+                                    leading = {
+                                        Icon(
+                                            if (isCollapsed) Icons.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
+                                            null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                    },
+                                    trailingText = if (isCollapsed) (if (zh) "展开" else "open") else (if (zh) "折叠" else "close"),
+                                    onClick = {
+                                        collapsed = if (isCollapsed) collapsed - pkg else collapsed + pkg
+                                    },
+                                )
+                            }
+                        }
+                        if (!isCollapsed) {
+                            items(list, key = { "cls:" + it }) { c ->
+                                Column(Modifier.padding(start = 14.dp)) {
+                                    GlassGroup {
+                                        DataRow(
+                                            title = c.substringAfterLast('/').removePrefix("L").removeSuffix(";").ifBlank { c },
+                                            subtitle = c,
+                                            onClick = { openClass(c) },
+                                            onLongClick = { openClass(c) },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

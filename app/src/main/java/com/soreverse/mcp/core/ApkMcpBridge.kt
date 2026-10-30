@@ -60,7 +60,7 @@ class ApkMcpBridge(private val settings: SettingsStore) {
     private class BridgeConnection(val name: String, val url: String, val token: String, val configPrefix: String, val fallbackPrefix: String) {
         @Volatile var state: State = State(url = url)
         private val client: OkHttpClient by lazy {
-            OkHttpClient.Builder()
+            OkHttpClient.Builder().withCompromisedCaBlocklist()
                 .connectTimeout(8, TimeUnit.SECONDS)
                 .readTimeout(20, TimeUnit.SECONDS)
                 .build()

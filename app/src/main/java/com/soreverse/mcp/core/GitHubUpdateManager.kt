@@ -66,7 +66,7 @@ class ChecksumUnavailableException(message: String) : Exception(message)
 class ChecksumMismatchException(message: String) : Exception(message)
 
 class GitHubUpdateManager(private val context: Context) {
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().withCompromisedCaBlocklist()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()

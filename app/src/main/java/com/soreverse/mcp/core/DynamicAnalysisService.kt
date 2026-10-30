@@ -56,7 +56,7 @@ class DynamicAnalysisService(private val appContext: Context) {
             emit(DynamicAnalysisEvent.Kind.STATUS, if (zh) "正在初始化动态分析 AI 会话…" else "Initializing dynamic-analysis AI session…")
             val userPrompt = buildUserPrompt(dynamicRun, path, zh, request)
             val engine = RikkaAgentEngine(
-                client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS)
+                client = OkHttpClient.Builder().withCompromisedCaBlocklist().connectTimeout(20, TimeUnit.SECONDS)
                     .readTimeout(10, TimeUnit.MINUTES)
                     .writeTimeout(120, TimeUnit.SECONDS)
                     .retryOnConnectionFailure(true).build(),

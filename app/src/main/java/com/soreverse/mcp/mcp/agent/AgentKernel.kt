@@ -1,5 +1,6 @@
 package com.soreverse.mcp.mcp.agent
 
+import com.soreverse.mcp.core.withCompromisedCaBlocklist
 import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.core.RikkaAgentEngine
 import com.soreverse.mcp.core.RikkaTool
@@ -91,7 +92,7 @@ internal object AgentKernel {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun client(): OkHttpClient = OkHttpClient.Builder()
+    fun client(): OkHttpClient = OkHttpClient.Builder().withCompromisedCaBlocklist()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.MINUTES)
         .writeTimeout(120, TimeUnit.SECONDS)

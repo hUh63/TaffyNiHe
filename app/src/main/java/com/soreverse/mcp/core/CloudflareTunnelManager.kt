@@ -55,7 +55,7 @@ class CloudflareTunnelManager(private val context: Context, private val settings
         val pid: Int = 0,
     )
 
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = OkHttpClient.Builder().withCompromisedCaBlocklist()
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)

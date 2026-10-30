@@ -590,14 +590,36 @@ private fun JSONObject.int(name: String, default: Int): Int = if (has(name)) opt
 
 private fun JSONObject.bool(name: String, default: Boolean): Boolean = if (has(name)) optBoolean(name, default) else default
 
-/** 从 frida_open 的参数对象里挑出 HostSpawnOptions 支持的四个字段（保持声明顺序）。 */
+/**
+ * 从 frida_open 的参数对象里挑出 HostSpawnOptions 的字段（保持声明顺序）。
+ *
+ * 覆盖完整的六个字段：argv / envp / env / cwd / stdio / aux。
+ * 前五个是 frida-python `Device.spawn()` 的同名参数；aux 是 `a{sv}` 字典，
+ * frida 用它携带调用方自己的不透明数据（值支持字符串、整数、字符串数组）。
+ */
 private fun buildSpawnOptions(params: JSONObject): List<Pair<String, SpawnOpt>> {
     val out = ArrayList<Pair<String, SpawnOpt>>()
     params.optJSONArray("argv")?.let { out += "argv" to SpawnOpt.StrArray(it.toStringList()) }
     params.optJSONArray("envp")?.let { out += "envp" to SpawnOpt.StrArray(it.toStringList()) }
+    params.optJSONArray("env")?.let { out += "env" to SpawnOpt.StrArray(it.toStringList()) }
     val cwd = params.str("cwd")
     if (cwd.isNotBlank()) out += "cwd" to SpawnOpt.Str(cwd)
     if (params.has("stdio")) out += "stdio" to SpawnOpt.U32(params.optInt("stdio", 0))
+    params.optJSONObject("aux")?.let { aux ->
+        val dict = LinkedHashMap<String, SpawnOpt>()
+        for (key in aux.keys()) {
+            when (val v = aux.opt(key)) {
+                is String -> dict[key] = SpawnOpt.Str(v)
+                is Int -> dict[key] = SpawnOpt.U32(v)
+                is Long -> dict[key] = SpawnOpt.U32(v.toInt())
+                is Boolean -> dict[key] = SpawnOpt.U32(if (v) 1 else 0)
+                is JSONArray -> dict[key] = SpawnOpt.StrArray(v.toStringList())
+                is JSONObject -> dict[key] = SpawnOpt.Str(v.toString())  // aux 只做一层，嵌套对象按字符串带
+                else -> {}
+            }
+        }
+        if (dict.isNotEmpty()) out += "aux" to SpawnOpt.Dict(dict)
+    }
     return out
 }
 

@@ -59,7 +59,7 @@ class DeepAnalysisService(private val appContext: Context) {
 
     private fun fetchModelCatalog(settings: SettingsStore): List<String> {
         if (settings.aiProvider == "gemini") return fetchGeminiModels(settings)
-        val client = OkHttpClient.Builder()
+        val client = OkHttpClient.Builder().withCompromisedCaBlocklist()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
@@ -104,7 +104,7 @@ class DeepAnalysisService(private val appContext: Context) {
 
     // Gemini 模型目录：GET /v1beta/models?pageSize=200（header x-goog-api-key）
     private fun fetchGeminiModels(settings: SettingsStore): List<String> {
-        val client = OkHttpClient.Builder()
+        val client = OkHttpClient.Builder().withCompromisedCaBlocklist()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
@@ -232,7 +232,7 @@ class DeepAnalysisService(private val appContext: Context) {
             emit(DeepAnalysisEvent.Kind.STATUS, if (zh) "正在初始化 AI 会话…" else "Initializing AI session…")
             val userPrompt = buildUserPrompt(path, zh, request)
             val engine = RikkaAgentEngine(
-                client = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(10, TimeUnit.MINUTES).writeTimeout(120, TimeUnit.SECONDS).retryOnConnectionFailure(true).build(),
+                client = OkHttpClient.Builder().withCompromisedCaBlocklist().connectTimeout(20, TimeUnit.SECONDS).readTimeout(10, TimeUnit.MINUTES).writeTimeout(120, TimeUnit.SECONDS).retryOnConnectionFailure(true).build(),
                 provider = settings.aiProvider,
                 endpoint = settings.aiEndpoint,
                 apiKey = settings.aiApiKey,

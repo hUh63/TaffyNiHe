@@ -62,7 +62,7 @@ object BinaryManager {
         md.digest().joinToString("") { "%02x".format(it) }
     }.getOrNull()
 
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().withCompromisedCaBlocklist()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .build()

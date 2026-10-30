@@ -71,6 +71,27 @@ class McpHttpServer(private val context: Context, private val port: Int, private
          * 1.5M 字符大致对应一条 stdio 行的安全上限量级，也留出了客户端解析的内存余量。
          */
         const val DEFAULT_RESPONSE_CAP = 1_500_000
+
+        /**
+         * 协议元数据响应（tools/list 等）的独立字符上限。
+         *
+         * `toolResultMaxChars` 是「工具结果」的语义，用户把它调到 400k 是为了别让一条
+         * 文件内容撑爆客户端；但 tools/list 是协议元数据，它的体积随工具数量线性增长
+         * （当前目录已达数百 KB），套用同一个上限会把整个目录判超限。旧行为是落盘后回一条
+         * content 摘要——那不是合法的 tools/list 响应（没有 tools 数组），严格客户端会当成
+         * 「工具目录为空 / 探测失败」。元数据因此单列一个额度，且超限时也只裁剪、不换形状。
+         */
+        const val META_RESPONSE_CAP = 4_000_000
+
+        /** 走元数据额度的 JSON-RPC 方法：它们的响应是协议结构，不能被工具结果闸门改写。 */
+        private val META_METHODS = setOf(
+            "initialize",
+            "server/discover",
+            "tools/list",
+            "resources/list",
+            "prompts/list",
+            "ping",
+        )
     }
     override val coroutineContext = SupervisorJob() + Dispatchers.Default
     private val startedAt = System.currentTimeMillis()
@@ -361,7 +382,8 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         val now = System.currentTimeMillis()
         sessions.entries.removeIf { now - it.value > SESSION_TIMEOUT_MS }
 
-        val response = dispatchBody(body)
+        val methods = linkedSetOf<String>()
+        val response = dispatchBody(body, methods)
         // Notifications produce no response body: reply 202 Accepted with an
         // empty body per the MCP streamable-HTTP spec. Sending a JSON-RPC
         // response (or an id=null result) for a notification breaks strict
@@ -374,7 +396,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         // 传输层兜底: 工具级落盘（wrapToolResult）默认关闭，某些工具仍可能直接把几 MB 塞进
         // 单条响应。这里的检查覆盖所有通道，保证「一条响应」永远不超过上限——超了就把整条
         // 响应落盘，只回一条结构合法的 JSON-RPC 摘要，客户端不会因为解析超大行而崩。
-        val capped = capResponseSize(response)
+        val capped = capResponseSize(response, methods)
         if (accept.contains("text/event-stream")) {
             call.respondText("event: message\ndata: $capped\n\n", ContentType.Text.EventStream)
         } else {
@@ -389,11 +411,21 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * 这个量级对应「一条 stdio 行」在多数客户端上的安全上限，也是本 App 传输层能保证
      * 客户端不 OOM 的余量。
      */
-    private fun capResponseSize(response: Any): String {
+    private fun capResponseSize(response: Any, methods: Set<String> = emptySet()): String {
         val text = response.toString()
+        // 请求方法全部属于元数据类别时走独立额度：tools/list 的响应形状由协议规定，
+        // 不能被「工具结果」的阈值改写（见 META_RESPONSE_CAP 的说明）。
+        val metaOnly = methods.isNotEmpty() && methods.all { it in META_METHODS }
         val configured = SettingsStore(context).toolResultMaxChars
-        val cap = if (configured > 0) maxOf(configured, 400_000) else DEFAULT_RESPONSE_CAP
+        val cap = if (metaOnly) {
+            META_RESPONSE_CAP
+        } else {
+            if (configured > 0) maxOf(configured, 400_000) else DEFAULT_RESPONSE_CAP
+        }
         if (text.length <= cap) return text
+
+        // 元数据超限：绝不能用 content 摘要替换（客户端会当成空目录），改为按协议形状裁剪。
+        if (metaOnly) return shrinkMetaResponse(response, cap)
 
         val savedPath = runCatching { spillToolResult(text) }.getOrNull()
         val note = "Response of " + text.length + " chars exceeded the " + cap +
@@ -564,7 +596,7 @@ $historyRows
         return "event: endpoint\ndata: $endpoint\n\n: Taffy ready\n\n"
     }
 
-    private fun dispatchBody(body: String): Any {
+    private fun dispatchBody(body: String, methods: MutableSet<String>): Any {
         val trimmed = body.trim()
         if (trimmed.isEmpty()) return jsonRpcError(JSONObject.NULL, -32700, "Parse error")
         if (trimmed.startsWith("[")) {
@@ -577,7 +609,7 @@ $historyRows
             if (arr.length() == 0) return jsonRpcError(JSONObject.NULL, -32600, "Invalid Request")
             for (i in 0 until arr.length()) {
                 val req = arr.optJSONObject(i)
-                val res = if (req == null) jsonRpcError(JSONObject.NULL, -32600, "Invalid Request") else dispatch(req)
+                val res = if (req == null) jsonRpcError(JSONObject.NULL, -32600, "Invalid Request") else dispatch(req, methods)
                 // Skip notifications (NoResponse) — a batch of only notifications
                 // yields an empty array, which the caller turns into 202 No body.
                 if (res !== NoResponse) out.put(res)
@@ -589,10 +621,10 @@ $historyRows
         } catch (_: JSONException) {
             return jsonRpcError(JSONObject.NULL, -32700, "Parse error")
         }
-        return dispatch(req)
+        return dispatch(req, methods)
     }
 
-    private fun dispatch(req: JSONObject): JSONObject {
+    private fun dispatch(req: JSONObject, methods: MutableSet<String>? = null): JSONObject {
         val id = req.opt("id")
         val method = req.optString("method")
         if (!req.has("jsonrpc") || req.optString("jsonrpc") != "2.0" || method.isBlank()) {
@@ -604,6 +636,7 @@ $historyRows
         // (previously an id=null result) makes strict clients such as rmcp
         // reject the stream with an "initialized notification" protocol error.
         // We signal "no response" with NoResponse and let the caller answer 202.
+        methods?.add(method)
         val isNotification = !req.has("id") || method.startsWith("notifications/")
         if (isNotification) return NoResponse
         val params = req.optJSONObject("params") ?: JSONObject()
@@ -954,6 +987,88 @@ $historyRows
         return JSONObject()
             .put("isError", (!payload.optBoolean("ok", true)) || payload.has("error"))
             .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", rendered)))
+    }
+
+    /**
+     * 把超限的元数据响应裁剪到 [cap] 字符以内，同时保持协议形状。
+     *
+     * 对 `tools/list` 只减工具条数（保留 tools 数组与 _meta），并写明 truncated/returnedCount/
+     * totalCatalogCount，客户端仍能拿到一个可用（但被说明过）的目录；其余元数据方法退化为
+     * 一个结构合法的空结果，而不是丢一个 content 文案过去。
+     */
+    private fun shrinkMetaResponse(response: Any, cap: Int): String {
+        val arr = response as? JSONArray
+        if (arr != null) {
+            // batch：逐个裁剪，保持数组形状
+            val out = JSONArray()
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                out.put(shrinkOneMeta(item, cap / maxOf(arr.length(), 1)))
+            }
+            val text = out.toString()
+            return if (text.length <= cap) text else JSONObject()
+                .put("jsonrpc", "2.0")
+                .put("id", JSONObject.NULL)
+                .put("error", JSONObject().put("code", -32603)
+                    .put("message", "metadata response too large after shrink ($cap chars)"))
+                .toString()
+        }
+        val obj = response as? JSONObject ?: return response.toString().take(cap)
+        return shrinkOneMeta(obj, cap).toString()
+    }
+
+    private fun shrinkOneMeta(obj: JSONObject, cap: Int): JSONObject {
+        val result = obj.optJSONObject("result")
+            ?: return JSONObject().put("jsonrpc", "2.0").put("id", obj.opt("id") ?: JSONObject.NULL)
+                .put("error", JSONObject().put("code", -32603).put("message", "metadata response missing result"))
+        val tools = result.optJSONArray("tools")
+        if (tools == null) {
+            // 非 tools/list 的元数据（initialize / server.discover ...）：保留骨架，剥掉大字段
+            val slim = JSONObject()
+            for (key in result.keys()) {
+                val value = result.opt(key)
+                val rendered = value?.toString().orEmpty()
+                if (rendered.length > 20_000) continue
+                slim.put(key, value)
+            }
+            return JSONObject().put("jsonrpc", "2.0").put("id", obj.opt("id") ?: JSONObject.NULL).put("result", slim)
+        }
+        // tools/list：按条数二分裁剪，直到落到额度内
+        val total = tools.length()
+        var keep = total
+        fun build(n: Int): JSONObject {
+            val kept = JSONArray()
+            for (i in 0 until n) tools.optJSONObject(i)?.let { kept.put(it) }
+            // 逐 key 浅拷贝 _meta：不用 JSONObject(String) 构造，避免 org.json 实现差异
+            val meta = JSONObject()
+            result.optJSONObject("_meta")?.let { src ->
+                for (key in src.keys()) meta.put(key, src.opt(key))
+            }
+            meta.put("truncated", n < total)
+            meta.put("returnedCount", n)
+            meta.put("totalCatalogCount", total)
+            if (n < total) {
+                meta.put(
+                    "hint",
+                    "响应超出元数据额度，tools/list 只返回前 " + n + " / " + total +
+                        " 个工具。用 taffy_meta_info action=tools 或 action=describe 按名取单个工具的 schema。"
+                )
+            }
+            val slim = JSONObject()
+            for (key in result.keys()) {
+                if (key == "tools" || key == "_meta") continue
+                slim.put(key, result.opt(key))
+            }
+            slim.put("tools", kept)
+            slim.put("_meta", meta)
+            return JSONObject().put("jsonrpc", "2.0").put("id", obj.opt("id") ?: JSONObject.NULL).put("result", slim)
+        }
+        var out = build(keep)
+        while (out.toString().length > cap && keep > 8) {
+            keep = maxOf(8, keep / 2)
+            out = build(keep)
+        }
+        return out
     }
 
     /** 把超大的工具结果落盘，返回绝对路径（保留最近 20 份，避免无限增长）。 */

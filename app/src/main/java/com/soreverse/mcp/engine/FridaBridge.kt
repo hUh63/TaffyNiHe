@@ -1515,8 +1515,68 @@ internal sealed class SpawnOpt {
     /** `u`：stdio 等 */
     internal data class U32(val value: Int) : SpawnOpt()
 
-    /** `as`：argv / envp */
+    /** `as`：argv / envp / env */
     internal data class StrArray(val value: List<String>) : SpawnOpt()
+
+    /**
+     * `a{sv}`：aux（frida 用来在 spawn 时携带不透明数据）。
+     *
+     * frida 的 HostSpawnOptions 一共 6 个字段（argv / envp / env / cwd / stdio / aux），
+     * 前五个都是 `as` / `s` / `u`，只有 aux 是嵌套字典——值本身又是 variant，
+     * 所以这一层要递归写。
+     */
+    internal data class Dict(val value: Map<String, SpawnOpt>) : SpawnOpt()
+}
+
+/**
+ * 写一个 GVariant `v`（variant）：类型签名(g) + 变长 framing + 值。
+ *
+ * 三条规则各不相同，都是与 GLib 逐字节对账得出的：
+ *  - `s`：framing = 字符串长度（**不含** NUL）
+ *  - `as`：framing = 元素区总字节数（**含**各元素 NUL）
+ *  - `u`：**没有** framing 槽（定长），多写 4 个 0 会让后续 dict entry 错位
+ *  - `a{sv}`：framing = 数组数据字节数，且数组数据起点要 8 对齐
+ */
+internal fun writeSpawnVariant(w: Gvariant.W, value: SpawnOpt) {
+    when (value) {
+        is SpawnOpt.Str -> {
+            w.g("s")
+            w.pad(4)
+            val raw = value.value.toByteArray(Charsets.UTF_8)
+            w.u32(raw.size)
+            w.b.write(raw)
+            w.raw(0)
+        }
+        is SpawnOpt.U32 -> {
+            // 定长类型**不写** framing 槽：值直接跟在签名之后（对齐 4）。
+            w.g("u")
+            w.pad(4)
+            w.i32(value.value)
+        }
+        is SpawnOpt.StrArray -> {
+            w.g("as")
+            w.pad(4)
+            val elems = Gvariant.W()
+            for (item in value.value) elems.str(item)
+            val eb = elems.b.toByteArray()
+            w.u32(eb.size)
+            w.b.write(eb)
+        }
+        is SpawnOpt.Dict -> {
+            w.g("a{sv}")
+            w.pad(4)
+            val items = Gvariant.W()
+            for ((key, item) in value.value) {
+                items.pad(8)            // dict entry 对齐 8
+                items.str(key)
+                writeSpawnVariant(items, item)
+            }
+            val ib = items.b.toByteArray()
+            w.u32(ib.size)              // 数组数据字节数（framing）
+            w.pad(8)                    // 数组数据起点对齐 8（空数组也要）
+            w.b.write(ib)
+        }
+    }
 }
 
 /**
@@ -1538,38 +1598,11 @@ internal fun spawnBody(program: String, options: List<Pair<String, SpawnOpt>> = 
     for ((key, value) in options) {
         arr.pad(8)                 // dict entry 对齐 8
         arr.str(key)               // key 是 s
-        when (value) {
-            is SpawnOpt.Str -> {
-                arr.g("s")
-                arr.pad(4)
-                val raw = value.value.toByteArray(Charsets.UTF_8)
-                arr.u32(raw.size)      // 字符串的 framing = 长度（不含 NUL）
-                arr.b.write(raw)
-                arr.raw(0)             // NUL terminator
-            }
-            is SpawnOpt.U32 -> {
-                // 定长类型**不写** framing 槽：值直接跟在签名之后（对齐 4）。
-                // 多写 4 个 0 会让后面的 dict entry 整体错位，frida 侧解出来就是乱的。
-                arr.g("u")
-                arr.pad(4)
-                arr.i32(value.value)
-            }
-            is SpawnOpt.StrArray -> {
-                arr.g("as")
-                arr.pad(4)
-                val elems = Gvariant.W()
-                for (item in value.value) elems.str(item)
-                val eb = elems.b.toByteArray()
-                arr.u32(eb.size)       // as 的 framing = 元素区总字节数（含各元素 NUL）
-                arr.b.write(eb)
-            }
-        }
+        writeSpawnVariant(arr, value)
     }
     val arrBytes = arr.b.toByteArray()
-
     val w = Gvariant.W()
-    w.str(program)                 // s program
-    w.pad(4)
+    w.str(program)
     w.u32(arrBytes.size)           // a{sv} framing
     w.pad(8)                       // 数组数据起点对齐 8（空数组也要，否则总长会短 4 字节）
     w.b.write(arrBytes)

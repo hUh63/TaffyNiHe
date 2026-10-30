@@ -171,6 +171,94 @@ class FridaSpawnTest {
         )
     }
 
+    /**
+     * HostSpawnOptions 的完整字段集（argv / envp / env / cwd / stdio / aux）。
+     *
+     * env 与 envp 的区别在 frida 侧：envp 是**替换**整个环境，env 是**追加**；
+     * aux 是唯一的嵌套结构（`a{sv}`），它的 variant 值还要再套一层 framing，
+     * 所以单独钉四个 case（字符串 / 整数 / 字符串数组 / 空字典）加一个六字段全发。
+     */
+    @Test
+    fun spawnOptionsCoverAllSixHostFields() {
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 18 00 00 00 03 00 00 00 65 6e " +
+            "76 00 02 61 73 00 08 00 00 00 03 00 00 00 41 3d 31 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf("env" to SpawnOpt.StrArray(listOf("A=1"))),
+                ),
+            "env",
+        )
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 2a 00 00 00 03 00 00 00 61 75 " +
+            "78 00 05 61 7b 73 76 7d 00 00 12 00 00 00 00 00 00 00 01 00 00 00 " +
+            "6b 00 01 73 00 00 00 00 01 00 00 00 76 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf("aux" to SpawnOpt.Dict(mapOf("k" to SpawnOpt.Str("v")))),
+                ),
+            "aux{k:v}",
+        )
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 28 00 00 00 03 00 00 00 61 75 " +
+            "78 00 05 61 7b 73 76 7d 00 00 10 00 00 00 00 00 00 00 01 00 00 00 " +
+            "6e 00 01 75 00 00 00 00 07 00 00 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf("aux" to SpawnOpt.Dict(mapOf("n" to SpawnOpt.U32(7)))),
+                ),
+            "aux{n:7}",
+        )
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 3a 00 00 00 03 00 00 00 61 75 " +
+            "78 00 05 61 7b 73 76 7d 00 00 22 00 00 00 00 00 00 00 04 00 00 00 " +
+            "6c 69 73 74 00 02 61 73 00 00 00 00 0e 00 00 00 01 00 00 00 61 00 " +
+            "00 00 01 00 00 00 62 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf(
+                        "aux" to SpawnOpt.Dict(
+                            mapOf("list" to SpawnOpt.StrArray(listOf("a", "b")))
+                        )
+                    ),
+                ),
+            "aux{list:[a,b]}",
+        )
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 18 00 00 00 03 00 00 00 61 75 " +
+            "78 00 05 61 7b 73 76 7d 00 00 00 00 00 00 00 00 00 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf("aux" to SpawnOpt.Dict(emptyMap())),
+                ),
+            "aux{}",
+        )
+        assertBytes(
+            "05 00 00 00 63 6f 6d 2e 61 00 00 00 c2 00 00 00 04 00 00 00 61 72 " +
+            "67 76 00 02 61 73 00 00 00 00 10 00 00 00 03 00 00 00 61 70 70 00 " +
+            "03 00 00 00 2d 2d 78 00 00 00 00 00 04 00 00 00 65 6e 76 70 00 02 " +
+            "61 73 00 00 00 00 0f 00 00 00 0a 00 00 00 50 41 54 48 3d 2f 73 62 " +
+            "69 6e 00 00 00 00 00 00 03 00 00 00 65 6e 76 00 02 61 73 00 08 00 " +
+            "00 00 03 00 00 00 41 3d 31 00 03 00 00 00 63 77 64 00 01 73 00 00 " +
+            "04 00 00 00 2f 74 6d 70 00 00 00 00 05 00 00 00 73 74 64 69 6f 00 " +
+            "01 75 00 00 00 00 00 00 00 00 00 00 00 00 03 00 00 00 61 75 78 00 " +
+            "05 61 7b 73 76 7d 00 00 12 00 00 00 00 00 00 00 01 00 00 00 6b 00 " +
+            "01 73 00 00 00 00 01 00 00 00 76 00 ",
+            spawnBody(
+                    "com.a",
+                    listOf(
+                        "argv" to SpawnOpt.StrArray(listOf("app", "--x")),
+                        "envp" to SpawnOpt.StrArray(listOf("PATH=/sbin")),
+                        "env" to SpawnOpt.StrArray(listOf("A=1")),
+                        "cwd" to SpawnOpt.Str("/tmp"),
+                        "stdio" to SpawnOpt.U32(0),
+                        "aux" to SpawnOpt.Dict(mapOf("k" to SpawnOpt.Str("v"))),
+                    ),
+                ),
+            "all6",
+        )
+    }
+
     @Test
     fun bodyUintReadsLittleEndianPid() {
         // 1337 = 0x539

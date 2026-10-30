@@ -7,7 +7,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 object PublicReachability {
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().withCompromisedCaBlocklist()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .build()

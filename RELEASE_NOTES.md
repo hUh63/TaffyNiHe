@@ -1,3 +1,78 @@
+## 塔菲逆核 v1.5.22 —— 内置 cloudflared 跟进 · 元数据额度 · 泄漏 CA 拉黑
+
+这一版的一半内容来自「检查上游 + 检查内置二进制」时发现的真问题：一个让工具目录凭空消失，一个让服务假装在跑。
+
+---
+
+### 一、内置 cloudflared 2026.9.1 → 2026.10.6
+
+塔菲内置的 cloudflared 停在 2026.9.1，最新是 2026.10.6（10-29 发布），跨 7 个版本、65 个提交。值得跟的几条：
+
+- **Quick Tunnel 鉴权链路整体改造**（TUN-10800 / 10801 / 10803）：broker JWKS 缓存、assertion 校验、callback 授权、recipient policy。塔菲的隧道正是走 quick tunnel，这条直接影响隧道侧。
+- `chore: Limit response size`、`Protect headers before flush`、`Avoid logging request body` —— 一批加固。
+- **Go 升到 1.27.2 修 GO-2026-6600**，另有 `VULN-176088`（metrics server 的 debug 端点收敛）。
+- `TUN-10994`: 修复「大于缓冲区末尾的消息被截断」，`TUN-10808`: 请求体关闭时取消 QUIC 读。
+
+> 取法说明：GitHub release 的 37MB 二进制在这个环境里被限速截断（多次尝试只拿到几 MB），改走 **Cloudflare 官方 apt 仓库**取 arm64 deb（18MB），解包后 `sha256` 与仓库 `Packages` 元数据逐字一致，再校验 ELF 是 aarch64、静态链接、且二进制内含 `2026.10.6`。
+
+**副作用提醒**：quick tunnel 的鉴权改了实现，理论上前台行为（`--url` 起隧道、返回 `*.trycloudflare.com`）不变，但这条链路没法在这里跑真机验证。更新后第一次起隧道时留意一下返回的地址是否还能访问。
+
+### 二、真 bug：tools/list 会被「工具结果上限」砍掉
+
+`toolResultMaxChars` 是给**工具结果**用的（用户调小它是为了别让一条文件内容撑爆客户端）。但传输层的落盘闸门对**所有**响应生效，包括 `tools/list`。
+
+工具目录随工具数量线性增长，现在已是数百 KB 量级。一旦把结果上限调到 400k，`tools/list` 就会判超限 → 落盘 → 回一条 `content: [{text: "Response of N chars exceeded..."}]`。那不是合法的 tools/list 响应（**没有 tools 数组**），严格客户端直接当成「工具目录为空 / 探测失败」。
+
+现在：
+
+- 协议元数据（`tools/list` / `initialize` / `server/discover` / `resources/list` / `prompts/list` / `ping`）走**独立额度**（4M 字符），不再读 `toolResultMaxChars`；
+- 万一真的超了，也**不换形状** —— `tools/list` 按条数裁剪，保留 `tools` 数组，并在 `_meta` 里写明 `truncated` / `returnedCount` / `totalCatalogCount` 和「用 `taffy_meta_info action=tools` 按名取」的提示；
+- 工具结果（`tools/call`）仍按用户配的上限落盘，语义没变。
+
+### 三、安全：拉黑 CVE-2026-111943 泄漏的中间 CA
+
+eMudhra 2025-04-30 生成的一批中间 CA，其 P-384 私钥熵不足 256 位，2026-10-17 起可被还原。持有者能给任意主机名签证书，而设备默认信任链仍接受 —— 这条对塔菲是实打实的攻击面：quick tunnel 注册、隧道公网可达性探测（被劫持时会给出「可访问」的假绿灯）、GitHub 更新与 APK 校验、以及 AI 引擎的全部出网请求。
+
+实现口径刻意保守：**包装平台 TrustManager**，先原样跑平台校验，再扫链拒绝 —— 只减不加信任，不改 hostname 校验、不裁剪锚点、不做 pinning，正常证书零影响。按**公钥**（SPKI SHA-256）匹配而不是按证书 DER，因为同一把密钥还有 AAA 根签发的交叉签名副本，只认证书会被绕过。
+
+接入点：`ApkMcpBridge` / `BinaryManager` / `CloudflareTunnelManager` / `DeepAnalysisService`×3 / `DynamicAnalysisService` / `GitHubUpdateManager` / `PublicReachability` / `AgentKernel`，共 9 个出网 OkHttp 客户端。
+
+单测用真实证书材料钉住（含 AAA 交叉签名副本与那份 875 字节的重编码版本），并断言「AAA 根自己不被误杀」。
+
+### 四、Frida spawn：`HostSpawnOptions` 六个字段补齐
+
+上一版只做了 argv / envp / cwd / stdio。这一版补上 **env**（追加环境变量，与 envp 的「替换」区分）和 **aux**（`a{sv}`，值支持字符串 / 整数 / 字符串数组）。
+
+`aux` 是唯一的嵌套结构，它的 variant 值还要再套一层 framing，所以单独用 GLib 生成 4 个 case（字符串 / 整数 / 字符串数组 / 空字典）+ 一个六字段全发（210 字节）作为 golden，全部逐字节对账后钉进单测。
+
+### 五、真 bug：服务在跑，但端口没人在听
+
+`McpHttpServer.start()` 用的是 ktor 的 `start(wait = false)` —— bind 交到后台协程，**失败时这里收不到异常**。于是端口被占用（或绑定地址非法）时：前台服务照常进前台、通知写「MCP 运行中」、`isRunning()` 返回 true，而端口根本没监听。用户侧只看到「客户端连不上 / 连接被拒绝」，完全无从判断。
+
+现在启动后显式探测一次（2s 内轮询），失败就回滚 engine 并抛出可读异常：
+
+- 端口被占用 →「端口 8799 已被其他进程占用（绑定地址 0.0.0.0），MCP 服务未启动；换一个端口或关掉占用方后重试」
+- 未就绪 →「MCP 服务未能在 0.0.0.0:8799 上开始监听（2s 内未就绪）」
+
+服务侧接住这个异常后停掉自己，并留一条**可滑走**的失败通知（不是那种 ongoing 的、停服务后还赖着不走的），把原因直接写出来。
+
+---
+
+### 上游核对结论（这轮没抄的部分）
+
+- **SOMCP v1.0.23 的 30 个只读审计工具**（T1 批次）：塔菲**已经全有**且版本更大 —— `ElfAudit` / `CryptoFingerprint` / `JniMangle` / `NativeProfile` / `ApkSigTools` / `PatchAudit` / `StringCensus` 七个模块都在，逐文件比 SOMCP 的对应文件还多约 10%。不需要搬。
+- **SOMCP v1.0.23 的「最新版仍提示有更新」修复**：塔菲不中招。那个 bug 的成因是把发布时刻嵌进 APK 再与 release 的 `published_at` 比，而发布在构建之后 → `published_at` 恒大于基线。塔菲用的是「同 tag 被重发才二次提醒」，没有构建期时钟耦合。
+- **bore**：最新 tag 仍是 v0.6.0（2025-06-09），main 上只多了一个服务端依赖的越界修复，客户端协议没变。塔菲的 Kotlin 客户端已对齐 v0.6.0 的半关闭转发。
+- **太墟 v1.6.0 的「端口孤儿回收 / 常驻通知」**：对应能力已按上面的第五节落地；「网关服务按实例管理」在塔菲是单实例模型，不适用。
+
+### 已知未做
+
+- spawn 真机端到端、隧道更新后的真机连通性 — 都没有设备，只有字节级与编译级证据。
+- `aux` 只支持一层（值是字符串 / 整数 / 字符串数组）；嵌套对象按字符串携带。
+- TOFU 之外没有 pinning：CVE 拉黑只看公钥哈希，若上游日后又泄漏新的 CA，需要补表。
+
+---
+
 ## 塔菲逆核 v1.5.21 —— spawn 的 options 编到位，GVariant 对齐修正
 
 上一版留的「HostSpawnOptions 只传空字典」，这次做掉了。过程中揪出**一个会让 spawn 直接失败的真 bug**。

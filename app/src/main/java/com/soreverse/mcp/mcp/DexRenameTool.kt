@@ -11,6 +11,7 @@ import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import com.soreverse.mcp.engine.DexRenameApi
+import com.soreverse.mcp.engine.DexStringCascade
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -62,6 +63,7 @@ object DexRenameTool {
                 "index" int "参数下标（从 0 起，不含 this）"
                 "register" int "局部变量寄存器号"
                 "output" str "输出路径（默认原地写回，并留 .bak.apk / .bak.dex 备份）"
+                "renameStrings" bool "同时把 const-string 里与旧类名完全相等的字符串改掉（默认 false；只匹配 Lcom/foo/Bar; 与 com.foo.Bar 两种写法，不做子串替换）"
                 "dryRun" bool "只统计命中数，不写盘（默认 false）"
             })
         }
@@ -75,6 +77,7 @@ object DexRenameTool {
             val newName = args.str("newName")
             if (newName.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 newName", "newName", "")
             val dryRun = args.optBoolean("dryRun", false)
+            val renameStrings = args.optBoolean("renameStrings", false)
             val isApk = file.name.endsWith(".apk", true) || file.name.endsWith(".zip", true)
 
             val slots = if (isApk) readApkDexes(file) else listOf(DexSlot(null, file.readBytes()))
@@ -88,7 +91,7 @@ object DexRenameTool {
                 try {
                     temp.writeBytes(slot.bytes)
                     val loaded = DexFileFactory.loadDexFile(temp, Opcodes.getDefault())
-                    val result = runCatching { applyRename(loaded, action, args, newName) }
+                    val result = runCatching { applyRename(loaded, action, args, newName, renameStrings) }
                         .getOrElse { e ->
                             return err("RENAME_FAILED", "重命名失败（${e.javaClass.simpleName}）: ${e.message}", "action", action)
                         }
@@ -180,6 +183,7 @@ object DexRenameTool {
         action: String,
         args: JSONObject,
         newName: String,
+        renameStrings: Boolean,
     ): Pair<DexFile, Int> {
         val owner = args.str("owner")
         val oldName = args.str("oldName")
@@ -217,7 +221,12 @@ object DexRenameTool {
             }
             else -> throw IllegalArgumentException("未知 action: $action")
         }
-        return result.dexFile to result.renamedCount
+        if (!renameStrings || action != "class") return result.dexFile to result.renamedCount
+        // 字符串常量级联：dexlib2 的 Rewriter 不碰字符串池，而 Class.forName / 反射 /
+        // 序列化键名常以字符串承载类名，只改描述符会让重命名后的包在运行期找不到类。
+        val oldDotted = args.str("oldName")
+        val cascaded = DexStringCascade.renameClassStrings(result.dexFile, oldDotted, newName)
+        return cascaded.dexFile to (result.renamedCount + cascaded.rewritten)
     }
 
     private fun splitTypes(raw: String): Array<String>? {

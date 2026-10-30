@@ -621,6 +621,99 @@ internal class FridaBridge(private val context: Context) {
         )
     }
 
+    /**
+     * 一站式自检：把 attach/spawn 之前要过的每一关都单独跑一遍并计时。
+     *
+     * 之前这些步骤只在失败时以「一整条异常」暴露，用户看不出是连不上、接口版本不对、
+     * 还是进程列表拿不到。这里逐步报告，哪一关卡住一目了然。
+     *
+     * @param spawnTarget 给了包名/路径时，额外做一次真实的 Device.Spawn 探测（会用同一个
+     *                    kill 回收路径立刻把进程杀掉，不留挂起进程）。
+     */
+    fun diagnose(target: FridaTarget = FridaTarget(), spawnTarget: String? = null): JSONObject {
+        val steps = JSONArray()
+        val startedAt = System.currentTimeMillis()
+        var mark = System.currentTimeMillis()
+        fun record(name: String, ok: Boolean, detail: String) {
+            steps.put(
+                JSONObject()
+                    .put("step", name)
+                    .put("ok", ok)
+                    .put("ms", System.currentTimeMillis() - mark)
+                    .put("detail", detail)
+            )
+            mark = System.currentTimeMillis()
+        }
+        val report = JSONObject()
+            .put("target", target.host + ":" + target.port)
+        var connection: FridaConnection? = null
+        var checkedOut: FridaSession? = null
+        try {
+            connection = connect(target)
+            record("connect", true, "TCP + D-Bus 连接建立")
+            FridaTransport.negotiate(connection)
+            record("transport", true, "D-Bus AUTH/HELLO 通过")
+            val session = FridaSession("diagnose", target, connection, "attach", "-")
+            checkedOut = session
+            sendPing(session)
+            record("ping", true, "HostSession.Ping 有响应")
+            val tried = JSONArray()
+            var used: String? = null
+            for (candidate in listOf(FridaBridge.INTERFACE_VERSION.toString(), "16", "")) {
+                session.ifcSuffix = candidate
+                val attempt = runCatching { enumerateProcesses(session) }
+                val ok = attempt.isSuccess
+                tried.put(
+                    JSONObject()
+                        .put("interface", "re.frida.HostSession" + candidate)
+                        .put("ok", ok)
+                        .put("error", if (ok) "" else (attempt.exceptionOrNull()?.message ?: "unknown"))
+                )
+                if (ok) {
+                    used = candidate
+                    val count = attempt.getOrNull()?.size ?: 0
+                    record(
+                        "negotiate",
+                        true,
+                        "接口 re.frida.HostSession" + candidate + " 可用，能看到 " + count + " 个进程"
+                    )
+                    break
+                }
+            }
+            if (used == null) record("negotiate", false, "17 / 16 / 无后缀 三种接口名都不通")
+            report.put("interfaces", tried).put("ifcSuffix", used ?: "")
+            if (used != null) negotiatedIfcSuffix = used
+            val probeTarget = spawnTarget?.trim().orEmpty()
+            if (used != null && probeTarget.isNotEmpty()) {
+                session.ifcSuffix = used
+                val spawned = runCatching { spawnRequest(session, probeTarget, emptyList()) }
+                if (spawned.isSuccess) {
+                    val pid = spawned.getOrDefault(-1)
+                    record("spawn", true, "已在 " + probeTarget + " 上挂起 pid=" + pid + "（随即回收）")
+                    runCatching { killRequest(session, pid) }
+                } else {
+                    record(
+                        "spawn",
+                        false,
+                        (spawned.exceptionOrNull()?.message ?: "unknown") + "；" +
+                            (stageHint("spawn", spawned.exceptionOrNull() ?: RuntimeException()) ?: "")
+                    )
+                }
+            } else if (used != null) {
+                record("spawn", true, "已跳过（没给 spawnTarget；传包名可做真实 spawn 探测）")
+            }
+            report.put("ok", used != null)
+        } catch (e: Throwable) {
+            record("connect", false, e.message ?: e.javaClass.simpleName)
+            report.put("ok", false)
+        } finally {
+            runCatching { connection?.close() }
+        }
+        report.put("steps", steps)
+        report.put("totalMs", System.currentTimeMillis() - startedAt)
+        return report
+    }
+
     fun unavailableReason(target: FridaTarget = FridaTarget()): String {
         if (!available(target)) {
             return "no frida daemon reachable at ${target.host}:${target.port} — " +

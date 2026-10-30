@@ -30,6 +30,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import com.soreverse.mcp.core.EngineProvider
+import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.mcp.ToolCatalog
+import com.soreverse.mcp.mcp.ToolContext
+import org.json.JSONObject
 import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +69,12 @@ internal fun SettingsDexExplorerPage(t: UiText) {
     var members by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var memberLoading by remember { mutableStateOf(false) }
     var memberError by remember { mutableStateOf("") }
+    // 重命名（taffy_dex_rename）：这是本页唯一的写操作，其余都是只读浏览，
+    // 所以单独一组状态 + 二次确认，避免误触把工作副本改掉。
+    var renameOpen by remember { mutableStateOf(false) }
+    var renameTo by remember { mutableStateOf("") }
+    var renameBusy by remember { mutableStateOf(false) }
+    var renameMsg by remember { mutableStateOf("") }
 
     fun dexFilesOf(p: String): List<File> {
         val f = File(p)
@@ -185,11 +199,21 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                 )
                 DataRow(
+                    title = if (zh) "重命名此类" else "Rename this class",
+                    subtitle = if (zh) "级联全部类型引用；可写出到副本" else "Cascades every type reference",
+                    leading = { Icon(Icons.Default.Description, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
+                    trailingText = "›",
+                    onClick = { renameTo = sel.removePrefix("L").removeSuffix(";").replace('/', '.'); renameMsg = ""; renameOpen = true },
+                )
+                DataRow(
                     title = if (zh) "返回类列表" else "Back to class list",
                     leading = { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) },
                     trailingText = "‹",
                     onClick = { selected = null; members = emptyList() },
                 )
+                if (renameMsg.isNotBlank()) {
+                    InlineHint(renameMsg, tone = if (renameMsg.startsWith("OK")) HintTone.Ok else HintTone.Error)
+                }
             }
             when {
                 memberLoading -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -284,6 +308,92 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                 }
             }
         }
+    }
+
+    if (renameOpen) {
+        val src = selected
+        AlertDialog(
+            onDismissRequest = { if (!renameBusy) renameOpen = false },
+            title = { Text(if (zh) "重命名类" else "Rename class", style = MaterialTheme.typography.titleMedium) },
+            text = {
+                Column {
+                    Text(
+                        src?.replace('/', '.') ?: "",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = renameTo,
+                        onValueChange = { renameTo = it },
+                        singleLine = true,
+                        label = { Text(if (zh) "新类名（点分）" else "New class name (dotted)") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    Text(
+                        if (zh) "会级联字段类型/方法签名/指令/注解；字符串常量里的反射类名不改。"
+                        else "Cascades field types / signatures / instructions / annotations. Reflective class names in string constants are untouched.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !renameBusy && renameTo.isNotBlank() && src != null,
+                    onClick = {
+                        val cls = src ?: return@TextButton
+                        val inputPath = path
+                        renameBusy = true
+                        scope.safeLaunch {
+                            val res = withContext(Dispatchers.IO) {
+                                runCatchingCancellable {
+                                    val handler = ToolCatalog.byName["taffy_dex_rename"]
+                                        ?: throw IllegalStateException("taffy_dex_rename not registered")
+                                    val args = JSONObject()
+                                        .put("path", inputPath)
+                                        .put("action", "class")
+                                        .put("oldName", cls.removePrefix("L").removeSuffix(";").replace('/', '.'))
+                                        .put("newName", renameTo.trim())
+                                    handler.handle(
+                                        ToolContext(
+                                            context,
+                                            SettingsStore(context),
+                                            EngineProvider.get(context),
+                                            runCatching { EngineProvider.getBinaryEngine(context) }.getOrNull(),
+                                        ),
+                                        args,
+                                    )
+                                }
+                            }
+                            renameBusy = false
+                            res.onSuccess { r ->
+                                val total = r.optInt("totalRenamed", 0)
+                                renameMsg = if (r.optBoolean("ok", false)) {
+                                    "OK · ${if (zh) "重命名 $total 处，已写回" else "renamed $total hits, written back"}"
+                                } else {
+                                    r.optString("error").ifBlank { if (zh) "重命名失败" else "rename failed" }
+                                }
+                                renameOpen = false
+                                if (r.optBoolean("ok", false)) {
+                                    selected = null
+                                    members = emptyList()
+                                    load(inputPath)
+                                }
+                            }.onFailure {
+                                renameMsg = it.message ?: "failed"
+                                renameOpen = false
+                            }
+                        }
+                    },
+                ) { Text(if (renameBusy) (if (zh) "处理中…" else "Working…") else (if (zh) "重命名" else "Rename")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameOpen = false }, enabled = !renameBusy) {
+                    Text(if (zh) "取消" else "Cancel")
+                }
+            },
+        )
     }
 
     BusyOverlay(visible = loading, message = if (zh) "解析中…" else "Parsing…")

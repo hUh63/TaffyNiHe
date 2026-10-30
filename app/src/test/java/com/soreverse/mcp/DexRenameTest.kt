@@ -5,6 +5,7 @@ import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.smali.Smali
 import com.android.tools.smali.smali.SmaliOptions
 import com.soreverse.mcp.engine.DexRenameApi
+import com.soreverse.mcp.engine.DexStringCascade
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -92,6 +93,51 @@ class DexRenameTest {
             val cls = result.dexFile.classes.first { it.type == "La/B;" }
             assertEquals("g", cls.fields.first().name)
             assertEquals("Lc/D;", cls.fields.first().type)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    /**
+     * 字符串常量级联：dexlib2 的 Rewriter 不碰字符串池，但 Class.forName / 反射 /
+     * 序列化键名常以字符串承载类名。只改「完全相等」的两种写法，子串不动。
+     */
+    @Test
+    fun stringConstantsCascadeOnlyOnExactMatch() {
+        val dir = File.createTempFile("dexstr", "").let { it.delete(); it.mkdirs(); it }
+        try {
+            val src = File(dir, "src").apply { mkdirs() }
+            File(src, "p.smali").writeText(
+                """
+                .class public Lp/Q;
+                .super Ljava/lang/Object;
+                .method public static f()V
+                    .locals 1
+                    const-string v0, "Lc/D;"
+                    const-string v0, "c.D"
+                    const-string v0, "prefix Lc/D; suffix"
+                    return-void
+                .end method
+                """.trimIndent()
+            )
+            File(src, "d.smali").writeText(classB)
+            val out = File(dir, "classes.dex")
+            Smali.assemble(SmaliOptions().apply { outputDexFile = out.absolutePath }, src.absolutePath)
+            val dex = DexFileFactory.loadDexFile(out, Opcodes.getDefault())
+
+            val result = DexStringCascade.renameClassStrings(dex, "c.D", "x.Y")
+            assertEquals(2, result.rewritten)
+
+            val strings = result.dexFile.classes
+                .flatMap { it.methods }
+                .mapNotNull { it.implementation }
+                .flatMap { impl -> impl.instructions.toList() }
+                .filterIsInstance<com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction>()
+                .mapNotNull { (it.reference as? com.android.tools.smali.dexlib2.iface.reference.StringReference)?.string }
+            assertTrue("strings=$strings", strings.contains("Lx/Y;"))
+            assertTrue("strings=$strings", strings.contains("x.Y"))
+            // 子串不得被替换
+            assertTrue("strings=$strings", strings.contains("prefix Lc/D; suffix"))
         } finally {
             dir.deleteRecursively()
         }

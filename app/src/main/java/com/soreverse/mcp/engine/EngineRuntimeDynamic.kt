@@ -188,6 +188,14 @@ internal fun EngineRuntime.dynamicDispatch(
         // ── Frida passthroughs (real on-device) ──
         "frida_status" -> ok(frida.connectionStatus(fridaTargetFromArgs(args.opt(0))))
 
+        // 一站式自检：connect / transport / ping / 接口版本协商 / 进程列表 / 可选真实 spawn，
+        // 逐步报告耗时与错误。frida 的失败现象都长得像「连不上」，没有这一步用户只能猜。
+        "frida_selftest" -> {
+            val target = fridaTargetFromArgs(args.opt(0))
+            val spawnTarget = args.optString(1).trim()
+            ok(frida.diagnose(target, spawnTarget.ifBlank { null }))
+        }
+
         "frida_sessions" -> ok(fridaSessionsView())
 
         "frida_open" -> {

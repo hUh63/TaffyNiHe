@@ -51,7 +51,7 @@ object DynamicApiTool {
                 )
                 "workspaceId" str "工作区 ID（由 so_open 返回）"
                 "editSessionId" str "编辑会话 ID（可空）"
-                "op" str "dispatch 的子操作：frida_status | frida_sessions | frida_open | frida_close | " +
+                "op" str "dispatch 的子操作：frida_status | frida_selftest | frida_sessions | frida_open | frida_close | " +
                     "frida_hook | frida_call | frida_read | frida_backtrace | frida_modules | " +
                     "frida_write | frida_replace | frida_scan | frida_script | unidbg_session_open | " +
                     "unidbg_session_call | unidbg_session_dump | unidbg_session_registers | " +

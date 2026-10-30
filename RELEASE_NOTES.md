@@ -1,3 +1,79 @@
+## 塔菲逆核 v1.5.23 —— Dex Editor 整合收尾 · 三项留白清零
+
+这一版把「Dex Editor 到底整合完整没有」这个问用源码逐个对了一遍，补掉唯一的实质缺口（dex 符号重命名），顺手把上一版列的三个留白全部清掉。
+
+---
+
+### 一、Dex Editor 源码对照：只差「重命名」这一族
+
+这次拿到的是完整源码（`net.dexedit.*`，55 个 Java 文件），可以逐类对账，而不是拿反编译的 `.java.bak` 猜。
+
+| Dex Editor | 塔菲 | 状态 |
+|---|---|---|
+| `DexlibParser`（类/方法/字段解析） | `taffy_dex_inspect` / `taffy_dex_index` | 早有 |
+| `DexlibSmaliGenerator`（dex → smali） | `taffy_baksmali_decode` / `smali_edit action=extract` | 早有 |
+| `SmaliAssembler`（smali → dex） | `taffy_smali_assemble` / `smali_edit action=replace` | 早有 |
+| `DexStringReplacer`（改字符串常量） | `smali_edit action=replace_string`（preserve / recompile 双模式） | 早有 |
+| `DexCodeReplacer`（替换方法代码） | `smali_edit action=patch_instruction` | 早有 |
+| `JavaDecompiler`（jadx） | `taffy_jadx_decompile` | 早有 |
+| `DexCache` / `DexEditSession` / `DexHistory` | `EditSnapshotService`（快照/diff/rollback）+ `.bak` | 等价 |
+| `TreeAdapter` / `PackageTreeBuilder`（包树） | 本轮补：DEX 浏览器改包树 | **本轮** |
+| `DexClassRenamer` / `DexMemberRenamer` / `DexParamRenamer` / `DexLocalRenamer` / `DexRenameApi` | 本轮补：`taffy_dex_rename` | **本轮** |
+
+**为什么重命名是真实缺口**：塔菲其它 dex 工具要么是「读」（索引 / 交叉引用 / 反编译），要么是「改字节」（smali 替换 / 字符串替换）。少了「按符号重命名并级联所有引用」这一层——混淆前后对账、把 `a.a.a` 改成可读名、整包搬家，都做不了。
+
+`taffy_dex_rename` 的六个动作与 Dex Editor 一一对应：
+
+- `class` — 重命名单个类，**含内部类** `Outer$Inner`
+- `package` — 整包前缀搬家（含子包）
+- `field` / `method` — 重命名成员；方法按**返回类型 + 参数类型**精确匹配重载
+- `param` / `local` — 改参数名与局部变量名（只动调试信息）
+
+级联范围由 dexlib2 的 Rewriter 保证：字段类型、方法签名、指令、注解、枚举、数组全部跟着改。**不会**改字符串常量里的反射类名（这点与 Dex Editor 一致，工具描述里也写明）。
+
+移植方式：5 个 Java 文件原样搬进 `engine/` 包，只换了 dexlib2 的包名（`org.jf.dexlib2` → `com.android.tools.smali.dexlib2`）。沙箱里做了端到端验证——用 smali 汇编出真 dex，跑三层重命名（类 → 字段 → 包），再用 `DexPool` 写回、重新读出来核引用：
+
+```
+BEFORE  La/B;  La/B;->f:Lc/D;  Lc/D;->run()V
+AFTER   Lz/B;  Lz/B;->g:Lx/Y;  Lx/Y;->run()V      ← 无残留，类型/成员/包全部级联
+```
+
+同一套断言也进了单测（`DexRenameTest`），真的汇编、真的重写、真的读回，不用 mock。
+
+写回 APK 走 `ZipRepack.copyAll`（保留条目压缩方式、resources.arsc 与 so 的对齐），一次重打包替换全部受影响的 `classesN.dex`，并留 `.bak.apk`。
+
+### 二、留白清零
+
+**1）`aux` 支持嵌套字典**
+上一版嵌套对象是 json 序列化后当字符串带的，frida 侧拿到的是文本。现在按真实类型递归写 `a{sv}`（最深 4 层）。嵌套两层的字节形状用 GLib golden 钉死（`aux{cfg:{k:v}}` 82B、`aux{deep:{cfg:{k:v}}}` 106B、混合值类型 122B）。
+
+**2）CVE 黑名单可扩展**
+拉黑表以前只能随发版更新，而泄漏公告是按天走的。现在应用私有目录放一份 `tls-blocklist-extra.json` 即可补充，命中逻辑与内置表完全一致（仍按 SPKI 公钥哈希）：`{"spkiSha256":["AB..."]}` 或带说明的 `{"keys":[{"subjectCn":"...","spkiSha256Hex":"..."}]}`。非法条目丢弃，文件缺失/解析失败只是退化成内置表，不影响任何连接。
+
+**3）spawn 失败按阶段给可操作提示**
+`spawn` / `attach` / `script` / `resume` 的失败现象都是「连不上」，但排查方向完全不同。现在异常带上阶段前缀，并给出该阶段的针对性提示：
+
+- `[spawn]` → frida-server 是否以 root 运行、包名是否真的装了、设备上有没有弹 root 授权框
+- `[attach]` → spawn 出来的进程可能在注入前就自杀了（壳的完整性校验）
+- `[script]` → 先 `frida_check` 校验语法，或用空脚本跑通链路
+- `[resolve]` → attach 模式要求目标进程**已经在跑**
+
+> 真机端到端仍然没做——手上没有设备。这一项能做的是「让失败自己说清楚」，剩下的必须你插上设备跑一次。
+
+### 三、DEX 浏览器改成包树
+
+原来是几万个类名平铺一列，只能靠搜索找。现在按包分组、可折叠，搜索时自动展开命中项（否则命中被折叠的包里就看不见了），标题显示包名 + 类数。
+
+---
+
+### 已知未做
+
+- `taffy_dex_rename` 目前只有 MCP 工具入口，**没有专门的 UI 表单**（可由 AI / MCP 客户端直接调用）。要不要在 DEX 浏览器里加「重命名」按钮，取决于你实际使用频率。
+- 重命名不处理字符串常量里的反射类名（与 Dex Editor 行为一致）。
+- `param` / `local` 只影响调试信息，目标被 strip 过就无从改起。
+
+---
+
 ## 塔菲逆核 v1.5.22 —— 内置 cloudflared 跟进 · 元数据额度 · 泄漏 CA 拉黑
 
 这一版的一半内容来自「检查上游 + 检查内置二进制」时发现的真问题：一个让工具目录凭空消失，一个让服务假装在跑。

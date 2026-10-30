@@ -40,6 +40,12 @@ import java.io.File
  * 刻意不做「原始 JSON / 文本」兜底出口：结果列表本身就是为这种数据设计的
  * （类名 → 成员 → 命中细节 → 所在 dex），点一行可复制签名。
  */
+/** 单次扫描最多取回的命中数（本地分页上限）。 */
+private const val PAGE_SCAN = 2000
+
+/** 首屏与每次「继续显示」新增的条数。 */
+private const val PAGE_VISIBLE = 200
+
 @Composable
 internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
     val cs = MaterialTheme.colorScheme
@@ -70,7 +76,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
     var queryError by remember { mutableStateOf<String?>(null) }
     var searched by remember { mutableStateOf(false) }
     // 上一次查询的指纹：改完类型/关键字再点「继续加载」时，不能把两次查询的结果拼在一起。
-    var lastKey by remember { mutableStateOf("") }
+    var visible by remember { mutableIntStateOf(200) }
 
     val typeLabel = DexIndex.TYPE_LABELS_ZH[type] ?: type
     val needKeyword = type in DexIndex.KEYWORD_REQUIRED
@@ -105,7 +111,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                 srcFile = f
                 srcName = name
                 srcSize = size
-                hits = emptyList(); matched = 0; searched = false; queryError = null; lastKey = ""
+                hits = emptyList(); matched = 0; searched = false; queryError = null
             } ?: run { fileError = out.exceptionOrNull()?.message ?: (if (zh) "读取失败" else "Read failed") }
         }
     }
@@ -124,14 +130,17 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
         copyToCache(uri, name)
     }
 
-    fun runSearch(append: Boolean) {
+    /**
+     * 一次扫描取回整页上限（[PAGE_SCAN]），之后"继续显示"只在本地展开。
+     *
+     * 原来每翻一页都带 offset 重新请求一次 —— 索引查询没有"跳过"成本，
+     * offset 之前的部分照扫不误，翻 5 页等于全量扫 5 遍，大包上每页几秒。
+     */
+    fun runSearch() {
         val f = srcFile ?: return
-        val key = "$type$keyword$exclude$regex$caseSensitive"
-        val realAppend = append && key == lastKey
-        lastKey = key
         busy = true
         queryError = null
-        val offset = if (realAppend) hits.size else 0
+        visible = PAGE_VISIBLE
         scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
                 DexIndex.search(
@@ -141,8 +150,8 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                     excludePackages = exclude.split(',', '\n', ';').map { it.trim() }.filter { it.isNotEmpty() },
                     caseSensitive = caseSensitive,
                     regex = regex,
-                    limit = 200,
-                    offset = offset,
+                    limit = PAGE_SCAN,
+                    offset = 0,
                     tmpDir = File(context.cacheDir, "dexindex"),
                 )
             }
@@ -150,9 +159,9 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
             searched = true
             if (r.error != null) {
                 queryError = r.error
-                if (!realAppend) { hits = emptyList(); matched = 0 }
+                hits = emptyList(); matched = 0
             } else {
-                hits = if (realAppend) hits + r.hits else r.hits
+                hits = r.hits
                 matched = r.matched
                 scannedClasses = r.scannedClasses
                 scannedMethods = r.scannedMethods
@@ -196,7 +205,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                 if (srcFile != null) {
                     IconButton(onClick = {
                         srcFile?.delete(); srcFile = null; srcName = ""; srcSize = 0
-                        hits = emptyList(); matched = 0; searched = false; lastKey = ""
+                        hits = emptyList(); matched = 0; searched = false
                     }, enabled = !busy && !loading, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Filled.Clear, null, modifier = Modifier.size(16.dp), tint = cs.onSurfaceVariant)
                     }
@@ -257,7 +266,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
             )
             Spacer(Modifier.width(8.dp))
             FilledTonalButton(
-                onClick = { runSearch(false) },
+                onClick = { runSearch() },
                 enabled = srcFile != null && !busy && (!needKeyword || keyword.isNotBlank()),
                 modifier = Modifier.height(40.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
@@ -354,7 +363,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(hits) { idx, h ->
+                itemsIndexed(hits.take(visible)) { idx, h ->
                     Column(
                         Modifier.fillMaxWidth()
                             .padding(vertical = 1.dp)
@@ -397,17 +406,22 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                         )
                     }
                 }
-                if (matched > hits.size) {
+                if (hits.size > visible || matched > hits.size) {
                     item {
                         Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                             OutlinedButton(
-                                onClick = { runSearch(true) },
-                                enabled = !busy,
+                                onClick = { visible += PAGE_VISIBLE },
+                                enabled = !busy && hits.size > visible,
                                 modifier = Modifier.height(34.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp),
                             ) {
                                 Text(
-                                    if (zh) "继续加载（${hits.size}/$matched）" else "Load more (${hits.size}/$matched)",
+                                    when {
+                                        hits.size > visible ->
+                                            if (zh) "继续显示（$visible/${hits.size}）" else "Show more ($visible/${hits.size})"
+                                        zh -> "已达单次上限 $PAGE_SCAN（命中 $matched），请缩小关键字或加排除包"
+                                        else -> "Hit the $PAGE_SCAN cap ($matched matches) — narrow it down"
+                                    },
                                     fontSize = 11.sp,
                                 )
                             }

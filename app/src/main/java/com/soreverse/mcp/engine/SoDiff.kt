@@ -111,11 +111,15 @@ internal object SoDiff {
         // 也就是 taffy_so_diff 与 taffy_byte_diff 的分工边界：前者给函数，后者给字节区间。
         val (funcA, noSizeA) = functionsOf(ea)
         val (funcB, noSizeB) = functionsOf(eb)
+        // 两边都得有函数符号才谈得上逐函数比较；strip 过的库只有导出符号，
+        // 拿它跟完整符号表的版本比会得到"上千个函数新增/删除"的假结论。
+        val fnAvailable = funcA.isNotEmpty() && funcB.isNotEmpty()
         val fnAdded = mutableListOf<JSONObject>()
         val fnRemoved = mutableListOf<JSONObject>()
         val fnResized = mutableListOf<JSONObject>()
         val fnChanged = mutableListOf<JSONObject>()
         var fnSame = 0
+        var fnUnreadable = 0
         for ((name, fb) in funcB) {
             val fa = funcA[name]
             if (fa == null) {
@@ -126,13 +130,28 @@ internal object SoDiff {
                 fnResized += funcEntry(name, fa, fb)
                 continue
             }
+            // 区间落到文件外（节区被裁剪/符号表 size 虚高）时不能算"相同"。
+            // 原来 firstDiffOffset 返回 null 会直接当 same，等于把"没法比较"说成"比过一样"。
+            if (fa.start + fa.size > aData.size || fb.start + fb.size > bData.size) {
+                fnUnreadable++
+                continue
+            }
             val d = firstDiffOffset(aData, fa.start, bData, fb.start, fa.size)
             if (d == null) fnSame++ else fnChanged += funcEntry(name, fa, fb).put("firstDiff", d)
         }
         for ((name, fa) in funcA) {
             if (funcB[name] == null) fnRemoved += funcEntry(name, fa, null)
         }
+        if (!fnAvailable) {
+            fnAdded.clear()
+            fnRemoved.clear()
+        }
         val fnChangedSorted = fnChanged.sortedByDescending { it.optLong("sizeA") }
+        val fnNote = when {
+            fnAvailable -> ""
+            funcA.isEmpty() && funcB.isEmpty() -> "两侧都没有函数符号，无法做函数级比较"
+            else -> "仅一侧有函数符号（另一侧可能被 strip），无法逐函数比较；请看节区/导出符号"
+        }
 
         // ── 依赖库 / 符号版本 ──
         val needA = ElfAudit.neededList(aData, ea)
@@ -212,7 +231,10 @@ internal object SoDiff {
                     .put("resized", fnResized.size)
                     .put("changed", fnChanged.size)
                     .put("same", fnSame)
-                    .put("unknownSize", noSizeA + noSizeB),
+                    .put("unknownSize", noSizeA + noSizeB)
+                    .put("unreadable", fnUnreadable)
+                    .put("comparable", fnAvailable)
+                    .put("note", fnNote),
             )
 
         val sectionsJson = JSONObject()

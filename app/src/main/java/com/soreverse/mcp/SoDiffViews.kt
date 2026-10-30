@@ -459,6 +459,12 @@ private fun buildRows(r: JSONObject, tab: Int, query: String): List<DiffRowUi> {
             // 函数级差分：这是 taffy_so_diff 与 taffy_byte_diff 的分界
             // —— 这里给「哪个函数变了、从第几字节开始变」，字节级定位交给 HEX/差分视图。
             val fn = r.optJSONObject("functions") ?: JSONObject()
+            // 一侧被 strip 时逐函数比较没有意义，直接说明，而不是显示一个空页签
+            val fs = r.optJSONObject("summary")?.optJSONObject("functions")
+            if (fs != null && !fs.optBoolean("comparable", true)) {
+                val note = fs.optString("note")
+                if (note.isNotBlank()) out += DiffRowUi('~', note, "函数级不可比", "")
+            }
             addSection(fn.optJSONArray("changed"), '~',
                 { o ->
                     val d = o.optLong("firstDiff", -1L)

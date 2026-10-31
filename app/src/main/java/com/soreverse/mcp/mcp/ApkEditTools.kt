@@ -146,14 +146,19 @@ object ApkEditTools {
                         // 注意：Replacement 里写 "\\$1" 会被解析成「字面 $ 后跟 1」而不是分组引用
                         // （Kotlin 的 \$ 就是美元符转义），旧实现因此把字面 "$1" 塞进 manifest，
                         // 产出 `$1android:exported="false"` 这种非法属性名 —— 编译期 aapt 直接报错。
-                        // 这里改用 lambda 拼字符串，零转义歧义。
+                        // 所以这里不用 Replacement 字符串：有 `exported` 属性就直接用 lambda 重写该属性，
+                        // 没有就手工拼接到标签名之后。
                         val pattern = Regex("(<(?:activity|service|receiver|provider)\\s[^>]*android:name=\"$name\"[^>]*?)android:exported=\"[^\"]*\"")
                         if (pattern.containsMatchIn(xml)) {
                             xml = pattern.replace(xml) { it.groupValues[1] + "android:exported=\"$exp\"" }
                         } else {
-                            xml = xml.replaceFirst(
-                                Regex("(<(?:activity|service|receiver|provider)\\s[^>]*android:name=\"$name\")")
-                            ) { it.groupValues[1] + " android:exported=\"$exp\"" }
+                            // 注：本项目的 stdlib 里 String.replaceFirst(Regex, …) 只有 String 版重载，
+                            // 没有 lambda 重载（用了会报 Argument type mismatch），所以手工拼接。
+                            val head = Regex("(<(?:activity|service|receiver|provider)\\s[^>]*android:name=\"$name\")").find(xml)
+                            if (head != null) {
+                                val end = head.range.last + 1
+                                xml = xml.substring(0, end) + " android:exported=\"$exp\"" + xml.substring(end)
+                            }
                         }
                         // 没命中组件时旧实现照样写回并报 success，客户端会以为属性改好了
                         if (xml == before) {

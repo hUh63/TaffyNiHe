@@ -180,7 +180,8 @@ object ArchiveTools {
                     written += n
                 }
                 // Pad to block size
-                val pad = BLOCK_SIZE - (written % BLOCK_SIZE)
+                // written 是 Long（累计字节），ByteArray 要 Int
+                val pad = (BLOCK_SIZE - (written % BLOCK_SIZE)).toInt()
                 if (pad < BLOCK_SIZE) output.write(ByteArray(pad))
             }
 

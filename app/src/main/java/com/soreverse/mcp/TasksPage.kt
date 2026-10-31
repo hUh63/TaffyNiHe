@@ -145,8 +145,7 @@ private fun CountPill(text: String) {
     val cs = MaterialTheme.colorScheme
     Surface(
         shape = RoundedCornerShape(AppShape.pill),
-        color = cs.surfaceContainerHigh,
-        border = BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.6f)),
+        color = cs.surfaceVariant,
     ) {
         Text(
             text,
@@ -245,15 +244,18 @@ private fun TaskCard(
 
     Surface(
         shape = RoundedCornerShape(AppShape.md),
-        color = cs.surfaceContainerHigh,
-        border = BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.55f)),
+        // Exbin 的卡片没有描边：靠 surfaceVariant 比背景亮一档来分层，
+        // 再叠 1dp outlineVariant 会变成「带框的浅色块」，一张页面出现七八个就很吵。
+        color = cs.surfaceVariant,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 11.dp, bottom = 8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 // 类型图标块
                 Box(
-                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(kindColor.copy(alpha = 0.16f)),
+                    // 图标块用「卡内凹陷」（surface 比卡片暗一档），类型色只留在图标本身：
+                    // 三块 16% 透明彩色底叠在浅卡上，两两不同的色相会互相打架。
+                    Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(cs.surface),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(kindIcon, contentDescription = null, tint = kindColor, modifier = Modifier.size(20.dp))
@@ -342,14 +344,14 @@ private fun StatusPill(text: String, active: Boolean) {
     val cs = MaterialTheme.colorScheme
     Surface(
         shape = RoundedCornerShape(AppShape.pill),
-        color = if (active) cs.primary.copy(alpha = 0.14f) else cs.surfaceContainerHighest,
+        color = if (active) cs.primaryContainer else cs.surface,
     ) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             fontSize = AppText.label,
             fontWeight = FontWeight.Medium,
-            color = if (active) cs.primary else cs.onSurfaceVariant,
+            color = if (active) cs.onPrimaryContainer else cs.onSurfaceVariant,
             maxLines = 1,
             softWrap = false,
         )
@@ -361,7 +363,7 @@ private fun MetaChip(text: String, color: Color = MaterialTheme.colorScheme.onSu
     if (text.isBlank()) return
     Surface(
         shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.75f),
+        color = MaterialTheme.colorScheme.surface,
     ) {
         Text(
             text,

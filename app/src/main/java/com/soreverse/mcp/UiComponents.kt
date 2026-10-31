@@ -424,7 +424,10 @@ internal fun CardRow(
     val cs = MaterialTheme.colorScheme
     val tint = iconTint ?: cs.primary
     ListItem(
-        modifier = Modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        // 水波纹要贴着行圆角走：不 clip 的话点按会出现一个矩形高亮，在圆角卡片里很扎眼
+        modifier = Modifier
+            .clip(RoundedCornerShape(AppShape.sm))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = icon?.let { { Icon(it, null, tint = tint, modifier = Modifier.size(24.dp)) } },
         headlineContent = {
@@ -437,7 +440,8 @@ internal fun CardRow(
                         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (!meta.isNullOrBlank()) {
-                        Text(meta, style = MaterialTheme.typography.labelSmall, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // 元信息是次要说明，不是链接 —— 用中性色，主色留给「选中/可点」
+                        Text(meta, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

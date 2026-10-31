@@ -381,24 +381,24 @@ internal fun SettingsTunnelPage(
         // 隧道运行日志
         GlassGroup(title = if (t.zh) "运行日志" else "Event log") {
             var showLog by remember { mutableStateOf(false) }
-            var logRefreshKey by remember { mutableStateOf(0) }
+            // 日志刷新用「state + 单个协程」：旧实现是「自增 key 的 LaunchedEffect + while(true)」，
+            // 每秒销毁重建一次协程，而且日志是在组合期（主线程）同步读文件。
+            var logLines by remember { mutableStateOf<List<String>>(emptyList()) }
             ToggleRow(if (t.zh) "显示日志" else "Show log", showLog) { showLog = it }
             if (showLog) {
-                // 日志自动刷新
-                LaunchedEffect(logRefreshKey) {
+                LaunchedEffect(tunnelType) {
                     while (true) {
+                        logLines = withContext(Dispatchers.IO) {
+                            if (tunnelType == "cloudflare") cfTunnelLog(context).orEmpty()
+                            else BoreTunnelService.getEventLog()
+                        }
                         delay(1000)
-                        logRefreshKey++
                     }
                 }
                 GroupDivider()
-                val logLines = if (tunnelType == "cloudflare") {
-                    cfTunnelLog(context) ?: listOf(if (t.zh) "无日志" else "No log")
-                } else {
-                    BoreTunnelService.getEventLog().ifEmpty { listOf(if (t.zh) "无日志" else "No log") }
-                }
+                val logLinesShown = logLines.ifEmpty { listOf(if (t.zh) "无日志" else "No log") }
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp).fillMaxWidth()) {
-                    logLines.takeLast(50).forEach { line ->
+                    logLinesShown.takeLast(50).forEach { line ->
                         Text(line, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, fontSize = AppText.label, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 14.sp)
                     }
                 }
@@ -416,7 +416,7 @@ internal fun SettingsTunnelPage(
                             TextButton(onClick = {
                                 if (tunnelType == "cloudflare") clearCfTunnelLog(context)
                                 else BoreTunnelService.clearEventLog()
-                                logRefreshKey++
+                                logLines = emptyList()
                                 confirmClearLog = false
                             }) { Text(if (t.zh) "清除" else "Clear", color = MaterialTheme.colorScheme.error) }
                         },

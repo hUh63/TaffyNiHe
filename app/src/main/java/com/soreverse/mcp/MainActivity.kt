@@ -694,18 +694,10 @@ internal fun SoReverseApp(
                                     },
                                 )
                                 MainTab.Tools -> {
-                                    // AI 深度分析对话全屏层：工具页发起 AI 分析后进入聊天（状态由 analyzeState 持有）
-                                    if (analyzeState.showDeepReport) {
-                                        DeepAiChatScreen(
-                                            t = t,
-                                            settings = settings,
-                                            state = analyzeState,
-                                            scope = appScope,
-                                            deepService = deepService,
-                                            backProgress = backProgress,
-                                            onLeaveDeepReport = { requestDeepLeave { analyzeState.showDeepReport = false } },
-                                        )
-                                    } else {
+                                    // 分析页**常驻**、AI 深聊作为覆盖层。
+                                    // 原来两者是 if/else 互斥挂载：进出一次深聊会把 AnalysisWorkspace 整棵子树
+                                    // 销毁重建，选中的函数、当前子视图、搜索词、滚动位置全部丢失（内部都是 remember）。
+                                    Box(Modifier.fillMaxSize()) {
                                         AnalysisWorkspace(
                                             t = t,
                                             state = workspaceState,
@@ -717,6 +709,23 @@ internal fun SoReverseApp(
                                             // 侧栏「返回」= 离开分析页（对齐 Explorer So nav_back）
                                             onLeave = { tab = MainTab.Home },
                                         )
+                                        if (analyzeState.showDeepReport) {
+                                            // 覆盖层要有实底：深聊页本身不是全屏不透明容器，不铺底会透出下面的分析页
+                                            Surface(
+                                                modifier = Modifier.fillMaxSize(),
+                                                color = MaterialTheme.colorScheme.background,
+                                            ) {
+                                                DeepAiChatScreen(
+                                                    t = t,
+                                                    settings = settings,
+                                                    state = analyzeState,
+                                                    scope = appScope,
+                                                    deepService = deepService,
+                                                    backProgress = backProgress,
+                                                    onLeaveDeepReport = { requestDeepLeave { analyzeState.showDeepReport = false } },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                                 MainTab.Tasks -> TasksPage(

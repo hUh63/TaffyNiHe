@@ -124,9 +124,13 @@ internal fun CapturePage(t: UiText) {
             runCatching { captureServer.stop() }
         }
     }
-    val filteredEntries = captureEntries.filter { e ->
-        (methodFilter == "全部" || (methodFilter == "HTTPS" && e.isHttps) || (methodFilter == "HTTP" && !e.isHttps) || e.method == methodFilter) &&
-            (listFilter.isBlank() || e.url.contains(listFilter, ignoreCase = true) || e.host.contains(listFilter, ignoreCase = true) || e.status.contains(listFilter, ignoreCase = true))
+    // 每来一条抓包记录 captureEntries 就整体替换一次；不 remember 的话每次重组都要
+    // 重新对所有条目跑一遍过滤（条目上千时每次新请求都卡一下）。
+    val filteredEntries = remember(captureEntries, methodFilter, listFilter) {
+        captureEntries.filter { e ->
+            (methodFilter == "全部" || (methodFilter == "HTTPS" && e.isHttps) || (methodFilter == "HTTP" && !e.isHttps) || e.method == methodFilter) &&
+                (listFilter.isBlank() || e.url.contains(listFilter, ignoreCase = true) || e.host.contains(listFilter, ignoreCase = true) || e.status.contains(listFilter, ignoreCase = true))
+        }
     }
 
     var detailEntry by remember { mutableStateOf<HttpCaptureServer.Entry?>(null) }

@@ -73,6 +73,15 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
     var logFilter by remember { mutableStateOf("all") }
     var searchText by rememberSaveable { mutableStateOf("") }
     var contentVersion by remember { mutableStateOf(0L) }
+    // 日志高频写入时，不要「每来一行」都触发一次全表过滤 + 逐行本地化（全在主线程）。
+    // 这里把刷新合并成 200ms 一次的节拍：写入仍然实时进列表，只是重组被限流。
+    var pendingVersion by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(200)
+            if (pendingVersion != contentVersion) contentVersion = pendingVersion
+        }
+    }
     val logs = remember { mutableStateListOf<String>().also { list -> list.addAll(AppLog.snapshot().takeLast(120)) } }
 
     DisposableEffect(Unit) {
@@ -84,7 +93,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
                 logs.add(line)
                 while (logs.size > cap) logs.removeAt(0)
             }
-            contentVersion++
+            pendingVersion++
         }
         AppLog.addListener(onLine)
         onDispose { AppLog.removeListener(onLine) }

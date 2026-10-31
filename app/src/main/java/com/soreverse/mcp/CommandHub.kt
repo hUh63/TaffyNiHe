@@ -63,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.service.McpForegroundService
 import kotlinx.coroutines.delay

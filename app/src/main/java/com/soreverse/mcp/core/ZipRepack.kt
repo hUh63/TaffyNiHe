@@ -20,7 +20,7 @@ import java.util.zip.ZipOutputStream
  * 改一个字节就把它们重新压缩，安装器直接拒装（INSTALL_PARSE_FAILED_UNEXPECTED_EXCEPTION）
  * 或原生库加载失败，而工具还返回「字节已写入」。
  *
- * 这里保留原压缩方式与 extra，并对上述两类条目强制 STORED + 4/4096 字节对齐。
+ * 这里保留原压缩方式与 extra，并对上述两类条目强制 STORED + 4/16KiB 字节对齐。
  * 所有需要「重写整个 APK」的工具都应该走这里，不要再自己写一遍 ZipOutputStream 循环。
  */
 internal object ZipRepack {
@@ -29,7 +29,17 @@ internal object ZipRepack {
     private fun requiresStore(name: String): Boolean =
         name == "resources.arsc" || isNativeLib(name)
 
-    /** native 库：未压缩时必须 4096 页对齐。 */
+    /**
+     * native 库在 zip 内的对齐。
+     *
+     * 必须用 **16384**（16 KiB）而不是 4096：Android 15 起有 16 KiB page size 的设备，
+     * 系统按 16 KiB 粒度 mmap APK 里的 .so，条目起始偏移不是 16 KiB 倍数时直接加载失败。
+     * 16 KiB 对齐同时满足 4 KiB 设备，代价只是每个 .so 最多多 12 KiB 填充。
+     * 对应 `zipalign -P 16`（未压缩 .so 按 16 KiB 对齐）。
+     */
+    private const val NATIVE_LIB_ALIGN = 16384
+
+    /** native 库：未压缩时必须 16 KiB 页对齐。 */
     private fun isNativeLib(name: String): Boolean =
         name.startsWith("lib/") && name.endsWith(".so")
 
@@ -137,11 +147,11 @@ internal object ZipRepack {
                                 entry.crc = CRC32().apply { update(d) }.value
                             }
                             var extra = e.extra ?: ByteArray(0)
-                            // resources.arsc 需 4 字节对齐；lib/ 下的 .so 需 4096 页对齐
-                            // （zipalign -p 语义）——旧实现两者都只对齐到 4，未压缩的 so 会失去
-                            // 页对齐，安装器改为解压存放或 mmap 失败。
+                            // resources.arsc 需 4 字节对齐；lib/ 下的 .so 需 16 KiB 页对齐
+                            // （zipalign -P 16 语义）——只对齐到 4 KiB 的话，16 KiB 页的设备
+                            // mmap 会失败。
                             val align = when {
-                                isNativeLib(e.name) -> 4096
+                                isNativeLib(e.name) -> NATIVE_LIB_ALIGN
                                 requiresStore(e.name) -> 4
                                 else -> 0
                             }
@@ -198,7 +208,7 @@ internal object ZipRepack {
             entry.size = bytes.size.toLong()
             entry.compressedSize = bytes.size.toLong()
             entry.crc = CRC32().apply { update(bytes) }.value
-            val align = if (isNativeLib(name)) 4096 else 4
+            val align = if (isNativeLib(name)) NATIVE_LIB_ALIGN else 4
             zos.flush()
             val nameLen = name.toByteArray(Charsets.UTF_8).size
             val pad = paddingFor(counting.count, nameLen, extra.size, align)
@@ -235,7 +245,7 @@ internal object ZipRepack {
             entry.size = size
             entry.compressedSize = size
             entry.crc = crc.value
-            val align = if (isNativeLib(name)) 4096 else 4
+            val align = if (isNativeLib(name)) NATIVE_LIB_ALIGN else 4
             zos.flush()
             val nameLen = name.toByteArray(Charsets.UTF_8).size
             val pad = paddingFor(counting.count, nameLen, extra.size, align)

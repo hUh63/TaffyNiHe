@@ -47,6 +47,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1021,6 +1022,9 @@ internal fun SettingsEditorPage(t: UiText) {
         sessionActive = false
         runCatching { p?.destroy() }
     }
+
+    // Python REPL 会话同理：页面销毁时要 shutdown，否则 python3 -i 子进程常驻
+    DisposableEffect(Unit) { onDispose { stopSession() } }
     fun startSession() {
         stopSession()
         val python = PythonRuntime.pythonPath(context) ?: return

@@ -139,7 +139,13 @@ object EditSnapshotService {
     /** 粗略判断一个文件是否以 UTF-8 文本为主(用于决定是否做行级 diff)。 */
     private fun looksLikeText(f: File): Boolean {
         if (f.length() > 5 * 1024 * 1024) return false   // 超过 5MB 不做行级
-        val head = try { f.inputStream().use { it.readNBytes(4096) } } catch (e: Exception) { return false }
+        // InputStream.readNBytes 是 Java 9 API，Android 直到 API 33 才提供；在 Android 10~12 上
+        // 这里抛的是 NoSuchMethodError（LinkageError），下面的 catch(Exception) 抓不住 → 直接崩。
+        val head = try {
+            f.inputStream().use { com.soreverse.mcp.core.StreamCompat.readCapped(it, 4096) }
+        } catch (e: Exception) {
+            return false
+        }
         if (head.isEmpty()) return true
         var control = 0
         val n = minOf(head.size, 4096)

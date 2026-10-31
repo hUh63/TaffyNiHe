@@ -31,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -114,6 +115,11 @@ internal fun SettingsTerminalPage(t: UiText) {
         }
         sessionChannel = ""
     }
+
+    // 会话是进程级的 root/Shizuku shell 或 python3：离开页面必须回收。
+    // 它原来只存在 remember 里，组件离开 composition 时唯一的持有者被丢弃，
+    // destroy() 永远没人调 —— su 会话会常驻到 App 进程被杀，反复进出还会累积多个。
+    DisposableEffect(Unit) { onDispose { stopSession() } }
 
     fun ensureTaffyCli(): String? {
         val dir = PythonRuntime.ensureExtracted(context) ?: return null

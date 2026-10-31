@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 常驻能力（MCP 服务器 / 隧道）必须用 specialUse：
+         Android 15 对 dataSync 类型的前台服务有「24 小时内累计 6 小时」硬上限，且禁止
+         从 BOOT_COMPLETED 拉起 dataSync 服务 —— 到点必被杀、开机自启静默失效。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -78,7 +82,12 @@
         <service
             android:name=".service.McpForegroundService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <!-- specialUse 必须声明子类型，否则 Play 上架会被拒（运行不受影响） -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local MCP tool server for on-device reverse engineering (SO/APK analysis, dex editing, traffic capture)" />
+        </service>
 
         <service
             android:name=".blutter.BlutterRunnerService"
@@ -89,7 +98,11 @@
         <service
             android:name=".core.BoreTunnelService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Public tunnel (bore/cloudflared) exposing the local MCP server for remote AI clients" />
+        </service>
 
         <receiver
             android:name=".service.BootReceiver"

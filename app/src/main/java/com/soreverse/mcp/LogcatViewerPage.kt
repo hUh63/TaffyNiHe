@@ -530,6 +530,9 @@ internal fun LogcatViewerPage(t: UiText) {
         // root/shizuku 手动模式：保持同步等待（用户显式要求该通道）
         if (mode == "root" || mode == "shizuku") {
             val priv = PermissionManager.startPrivilegedStream("logcat", listOf("-v", "time"))
+            // 绑定期间用户可能已经点了「停止」：这时 priv 没人接管，必须自己销毁，
+            // 否则一条特权 logcat（外加一个 root/Shizuku shell）会常驻到进程死亡。
+            if (priv != null && !running) runCatching { priv.destroy() }
             if (priv != null && running) {
                 runCatching { firstProc.destroy() }
                 process = priv
@@ -568,7 +571,11 @@ internal fun LogcatViewerPage(t: UiText) {
                     return@safeLaunch
                 }
                 // 特权就绪且仍在运行：无缝切换到特权流
-                if (!running || pollMode) return@safeLaunch
+                if (!running || pollMode) {
+                    // 同上一分支：这几秒里被停掉 / 已降级为轮询，priv 无人接管 → 销毁
+                    runCatching { priv.destroy() }
+                    return@safeLaunch
+                }
                 runCatching { firstProc.destroy() }
                 process = priv
                 channelError = ""

@@ -12329,25 +12329,27 @@ private fun EditCenterView(tools: ToolPagesState, zh: Boolean, context: android.
     val ws = tools.sharedWorkspaceId
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableStateOf("symbol") }
+    // 这些输入必须 rememberSaveable：EditCenterView 挂在 when(view) 分支里，
+    // 侧栏切一下视图、或切到别的 tab 就会销毁重组 —— 用户抄好的地址/hex 全丢。
+    var tab by rememberSaveable { mutableStateOf("symbol") }
 
     // 函数改名
-    var symLocator by remember { mutableStateOf("") }
-    var symNew by remember { mutableStateOf("") }
+    var symLocator by rememberSaveable { mutableStateOf("") }
+    var symNew by rememberSaveable { mutableStateOf("") }
     var symOut by remember { mutableStateOf("") }
 
     // 字符串
-    var strAddr by remember { mutableStateOf("") }
-    var strNew by remember { mutableStateOf("") }
-    var strOld by remember { mutableStateOf("") }
-    var strPad by remember { mutableStateOf("null_pad") }
+    var strAddr by rememberSaveable { mutableStateOf("") }
+    var strNew by rememberSaveable { mutableStateOf("") }
+    var strOld by rememberSaveable { mutableStateOf("") }
+    var strPad by rememberSaveable { mutableStateOf("null_pad") }
     var strOut by remember { mutableStateOf("") }
 
     // 指令
-    var insAddr by remember { mutableStateOf("") }
-    var insAsm by remember { mutableStateOf("") }
-    var insOld by remember { mutableStateOf("") }
-    var insThumb by remember { mutableStateOf(false) }
+    var insAddr by rememberSaveable { mutableStateOf("") }
+    var insAsm by rememberSaveable { mutableStateOf("") }
+    var insOld by rememberSaveable { mutableStateOf("") }
+    var insThumb by rememberSaveable { mutableStateOf(false) }
     var insOut by remember { mutableStateOf("") }
 
     var busy by remember { mutableStateOf(false) }

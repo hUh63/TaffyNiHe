@@ -269,7 +269,11 @@ object ScriptTool {
         val bytes = text.toByteArray(Charsets.UTF_8)
         if (bytes.size > MAX_RESULT_BYTES) {
             outcome.resultTruncated = true
-            return String(bytes, 0, MAX_RESULT_BYTES, Charsets.UTF_8)
+            // 直接按字节截会把最后一个汉字切成半个（解码成 U+FFFD 乱码），
+            // 往回退到 UTF-8 首字节边界再解码。
+            var cut = MAX_RESULT_BYTES
+            while (cut > 0 && (bytes[cut].toInt() and 0xC0) == 0x80) cut--
+            return String(bytes, 0, cut, Charsets.UTF_8)
         }
         val trimmed = text.trim()
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {

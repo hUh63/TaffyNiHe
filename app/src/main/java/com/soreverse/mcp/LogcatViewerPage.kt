@@ -325,42 +325,56 @@ internal fun LogcatViewerPage(t: UiText) {
     }
 
     fun exportZip(visibleLines: List<LogLine>) {
-        runCatching {
-            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-            val zip = File(context.filesDir, "logcat_export_$stamp.zip")
-            ZipOutputStream(zip.outputStream()).use { zos ->
-                // 设备信息（设置项「导出设备信息」控制）
-                if (exportDeviceInfo) {
-                    val deviceInfo = buildString {
-                        appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
-                        appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
-                        appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
-                        appendLine("Kernel: ${System.getProperty("os.version", "")}")
-                        appendLine("Time: $stamp")
-                        appendLine("Filter: tags=[$tagFilter] keyword=[$keyword] levels=$levelSet")
+        // 打包 + 写文件挪到 IO 线程：旧实现整段在主线程（2000 行 joinToString + zip 压缩 + 磁盘写），
+        // 日志量大时会卡住界面；分享动作必须回主线程。
+        scope.safeLaunch(Dispatchers.IO) {
+            val built = runCatchingCancellable {
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                val zip = File(context.filesDir, "logcat_export_$stamp.zip")
+                ZipOutputStream(zip.outputStream()).use { zos ->
+                    // 设备信息（设置项「导出设备信息」控制）
+                    if (exportDeviceInfo) {
+                        val deviceInfo = buildString {
+                            appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                            appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+                            appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
+                            appendLine("Kernel: ${System.getProperty("os.version", "")}")
+                            appendLine("Time: $stamp")
+                            appendLine("Filter: tags=[$tagFilter] keyword=[$keyword] levels=$levelSet")
+                        }
+                        zos.putNextEntry(ZipEntry("device_info.txt"))
+                        zos.write(deviceInfo.toByteArray())
+                        zos.closeEntry()
                     }
-                    zos.putNextEntry(ZipEntry("device_info.txt"))
-                    zos.write(deviceInfo.toByteArray())
+                    val logText = visibleLines.joinToString("\n") { it.raw }
+                    zos.putNextEntry(ZipEntry("logcat.txt"))
+                    zos.write(logText.toByteArray())
                     zos.closeEntry()
                 }
-                // 日志
-                val logText = visibleLines.joinToString("\n") { it.raw }
-                zos.putNextEntry(ZipEntry("logcat.txt"))
-                zos.write(logText.toByteArray())
-                zos.closeEntry()
+                zip
             }
-            // 分享
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                context, "${context.packageName}.fileprovider", zip,
-            )
-            val share = Intent(Intent.ACTION_SEND).apply {
-                type = "application/zip"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            withContext(Dispatchers.Main) {
+                built.onSuccess { zip ->
+                    runCatching {
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            context, "${context.packageName}.fileprovider", zip,
+                        )
+                        val share = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/zip"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            Intent.createChooser(share, if (zh) "导出 Logcat 日志" else "Export logcat")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }.onFailure { e ->
+                        Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }.onFailure { e ->
+                    Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
-            context.startActivity(Intent.createChooser(share, if (zh) "导出 Logcat 日志" else "Export logcat").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { e ->
-            Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1064,7 +1078,9 @@ internal fun LogcatViewerPage(t: UiText) {
             }
             "crash" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // ── 崩溃记录（LogFox 卡片样式：JAVA / NATIVE / ANR）──
-                val groups = remember(logs.size) { groupCrashesFromLogs(logs) }
+                // 不能只用 size 当 key：缓冲满 2000 行后 size 恒定，remember 永不失效，
+                // 崩溃列表会冻结在那一刻（之后真崩了也看不到）—— 上面 visible 踩过同一个坑。
+                val groups = remember(logs.size, logs.lastOrNull()) { groupCrashesFromLogs(logs) }
                 var expandedIdx by remember { mutableStateOf(-1) }
                 Text(
                     (if (zh) "崩溃记录" else "Crash records") + " · " + groups.size,

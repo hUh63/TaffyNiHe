@@ -86,9 +86,14 @@ object DexRenameTool {
             var dexCount = 0
             // 逐个 dex「读→改→存结果→丢原始」：大 APK 里所有 classesN.dex 合起来能到几百 MB，
             // 一次全读进内存再全留下结果，峰值是 dex 总量的两倍，容易 OOM。
-            val slots: List<Pair<String?, ByteArray>> =
-                if (isApk) apkDexEntries(file) else listOf(null to file.readBytes())
-            if (slots.isEmpty()) return err("NO_DEX", "没有找到任何 dex（APK 里没有 classes*.dex）", "path", path)
+            if (isApk && apkDexNames(file).isEmpty()) {
+                return err("NO_DEX", "没有找到任何 dex（APK 里没有 classes*.dex）", "path", path)
+            }
+            // 惰性序列：ZipFile 只在迭代期间打开，每个条目「读 → 改 → 丢原始」。
+            // 旧实现先构造 List<Pair<String, ByteArray>> 把全部 dex 读进来、再另存全部重写结果，
+            // 峰值 ≈ 2× dex 总量（十 dex 的大包几百 MB）——与本段注释声称的行为相反。
+            val slots: Sequence<Pair<String?, ByteArray>> =
+                if (isApk) apkDexSequence(file) else sequenceOf(null to file.readBytes())
             for ((entryName, rawBytes) in slots) {
                 dexCount++
                 val slot = DexSlot(entryName, rawBytes)
@@ -174,18 +179,28 @@ object DexRenameTool {
 
     private class DexSlot(val entryName: String?, val bytes: ByteArray)
 
-    /** 按顺序读出 APK 里的 classesN.dex（调用方逐个消费后即可释放，不长期持有全部）。 */
-    private fun apkDexEntries(apk: File): List<Pair<String?, ByteArray>> {
-        val out = ArrayList<Pair<String?, ByteArray>>()
+    /** APK 内 classesN.dex 的条目名（只看目录，不读内容）。 */
+    private fun apkDexNames(apk: File): List<String> = ZipFile(apk).use { zf ->
+        zf.entries().toList()
+            .filter { it.name.matches(Regex("classes\\d*\\.dex")) }
+            .map { it.name }
+            .sorted()
+    }
+
+    /**
+     * 惰性逐条读 dex：每次只有当前条目在内存里，for 循环消费完即可被回收。
+     * 配合上面的「读→改→存结果」循环，峰值从「全部原始 dex + 全部结果」降到
+     * 「单个 dex + 结果集」。
+     */
+    private fun apkDexSequence(apk: File): Sequence<Pair<String?, ByteArray>> = sequence {
         ZipFile(apk).use { zf ->
             val entries = zf.entries().toList()
                 .filter { it.name.matches(Regex("classes\\d*\\.dex")) }
                 .sortedBy { it.name }
             for (entry in entries) {
-                out += entry.name to zf.getInputStream(entry).use { it.readBytes() }
+                yield(entry.name to zf.getInputStream(entry).use { it.readBytes() })
             }
         }
-        return out
     }
 
     /** 把一次重命名结果落成 (新 DexFile, 命中数)。 */

@@ -542,7 +542,9 @@ internal fun SettingsEditorPage(t: UiText) {
             val text = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
                     val f = File(path)
-                    if (f.length() > 64L * 1024 * 1024) null else f.readText()
+                    // 与 SAF 选择路径统一上限：原来是 64 MiB，比 SAF 宽 8 倍。几十 MB 的文本
+                    // 塞进 BasicTextField 不是「慢一点」，是整个界面卡死（甚至有 OOM）。
+                    if (f.length() > 8L * 1024 * 1024) null else f.readText()
                 }.getOrNull()
             }
             if (text != null) {
@@ -562,7 +564,7 @@ internal fun SettingsEditorPage(t: UiText) {
                     CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(File(path).extension)
                 }
             } else {
-                appendOut("\n[无法读取: $path]\n")
+                appendOut("\n[无法读取: $path]（不存在、无权限，或超过 8 MiB 上限）\n")
             }
         }
     }
@@ -1004,11 +1006,12 @@ internal fun SettingsEditorPage(t: UiText) {
         requestCompletion("complete")
     }
 
-    LaunchedEffect(Unit) {
-        EditorBridge.pendingPath?.let { p ->
-            EditorBridge.pendingPath = null
-            loadWsFile(p)
-        }
+    // key 用 pendingPath 本身：编辑器常驻不销毁，LaunchedEffect(Unit) 只会跑一次，
+    // 第二次从外部跳进来就没反应了。
+    LaunchedEffect(EditorBridge.pendingPath.value) {
+        val p = EditorBridge.pendingPath.value ?: return@LaunchedEffect
+        EditorBridge.pendingPath.value = null
+        loadWsFile(p)
     }
 
     // ── Python REPL / Shell ──

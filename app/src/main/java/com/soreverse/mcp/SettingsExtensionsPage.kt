@@ -661,7 +661,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                     )
                                 },
                                 onClick = {
-                                    EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath
+                                    EditorBridge.pendingPath.value = File(dir, "plugin.py").absolutePath
                                     onDest(SettingsDest.Python)
                                 },
                             )
@@ -677,7 +677,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                     ExtBtn(if (zh) "设置" else "Settings", icon = Icons.Default.Settings) { settingsTarget = dir }
                                 }
                                 ExtBtn(if (zh) "编辑" else "Edit", icon = Icons.Default.Edit) {
-                                    EditorBridge.pendingPath = File(dir, "plugin.py").absolutePath
+                                    EditorBridge.pendingPath.value = File(dir, "plugin.py").absolutePath
                                     onDest(SettingsDest.Python)
                                 }
                                 ExtBtn(if (zh) "删除" else "Delete", icon = Icons.Default.Delete) { deleteTarget = dir }
@@ -689,7 +689,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                             Toast.makeText(context, if (zh) "AI 转换 prompt 已复制——粘贴给 AI 即可自动生成完整 plugin.py" else "AI convert prompt copied", Toast.LENGTH_LONG).show()
                                         }
                                         ExtBtn(if (zh) "看转换报告" else "Report", icon = Icons.Default.Description) {
-                                            EditorBridge.pendingPath = File(dir, "CONVERT_INFO.md").absolutePath
+                                            EditorBridge.pendingPath.value = File(dir, "CONVERT_INFO.md").absolutePath
                                             onDest(SettingsDest.Python)
                                         }
                                     }

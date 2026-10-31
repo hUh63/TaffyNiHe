@@ -136,7 +136,9 @@ object SmaliBatchTool {
                                 return@runCatching err("DEX_TOO_LARGE", "DEX ${de.name} 解压后过大(${(de.size / 1024 / 1024)}MB), 可能 OOM", "path", path)
                             }
                             val tempDex = File.createTempFile("smb_", ".dex")
-                            zf.getInputStream(de).use { it.copyTo(tempDex.outputStream()) }
+                            // 目标流也必须 use：不关会漏 fd，且紧接着 tempDex.delete() 在 fd 仍打开时
+                            // unlink —— 空间要等 GC finalize 才回来，批量 init 能把 fd 耗到 "Too many open files"
+                            zf.getInputStream(de).use { ins -> tempDex.outputStream().use { ins.copyTo(it) } }
                             try {
                                 val dexFile = DexFileFactory.loadDexFile(tempDex, opcodes)
                                 val smaliDir = File(workRoot, de.name.replace(".dex", "_smali"))
@@ -200,7 +202,9 @@ object SmaliBatchTool {
                     if (!okA) return@runCatching err("ASSEMBLE_FAILED", "smali 汇编失败(检查语法)", "workDir", workDirPath)
                     val bytes = newDex.readBytes(); newDex.delete()
                     val backup = File(File(apkPath).parentFile, "${File(apkPath).nameWithoutExtension}.bak.dex")
-                    File(apkPath).copyTo(backup, overwrite = true)
+                    // 只在没有备份时创建：apkPath 是「就地改写」的目标，第二次 rebuild 时它已经是
+                    // 改过的产物，overwrite=true 会把真正的原始包覆盖掉（回退拿到半改产物）。
+                    if (!backup.exists()) File(apkPath).copyTo(backup, overwrite = false)
                     File(apkPath).writeBytes(bytes)
                     ok(JSONObject()
                         .put("action", "rebuild")
@@ -233,7 +237,9 @@ object SmaliBatchTool {
                     }
                     val apkFile = File(apkPath)
                     val backup = File(apkFile.parentFile, "${apkFile.nameWithoutExtension}.bak.apk")
-                    apkFile.copyTo(backup, overwrite = true)
+                    // 同 .bak.dex：第二次 rebuild 时 apkFile 已被改过，覆盖备份会丢原始包；
+                    // 下面 copyV2V3Blocks 还会把这份「污染过的备份」当原始签名块来源，产物必然验签失败。
+                    if (!backup.exists()) apkFile.copyTo(backup, overwrite = false)
                     // 重建 ZIP: 替换目标 DEX, 其余条目原样。
                     // 必须走 ZipRepack —— 这里原来自己写 ZipOutputStream，`ZipEntry(e.name)`
                     // 的 method 是 -1（被 putNextEntry 设成 DEFLATED）且丢掉原 extra，于是

@@ -81,6 +81,18 @@ internal fun SettingsPythonPage(t: UiText) {
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.safeLaunch {
+            // 系统选择器能选到任意文件（OpenDocument 不限定 MIME）：先看大小再决定。
+            // 旧实现直接 readBytes().decodeToString()，选到 200 MB 的包就是 OOM。
+            val limit = 8L * 1024 * 1024
+            val size = withContext(Dispatchers.IO) {
+                runCatchingCancellable {
+                    context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+                }.getOrDefault(-1L)
+            }
+            if (size > limit) {
+                output = output + "\n[文件 ${size / 1024 / 1024} MiB，超过编辑器 8 MiB 上限]\n"
+                return@safeLaunch
+            }
             val text = withContext(Dispatchers.IO) {
                 runCatchingCancellable { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
             }

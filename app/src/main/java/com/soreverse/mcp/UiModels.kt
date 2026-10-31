@@ -19,7 +19,13 @@ internal enum class SettingsDest {
 
 /** 页面间轻量桥：扩展页 → 编辑器（打开指定插件文件）。 */
 internal object EditorBridge {
-    var pendingPath: String? = null
+    /**
+     * 待打开的文件路径。必须用 Compose 状态而不是普通 var：
+     * 编辑器页是常驻挂载的（MainActivity 用 offset 移出屏幕保活、不销毁），它的
+     * LaunchedEffect(Unit) 只跑一次 —— 普通 var 改了既不触发重组、也没有第二次消费机会，
+     * 表现为「从扩展页点『编辑』，第一次能跳，之后每次都没反应」。
+     */
+    val pendingPath = androidx.compose.runtime.mutableStateOf<String?>(null)
 }
 
 internal data class WorkspaceUi(

@@ -3311,9 +3311,11 @@ private fun AnalysisAppBar(
         ) {
             Text(
                 tools.sharedSoName.ifBlank { if (zh) "SO 详情" else "SO detail" },
+                // Exbin 的 MaterialToolbar 标题是 TitleMedium 16sp + **常规字重**：加粗 +
+                // 14sp 会让顶栏看起来像「列表项标题」，跟下面的视图内容抢层级。
                 style = MaterialTheme.typography.titleMedium,
-                fontSize = AppText.title,
-                fontWeight = FontWeight.SemiBold,
+                fontSize = AppText.headline,
+                fontWeight = FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = cs.onSurface,
@@ -3329,7 +3331,8 @@ private fun AnalysisAppBar(
         }
         IconButton(onClick = onRefresh) {
             if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Filled.Refresh, contentDescription = if (zh) "刷新" else "Refresh", tint = cs.primary)
+            // 刷新是全局动作，用次要色；主色留给「当前选中」和主按钮
+            else Icon(Icons.Filled.Refresh, contentDescription = if (zh) "刷新" else "Refresh", tint = cs.onSurfaceVariant)
         }
         Box {
             IconButton(onClick = { menu = true }) {

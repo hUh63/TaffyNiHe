@@ -181,12 +181,12 @@ internal fun GlassGroup(
         if (!title.isNullOrBlank()) {
             Text(
                 title,
-                // 组标题在卡片外、primary 色；start 与卡内正文左对齐（卡内 padding 16，这里 16）。
-                // 原来写 20dp 是「标题比正文更靠里」，整页看起来是歪的。
-                fontSize = AppText.body,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.3.sp,
-                color = MaterialTheme.colorScheme.primary,
+                // 组标题在卡片外、中性次要色；start 与卡内正文左对齐（卡内 padding 16，这里 16）。
+                // 用 primary 写组标题，一页七八个分组就变成彩色标签墙，而且会跟「值/状态」抢注意力。
+                fontSize = AppText.label,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.8.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp),
             )
         }

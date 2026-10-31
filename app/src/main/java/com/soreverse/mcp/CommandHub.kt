@@ -63,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.service.McpForegroundService
 import kotlinx.coroutines.delay
 
@@ -225,7 +226,7 @@ internal fun CommandHubScreen(
             ServiceCard(zh = zh, settings = settings, onNavigateSettings = onNavigateSettings)
 
             Spacer(Modifier.height(m.sectionGap))
-            AnalyzeCta(zh = zh) { onNavigate(MainTab.Analyze, null) }
+            AnalyzeCta(zh = zh) { onNavigate(MainTab.Tools, null) }
             Spacer(Modifier.height(28.dp))
         }
     }
@@ -647,7 +648,7 @@ private data class Satellite(
 private fun workbenchTiles(zh: Boolean): List<Satellite> = listOf(
     Satellite(Icons.Default.Code, if (zh) "伪代码" else "Decompile", MainTab.Home, "decompile"),
     Satellite(Icons.Default.LockOpen, if (zh) "脱壳" else "Unpack", MainTab.Home, "unpack"),
-    Satellite(Icons.Default.Memory, if (zh) "SO 分析" else "SO", MainTab.Analyze, null),
+    Satellite(Icons.Default.Memory, if (zh) "SO 分析" else "SO", MainTab.Tools, null),
     Satellite(Icons.Default.FlashOn, if (zh) "模拟执行" else "Emulate", MainTab.Home, "unidbg"),
     Satellite(Icons.Default.MyLocation, if (zh) "Frida" else "Frida", MainTab.Home, "frida"),
     Satellite(Icons.Default.Inventory2, if (zh) "回编" else "Rebuild", MainTab.Home, "rebuild"),

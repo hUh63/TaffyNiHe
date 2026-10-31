@@ -70,8 +70,9 @@ internal object SettingsDensity {
     val iconGap = 14.dp
     val textGap = 2.dp
     val cardPadding = 14.dp
-    val sectionGap = 14.dp
-    val groupCorner = 20.dp
+    val sectionGap = 22.dp
+    // Exbin 卡片圆角是 12dp；20dp 是太墟的「大圆角」语言，同一个 App 里不该有两套
+    val groupCorner = 12.dp
     val innerCorner = 0.dp
     val listPadding = 16.dp
 }
@@ -159,11 +160,13 @@ internal fun SettingsSection(title: String, content: @Composable ColumnScope.() 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             title,
-            modifier = Modifier.padding(start = 4.dp),
-            fontSize = AppText.body,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.3.sp,
-            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
+            // 分组标题用次要文字色 + 字距：用主色写小节标题，一页里出现六七次就变成调色板，
+            // 而且会和「右侧状态值是主色」抢注意力。Exbin 的分组标题一律中性色。
+            fontSize = AppText.label,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.8.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         content()
     }
@@ -191,7 +194,8 @@ internal fun PreferenceSurface(
             bottomStart = if (last) SettingsDensity.groupCorner else SettingsDensity.innerCorner,
             bottomEnd = if (last) SettingsDensity.groupCorner else SettingsDensity.innerCorner,
         ),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        // 页面级卡片统一 surfaceVariant（比背景亮一档，Exbin 的 item_detail 就是这档）
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         onClick = onClick ?: {},
         enabled = onClick != null,
@@ -244,8 +248,9 @@ internal fun SettingsCategoryRow(
                     Text(
                         value,
                         Modifier.widthIn(max = 104.dp),
-                        fontSize = AppText.body,
-                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = AppText.label,
+                        // 状态摘要不是「可点链接」，用中性次要色；主色留给选中/主操作
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -305,8 +310,8 @@ internal fun SettingsItemRow(
                     Text(
                         value,
                         Modifier.widthIn(max = 96.dp),
-                        fontSize = AppText.body,
-                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = AppText.label,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

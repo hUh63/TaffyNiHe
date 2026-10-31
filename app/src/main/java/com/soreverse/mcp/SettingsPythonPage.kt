@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -111,6 +112,10 @@ internal fun SettingsPythonPage(t: UiText) {
         runCatching { p?.destroy() }
         appendOut("\n[会话已结束]\n")
     }
+
+    // python3 -i 是子进程：离开页面必须回收，否则它在 App 进程存活期间一直占着内存与 fd
+    // （原来只存在 remember 里，组件销毁时唯一的持有者被丢弃，destroy() 永远没人调）。
+    DisposableEffect(Unit) { onDispose { stopSession() } }
 
     fun startSession() {
         stopSession()

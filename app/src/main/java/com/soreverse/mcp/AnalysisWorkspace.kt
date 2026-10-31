@@ -3297,8 +3297,11 @@ private fun AnalysisAppBar(
     val busy = tools.viewLoading.isNotBlank() || tools.cfgLoading
     var menu by remember { mutableStateOf(false) }
 
+    // 自绘顶栏，但尺寸严格对齐 M3 TopAppBar：高度 64dp（不是 56dp —— 其它页面的 TopAppBar
+    // 就是 64dp，两套高度并排切换时会「跳一下」）、左右 4dp、标题 16sp 常规字重。
+    // 不直接换成 TopAppBar 组件是因为本文件有架构行数基线，换容器要连带改 25 处缩进。
     Row(
-        Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 4.dp),
+        Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {

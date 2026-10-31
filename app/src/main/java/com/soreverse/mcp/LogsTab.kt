@@ -82,7 +82,11 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
             if (pendingVersion != contentVersion) contentVersion = pendingVersion
         }
     }
-    val logs = remember { mutableStateListOf<String>().also { list -> list.addAll(AppLog.snapshot().takeLast(120)) } }
+    // 回填上限必须和运行期上限一致：原来回填只取 120 行，而运行期上限是 settings.logMaxLines
+    // （默认远大于 120），于是「刷满 → 切走 → 切回」历史会瞬间缩水到 120 行，看起来像日志被吞了。
+    val logs = remember {
+        mutableStateListOf<String>().also { list -> list.addAll(AppLog.snapshot().takeLast(settings.logMaxLines)) }
+    }
 
     DisposableEffect(Unit) {
         val cap = settings.logMaxLines
@@ -99,20 +103,24 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
         onDispose { AppLog.removeListener(onLine) }
     }
 
-    val visibleLogs = remember(contentVersion, logFilter, searchText, settings.logMaxLines, t.zh) {
-        logs
-        .filter { line ->
-            val levelMatch = when (logFilter) {
-                "E" -> " E " in line
-                "W" -> " W " in line
-                "I" -> " I " in line
-                else -> true
-            }
-            val searchMatch = searchText.isBlank() ||
-                localizeLogLine(line, t.zh).contains(searchText, ignoreCase = true)
-            levelMatch && searchMatch
+    // 过滤条件抽成局部函数：列表渲染用节流后的快照，而「复制 / 导出」必须取**最新**
+    // 一份（节流最多落后 200ms，日志刷屏时点复制会少最后几行）。
+    fun matchLine(line: String): Boolean {
+        val levelMatch = when (logFilter) {
+            "E" -> " E " in line
+            "W" -> " W " in line
+            "I" -> " I " in line
+            else -> true
         }
-        .takeLast(settings.logMaxLines)
+        val searchMatch = searchText.isBlank() ||
+            localizeLogLine(line, t.zh).contains(searchText, ignoreCase = true)
+        return levelMatch && searchMatch
+    }
+    fun latestFiltered(): List<String> =
+        AppLog.snapshot().filter(::matchLine).takeLast(settings.logMaxLines)
+
+    val visibleLogs = remember(contentVersion, logFilter, searchText, settings.logMaxLines, t.zh) {
+        logs.filter(::matchLine).takeLast(settings.logMaxLines)
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -121,7 +129,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
         if (uri == null) return@rememberLauncherForActivityResult
         scope.safeLaunch {
             runCatching {
-                val text = visibleLogs.joinToString("\n") { localizeLogLine(it, t.zh) }
+                val text = latestFiltered().joinToString("\n") { localizeLogLine(it, t.zh) }
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { output ->
                         output.write(text.toByteArray(Charsets.UTF_8))
@@ -186,7 +194,7 @@ internal fun LogsTab(t: UiText, settings: SettingsStore, onBack: (() -> Unit)? =
             ) {
                 LogActionButton(if (logPaused) if (t.zh) "继续" else "Resume" else if (t.zh) "暂停" else "Pause", if (logPaused) Icons.Default.PlayArrow else Icons.Default.Pause, Modifier.weight(1f)) { logPaused = !logPaused }
                 LogActionButton(if (t.zh) "清空" else "Clear", Icons.Default.Delete, Modifier.weight(1f)) { AppLog.clear(); logs.clear() }
-                LogActionButton(if (t.zh) "复制" else "Copy", Icons.Default.ContentCopy, Modifier.weight(1f)) { copy(context, visibleLogs.joinToString("\n") { localizeLogLine(it, t.zh) }, t.copied) }
+                LogActionButton(if (t.zh) "复制" else "Copy", Icons.Default.ContentCopy, Modifier.weight(1f)) { copy(context, latestFiltered().joinToString("\n") { localizeLogLine(it, t.zh) }, t.copied) }
                 LogActionButton(if (t.zh) "导出" else "Export", Icons.Default.FileDownload, Modifier.weight(1f)) {
                     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                     exportLauncher.launch("niehe_logs_$timestamp.txt")

@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.EndpointInfo
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.service.McpForegroundService
@@ -98,10 +99,18 @@ internal fun CommandHubScreen(
     val zh = t.zh
     var running by remember { mutableStateOf(McpForegroundService.isRunning()) }
     var treeUri by remember { mutableStateOf(settings.treeUri) }
-    // 端点只在「运行状态 / 端口」变化时重算。旧实现每秒 `NetworkInterface.getNetworkInterfaces()`
-    // 枚举一次网卡再把结果写进 State —— 首页因此每秒重组一次，且主线程多一次 syscall，纯浪费。
-    val endpoints = remember(running, settings.port) {
-        if (running) filteredEndpoints(context, settings, settings.port) else emptyList()
+    // 端点：`NetworkInterface.getNetworkInterfaces()` 是实打实的 syscall + 遍历网卡，
+    // 放在 remember 的计算块里就是在组合期（主线程）跑。改成 IO 线程 + 状态，
+    // 只在「运行状态 / 端口」变化时重算一次。
+    var endpoints by remember { mutableStateOf<List<EndpointInfo>>(emptyList()) }
+    LaunchedEffect(running, settings.port) {
+        endpoints = if (running) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { filteredEndpoints(context, settings, settings.port) }.getOrDefault(emptyList())
+            }
+        } else {
+            emptyList()
+        }
     }
 
     val pickTree = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
@@ -199,10 +208,11 @@ internal fun CommandHubScreen(
             EngineCard(
                 running = running,
                 loopbackUrl = loopbackUrl,
+                lanUrl = endpoints.firstOrNull { !it.url.contains("127.0.0.1") }?.url,
                 dirName = dirName,
                 onToggle = { toggle() },
-                onCopy = {
-                    clipboard.setText(AnnotatedString(loopbackUrl))
+                onCopy = { text ->
+                    clipboard.setText(AnnotatedString(text))
                     Toast.makeText(
                         context,
                         if (zh) "已复制，填到 AI 客户端 MCP 地址" else "Copied",
@@ -242,9 +252,10 @@ internal fun CommandHubScreen(
 private fun EngineCard(
     running: Boolean,
     loopbackUrl: String,
+    lanUrl: String?,
     dirName: String,
     onToggle: () -> Unit,
-    onCopy: () -> Unit,
+    onCopy: (String) -> Unit,
     onPickDir: () -> Unit,
     zh: Boolean,
 ) {
@@ -303,24 +314,35 @@ private fun EngineCard(
             HorizontalDivider(color = cs.outlineVariant)
             Spacer(Modifier.height(4.dp))
 
-            // 一行信息条：运行中给端点（点按复制），停止时给工作目录（点按选择）
+            // 端点（运行中）与工作目录（常驻）是**两条互不相关的信息**，不能做成 if/else：
+            // 引擎一般是常开的，做成互斥就等于「运行中既看不到目录、也没有换目录的入口」，
+            // 想换目录必须先停服务（会断掉已经连上的 AI 客户端）。
             if (running) {
                 InfoRow(
                     icon = Icons.Filled.ContentCopy,
                     text = loopbackUrl,
                     monospace = true,
                     trailingChevron = false,
-                    onClick = onCopy,
+                    onClick = { onCopy(loopbackUrl) },
                 )
-            } else {
-                InfoRow(
-                    icon = Icons.Filled.FolderOpen,
-                    text = dirName,
-                    monospace = false,
-                    trailingChevron = true,
-                    onClick = onPickDir,
-                )
+                // 手机开着服务、AI 客户端在电脑上时，127.0.0.1 是连不上的 —— 局域网地址必须露出来
+                if (lanUrl != null && lanUrl != loopbackUrl) {
+                    InfoRow(
+                        icon = Icons.Filled.ContentCopy,
+                        text = lanUrl,
+                        monospace = true,
+                        trailingChevron = false,
+                        onClick = { onCopy(lanUrl) },
+                    )
+                }
             }
+            InfoRow(
+                icon = Icons.Filled.FolderOpen,
+                text = dirName,
+                monospace = false,
+                trailingChevron = true,
+                onClick = onPickDir,
+            )
         }
     }
 }
@@ -653,7 +675,8 @@ private fun workbenchTiles(zh: Boolean): List<Satellite> = listOf(
     Satellite(Icons.Default.Code, if (zh) "伪代码" else "Decompile", MainTab.Home, "decompile"),
     Satellite(Icons.Default.LockOpen, if (zh) "脱壳" else "Unpack", MainTab.Home, "unpack"),
     Satellite(Icons.Default.Memory, if (zh) "SO 分析" else "SO", MainTab.Tools, null),
-    Satellite(Icons.Default.FlashOn, if (zh) "模拟执行" else "Emulate", MainTab.Home, "unidbg"),
+    // categoryMap 里的键是 emulate（不是 unidbg）；写错会被当成「全部工具」，静默打开上百个工具
+    Satellite(Icons.Default.FlashOn, if (zh) "模拟执行" else "Emulate", MainTab.Home, "emulate"),
     Satellite(Icons.Default.MyLocation, if (zh) "Frida" else "Frida", MainTab.Home, "frida"),
     Satellite(Icons.Default.Inventory2, if (zh) "回编" else "Rebuild", MainTab.Home, "rebuild"),
     Satellite(Icons.Default.RssFeed, if (zh) "日志" else "Logs", MainTab.Home, "logs"),

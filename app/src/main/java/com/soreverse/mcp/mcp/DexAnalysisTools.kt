@@ -497,7 +497,11 @@ object DexAnalysisTools {
                 }
                 for (entry in dexEntries) {
                     val tempDex = File.createTempFile("classes_", ".dex")
-                    zf.getInputStream(entry).use { it.copyTo(tempDex.outputStream()) }
+                    zf.getInputStream(entry).use { ins ->
+                        // 目标流也必须 use：不关会漏 fd，紧接着 tempDex.delete() 在 fd 仍打开时
+                        // unlink，空间要等 GC finalize 才回来；批量处理 dex 能把 fd 耗到 "Too many open files"
+                        tempDex.outputStream().use { out -> ins.copyTo(out) }
+                    }
                     // 不删 tempDex — DexFile 可能需要文件存在
                     try {
                         val dex = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())

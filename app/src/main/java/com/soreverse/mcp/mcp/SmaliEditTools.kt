@@ -108,7 +108,11 @@ object SmaliEditTools {
                 for (dexEntry in dexEntries) {
                     // 提取 DEX 到临时文件
                     val tempDex = File.createTempFile("classes_", ".dex")
-                    zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
+                    zf.getInputStream(dexEntry).use { ins ->
+                        // 目标流也必须 use：不关会漏 fd，紧接着 tempDex.delete() 在 fd 仍打开时
+                        // unlink，空间要等 GC finalize 才回来；批量处理 dex 能把 fd 耗到 "Too many open files"
+                        tempDex.outputStream().use { out -> ins.copyTo(out) }
+                    }
                     try {
                         val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
                         for (classDef in dexFile.classes) {
@@ -391,7 +395,11 @@ object SmaliEditTools {
                 val dexEntries = zf.entries().toList().filter { it.name.matches(Regex("classes\\d*\\.dex")) }
                 for (dexEntry in dexEntries) {
                     val tempDex = File.createTempFile("rstr_dex_", ".dex")
-                    zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
+                    zf.getInputStream(dexEntry).use { ins ->
+                        // 目标流也必须 use：不关会漏 fd，紧接着 tempDex.delete() 在 fd 仍打开时
+                        // unlink，空间要等 GC finalize 才回来；批量处理 dex 能把 fd 耗到 "Too many open files"
+                        tempDex.outputStream().use { out -> ins.copyTo(out) }
+                    }
                     try {
                         val dexFile = DexFileFactory.loadDexFile(tempDex, opcodes)
                         // 决定本 DEX 是否需要处理
@@ -609,7 +617,11 @@ object SmaliEditTools {
                 }
                 for (dexEntry in dexEntries) {
                     val tempDex = File.createTempFile("classes_", ".dex")
-                    zf.getInputStream(dexEntry).use { it.copyTo(tempDex.outputStream()) }
+                    zf.getInputStream(dexEntry).use { ins ->
+                        // 目标流也必须 use：不关会漏 fd，紧接着 tempDex.delete() 在 fd 仍打开时
+                        // unlink，空间要等 GC finalize 才回来；批量处理 dex 能把 fd 耗到 "Too many open files"
+                        tempDex.outputStream().use { out -> ins.copyTo(out) }
+                    }
                     try {
                         val dexFile = DexFileFactory.loadDexFile(tempDex, Opcodes.getDefault())
                         if (dexFile.classes.any { it.type == classDescriptor }) {

@@ -101,16 +101,31 @@ object ApkEditTools {
                             "provider" -> "<provider android:name=\"$name\" android:exported=\"false\" android:authorities=\"${name.lowercase()}.provider\" />"
                             else -> return err("INVALID_ARGUMENT", "未知组件类型: $type", "componentType", type)
                         }
-                        xml = xml.replaceFirst("</application>", "        $tag\n    </application>")
+                        val mutated = xml.replaceFirst("</application>", "        $tag\n    </application>")
+                        if (mutated == xml) return err("NO_CHANGE", "manifest 中未找到 </application>，未写入", "componentName", name)
+                        xml = mutated
                         manifest.writeText(xml)
                         ok(JSONObject().put("action", "add_component").put("type", type).put("name", name))
                     }
                     "remove_component" -> {
                         val name = args.str("componentName")
                         if (name.isBlank()) return err("INVALID_ARGUMENT", "remove_component 需要 componentName 参数", "componentName", "")
-                        val pattern = Regex("\\s*<(activity|service|receiver|provider)\\s[^>]*android:name=\"$name\"[^>]*/>\\s*\\n?")
-                        xml = pattern.replace(xml, "")
-                        manifest.writeText(xml)
+                        // 自闭合写法 <activity ... />
+                        val selfClosing = Regex("\\s*<(activity|service|receiver|provider)\\s[^>]*android:name=\"$name\"[^>]*/>\\s*\\n?")
+                        var mutated = selfClosing.replace(xml, "")
+                        if (mutated == xml) {
+                            // 成对写法 <activity ...> <intent-filter/> </activity> —— 真实 App 里绝大多数
+                            // 组件都是这种形态；旧实现只匹配自闭合，于是「删了」其实一字节没删，还回报成功。
+                            val paired = Regex(
+                                "<(activity|service|receiver|provider)\\s[^>]*android:name=\"$name\"[^>]*>.*?</\\1>\\s*\\n?",
+                                setOf(RegexOption.DOT_MATCHES_ALL),
+                            )
+                            mutated = paired.replace(xml, "")
+                        }
+                        if (mutated == xml) {
+                            return err("NOT_FOUND", "manifest 中没有该组件: $name", "componentName", name)
+                        }
+                        manifest.writeText(mutated)
                         ok(JSONObject().put("action", "remove_component").put("name", name))
                     }
                     "set_debuggable" -> {
@@ -127,14 +142,22 @@ object ApkEditTools {
                         val name = args.str("componentName")
                         val exp = args.bool("exported", true)
                         if (name.isBlank()) return err("INVALID_ARGUMENT", "set_exported 需要 componentName 参数", "componentName", "")
+                        val before = xml
+                        // 注意：Replacement 里写 "\\$1" 会被解析成「字面 $ 后跟 1」而不是分组引用
+                        // （Kotlin 的 \$ 就是美元符转义），旧实现因此把字面 "$1" 塞进 manifest，
+                        // 产出 `$1android:exported="false"` 这种非法属性名 —— 编译期 aapt 直接报错。
+                        // 这里改用 lambda 拼字符串，零转义歧义。
                         val pattern = Regex("(<(?:activity|service|receiver|provider)\\s[^>]*android:name=\"$name\"[^>]*?)android:exported=\"[^\"]*\"")
                         if (pattern.containsMatchIn(xml)) {
-                            xml = pattern.replace(xml, "\$1android:exported=\"$exp\"")
+                            xml = pattern.replace(xml) { it.groupValues[1] + "android:exported=\"$exp\"" }
                         } else {
                             xml = xml.replaceFirst(
-                                Regex("(<(?:activity|service|receiver|provider)\\s[^>]*android:name=\"$name\")"),
-                                "\$1 android:exported=\"$exp\""
-                            )
+                                Regex("(<(?:activity|service|receiver|provider)\\s[^>]*android:name=\"$name\")")
+                            ) { it.groupValues[1] + " android:exported=\"$exp\"" }
+                        }
+                        // 没命中组件时旧实现照样写回并报 success，客户端会以为属性改好了
+                        if (xml == before) {
+                            return err("NOT_FOUND", "manifest 中没有该组件: $name", "componentName", name)
                         }
                         manifest.writeText(xml)
                         ok(JSONObject().put("action", "set_exported").put("component", name).put("exported", exp))
@@ -144,6 +167,9 @@ object ApkEditTools {
             }.getOrElse { e -> err("MANIFEST_EDIT_FAILED", "Manifest 编辑失败: ${e.message}", "action", action) }
         }
     }
+
+    /** 注入 SO 时允许的 ABI 目录名（与 schema 的 oneOf 一致；用于挡路径穿越） */
+    private val ALLOWED_ABIS = listOf("arm64-v8a", "armeabi-v7a", "armeabi", "x86", "x86_64", "mips", "mips64")
 
     /** 向已 decode 目录注入 SO 文件到 lib/arm64-v8a/ (或其他 abi) */
     val injectSo: ToolHandler = object : ToolHandler {
@@ -169,10 +195,23 @@ object ApkEditTools {
             val soFile = File(soPath)
             if (!dir.isDirectory) return err("FILE_NOT_FOUND", "decode 目录不存在: $dirPath", "dir", dirPath)
             if (!soFile.isFile) return err("FILE_NOT_FOUND", "so 文件不存在: $soPath", "so", soPath)
-            val abi = args.str("abi", "arm64-v8a")
+            // abi 会被直接拼进路径：schema 里的 oneOf 只是提示，MCP 客户端不强制校验，
+            // 传 abi="../../xxx" 就能把 SO 写到 decode 目录之外；而 abi 不是 WorkspacePolicy
+            // 登记的路径键（只有 dir / so 是），等于整体绕过工作区白名单。
+            val abiRaw = args.str("abi", "arm64-v8a").trim()
+            val abi = ALLOWED_ABIS.firstOrNull { it == abiRaw }
+                ?: return err(
+                    "INVALID_ARGUMENT",
+                    "abi 只能是 ${ALLOWED_ABIS.joinToString("/")}，收到: $abiRaw",
+                    "abi", abiRaw,
+                )
             val replace = args.bool("replace", true)
             val libDir = File(dir, "lib/$abi").apply { mkdirs() }
             val target = File(libDir, soFile.name)
+            // 双保险：规范化路径必须仍在 decode 目录内
+            if (!target.canonicalPath.startsWith(dir.canonicalPath + File.separator)) {
+                return err("INVALID_ARGUMENT", "目标路径越界: ${target.absolutePath}", "abi", abi)
+            }
             if (target.exists() && !replace) return err("ALREADY_EXISTS", "目标已存在且 replace=false: ${target.absolutePath}", "so", soPath)
             soFile.copyTo(target, overwrite = true)
             return ok(JSONObject()

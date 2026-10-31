@@ -24,6 +24,19 @@ import java.io.File
 object SandboxTool {
 
     /**
+     * PackageInstaller / PackageManager 回调用 PendingIntent 的 flag。
+     *
+     * Android 12（API 31）起，targetSdk >= 31 的应用创建 PendingIntent 必须显式声明可变性，
+     * 否则构造时就抛 IllegalArgumentException —— 也就是无 root 模式的「安装 / 卸载 APK」
+     * 在 Android 12+ 上 100% 失败（而且报错信息与安装本身无关，很难定位）。
+     * 这里必须用 MUTABLE：系统会往这个 PendingIntent 里回填安装状态 extras，
+     * IMMUTABLE 会让系统填充的 extras 被丢弃，SandboxInstallReceiver 收不到结果。
+     */
+    private val installPiFlags: Int
+        get() = android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (android.os.Build.VERSION.SDK_INT >= 31) android.app.PendingIntent.FLAG_MUTABLE else 0)
+
+    /**
      * 安全闸门：packageName / activity / apkPath 会被拼进 root/shell 命令行
      * （[PermissionManager.exec] 走 `su -c` 或 `sh -c`），因此必须先拒绝 shell 元字符，
      * 否则经 MCP 传入 `com.a; id > /data/local/tmp/x` 就是一次任意命令执行。
@@ -130,7 +143,8 @@ object SandboxTool {
                     apk.inputStream().use { it.copyTo(out) }
                 }
                 val pi = android.app.PendingIntent.getBroadcast(ctx.context, sessionId,
-                    Intent(ctx.context, SandboxInstallReceiver::class.java).putExtra("packageName", ""), 0)
+                    Intent(ctx.context, SandboxInstallReceiver::class.java).putExtra("packageName", ""),
+                    installPiFlags)
                 session.commit(pi.intentSender)
                 ok(JSONObject()
                     .put("action", "install").put("mode", "package-installer")
@@ -270,7 +284,7 @@ object SandboxTool {
             return runCatching {
                 val pm = ctx.context.packageManager
                 val pi = android.app.PendingIntent.getBroadcast(ctx.context, 0,
-                    Intent(ctx.context, SandboxInstallReceiver::class.java), 0)
+                    Intent(ctx.context, SandboxInstallReceiver::class.java), installPiFlags)
                 pm.packageInstaller.uninstall(pkg, pi.intentSender)
                 ok(JSONObject().put("action", "uninstall").put("mode", "package-installer")
                     .put("packageName", pkg)

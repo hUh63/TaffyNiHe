@@ -83,6 +83,7 @@ object EditSnapshotService {
 
     /** 字节级 diff：对比某份快照的原始文件与当前文件。返回 JSONObject 差异描述。 */
     fun diff(ctx: Context, snapshotId: String, toolName: String): JSONObject {
+        badId(snapshotId)?.let { return it }
         val snapDir = File(snapshotsDir(ctx, toolName), snapshotId)
         val metaFile = File(snapDir, "meta.json")
         if (!metaFile.isFile) {
@@ -171,8 +172,18 @@ object EditSnapshotService {
         return removed to added
     }
 
+    /** 快照 id 只允许文件名字符 —— 它会直接拼进 snapshotsDir/<tool>/<id> 路径。 */
+    private val SAFE_ID = Regex("[A-Za-z0-9._-]{1,80}")
+
+    /** diff/rollback 共用：非法 id 直接拒绝，避免 "../.." 跨目录读别人的快照。 */
+    private fun badId(snapshotId: String): JSONObject? =
+        if (SAFE_ID.matches(snapshotId)) null
+        else JSONObject().put("error", "INVALID_ARGUMENT")
+            .put("message", "snapshotId 只能包含字母数字和 . _ -（最长 80）: $snapshotId")
+
     /** 回滚：用快照还原原始文件到指定目标路径。默认还原到元数据里的原始路径。 */
     fun rollback(ctx: Context, snapshotId: String, toolName: String, targetPath: String? = null): JSONObject {
+        badId(snapshotId)?.let { return it }
         val snapDir = File(snapshotsDir(ctx, toolName), snapshotId)
         val metaFile = File(snapDir, "meta.json")
         if (!metaFile.isFile) {

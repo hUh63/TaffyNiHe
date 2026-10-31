@@ -50,6 +50,14 @@ object LogcatTools {
 
     /** 后台采集进程引用 */
     @Volatile private var captureProcess: Process? = null
+
+    /**
+     * start / stop 串行化。
+     * 旧实现是裸的 check-then-act：「captureProcess 为空吗」与 ProcessBuilder.start() 之间
+     * 有窗口，UI 按钮和 MCP 请求同时 start 会起两个 logcat，第二个覆盖字段，第一个永远
+     * 没人 destroy（持续吃 CPU/电量、往已删的文件里写）。
+     */
+    private val captureLock = Any()
     @Volatile private var captureFile: java.io.File? = null
     @Volatile private var capturePid: Int = 0
     @Volatile private var captureTag: String = ""
@@ -256,7 +264,7 @@ object LogcatTools {
 
             return runCatching {
                 when (action) {
-                    "start" -> {
+                    "start" -> synchronized(captureLock) {
                         if (captureProcess != null && captureProcess!!.isAlive) {
                             return err("ALREADY_RUNNING", "后台采集已在运行, 先 stop 再 start", "action", "start")
                         }
@@ -307,8 +315,12 @@ object LogcatTools {
                             .put("hint", "后台采集已启动, 用 action=read 读取, action=stop 停止"))
                     }
 
-                    "stop" -> {
-                        captureProcess?.destroy()
+                    "stop" -> synchronized(captureLock) {
+                        // destroy 之后要 waitFor：只 destroy 不回收，进程在 GC 前一直是僵尸
+                        val p = captureProcess
+                        p?.destroy()
+                        runCatching { p?.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) }
+                            .onFailure { runCatching { p?.destroyForcibly() } }
                         captureProcess = null
                         // 大文件不做全量扫描：每次 status/stop 都 count() 一遍是 O(n) IO，
                         // 一个 8 小时录制的文件能让 UI 卡死；超过 8MB 按平均行宽估算

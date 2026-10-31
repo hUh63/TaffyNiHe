@@ -132,7 +132,7 @@ object ArchiveTools {
                 return header
             }
 
-            fun write(output: OutputStream, header: TarHeader, data: ByteArray) {
+            fun write(output: OutputStream, header: TarHeader, data: InputStream) {
                 val buf = ByteArray(BLOCK_SIZE)
                 val nameBytes = header.name.toByteArray(Charsets.UTF_8)
                 val prefixBytes = header.prefix.toByteArray(Charsets.UTF_8)
@@ -169,9 +169,18 @@ object ArchiveTools {
                 buf[155] = ' '.code.toByte()
 
                 output.write(buf)
-                output.write(data)
+                // 流式写数据段：旧实现要调用方先把整个文件 readBytes() 进堆才能写，
+                // 打包一个装满 SO/APK 的工作目录（几百 MB）时必然 OOM。
+                val chunk = ByteArray(64 * 1024)
+                var written = 0L
+                while (true) {
+                    val n = data.read(chunk)
+                    if (n < 0) break
+                    output.write(chunk, 0, n)
+                    written += n
+                }
                 // Pad to block size
-                val pad = BLOCK_SIZE - (data.size % BLOCK_SIZE)
+                val pad = BLOCK_SIZE - (written % BLOCK_SIZE)
                 if (pad < BLOCK_SIZE) output.write(ByteArray(pad))
             }
 
@@ -407,6 +416,9 @@ object ArchiveTools {
                             while (tpLeft > 0) { val n = bis.skip(tpLeft); if (n <= 0) break; tpLeft -= n }
                             continue
                         }
+                        // readOctalLong 读到 base-256 编码（高位置位）的 size 会解析成负数，
+                        // ByteArray(负数) 抛 NegativeArraySizeException，把整次解压中断在半成品状态。
+                        if (hdr.size < 0) throw IllegalStateException("tar 条目 size 非法(负数): $tarName (${hdr.size})")
                         if (hdr.size > MAX_TAR_ENTRY_BYTES) throw IllegalStateException("tar 条目过大: $tarName (${hdr.size} bytes)")
                         val data = ByteArray(hdr.size.toInt())
                         var totalRead = 0
@@ -529,17 +541,18 @@ object ArchiveTools {
                 } else FileOutputStream(outputFile)
                 output.buffered().use { bos ->
                     for ((name, f) in entries) {
-                        val data = f.readBytes()
                         val safeName = name.replace(File.separatorChar, '/')
+                        val len = f.length()
                         val hdr = TarHeader().apply {
                             this.name = safeName
-                            size = data.size.toLong()
+                            size = len
                             mtime = f.lastModified() / 1000
                             typeflag = '0'.code.toByte()
                         }
-                        TarHeader.write(bos, hdr, data)
+                        // 流式写入，不再把整个文件读进堆
+                        f.inputStream().use { TarHeader.write(bos, hdr, it) }
                         totalFiles++
-                        totalBytes += data.size
+                        totalBytes += len
                     }
                     TarHeader.writeEnd(bos)
                 }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -72,7 +73,10 @@ internal fun ScreenHeader(
     trailing: (@Composable () -> Unit)? = null,
     titleColor: Color? = null,
 ) {
+    // windowInsets 置零：外层 MainActivity 的 Scaffold 已经把状态栏高度作为 padding 给了内容区，
+    // TopAppBar 默认还会再加一次 statusBars，页面顶部因此多出一截空白（不同页面还不一样高）。
     TopAppBar(
+        windowInsets = WindowInsets(0, 0, 0, 0),
         title = {
             Column {
                 Text(
@@ -127,8 +131,10 @@ internal fun ToolPageScaffold(
     content: @Composable () -> Unit,
 ) {
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 title = {
                     Column {
                         Text(

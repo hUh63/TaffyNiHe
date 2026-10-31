@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -157,6 +158,8 @@ internal fun CommandHubScreen(
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
+            // 外层 MainActivity 的 Scaffold 已给过状态栏 padding，这里再叠一次会多出一截空白
+            windowInsets = WindowInsets(0, 0, 0, 0),
             title = {
                 Text(
                     if (zh) "塔菲逆核" else "Taffy",

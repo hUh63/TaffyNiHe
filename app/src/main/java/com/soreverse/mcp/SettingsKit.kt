@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -98,14 +99,20 @@ internal fun SettingsScaffold(
 ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        // 外层 MainActivity 的 Scaffold 已经给过状态栏 padding；内层再让 Scaffold / TopAppBar
+        // 各算一次系统栏 inset，页面顶部就会多出一截空白。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 title = {
                     Text(
                         title,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = AppText.display,
+                        // 20sp+半粗是太墟的「大标题」语言；Exbin 的 toolbar 是 TitleMedium 16sp 常规字重。
+                        // 40 多个设置子页共用这一处，改这里等于全站统一。
+                        fontWeight = FontWeight.Normal,
+                        fontSize = AppText.headline,
                         letterSpacing = 0.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

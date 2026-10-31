@@ -1,3 +1,61 @@
+## 塔菲逆核 v1.5.25 —— 继续排查：14 个真缺陷（含一个 Android 12+ 必崩）
+
+这一轮把全仓 311 个自有 .kt + 55 个 .java + 原生/构建配置拉下来做规则扫描，再分「工具与引擎层」「UI 层」两路逐文件深读，只保留能指出具体行号、具体触发路径、具体后果的条目。下面每一条都回读过源码确认，误报已丢弃。
+
+### 一、会在 Android 12+ 直接崩的
+
+**无 root 安装 / 卸载 APK 100% 失败。** `PendingIntent.getBroadcast(...)` 传的是 `flags = 0` —— targetSdk 36 下，Android 12 起创建 PendingIntent 必须显式声明可变性，否则构造时就抛 `IllegalArgumentException`。报错跟安装本身毫无关系，所以表现成「点了安装，什么都没发生」。
+这里也只能用 `FLAG_MUTABLE`：系统要往这个 PendingIntent 里回填安装状态 extras，用 IMMUTABLE 会把系统填充的内容丢掉，`SandboxInstallReceiver` 收不到结果。
+
+### 二、会静默改错的
+
+**`taffy_apk_manifest_edit` 三个动作「说改了，其实没改」。** `add_component` / `remove_component` / `set_exported` 都没做「改动前后是否一致」的判断，没命中照样写回并返回成功。其中 `remove_component` 的正则只匹配自闭合的 `<activity ... />`，而真实 App 里组件绝大多数写成 `<activity ...> <intent-filter/> </activity>` —— 于是「删组件」永远删不掉，用户拿着这个包去签名安装，还以为已经删了。现在两个写法都支持，且三处统一在无变化时返回 `NOT_FOUND` / `NO_CHANGE`。
+
+**`set_exported` 会把字面 `$1` 写进属性名。** 旧代码用 `replace(xml, "\\$1android:exported=...")` —— Kotlin 里 `\$` 是美元符转义，正则 Replacement 的 `\$` 又表示字面 `$`，两层叠加后插入的是文本 `$1`，产出 `$1android:exported="false"` 这种非法属性名，aapt 直接编译失败。改成用 lambda 拼字符串 / 手工拼接，零转义歧义。
+
+**`taffy_smali_batch(rebuild)` 第二次会把原始包覆盖掉。** 备份写作 `copyTo(backup, overwrite = true)`，而这个备份正是「回退用」和「保留 v2/v3 签名块」的来源。apkPath 是就地改写目标，第二次 rebuild 时它已经是改过的产物 —— 备份被污染，用户回退拿到半改包；开着 `apkKeepV2V3WhenNoSign` 时还会把污染包当原始签名块来源，产物必然验签失败。改成只在备份不存在时创建。
+
+**`taffy_apk_inject_so` 的 `abi` 参数可路径穿越。** schema 里写了 oneOf 枚举，但服务端只取值不校验，传 `abi="../../xxx"` 就能把 SO 写到 decode 目录之外；而 `abi` 不是 `WorkspacePolicy` 登记的路径键（只有 `dir` / `so` 是），等于整体绕过工作区白名单。现在白名单校验 + 规范化路径必须落在 decode 目录内，双保险。
+
+**快照 id 可以跨目录读。** `snapshotId` 直接拼进 `edit-snapshots/<tool>/<id>`，传 `../` 就能读到别处的 `meta.json`。现在只允许 `[A-Za-z0-9._-]{1,80}`。
+
+### 三、会 OOM / 卡死的
+
+**`taffy_dex_rename` 的大包内存峰值是 dex 总量的 2 倍。** 上一版声称改成了「逐个读 → 改 → 存结果 → 丢原始」，但实际代码是 `apkDexEntries(file)` 先把所有 `classesN.dex` 一次性读进 `List<Pair<String, ByteArray>>`，再另存全部重写结果 —— 注释和实现相反。真实的大包（10 个 dex）峰值能到几百 MB，被 LMK 杀掉时连带整个进程里的工作区、编辑会话、Frida 会话一起没了。现在改成 `Sequence` 惰性逐条读，峰值降到「单个 dex + 结果集」。
+
+**打包 tar 会把整个文件读进堆。** 同一个函数的 ZIP 分支是流式的，只有 tar 分支 `f.readBytes()` —— 而打包对象通常是塞满 SO/APK 的工作目录。改成 `header.size = f.length()` + `inputStream().copyTo()` 流式写。
+
+**打开工作区大文本的上限是 64 MiB，比 SAF 路径宽 8 倍。** 同一页对系统选择器已经限死 8 MiB 并写明「几十 MB 的文本塞进 BasicTextField 是整个界面卡死」，工作区文件树却放宽到 64 MiB 且直接 `TextFieldValue(text)`。统一到 8 MiB，超限给出明确提示。
+
+**Python 页加载脚本完全没有上限**，`readBytes().decodeToString()` 选到 200 MB 的包就是 OOM。改成先查 `openAssetFileDescriptor().length` 再决定。
+
+**`taffy_archive_extract` 遇到负 size 直接抛 `NegativeArraySizeException`。** tar 的 base-256 编码 size 会被 `readOctalLong` 解析成负数，`ByteArray(负数)` 把整次解压中断在半成品状态。现在明确报「size 非法(负数)」。
+
+### 四、会丢状态 / 卡住界面的
+
+**编辑器的「从扩展页点编辑」从第二次起失效。** 编辑器页是常驻挂载的（用 offset 移出屏幕保活、不销毁），它的 `LaunchedEffect(Unit)` 只跑一次；而 `EditorBridge.pendingPath` 是普通 `var`，改了既不触发重组也没有第二次消费机会。现在改成 Compose 状态 + 以路径本身为 key。顺带修掉了「下次启动突然打开上次那个文件」。
+
+**logcat 崩溃列表在缓冲满 2000 行后永久冻结。** `remember(logs.size)` 在封顶后 size 恒定 → 永不失效，之后真崩了也看不到。同一文件里 `visible` 早就因为这个原因改成带首尾元素做 key 了，这里漏改。
+
+**分析页「编辑中心」的输入一切视图就归零。** `tab` / `symLocator` / `strAddr` / `strNew` / `strOld` / `strPad` / `insAddr` / `insAsm` / `insOld` / `insThumb` 全是 `remember`，而 `EditCenterView` 挂在 `when (view)` 分支里 —— 打开侧栏看一眼函数列表再回来，抄好的地址和长串 hex 全没了。输入类状态改成 `rememberSaveable`。
+
+**`taffy_logcat_capture(start)` 的竞态会永久泄漏一个 logcat 进程。** 「captureProcess 为空吗」与 `ProcessBuilder.start()` 之间有窗口，UI 按钮和 MCP 请求同时 start 会起两个，字段只记住后一个，前一个永远没人 destroy（持续吃 CPU、往已删的文件里写）。start / stop 串行化，`destroy()` 后补 `waitFor` 回收僵尸。
+
+**导出 logcat 在主线程打包。** 2000 行 `joinToString` + zip 压缩 + 磁盘写全在主线程，现在下沉到 IO，只有分享动作回主线程。
+
+**`taffy_script` 结果截断会切在汉字中间。** 按字节截断后直接解码，最后一个汉字变成 U+FFFD。改成回退到 UTF-8 首字节边界。
+
+**`taffy_smali_batch(init)` 每个 dex 漏一个 fd。** `copyTo(tempDex.outputStream())` 的目标流没有 `use`，接着 `tempDex.delete()` 在该 fd 仍打开时 unlink —— 空间要等 GC finalize 才回来，批量 init 能把 fd 耗到 "Too many open files"。目标流补 `use`。
+
+### 五、查过但确认不是问题的（省得下次重复怀疑）
+
+`UnidbgEmulator` 的 `!!`（只在 `!isSuccess` 分支）、`Storage.readSource` 的 `runBlocking`（同步 API 内部并行）、`WorkspacePolicy` 的路径校验、`ZipRepack` 的 zipalign 语义、`EngineProvider` 的双检锁、`EngineRuntime` 的 ConcurrentHashMap、`ArchiveTools` 的 Zip Slip / Tar Slip 校验 —— 都已确认正确。
+
+### 六、已知但本轮未动
+
+- `MainActivity` 里 AI 深聊页与分析页是互斥挂载，进出深聊会让分析工作区整体重建（选中的函数、滚动位置丢失）。要修得把分析页也做成常驻 + 覆盖层，属于结构改动，留到下一轮。
+- `LogsTab` 每来一行日志就对全表重做过滤 + 逐行本地化（日志密集时掉帧）、`CapturePage` 的抓包条目列表未 `remember`、`SettingsTunnelPage` 用「自增 key 的 LaunchedEffect + while(true)」做轮询（每秒销毁重建协程）。这三处是性能问题不是功能缺陷，本轮未改。
+
 ## 塔菲逆核 v1.5.24 —— 留白清零 · 全站 UI 对齐 Exbin
 
 ### 一、三项留白做完

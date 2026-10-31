@@ -114,7 +114,9 @@ object FileTools {
         when (mode) {
             "base64" -> {
                 val maxBytes = a.intValue("maxBytes", 1_000_000).coerceIn(1, 100_000_000)
-                val bytes = file.inputStream().use { it.readNBytes(maxBytes) }
+                // readNBytes 是 Java 9 API，Android 直到 API 33 才提供；在 Android 10~12 上
+                // 抛 NoSuchMethodError（LinkageError，catch(Exception) 抓不住）→ 整个读取失败。
+                val bytes = file.inputStream().use { com.soreverse.mcp.core.StreamCompat.readCapped(it, maxBytes) }
                 val b64 = java.util.Base64.getEncoder().encodeToString(bytes)
                 ok(JSONObject()
                     .put("mode", "base64")
@@ -126,7 +128,7 @@ object FileTools {
             }
             "hex" -> {
                 val maxBytes = a.intValue("maxBytes", 4096).coerceIn(1, 1_000_000)
-                val bytes = file.inputStream().use { it.readNBytes(maxBytes) }
+                val bytes = file.inputStream().use { com.soreverse.mcp.core.StreamCompat.readCapped(it, maxBytes) }
                 val sb = StringBuilder()
                 var i = 0
                 while (i < bytes.size) {

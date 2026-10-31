@@ -39,7 +39,16 @@ object LogcatTools {
         }
         val proc = ProcessBuilder(cmd).redirectErrorStream(true).start()
         // 安全加固：限量读取 + 超时终止，防止大输出 OOM 与永久阻塞
-        val out = proc.inputStream.use { it.readNBytes(2_000_000) }.decodeToString()
+        // readNBytes 是 Java 9 API（Android 33+）：低版本抛 NoSuchMethodError 会跳过下面的
+        // waitFor/destroy，把 logcat 子进程永久遗留。这里用自带有界读，并在异常时销毁进程。
+        val out = try {
+            proc.inputStream.use { ins ->
+                com.soreverse.mcp.core.StreamCompat.readCapped(ins, 2_000_000).decodeToString()
+            }
+        } catch (t: Throwable) {
+            runCatching { proc.destroy() }
+            throw t
+        }
         val finished = proc.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)
         if (!finished) proc.destroy()
         // 特权通道的输出上限由 RootShell/Shizuku 侧保证，这里再兜一层字符上限：

@@ -1,3 +1,70 @@
+## 塔菲逆核 v1.5.27 —— 新系统上的硬坑：前台服务类型、16 KiB 页、Java 9 API
+
+这一轮把「新 Android 版本会静默打死我们的地方」逐个查了一遍。三个问题都会让功能在某些机型上**整个不可用**，但都不会崩、不会报错，最难查。
+
+### 一、前台服务类型写错，常驻服务在 Android 15 上活不过 6 小时
+
+`McpForegroundService` 和 `BoreTunnelService` 都声明了 `foregroundServiceType="dataSync"`。Android 15 对 `dataSync` 类型有两条硬规则：
+
+1. **24 小时内累计 6 小时上限**，到点系统回调 `onTimeout()`，本代码在里面 `stopSelf()` —— 也就是「MCP 服务挂一整天」这件事在新系统上不可能，隧道和服务器会被硬停；
+2. **禁止从 `BOOT_COMPLETED` 拉起 `dataSync` 前台服务**，而 `BootReceiver` 开机自启走的正是这条路 → `startForeground` 抛异常 → catch 吞掉 → `stopSelf`，用户只看到「开机自启没用」。
+
+两者都改成 `specialUse`（并补 `FOREGROUND_SERVICE_SPECIAL_USE` 权限与 `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` 子类型声明）。`specialUse` 不受 6 小时限制，也不在 BOOT_COMPLETED 的禁止列表里——它本来就是给「本机服务型常驻」用的。
+
+### 二、重打包的 native 库只按 4 KiB 对齐，16 KiB 页的设备装不上
+
+`ZipRepack` 给 `lib/*.so` 强制 STORED + **4096** 字节对齐，这是老的 `zipalign -p 4` 语义。Android 15 起有 16 KiB page size 的设备（部分 Pixel / 新骁龙），系统按 **16 KiB** 粒度 mmap APK 里的 .so —— 条目起始偏移不是 16384 的倍数时直接加载失败。
+
+`taffy_apk_rebuild` / `taffy_apk_replace_native` / `taffy_so_inject_code` 的产物都走这条路径，所以「重打包完装上去，一打开就崩/找不到库」在 16 KiB 设备上是必然的。
+改成 16384（`zipalign -P 16` 语义），同时满足 4 KiB 设备，代价只是每个 .so 最多多 12 KiB 填充。
+
+### 三、`InputStream.readNBytes` 是 Java 9 API，Android 33 才有
+
+四处直调（`taffy_file_read` 的 base64 与 hex 模式、`taffy_logcat` 的无特权兜底分支、编辑快照的文本判定、ARSC 提取用的 `readAllBytes`）。在 Android 10~12 上抛 `NoSuchMethodError`——这是 `LinkageError`，`catch (Exception)` 抓不住，所以：
+
+- `taffy_file_read mode=base64/hex` 完全不可用（读 so、图片、任意二进制都走这里）；
+- logcat 兜底分支抛错后会**跳过后面的 `waitFor`/`destroy`**，把 logcat 子进程永久遗留；
+- 编辑快照的文本判定崩掉（`taffy_edit_snapshot` 全链路）。
+
+仓库里其实早有 `core/StreamCompat.readCapped` 就是为了这个坑写的，`NativeExec`/`PythonRuntime`/`ShizukuUserService` 都已改过，这四处是漏改。全部换掉，并且把 logcat 那处放进「异常也 destroy」的结构。
+
+### 四、三处会话子进程离开页面不回收
+
+设置→终端、设置→Python、编辑器里的 REPL，`sessionProc` 都只存在 `remember` 里，**没有任何 `DisposableEffect`**。组件离开 composition 时唯一的持有者被丢弃，`destroy()` 永远没人调：
+
+- 终端页的 `su -c sh -i`（root/Shizuku 通道）会常驻到 App 进程被杀，反复进出还会累积多个；
+- `python3 -i` 同理，每次进出多一个。
+
+三处统一加 `DisposableEffect { onDispose { stopSession() } }`。
+
+### 五、logcat 特权流两处丢弃分支
+
+`LogcatViewerPage` 绑定 Shizuku/Root 特权流最长要等约 2 秒，这段窗口里如果用户点了「停止」或者已经降级为轮询，代码直接 `return`/走 else 分支——**那个特权 `logcat` 进程没人接管、也从来没被 destroy**。用户以为已经停了，实际一条特权 logcat（外加一个 root/Shizuku shell）在后台持续吃 CPU。两处都补上 `priv.destroy()`。
+
+### 六、`smali_edit` / `dex_analysis` 的 4 处 fd 泄漏
+
+`zf.getInputStream(dex).use { it.copyTo(tempDex.outputStream()) }` —— 源流关了，目标流没关。紧接着 `tempDex.delete()` 是在 fd 仍打开时 unlink，空间要等 GC finalize 才回来；批量处理多个 dex 能把进程 fd 耗到 "Too many open files"（那时连 `ZipFile` 都打不开）。四处统一改成两层 `use`。
+
+### 七、首页重写引入的三个回归（上一版我自己的锅）
+
+- **「模拟执行」分类键写成 `unidbg`，而 `categoryMap` 里的键是 `emulate`** → 未知键在这个文件里的语义是「全部」，于是点「模拟执行」打开的是上百个工具的全量列表；
+- **端点与工作目录被写成 `if/else`** → 引擎一般是常开的，运行时这行显示端点，工作目录就整行消失，想换目录必须先停服务（会断掉已连上的客户端）。改成两行都渲染；
+- **只展示 loopback 端点** → 手机开服务、AI 客户端在电脑上时，复制到 `127.0.0.1` 根本连不上。局域网那行加回来；同时端点计算从「组合期主线程」挪到 IO 线程（`NetworkInterface.getNetworkInterfaces()` 是实打实的 syscall）。
+
+### 八、日志页两处
+
+- 「复制 / 导出」用的是节流后的快照（最多落后 200ms），日志刷屏时点复制会少最后几行 → 改成从 `AppLog.snapshot()` 现取；
+- 重新进入页面只回填 120 行，而运行期上限是 `settings.logMaxLines` → 「刷满、切走、切回」历史会瞬间缩水成 120 行，看起来像日志被吞了。两边统一。
+
+### 九、分析页顶栏 56 → 64dp
+
+其它页面的 `TopAppBar` 是 64dp，分析页自绘顶栏是 56dp，两套高度在页面切换时会「跳一下」。统一到 64dp（视觉参数已与 TopAppBar 一致，但组件本体仍是自绘 Row —— 那个文件有架构行数基线，换容器要连带调整 25 处缩进，留到下一轮）。
+
+### 未做 / 已知风险
+
+- **第三方预编译二进制**（`libcloudflared.so`、`libfrida_server.so`、`libblutter_*.so`）是别人编译的，如果它们的 `PT_LOAD p_align` 是 4096，在 16 KiB 页设备上同样加载不了。我们自己编译的 `librz_native.so` 等用 NDK r30（默认 16 KiB 对齐），不受影响。这几个二进制要等上游或重新交叉编译，本轮无法在沙箱内验证。
+- `McpHttpServer.start()` 若抛异常，新建的实例（含线程池）没有 `stop()`；实际路径里 engine 已回滚，泄漏面主要是 executor，留待单独处理。
+
 ## 塔菲逆核 v1.5.26 —— UI 真的换组件了（不只是换颜色）
 
 上一版我把「统一成 Exbin」做成了换配色：色值换对了（`#0F1F15` / `#2A3A2E` / `#66D39A`），但页面还是原来那套堆叠——2 列彩色大卡、圆底彩图标、彩色分组标题、每页各写各的字号。这次动的是**版式与组件**。

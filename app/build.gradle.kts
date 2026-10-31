@@ -26,8 +26,8 @@ android {
         // 太墟移植：convention 插件（build-logic）统一 minSdk=29，太墟模块全部按 Android 10+ 设计
         minSdk = 29
         targetSdk = 36
-        versionCode = 265
-        versionName = "1.5.26"
+        versionCode = 266
+        versionName = "1.5.27"
 
         // 逆核: 禁用 CMake native 编译, 完全使用从原版 SOMCP 提取的预编译 so(在 jniLibs/)。
         // 原因: 我们没有 rizin/lief 的交叉编译产物, CMake 只会产出 stub 桩覆盖真 so。

@@ -1575,9 +1575,9 @@ internal fun SettingsEditorPage(t: UiText) {
                 .fillMaxWidth()
                 .weight(1f)
                 .heightIn(min = 180.dp)
-                .clip(RoundedCornerShape(AppShape.lg))
+                .clip(RoundedCornerShape(AppShape.md))
                 .background(TerminalColors.bg)
-                .border(1.dp, TerminalColors.fg.copy(alpha = 0.10f), RoundedCornerShape(AppShape.lg)),
+                .border(1.dp, TerminalColors.fg.copy(alpha = 0.10f), RoundedCornerShape(AppShape.md)),
         ) {
             Box(Modifier.fillMaxSize().onSizeChanged { editorViewport = it.height }) {
                 if (viewerMode) {
@@ -1843,7 +1843,7 @@ internal fun SettingsEditorPage(t: UiText) {
         }
         val currentToolbar = EditorCommands.order(context)
         Dialog(onDismissRequest = { showCommandPalette = false }) {
-            Surface(shape = RoundedCornerShape(AppShape.lg), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+            Surface(shape = RoundedCornerShape(AppShape.md), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                 Column(
                     Modifier.fillMaxWidth().heightIn(max = 560.dp).padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1964,7 +1964,7 @@ internal fun SettingsEditorPage(t: UiText) {
     // ══════════════════════ 面板：控制台 / 文件 / 大纲 ══════════════════════
     if (panel != null) {
         Dialog(onDismissRequest = { panel = null }) {
-            Surface(shape = RoundedCornerShape(AppShape.lg), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+            Surface(shape = RoundedCornerShape(AppShape.md), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                 Column(
                     Modifier.fillMaxWidth().heightIn(max = 560.dp).padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),

@@ -82,7 +82,7 @@ internal fun DeepChatMessageItem(message: DeepChatMessage, zh: Boolean) {
         if (message.error.isNotBlank()) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(AppShape.lg),
+                shape = RoundedCornerShape(AppShape.md),
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
             ) {
                 Row(

@@ -307,7 +307,7 @@ internal fun SettingsUpdatesPage(
         }
         if (error.isNotBlank()) {
             Surface(
-                shape = RoundedCornerShape(AppShape.lg),
+                shape = RoundedCornerShape(AppShape.md),
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
                 modifier = Modifier.fillMaxWidth(),
             ) {

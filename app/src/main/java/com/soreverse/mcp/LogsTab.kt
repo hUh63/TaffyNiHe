@@ -192,7 +192,7 @@ private fun LogActionButton(label: String, icon: ImageVector, modifier: Modifier
     FilledTonalButton(
         onClick = onClick,
         modifier = modifier,
-        shape = RoundedCornerShape(AppShape.lg),
+        shape = RoundedCornerShape(AppShape.md),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)

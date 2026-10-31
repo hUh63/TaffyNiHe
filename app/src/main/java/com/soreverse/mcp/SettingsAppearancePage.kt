@@ -187,7 +187,7 @@ internal fun SettingsAppearancePage(
 private fun ChipFieldLabel(text: String) {
     Text(
         text,
-        fontSize = 12.sp,
+        fontSize = AppText.body,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 16.dp, top = 12.dp),

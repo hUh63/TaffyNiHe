@@ -183,7 +183,7 @@ internal fun GlassGroup(
                 title,
                 // 组标题在卡片外、primary 色；start 与卡内正文左对齐（卡内 padding 16，这里 16）。
                 // 原来写 20dp 是「标题比正文更靠里」，整页看起来是歪的。
-                fontSize = 12.sp,
+                fontSize = AppText.body,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 0.3.sp,
                 color = MaterialTheme.colorScheme.primary,
@@ -202,7 +202,7 @@ internal fun GlassGroup(
         if (!footer.isNullOrBlank()) {
             Text(
                 footer,
-                fontSize = 12.sp,
+                fontSize = AppText.body,
                 lineHeight = 17.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),

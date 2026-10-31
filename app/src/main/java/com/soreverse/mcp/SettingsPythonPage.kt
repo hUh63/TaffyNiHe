@@ -252,7 +252,7 @@ internal fun SettingsPythonPage(t: UiText) {
                     focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f),
                     unfocusedBorderColor = Color(0xFF1E2A36),
                 ),
-                shape = RoundedCornerShape(AppShape.lg),
+                shape = RoundedCornerShape(AppShape.md),
             )
             // 操作按钮行
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -278,7 +278,7 @@ internal fun SettingsPythonPage(t: UiText) {
             )
             Box(
                 Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp)
-                    .background(bg, RoundedCornerShape(AppShape.lg))
+                    .background(bg, RoundedCornerShape(AppShape.md))
                     .verticalScroll(consoleScroll),
             ) {
                 Text(

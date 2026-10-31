@@ -188,7 +188,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                             srcFile != null -> srcName
                             else -> if (zh) "未选择 APK / DEX" else "No APK / DEX selected"
                         },
-                        fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = AppText.bodyStrong, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         fontFamily = if (srcFile != null) FontFamily.Monospace else null,
                         color = if (srcFile != null) cs.onSurface else cs.onSurfaceVariant,
                     )
@@ -198,7 +198,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                         else -> if (zh) "选一个 APK 或 DEX" else "Pick an APK or DEX"
                     }
                     Text(
-                        sub, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        sub, fontSize = AppText.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = if (fileError != null) cs.error else cs.onSurfaceVariant,
                     )
                 }
@@ -212,7 +212,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                 }
                 TextButton(onClick = {
                     runCatching { picker.launch(arrayOf("*/*")) }
-                }, enabled = !loading && !busy) { Text(if (zh) "选择" else "Pick", fontSize = 12.sp) }
+                }, enabled = !loading && !busy) { Text(if (zh) "选择" else "Pick", fontSize = AppText.body) }
             }
         }
 
@@ -223,18 +223,18 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                     onClick = { typeMenu = true },
                     modifier = Modifier.height(36.dp),
                     contentPadding = PaddingValues(horizontal = 10.dp),
-                ) { Text(typeLabel, fontSize = 12.sp) }
+                ) { Text(typeLabel, fontSize = AppText.body) }
                 DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }) {
                     for ((k, v) in DexIndex.TYPE_LABELS_ZH) {
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(v, fontSize = 13.sp)
+                                    Text(v, fontSize = AppText.bodyStrong)
                                     if (k !in DexIndex.KEYWORD_REQUIRED) {
                                         Spacer(Modifier.width(6.dp))
                                         Text(
                                             if (zh) "可空" else "any",
-                                            fontSize = 9.sp, color = cs.primary,
+                                            fontSize = AppText.label, color = cs.primary,
                                         )
                                     }
                                 }
@@ -250,7 +250,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                 onValueChange = { keyword = it },
                 modifier = Modifier.weight(1f).heightIn(min = 46.dp),
                 singleLine = true,
-                textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+                textStyle = LocalTextStyle.current.copy(fontSize = AppText.bodyStrong, fontFamily = FontFamily.Monospace),
                 placeholder = {
                     Text(
                         if (needKeyword) {
@@ -260,7 +260,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                                 else -> if (zh) "关键字" else "keyword"
                             }
                         } else if (zh) "留空 = 列全部" else "empty = list all",
-                        fontSize = 12.sp,
+                        fontSize = AppText.body,
                     )
                 },
             )
@@ -288,26 +288,26 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
             FilterChip(
                 selected = regex,
                 onClick = { regex = !regex },
-                label = { Text(".*", fontSize = 11.sp, fontFamily = FontFamily.Monospace) },
+                label = { Text(".*", fontSize = AppText.label, fontFamily = FontFamily.Monospace) },
                 modifier = Modifier.height(30.dp),
             )
             FilterChip(
                 selected = caseSensitive,
                 onClick = { caseSensitive = !caseSensitive },
-                label = { Text("Aa", fontSize = 11.sp) },
+                label = { Text("Aa", fontSize = AppText.label) },
                 modifier = Modifier.height(30.dp),
             )
             FilterChip(
                 selected = showExclude || exclude.isNotBlank(),
                 onClick = { showExclude = !showExclude },
-                label = { Text(if (zh) "排除包" else "Exclude", fontSize = 11.sp) },
+                label = { Text(if (zh) "排除包" else "Exclude", fontSize = AppText.label) },
                 modifier = Modifier.height(30.dp),
             )
             Spacer(Modifier.weight(1f))
             if (searched) {
                 Text(
                     "$matched",
-                    fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = cs.primary,
+                    fontSize = AppText.body, fontFamily = FontFamily.Monospace, color = cs.primary,
                 )
             }
         }
@@ -318,15 +318,15 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                 onValueChange = { exclude = it },
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 singleLine = true,
-                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
-                placeholder = { Text("com.android.,kotlin.", fontSize = 12.sp) },
+                textStyle = LocalTextStyle.current.copy(fontSize = AppText.body, fontFamily = FontFamily.Monospace),
+                placeholder = { Text("com.android.,kotlin.", fontSize = AppText.body) },
             )
         }
 
         // ---------------- 状态行
         if (queryError != null) {
             Text(
-                queryError!!, fontSize = 11.sp, color = cs.error,
+                queryError!!, fontSize = AppText.label, color = cs.error,
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             )
         } else if (searched) {
@@ -344,7 +344,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                         append("$dexCount dex / $scannedClasses classes / $scannedMethods methods / $scannedInsns insns")
                     }
                 },
-                fontSize = 10.sp, color = cs.onSurfaceVariant,
+                fontSize = AppText.label, color = cs.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
             )
         }
@@ -358,7 +358,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                         !searched -> if (zh) "选好类型与关键字后点搜索" else "Pick a type and keyword, then search"
                         else -> if (zh) "没有命中" else "No hits"
                     },
-                    fontSize = 12.sp, color = cs.onSurfaceVariant,
+                    fontSize = AppText.body, color = cs.onSurfaceVariant,
                 )
             }
         } else {
@@ -376,31 +376,31 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 "${idx + 1}",
-                                fontSize = 9.sp, color = cs.onSurfaceVariant,
+                                fontSize = AppText.label, color = cs.onSurfaceVariant,
                                 modifier = Modifier.width(28.dp),
                                 fontFamily = FontFamily.Monospace,
                             )
                             Text(
                                 h.className,
-                                fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                                fontSize = AppText.body, fontFamily = FontFamily.Monospace,
                                 color = cs.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
                                 h.dex.removeSuffix(".dex"),
-                                fontSize = 9.sp, color = cs.onSurfaceVariant,
+                                fontSize = AppText.label, color = cs.onSurfaceVariant,
                                 modifier = Modifier.padding(start = 6.dp),
                             )
                         }
                         Text(
                             h.member,
-                            fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                            fontSize = AppText.label, fontFamily = FontFamily.Monospace,
                             color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(start = 28.dp),
                         )
                         Text(
                             h.detail,
-                            fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                            fontSize = AppText.label, fontFamily = FontFamily.Monospace,
                             color = cs.primary, maxLines = 2, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(start = 28.dp),
                         )
@@ -422,7 +422,7 @@ internal fun DexIndexView(zh: Boolean, context: android.content.Context) {
                                         zh -> "已达单次上限 $PAGE_SCAN（命中 $matched），请缩小关键字或加排除包"
                                         else -> "Hit the $PAGE_SCAN cap ($matched matches) — narrow it down"
                                     },
-                                    fontSize = 11.sp,
+                                    fontSize = AppText.label,
                                 )
                             }
                         }

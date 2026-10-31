@@ -344,7 +344,7 @@ internal fun AgentRunView(
                 if (conclusion.isNotBlank()) {
                     item {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+                            colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
                             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -418,7 +418,7 @@ private fun NodeCard(nodeId: String, node: JSONObject, zh: Boolean) {
         else -> cs.onSurfaceVariant
     }
     Card(
-        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {

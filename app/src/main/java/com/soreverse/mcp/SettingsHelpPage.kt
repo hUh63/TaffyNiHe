@@ -91,7 +91,7 @@ internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
                 when (tab) { 0 -> HELP_GUIDE; 1 -> HELP_INTERNALS; 2 -> MCP_SKILL; else -> WORKFLOW_GUIDE },
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 16.sp),
                 color = fg,
-                modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AppShape.lg)).padding(12.dp),
+                modifier = Modifier.fillMaxWidth().background(bg, RoundedCornerShape(AppShape.md)).padding(12.dp),
             )
         }
     

@@ -83,14 +83,14 @@ internal fun TasksPage(
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (zh) "任务" else "Tasks",
-                        fontSize = 21.sp,
+                        fontSize = AppText.display,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         if (zh) "围绕同一个文件的分析记录，随时接着做"
                         else "Analysis records that you can resume anytime",
-                        fontSize = 11.sp,
+                        fontSize = AppText.label,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 1.dp),
                     )
@@ -151,7 +151,7 @@ private fun CountPill(text: String) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-            fontSize = 10.5.sp,
+            fontSize = AppText.label,
             color = cs.onSurfaceVariant,
             maxLines = 1,
             softWrap = false,
@@ -168,7 +168,7 @@ private fun SectionLabel(text: String, count: Int) {
     ) {
         Text(
             text,
-            fontSize = 11.5.sp,
+            fontSize = AppText.body,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -179,7 +179,7 @@ private fun SectionLabel(text: String, count: Int) {
             Text(
                 "$count",
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                fontSize = 10.sp,
+                fontSize = AppText.label,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -261,7 +261,7 @@ private fun TaskCard(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         display,
-                        fontSize = 13.5.sp,
+                        fontSize = AppText.bodyStrong,
                         fontWeight = FontWeight.SemiBold,
                         color = cs.onSurface,
                         maxLines = 2,
@@ -271,7 +271,7 @@ private fun TaskCard(
                         if (task.mainPath.startsWith("content://") || task.mainPath.startsWith("http"))
                             (if (zh) "外部文档（URI 引用）" else "External document (URI)")
                         else task.mainPath.substringAfterLast('/').ifBlank { task.mainPath },
-                        fontSize = 10.5.sp,
+                        fontSize = AppText.label,
                         color = cs.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -311,13 +311,13 @@ private fun TaskCard(
                     onClick = onClear,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     shape = RoundedCornerShape(AppShape.sm),
-                ) { Text(if (zh) "清除" else "Clear", fontSize = 12.sp) }
+                ) { Text(if (zh) "清除" else "Clear", fontSize = AppText.body) }
                 if (!info.resumable) {
                     OutlinedButton(
                         onClick = onGoAnalyze,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                         shape = RoundedCornerShape(AppShape.sm),
-                    ) { Text(if (zh) "重新选文件" else "Re-pick", fontSize = 12.sp) }
+                    ) { Text(if (zh) "重新选文件" else "Re-pick", fontSize = AppText.body) }
                 }
                 Spacer(Modifier.weight(1f))
                 Button(
@@ -330,7 +330,7 @@ private fun TaskCard(
                         CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = cs.onPrimary)
                         Spacer(Modifier.size(6.dp))
                     }
-                    Text(if (zh) "继续分析" else "Continue", fontSize = 12.sp)
+                    Text(if (zh) "继续分析" else "Continue", fontSize = AppText.body)
                 }
             }
         }
@@ -347,7 +347,7 @@ private fun StatusPill(text: String, active: Boolean) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            fontSize = 10.sp,
+            fontSize = AppText.label,
             fontWeight = FontWeight.Medium,
             color = if (active) cs.primary else cs.onSurfaceVariant,
             maxLines = 1,
@@ -366,7 +366,7 @@ private fun MetaChip(text: String, color: Color = MaterialTheme.colorScheme.onSu
         Text(
             text,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            fontSize = 10.sp,
+            fontSize = AppText.label,
             color = color,
             maxLines = 1,
             softWrap = false,

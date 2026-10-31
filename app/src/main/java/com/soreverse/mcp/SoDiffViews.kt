@@ -151,7 +151,7 @@ internal fun SoDiffView(zh: Boolean, context: android.content.Context) {
                 ) {
                     Text(
                         if (busy) (if (zh) "处理中…" else "Working…") else (if (zh) "开始对比" else "Diff"),
-                        fontSize = 14.sp,
+                        fontSize = AppText.bodyStrong,
                     )
                 }
                 error?.let {
@@ -171,7 +171,7 @@ internal fun SoDiffView(zh: Boolean, context: android.content.Context) {
                 )
                 TabRow(selectedTabIndex = tab, containerColor = cs.background) {
                     labels.forEachIndexed { i, label ->
-                        Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label, fontSize = 13.sp) })
+                        Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label, fontSize = AppText.bodyStrong) })
                     }
                 }
                 OutlinedTextField(
@@ -179,7 +179,7 @@ internal fun SoDiffView(zh: Boolean, context: android.content.Context) {
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     singleLine = true,
-                    placeholder = { Text(if (zh) "搜索名称…" else "Filter by name…", fontSize = 13.sp) },
+                    placeholder = { Text(if (zh) "搜索名称…" else "Filter by name…", fontSize = AppText.bodyStrong) },
                     shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions.Default,
                 )
@@ -268,7 +268,7 @@ private fun SidePickCard(
                 Modifier.size(26.dp).background(cs.primary.copy(alpha = 0.16f), RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, color = cs.primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Text(label, color = cs.primary, fontWeight = FontWeight.SemiBold, fontSize = AppText.bodyStrong)
             }
             Column(Modifier.weight(1f)) {
                 Text(
@@ -291,7 +291,7 @@ private fun SidePickCard(
                 }
             }
             TextButton(onClick = onPick, enabled = !pending) {
-                Text(if (side == null) (if (zh) "选择" else "Pick") else (if (zh) "重选" else "Replace"), fontSize = 13.sp)
+                Text(if (side == null) (if (zh) "选择" else "Pick") else (if (zh) "重选" else "Replace"), fontSize = AppText.bodyStrong)
             }
         }
     }
@@ -333,10 +333,10 @@ private fun MiniStat(label: String, value: String) {
             Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(label, fontSize = 11.sp, color = cs.onSecondaryContainer.copy(alpha = 0.75f))
+            Text(label, fontSize = AppText.label, color = cs.onSecondaryContainer.copy(alpha = 0.75f))
             Text(
                 value,
-                fontSize = 11.sp,
+                fontSize = AppText.label,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
                 color = cs.onSecondaryContainer,
@@ -362,7 +362,7 @@ private fun DiffRow(row: DiffRowUi) {
             row.kind.toString(),
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
-            fontSize = 13.sp,
+            fontSize = AppText.bodyStrong,
             color = color,
             modifier = Modifier.width(12.dp),
         )
@@ -370,7 +370,7 @@ private fun DiffRow(row: DiffRowUi) {
             Text(
                 row.name,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
+                fontSize = AppText.body,
                 color = cs.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -378,7 +378,7 @@ private fun DiffRow(row: DiffRowUi) {
             if (row.detail.isNotBlank()) {
                 Text(
                     row.detail,
-                    fontSize = 10.sp,
+                    fontSize = AppText.label,
                     color = cs.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -389,7 +389,7 @@ private fun DiffRow(row: DiffRowUi) {
             Text(
                 row.right,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
+                fontSize = AppText.label,
                 color = if (row.kind == '~') cs.tertiary else cs.onSurfaceVariant,
             )
         }

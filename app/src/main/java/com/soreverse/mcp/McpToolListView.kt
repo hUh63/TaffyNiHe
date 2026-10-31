@@ -204,7 +204,7 @@ internal fun ToolSearchField(
         onValueChange = onValueChange,
         modifier = modifier.fillMaxWidth(),
         singleLine = true,
-        shape = RoundedCornerShape(AppShape.lg),
+        shape = RoundedCornerShape(AppShape.md),
         placeholder = {
             Text(
                 "搜索工具 / Search tools",
@@ -376,13 +376,13 @@ private fun CategoryFilterRow(
         FilterChip(
             selected = selected == null,
             onClick = { onSelect(null) },
-            label = { Text(if (zh) "全部" else "All", fontSize = 11.sp) },
+            label = { Text(if (zh) "全部" else "All", fontSize = AppText.label) },
         )
         categoryMap.keys.forEach { key ->
             FilterChip(
                 selected = selected == key,
                 onClick = { onSelect(if (selected == key) null else key) },
-                label = { Text(categoryLabel(key, zh), fontSize = 11.sp) },
+                label = { Text(categoryLabel(key, zh), fontSize = AppText.label) },
             )
         }
     }
@@ -424,7 +424,7 @@ private fun ParamTable(schema: JSONObject, zh: Boolean) {
                     Text(
                         type,
                         style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
+                        fontSize = AppText.label,
                         color = cs.onSurfaceVariant,
                     )
                     if (key in required) {
@@ -432,7 +432,7 @@ private fun ParamTable(schema: JSONObject, zh: Boolean) {
                         Text(
                             if (zh) "必填" else "required",
                             style = MaterialTheme.typography.labelSmall,
-                            fontSize = 10.sp,
+                            fontSize = AppText.label,
                             color = cs.error,
                         )
                     }

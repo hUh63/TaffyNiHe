@@ -430,7 +430,7 @@ internal fun SettingsReversePage(
                     Tab(
                         selected = pane == i,
                         onClick = { pane = i },
-                        text = { Text(label, fontSize = 13.sp, maxLines = 1) },
+                        text = { Text(label, fontSize = AppText.bodyStrong, maxLines = 1) },
                     )
                 }
             }
@@ -506,7 +506,7 @@ internal fun SettingsDevEnvPage(
                     Tab(
                         selected = pane == i,
                         onClick = { pane = i },
-                        text = { Text(label, fontSize = 13.sp, maxLines = 1) },
+                        text = { Text(label, fontSize = AppText.bodyStrong, maxLines = 1) },
                     )
                 }
             }

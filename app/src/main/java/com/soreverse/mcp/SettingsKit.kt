@@ -104,7 +104,7 @@ internal fun SettingsScaffold(
                     Text(
                         title,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 20.sp,
+                        fontSize = AppText.display,
                         letterSpacing = 0.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -160,7 +160,7 @@ internal fun SettingsSection(title: String, content: @Composable ColumnScope.() 
         Text(
             title,
             modifier = Modifier.padding(start = 4.dp),
-            fontSize = 12.sp,
+            fontSize = AppText.body,
             fontWeight = FontWeight.SemiBold,
             letterSpacing = 0.3.sp,
             color = MaterialTheme.colorScheme.primary,
@@ -244,7 +244,7 @@ internal fun SettingsCategoryRow(
                     Text(
                         value,
                         Modifier.widthIn(max = 104.dp),
-                        fontSize = 12.sp,
+                        fontSize = AppText.body,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -305,7 +305,7 @@ internal fun SettingsItemRow(
                     Text(
                         value,
                         Modifier.widthIn(max = 96.dp),
-                        fontSize = 12.sp,
+                        fontSize = AppText.body,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

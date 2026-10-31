@@ -36,10 +36,13 @@ internal fun AppBottomNav(current: MainTab, zh: Boolean, onSelect: (MainTab) -> 
                 onClick = { onSelect(item.tab) },
                 icon = { Icon(item.icon, contentDescription = null) },
                 label = { Text(if (zh) item.labelZh else item.labelEn) },
+                // M3 规范：选中态用 secondaryContainer 做指示器、onSecondaryContainer 做前景。
+                // 之前用 primary + alpha 0.16 的指示器，深色主题下会跟背景糊成一片，
+                // 而且「选中=主色文字」在 5 个 tab 里过于抢眼 —— 主色只该给主操作。
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ),

@@ -163,7 +163,7 @@ internal fun DeepAiChatScreen(
                         onValueChange = { state.deepInput = it },
                         modifier = Modifier.weight(1f).heightIn(min = 50.dp, max = 132.dp),
                         placeholder = { Text(if (t.zh) "继续提问" else "Ask a follow-up", maxLines = 1) },
-                        shape = RoundedCornerShape(AppShape.lg),
+                        shape = RoundedCornerShape(AppShape.md),
                         maxLines = 5,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surface,

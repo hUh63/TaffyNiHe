@@ -2095,11 +2095,11 @@ private fun DisasmLine(line: String) {
                 first && isAlpha -> cs.primary
                 else -> cs.onSurface
             }
-            withStyle(SpanStyle(color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal)) { append(tk) }
+            withStyle(SpanStyle(color = color, fontFamily = FontFamily.Monospace, fontSize = AppText.body, fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal)) { append(tk) }
             if (isAlpha) first = false
         }
         if (comment.isNotEmpty()) {
-            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = 12.sp)) { append(comment) }
+            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = AppText.body)) { append(comment) }
         }
     }
     Text(out, style = monoStyle())
@@ -2190,7 +2190,7 @@ private fun XrefTabButton(
     ) {
         Text(
             label,
-            fontSize = 13.sp,
+            fontSize = AppText.bodyStrong,
             fontWeight = FontWeight.Medium,
             color = if (selected) cs.onPrimaryContainer else cs.onSurfaceVariant,
             maxLines = 1,
@@ -3872,7 +3872,7 @@ private fun ExbinFunctionButton(label: String, primary: Boolean = false, enabled
     val body: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
         Text(
             label,
-            fontSize = 13.sp,
+            fontSize = AppText.bodyStrong,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Start,
@@ -3921,7 +3921,7 @@ private fun ExbinCheckRow(label: String, checked: Boolean, onChange: (Boolean) -
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Checkbox(checked = checked, onCheckedChange = onChange)
-        Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(label, fontSize = AppText.bodyStrong, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -3945,7 +3945,7 @@ private fun ExbinResultCard(
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
             Text(
                 title,
-                fontSize = 12.sp,
+                fontSize = AppText.body,
                 fontFamily = if (mono) FontFamily.Monospace else null,
                 color = cs.onSurface,
                 maxLines = 2,
@@ -3953,13 +3953,13 @@ private fun ExbinResultCard(
             )
             if (meta.isNotBlank()) {
                 Text(
-                    meta, fontSize = 10.sp, color = cs.onSurfaceVariant,
+                    meta, fontSize = AppText.label, color = cs.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
             }
             if (hint.isNotBlank()) {
                 Text(
-                    hint, fontSize = 11.sp, color = hintColor,
+                    hint, fontSize = AppText.label, color = hintColor,
                     modifier = Modifier.padding(top = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -4109,7 +4109,7 @@ private fun SearchView(
     Column(Modifier.fillMaxSize()) {
         Text(
             if (zh) "功能" else "Actions",
-            fontSize = 13.sp,
+            fontSize = AppText.bodyStrong,
             color = cs.onSurfaceVariant,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
         )
@@ -4147,7 +4147,7 @@ private fun SearchView(
         if (header.isNotBlank()) {
             Text(
                 header,
-                fontSize = 12.sp,
+                fontSize = AppText.body,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp),
                 maxLines = 2,
@@ -4217,13 +4217,13 @@ private fun SearchView(
                         },
                     )
                     if (!dialogInResults) {
-                        Text(if (zh) "搜索类型" else "Type", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                        Text(if (zh) "搜索类型" else "Type", fontSize = AppText.bodyStrong, color = cs.onSurfaceVariant)
                         val types = if (zh) exbinSearchTypesZh else exbinSearchTypesEn
                         ExbinDropdownField(types.getOrElse(typeIdx) { types.first() }, types) {
                             typeIdx = it
                             methodIdx = 0
                         }
-                        Text(if (zh) "搜索方式" else "Method", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                        Text(if (zh) "搜索方式" else "Method", fontSize = AppText.bodyStrong, color = cs.onSurfaceVariant)
                         val methods = if (zh) exbinSearchMethodsZh[typeIdx] else exbinSearchMethodsEn[typeIdx]
                         ExbinDropdownField(methods.getOrElse(methodIdx) { methods.first() }, methods) { methodIdx = it }
                     }
@@ -4299,14 +4299,14 @@ private fun disasmInstrAnnotated(instr: String, cs: androidx.compose.material3.C
                 SpanStyle(
                     color = color,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    fontSize = AppText.body,
                     fontWeight = if (first && isAlpha) FontWeight.SemiBold else FontWeight.Normal,
                 ),
             ) { append(tk) }
             if (isAlpha) first = false
         }
         if (comment.isNotEmpty()) {
-            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = 12.sp)) { append(comment) }
+            withStyle(SpanStyle(color = cs.onSurfaceVariant.copy(alpha = 0.55f), fontFamily = FontFamily.Monospace, fontSize = AppText.body)) { append(comment) }
         }
     }
 }
@@ -4583,7 +4583,7 @@ private fun FuncXRefView(
                         Text(
                             l,
                             style = MaterialTheme.typography.titleSmall,
-                            fontSize = 13.sp,
+                            fontSize = AppText.bodyStrong,
                             maxLines = 1,
                             softWrap = false,
                         )
@@ -4915,7 +4915,7 @@ private fun DisasmView(
         }
     }
     val hs = rememberScrollState()
-    val mono12 = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+    val mono12 = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.body)
 
     Column(Modifier.fillMaxSize()) {
         // 函数头（在「函数详情」容器内由容器统一显示）
@@ -5573,7 +5573,7 @@ private fun PseudoView(
     val truncated = allLines.size > 3000
     val lines = remember(allLines) { if (truncated) allLines.take(3000) else allLines }
     var warnsOpen by remember(pseudo) { mutableStateOf(false) }
-    val codeStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+    val codeStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong)
     val gutterW = (lines.size.toString().length.coerceAtLeast(2) * 9 + 20).dp
 
     Column(Modifier.fillMaxSize()) {
@@ -6212,7 +6212,7 @@ private fun CfgNodeListView(
                                 ) {
                                     Text(
                                         if (leaf) "●" else if (collapsedNow) "▶" else "▼",
-                                        fontSize = 11.sp,
+                                        fontSize = AppText.label,
                                         color = if (leaf) cs.onSurfaceVariant else cs.primary,
                                     )
                                 }
@@ -6220,7 +6220,7 @@ private fun CfgNodeListView(
                                     Text(
                                         blockTitle(b, r),
                                         fontFamily = FontFamily.Monospace,
-                                        fontSize = 12.5.sp,
+                                        fontSize = AppText.body,
                                         fontWeight = if (r.entry || r.ref) FontWeight.SemiBold else FontWeight.Normal,
                                         color = when {
                                             r.ref -> cs.error
@@ -6234,14 +6234,14 @@ private fun CfgNodeListView(
                                     Text(
                                         "$cnt " + (if (zh) "条指令" else "insns") +
                                             (if (head.isBlank()) "" else "  ·  $head"),
-                                        fontSize = 11.sp,
+                                        fontSize = AppText.label,
                                         color = cs.onSurfaceVariant,
                                         maxLines = 2,
                                     )
                                 }
                                 Text(
                                     if (insnOpen) (if (zh) "收起" else "Hide") else (if (zh) "指令" else "Insns"),
-                                    fontSize = 11.sp,
+                                    fontSize = AppText.label,
                                     color = if (insnOpen) cs.primary else cs.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 4.dp),
                                 )
@@ -6272,7 +6272,7 @@ private fun CfgNodeListView(
                                         Text(
                                             "${i + 1}.  $ins",
                                             fontFamily = FontFamily.Monospace,
-                                            fontSize = 11.5.sp,
+                                            fontSize = AppText.body,
                                             color = cs.onSurface,
                                         )
                                     }
@@ -6563,7 +6563,7 @@ private fun FilterChipMenu(label: String, value: String, options: kotlin.collect
             modifier = Modifier.heightIn(min = 32.dp),
         ) {
             Row(Modifier.padding(start = 10.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (active) "$label: $value" else label, fontSize = 12.sp, maxLines = 1)
+                Text(if (active) "$label: $value" else label, fontSize = AppText.body, maxLines = 1)
                 Spacer(Modifier.size(4.dp))
                 Icon(Icons.Filled.KeyboardArrowDown, null, modifier = Modifier.size(14.dp))
             }
@@ -6991,7 +6991,7 @@ private fun ResultCard(label: String, mono: Boolean = true, value: () -> String)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(AppShape.md),
-        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, cs.outlineVariant),
     ) {
@@ -7145,7 +7145,7 @@ private fun KeyValueCard(zh: Boolean, pairs: List<Pair<String, String>>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(AppShape.md),
-        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         border = BorderStroke(1.dp, cs.outlineVariant),
     ) {
@@ -9227,7 +9227,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
     Column(Modifier.fillMaxSize()) {
         Text(
             if (zh) "虚表搜索" else "Vtable search",
-            fontSize = 13.sp,
+            fontSize = AppText.bodyStrong,
             color = cs.onSurfaceVariant,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
         )
@@ -9252,7 +9252,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
         ) {
             Text(
                 scanLine,
-                fontSize = 11.sp,
+                fontSize = AppText.label,
                 color = cs.tertiary,
                 modifier = Modifier.weight(1f),
                 maxLines = 2,
@@ -9262,7 +9262,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
             if (all.isNotEmpty()) {
                 Text(
                     if (exporting) (if (zh) "生成中…" else "generating…") else (if (zh) "生成头文件" else "Header"),
-                    fontSize = 11.sp,
+                    fontSize = AppText.label,
                     color = cs.primary,
                     modifier = Modifier.clip(RoundedCornerShape(6.dp))
                         .clickable(enabled = !exporting) {
@@ -9282,7 +9282,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                 )
                 Text(
                     if (zh) "复制全部" else "Copy all",
-                    fontSize = 11.sp,
+                    fontSize = AppText.label,
                     color = cs.primary,
                     modifier = Modifier.clip(RoundedCornerShape(6.dp))
                         .clickable {
@@ -9307,7 +9307,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
         if (lastQuery.isNotBlank()) {
             Text(
                 if (zh) "搜索结果 (\"$lastQuery\") — ${shown.size} 个" else "search results (\"$lastQuery\") — ${shown.size}",
-                fontSize = 12.sp,
+                fontSize = AppText.body,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 4.dp),
                 maxLines = 2,
@@ -9356,7 +9356,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                         ) {
                             Text(
                                 cls,
-                                fontSize = 12.sp,
+                                fontSize = AppText.body,
                                 fontFamily = FontFamily.Monospace,
                                 color = cs.onSurface,
                                 maxLines = 2,
@@ -9365,7 +9365,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                             Text(
                                 (if (vAddr.isBlank()) "—" else vAddr) + "  ·  " + srcLabel + "  ·  " +
                                     (if (zh) "${slots.length()} 个虚函数" else "${slots.length()} virtuals"),
-                                fontSize = 10.sp,
+                                fontSize = AppText.label,
                                 color = vtableSourceColor(srcLabel, cs),
                                 modifier = Modifier.padding(top = 2.dp),
                                 maxLines = 2,
@@ -9377,7 +9377,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                                         if (v.optString("typeinfoAddr").isNotBlank()) "rtti " + v.optString("typeinfoAddr") else "",
                                         if (v.optString("confidence").isNotBlank()) "conf " + v.optString("confidence") else "",
                                     ).filter { it.isNotBlank() }.joinToString("  ·  "),
-                                    fontSize = 10.sp,
+                                    fontSize = AppText.label,
                                     color = cs.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 2.dp),
                                     maxLines = 1,
@@ -9388,7 +9388,7 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                                 Text(
                                     if (isOpen) (if (zh) "收起虚函数" else "collapse")
                                     else (if (zh) "展开 ${slots.length()} 个虚函数" else "expand ${slots.length()} virtuals"),
-                                    fontSize = 11.sp,
+                                    fontSize = AppText.label,
                                     color = cs.primary,
                                     modifier = Modifier.padding(top = 4.dp),
                                 )
@@ -9401,16 +9401,16 @@ private fun VtableView(tools: ToolPagesState, zh: Boolean, context: android.cont
                                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Text(
                                             "#" + o.optInt("index"),
-                                            fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant,
+                                            fontSize = AppText.label, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant,
                                         )
                                         Text(
                                             o.optString("name").ifBlank { o.optString("addr") },
-                                            fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = cs.onSurface,
+                                            fontSize = AppText.label, fontFamily = FontFamily.Monospace, color = cs.onSurface,
                                             modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                         )
                                         Text(
                                             o.optString("addr"),
-                                            fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant,
+                                            fontSize = AppText.label, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant,
                                         )
                                     }
                                 }
@@ -12663,9 +12663,9 @@ private fun StringDetailDialog(
         Column(
             Modifier
                 .fillMaxWidth(0.94f)
-                .clip(RoundedCornerShape(AppShape.lg))
+                .clip(RoundedCornerShape(AppShape.md))
                 .background(cs.surfaceContainerHigh)
-                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.lg))
+                .border(BorderStroke(1.dp, cs.outlineVariant), RoundedCornerShape(AppShape.md))
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -13318,7 +13318,7 @@ private fun TonalMiniButton(label: String, modifier: Modifier = Modifier, onClic
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
         modifier = modifier.heightIn(min = 32.dp),
     ) {
-        Text(label, fontSize = 12.sp, maxLines = 1)
+        Text(label, fontSize = AppText.body, maxLines = 1)
     }
 }
 
@@ -13354,7 +13354,7 @@ private fun SegButton(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label, fontSize = 12.sp, maxLines = 1) },
+        label = { Text(label, fontSize = AppText.body, maxLines = 1) },
     )
 }
 
@@ -13509,7 +13509,7 @@ private fun CallGraphGraphPane(
                         placeholder = {
                             Text(
                                 if (zh) "搜索" else "search",
-                                fontSize = 13.5.sp,
+                                fontSize = AppText.bodyStrong,
                                 color = cs.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -13533,7 +13533,7 @@ private fun CallGraphGraphPane(
                         else if (zh) "第 ${matchCursor + 1} / ${matchIndices.size} 个匹配"
                         else "match ${matchCursor + 1} / ${matchIndices.size}",
                         modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp),
-                        fontSize = 11.sp,
+                        fontSize = AppText.label,
                         color = if (matchIndices.isEmpty()) cs.error else cs.tertiary,
                     )
                 }
@@ -13561,7 +13561,7 @@ private fun CallGraphGraphPane(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text(if (zh) "选项" else "Options", fontSize = 12.sp, maxLines = 1)
+                            Text(if (zh) "选项" else "Options", fontSize = AppText.body, maxLines = 1)
                             Icon(
                                 if (optionsOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                                 contentDescription = null,
@@ -13586,7 +13586,7 @@ private fun CallGraphGraphPane(
                             placeholder = {
                                 Text(
                                     if (zh) "函数名 或 0x 地址（留空取首个入口）" else "name or 0x addr",
-                                    fontSize = 13.sp,
+                                    fontSize = AppText.bodyStrong,
                                     color = cs.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -13629,7 +13629,7 @@ private fun CallGraphGraphPane(
                         ) {
                             Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(6.dp))
-                            Text(if (zh) "重新构建" else "Rebuild", fontSize = 13.sp)
+                            Text(if (zh) "重新构建" else "Rebuild", fontSize = AppText.bodyStrong)
                         }
                     }
                 }
@@ -13660,7 +13660,7 @@ private fun CallGraphGraphPane(
             Text(
                 if (zh) "来源：rizin 调用图" else "source: rizin call graph",
                 modifier = Modifier.padding(start = 10.dp),
-                fontSize = 10.5.sp,
+                fontSize = AppText.label,
                 color = cs.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

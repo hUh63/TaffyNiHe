@@ -129,11 +129,15 @@ internal class BlutterEmbeddedBackend(private val context: Context, private val 
             override fun onCompleted(callbackJobId: String, exitCode: Int, errorCode: String, message: String, resultBytes: Long, resultSha256: String) {
                 if (callbackJobId != jobId || !active.containsKey(jobId)) return
                 if (exitCode != 0 || errorCode.isNotBlank()) {
+                    // 服务侧对任何非零退出都只报一个粗粒度的 RUNNER_FAILED，于是
+                    // 「Dart snapshot 反序列化失败（大 libapp.so 撑爆 native 堆）」
+                    // 和其它失败在用户眼里一模一样。退出码表优先于那个兜底码。
+                    val exitFailure = nativeExitFailure(exitCode)
                     finishFailure(
-                        errorCode.ifBlank {
-                            "RUNNER_FAILED"
+                        resolvedErrorCode(errorCode, exitFailure),
+                        message.ifBlank {
+                            exitFailure?.second ?: "Blutter runner exited with code $exitCode"
                         },
-                        message.ifBlank { "Blutter runner exited with code $exitCode" },
                         true
                     )
                     return
@@ -306,5 +310,33 @@ internal class BlutterEmbeddedBackend(private val context: Context, private val 
 
     private companion object {
         const val MAX_RESULT_BYTES = 512L * 1024L * 1024L
+
+        /**
+         * `blutter_run_fd` 的退出码（见 cpp/blutter_bridge.cpp 与 android_runner.cpp）。
+         * 没有这张表时它们全部塌成一个 "RUNNER_FAILED: Blutter runner exited with code N"，
+         * 用户看不出到底是取消、写结果失败，还是 Dart snapshot 反序列化把 native 堆撑爆了。
+         */
+        fun nativeExitFailure(exitCode: Int): Pair<String, String>? = when (exitCode) {
+            3 -> "RUNNER_CANCELLED" to "The Blutter runner stopped before producing a result"
+            5 -> "RUNNER_OUTPUT_FAILED" to "The Blutter runner could not write its result"
+            6 ->
+                "RUNNER_NATIVE_FAILED" to
+                    "The Blutter runner aborted while deserializing the Dart snapshot. On tight-heap " +
+                    "devices a large libapp.so can exhaust the native heap; check the snapshot fingerprint " +
+                    "(engine revision, Dart version, compressed pointers) before retrying."
+            else -> null
+        }
+
+        /**
+         * 隔离进程会报自己的码（CANCELLED / RUNNER_EXCEPTION）以及对所有非零退出的兜底
+         * RUNNER_FAILED；只有当它没说出更有信息量的东西时，退出码表才生效。
+         */
+        fun resolvedErrorCode(errorCode: String, exitFailure: Pair<String, String>?): String {
+            if (exitFailure == null) return errorCode.ifBlank { "RUNNER_FAILED" }
+            return when (errorCode) {
+                "", "RUNNER_FAILED" -> exitFailure.first
+                else -> errorCode
+            }
+        }
     }
 }

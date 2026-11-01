@@ -144,6 +144,13 @@ jobs:
         # 只允许收缩不允许扩张。有 ERROR 退出码为 1。
         run: python3 tools/arch-policy.py
 
+      - name: 16 KiB 页对齐门禁 (ELF p_align)
+        # Android 15 起有 16 KiB page size 的设备，bionic 要求 APK 内每个 .so 的
+        # PT_LOAD p_align >= 16384，否则直接拒绝加载（表现为「功能静默不可用」）。
+        # 存量不达标记录在 tools/elf-align-baseline.json（只允许收缩），
+        # 新引入的一律阻塞构建。
+        run: python3 tools/check-elf-align.py
+
       - name: 构建 arm64-v8a APK (Build APK)
         run: |
           BUILD_TYPE="${{ steps.build_type.outputs.type }}"

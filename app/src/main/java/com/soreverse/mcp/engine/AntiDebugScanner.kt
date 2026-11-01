@@ -145,7 +145,9 @@ internal object AntiDebugScanner {
             if (sec.flags and 0x4L == 0L) return@forEach // executable sections only
             val start = sec.offset.toInt()
             if (start < 0 || start >= elf.data.size) return@forEach
-            val len = minOf(elf.data.size - start, sec.size.toInt())
+            // sec.size 是 Long：超过 Int.MAX_VALUE 的畸形 sh_size 经 toInt() 会变成负数，
+            // 此时 start + len < start，copyOfRange 直接抛 IllegalArgumentException。
+            val len = minOf((elf.data.size - start).toLong(), sec.size).toInt()
             val body = elf.data.copyOfRange(start, start + len)
             if (body.size < 12) return@forEach
             // x86-64: 48 B8 <imm64> FF E0  == mov rax, imm64 ; jmp rax

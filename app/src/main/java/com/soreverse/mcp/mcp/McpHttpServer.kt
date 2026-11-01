@@ -93,7 +93,14 @@ class McpHttpServer(private val context: Context, private val port: Int, private
             "ping",
         )
     }
-    override val coroutineContext = SupervisorJob() + Dispatchers.Default
+    /**
+     * 作用域 Job 可重建：stop() 会 cancel 它，若同一实例再次 start()，旧的 Job 已是
+     * Cancelled 状态，协程一启动就立刻取消（表现为"重启服务后所有后台任务都不执行"）。
+     * 因此每次 start() 都确保它处在一个活的实例上。
+     */
+    private var scopeJob = SupervisorJob()
+    override val coroutineContext: CoroutineContext
+        get() = scopeJob + Dispatchers.Default
     private val startedAt = System.currentTimeMillis()
     private var engine: EmbeddedServer<*, *>? = null
     // heavy 许可统一由进程级 HeavyGate 管理（脚本内调用也走它），这里不再持有本地闸门
@@ -102,7 +109,14 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * 工具执行线程池：配合调用级超时使用；daemon 线程不阻止进程退出。
      * 有界（8~48 线程 + 256 队列）：异常/恶意客户端灌爆请求时不再无限建线程。
      */
-    private val toolExecutor = java.util.concurrent.ThreadPoolExecutor(
+    private var toolExecutor = newToolExecutor()
+
+    /**
+     * shutdownNow() 是不可逆的：线程池一旦被停，之后所有 submit 都抛
+     * RejectedExecutionException（上层把它报成"tool executor saturated"，极具误导）。
+     * stop() 之后同一实例再 start() 是很正常的使用路径，所以线程池必须可重建。
+     */
+    private fun newToolExecutor() = java.util.concurrent.ThreadPoolExecutor(
         8, 48, 60L, TimeUnit.SECONDS,
         java.util.concurrent.LinkedBlockingQueue<Runnable>(256),
         { r -> Thread(r).apply { isDaemon = true; name = "mcp-tool-worker" } },
@@ -159,6 +173,10 @@ class McpHttpServer(private val context: Context, private val port: Int, private
 
     fun start() {
         if (engine != null) return
+        // stop() 曾经回收过这两个资源；同一实例重启时必须重新造一份，否则
+        // 线程池已 shutdown（所有工具调用被拒）、作用域 Job 已取消（后台任务秒退）。
+        if (toolExecutor.isShutdown) toolExecutor = newToolExecutor()
+        if (!scopeJob.isActive) scopeJob = SupervisorJob()
         NativeEngine.select(SettingsStore(context).nativeBackend)
         engine = embeddedServer(CIO, host = host, port = port) {
             routing {
@@ -261,6 +279,10 @@ class McpHttpServer(private val context: Context, private val port: Int, private
             val occupied = probeListening(probeHost, port)
             runCatching { engine?.stop(gracePeriodMillis = 200, timeoutMillis = 800) }
             engine = null
+            // 端口没起来 = 这个实例不会被任何人使用（调用方只会拿到异常并丢弃它），
+            // 线程池与作用域必须就地回收：曾经每次启动失败都留一套 8 线程的池子，
+            // 反复"改端口 → 启动 → 发现被占用 → 再改"就能把进程线程数堆到上百。
+            releaseResources()
             throw IllegalStateException(
                 if (occupied) {
                     "端口 $port 已被其他进程占用（绑定地址 $host），MCP 服务未启动；换一个端口或关掉占用方后重试"
@@ -309,9 +331,18 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         engine = null
         // 工具线程池与协程作用域一起回收：旧实现每次改端口/绑定地址都留一套旧线程池，
         // 旧作用域里 detached 的重任务还会和新实例抢同一个引擎与文件。
-        runCatching { toolExecutor.shutdownNow() }
-        runCatching { (coroutineContext[kotlinx.coroutines.Job] as? kotlinx.coroutines.Job)?.cancel() }
+        releaseResources()
         AppLog.i("Ktor MCP server stopped")
+    }
+
+    /**
+     * 回收工具线程池与协程作用域。幂等，可在 stop() 与启动失败路径重复调用。
+     * 线程池用 shutdownNow 立刻中断在跑的工具（它们大多不响应中断，但至少能排空队列）。
+     */
+    private fun releaseResources() {
+        runCatching { toolExecutor.shutdownNow() }
+        runCatching { toolExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }
+        runCatching { scopeJob.cancel() }
     }
 
     private suspend fun handleSseConnection(call: ApplicationCall) {

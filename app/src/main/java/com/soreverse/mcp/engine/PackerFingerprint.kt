@@ -77,7 +77,8 @@ internal object PackerFingerprint {
         if (sec.type == 8L || sec.size <= 0) return ByteArray(0)
         val start = sec.offset.toInt()
         if (start < 0 || start >= data.size) return ByteArray(0)
-        val len = minOf(data.size - start, sec.size.toInt())
+        // sec.size 是 Long，畸形值（> Int.MAX_VALUE）经 toInt() 变负会让 copyOfRange 抛异常
+        val len = minOf((data.size - start).toLong(), sec.size).toInt()
         return data.copyOfRange(start, start + len)
     }
 

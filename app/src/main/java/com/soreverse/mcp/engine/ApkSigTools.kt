@@ -155,6 +155,9 @@ internal object ApkSigTools {
         }
         val sizeFooter = u64(bytes, magicStart)
         // sizeFooter counts everything after the leading size field: blockStart = cdOffset - 8 - sizeFooter.
+        // 先把范围收紧到 Int 再相减：u64 的合法取值可以远超 Int，直接 toInt() 会截断成
+        // 任意值（包括负数），blockStart 算出来可能正好落在文件内但语义完全错位。
+        if (sizeFooter <= 0L || sizeFooter > cdOffset - 8L) return null
         val blockStart = cdOffset - 8 - sizeFooter.toInt()
         if (blockStart < 0 || u64(bytes, blockStart) != sizeFooter) return null
         val pairs = mutableListOf<Pair<Long, ByteArray>>()
@@ -171,6 +174,7 @@ internal object ApkSigTools {
     }
 
     private fun u64(b: ByteArray, o: Int): Long {
+        if (o < 0 || o + 8 > b.size) return 0L
         var v = 0L
         for (i in 7 downTo 0) v = (v shl 8) or (b[o + i].toLong() and 0xff)
         return v
@@ -214,6 +218,7 @@ internal object ApkSigTools {
         var q = p + 4 + sdLen
         if (q + 4 > signer.size) return null
         val sigsLen = u32(signer, q).toInt()
+        if (sigsLen < 0) return null
         val sigsRaw = if (q + 4 + sigsLen <= signer.size) signer.copyOfRange(q + 4, q + 4 + sigsLen) else ByteArray(0)
         q += 4 + sigsLen
         val signatures = mutableListOf<Pair<Long, ByteArray>>()
@@ -226,6 +231,7 @@ internal object ApkSigTools {
         }
         if (q + 4 > signer.size) return null
         val pkLen = u32(signer, q).toInt()
+        if (pkLen < 0) return null
         q += 4 + pkLen
         // signed data: digests, certs, additional attributes
         var s = 0
@@ -233,6 +239,7 @@ internal object ApkSigTools {
         val certs = mutableListOf<ByteArray>()
         if (s + 4 <= signedData.size) {
             val dLen = u32(signedData, s).toInt()
+            if (dLen < 0) return null
             val dRaw = signedData.copyOfRange(s + 4, minOf(signedData.size, s + 4 + dLen))
             var t = 0
             while (t + 4 <= dRaw.size) {
@@ -245,6 +252,7 @@ internal object ApkSigTools {
         }
         if (s + 4 <= signedData.size) {
             val cLen = u32(signedData, s).toInt()
+            if (cLen < 0) return null
             val cRaw = signedData.copyOfRange(s + 4, minOf(signedData.size, s + 4 + cLen))
             var t = 0
             while (t + 4 <= cRaw.size) {

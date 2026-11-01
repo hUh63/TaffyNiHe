@@ -538,6 +538,7 @@ internal object DotNetReader {
             o.put("flags", String.format("0x%08x", m.read(0x02, row, "Flags")))
             o.put("isNested", nested.containsKey(row))
             nested[row]?.let { o.put("enclosingType", fullTypeName(m, it)) }
+            o.put("extends", typeDefOrRefName(m, m.read(0x02, row, "Extends")))
             arr.put(o)
         }
         return JSONObject().put("types", arr).put("count", arr.length()).put("engine", "kotlin")
@@ -602,7 +603,9 @@ internal object DotNetReader {
             val s = m.userStringAt(off)
             val o = JSONObject()
             o.put("offset", String.format("0x%x", start))
+            o.put("usOffset", start)              // 与 native 输出保持兼容
             o.put("value", s)
+            o.put("text", s)                      // 同上
             o.put("length", s.length)
             arr.put(o)
             index++
@@ -870,6 +873,19 @@ internal object DotNetReader {
         val ns = m.stringAt(m.read(0x01, row, "TypeNamespace"))
         val name = m.stringAt(m.read(0x01, row, "TypeName"))
         return if (ns.isEmpty()) name else "$ns.$name"
+    }
+
+    /** TypeDefOrRef coded index → 可读名字（"TypeRef:System.Object" 风格，与 native 对齐）。 */
+    private fun typeDefOrRefName(m: Meta, raw: Long): String {
+        if (raw == 0L) return ""
+        val dec = m.decodeCoded("TypeDefOrRef", raw) ?: return ""
+        val (table, row) = dec
+        return when (table) {
+            0x01 -> "TypeRef:" + typeRefName(m, row)
+            0x02 -> "TypeDef:" + fullTypeName(m, row)
+            0x1B -> "TypeSpec"
+            else -> "table$table#$row"
+        }
     }
 
     private fun memberRefParentName(m: Meta, raw: Long): String {

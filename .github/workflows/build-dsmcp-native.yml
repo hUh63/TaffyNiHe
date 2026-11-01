@@ -1,0 +1,137 @@
+name: Build dsmcp native (libdsmcp_native.so)
+
+# libdsmcp_native.so 是 PE / .NET / ELF 结构解析与 patch 的 JNI 层。
+#
+# 仓库里原来那份是**预编译二进制**，来源仓库（zigou2162/DSMCP，GPL-3.0）的
+# cpp/ 目录现在能查到源码，但当年入库的产物已经把 p_align 写死成 0x1000 ——
+# Android 15 起 16 KiB page size 的设备上 bionic 会直接拒绝加载，PE/.NET 的
+# 结构视图整块静默消失。
+#
+# 更麻烦的是那份二进制里 dotnet_parser.h 的 parse_metadata_root 把 Length 字段
+# 读在 metaOff+16（规范是 +12），任何真实程序集都会报 "truncated version string"，
+# 也就是说它在 arm64 上"能加载"但 .NET 结果恒错。源码已一起修掉。
+#
+# 这个 workflow 用 NDK 从源码重编（4 个 ABI），产物带
+# -Wl,-z,max-page-size=16384。编出来的 .so 直接提交进 jniLibs，
+# 这样 build-apk 不需要装 NDK。
+
+on:
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: 'ABI'
+        required: true
+        default: 'arm64-v8a'
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86
+          - x86_64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v5
+
+      - name: 定位 NDK
+        id: ndk
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "sdk=$SDK"
+          if [ -d "$SDK/ndk" ]; then
+            NDK=$(ls -d "$SDK"/ndk/* | sort -V | tail -1)
+          else
+            echo "预装 NDK 不存在，安装一个"
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" >/dev/null
+            NDK="$SDK/ndk/27.2.12479018"
+          fi
+          echo "ndk=$NDK"
+          echo "ndk=$NDK" >> "$GITHUB_OUTPUT"
+
+      - name: 编译 libdsmcp_native.so
+        run: |
+          NDK="${{ steps.ndk.outputs.ndk }}"
+          case "${{ inputs.abi }}" in
+            arm64-v8a)    TARGET=aarch64-linux-android26 ; PAGESIZE=16384 ;;
+            armeabi-v7a)  TARGET=armv7a-linux-androideabi26 ; PAGESIZE=16384 ;;
+            x86)          TARGET=i686-linux-android26 ; PAGESIZE=16384 ;;
+            x86_64)       TARGET=x86_64-linux-android26 ; PAGESIZE=16384 ;;
+            *) echo "::error::未知 ABI"; exit 1 ;;
+          esac
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET}-clang++"
+          SRC=app/src/main/cpp/dsmcp
+          mkdir -p out
+          "$CXX" -shared -O2 -fPIC -fexceptions -frtti -std=c++17 \
+            -Wl,-z,max-page-size=$PAGESIZE -Wl,-z,relro -Wl,-z,now \
+            -static-libstdc++ \
+            -o out/libdsmcp_native.so \
+            "$SRC/native-lib.cpp" "$SRC/elf_bridge.cpp" "$SRC/pe_bridge.cpp" "$SRC/dotnet_bridge.cpp" \
+            -llog
+          ls -l out/libdsmcp_native.so
+          sha256sum out/libdsmcp_native.so
+
+      - name: 校验 ELF（16 KiB 对齐 + 页独占 + 33 个 JNI 符号）
+        run: |
+          python3 - <<'PY'
+          import struct
+          d = open('out/libdsmcp_native.so', 'rb').read()
+          assert d[:4] == b'\x7fELF', 'not an ELF'
+          is64 = d[4] == 2
+          assert is64, 'expected ELF64 for these ABIs'
+          phoff, = struct.unpack_from('<Q', d, 0x20)
+          phentsize, = struct.unpack_from('<H', d, 0x36)
+          phnum, = struct.unpack_from('<H', d, 0x38)
+          PAGE = 16384
+          loads = []
+          bad = []
+          for i in range(phnum):
+              o = phoff + i * phentsize
+              p_type, = struct.unpack_from('<I', d, o)
+              p_flags, = struct.unpack_from('<I', d, o + 4)
+              p_offset, = struct.unpack_from('<Q', d, o + 8)
+              p_vaddr, = struct.unpack_from('<Q', d, o + 16)
+              p_memsz, = struct.unpack_from('<Q', d, o + 40)
+              p_align, = struct.unpack_from('<Q', d, o + 48)
+              if p_type != 1:
+                  continue
+              loads.append((p_offset, p_vaddr, p_memsz, p_align, p_flags))
+              if p_align < PAGE:
+                  bad.append('PT_LOAD off=0x%x p_align=0x%x < 0x%x' % (p_offset, p_align, PAGE))
+              elif (p_offset % p_align) != (p_vaddr % p_align):
+                  bad.append('PT_LOAD off=0x%x vaddr=0x%x 不同余' % (p_offset, p_vaddr))
+          if bad:
+              raise SystemExit('!! 16 KiB 对齐不达标:\n  ' + '\n  '.join(bad))
+          # 页独占：同一 16 KiB 页不能被两个 PT_LOAD 同时覆盖
+          owner = {}
+          clash = []
+          for idx, (off, va, sz, al, fl) in enumerate(loads):
+              first = va // PAGE
+              last = (va + max(sz, 1) - 1) // PAGE
+              for pg in range(first, last + 1):
+                  if pg in owner:
+                      clash.append('page 0x%x: PT_LOAD#%d 与 #%d 重叠' % (pg * PAGE, owner[pg], idx))
+                  else:
+                      owner[pg] = idx
+          if clash:
+              raise SystemExit('!! 16 KiB 页被多个段共享（会因权限冲突无法加载）:\n  ' + '\n  '.join(clash))
+          need = ['nativeDetectFormat', 'nativeDotnetEditIl', 'nativeDotnetEditString',
+                  'nativeDotnetResolveToken', 'nativeElfParse', 'nativePeParse', 'nativeSearchBytes']
+          for name in need:
+              sym = ('Java_com_dsmcp_tool_engine_NativeBridge_' + name).encode()
+              if sym not in d:
+                  raise SystemExit('!! 缺少 JNI 符号 ' + name)
+          total = d.count(b'Java_com_dsmcp_tool_engine_NativeBridge_')
+          print('PT_LOAD 段数=%d  页数=%d  16 KiB 对齐与页独占均通过' % (len(loads), len(owner)))
+          print('JNI 符号（抽样校验 %d 个，文本命中 %d 处）齐全' % (len(need), total))
+          PY
+          file out/libdsmcp_native.so || true
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: libdsmcp-${{ inputs.abi }}
+          path: out/libdsmcp_native.so

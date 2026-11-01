@@ -5,7 +5,9 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -262,11 +264,16 @@ private fun EngineCard(
     val cs = MaterialTheme.colorScheme
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(AppShape.md),
+        shape = RoundedCornerShape(AppShape.lg),
         colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
+        // 运行中套一圈主色描边：一屏只有一个元素该带颜色，就是"服务在跑"这件事
+        border = BorderStroke(
+            1.dp,
+            if (running) cs.primary.copy(alpha = 0.55f) else cs.outlineVariant,
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
@@ -405,7 +412,7 @@ private fun SectionTitle(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 4.dp, end = 0.dp, top = 22.dp, bottom = 10.dp),
+            .padding(start = 4.dp, end = 0.dp, top = 24.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -413,7 +420,7 @@ private fun SectionTitle(
             modifier = Modifier.weight(1f),
             fontSize = AppText.label,
             fontWeight = FontWeight.Medium,
-            letterSpacing = 0.8.sp,
+            letterSpacing = 0.6.sp,
             color = cs.onSurfaceVariant,
         )
         if (action != null && onAction != null) {
@@ -446,43 +453,56 @@ private fun SectionTitle(
 @Composable
 private fun WorkbenchGrid(items: List<Satellite>, onNavigate: (MainTab, String?) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        items.chunked(4).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { sat ->
-                    Column(
+                    Row(
                         Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(AppShape.md))
+                            .background(cs.surfaceVariant)
+                            .border(1.dp, cs.outlineVariant, RoundedCornerShape(AppShape.md))
                             .clickable { onNavigate(sat.tab, sat.toolCategory) }
-                            .padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
                             Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(AppShape.md))
-                                .background(cs.surfaceVariant),
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(AppShape.sm))
+                                .background(cs.surface),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 sat.icon,
                                 contentDescription = null,
                                 tint = cs.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp),
+                                modifier = Modifier.size(18.dp),
                             )
                         }
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            sat.label,
-                            fontSize = AppText.label,
-                            color = cs.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Spacer(Modifier.size(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                sat.label,
+                                fontSize = AppText.bodyStrong,
+                                color = cs.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(1.dp))
+                            Text(
+                                sat.desc,
+                                fontSize = AppText.label,
+                                lineHeight = 14.sp,
+                                color = cs.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
-                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
@@ -666,19 +686,56 @@ private fun AnalyzeCta(zh: Boolean, onClick: () -> Unit) {
 private data class Satellite(
     val icon: ImageVector,
     val label: String,
+    /** 一句人话说明这个入口是干什么的 —— 4 列小宫格时代只有一个词，点进去才知道是什么。 */
+    val desc: String,
     val tab: MainTab,
     val toolCategory: String? = null,
 )
 
-/** 8 个入口。4 列网格只放主标题，副标题留给「全部工具」页。 */
+/**
+ * 六个入口，两列卡片。
+ *
+ * 上一版是 8 个 4 列小宫格（40dp 图标底 + 11sp 单词标签），问题有三个：
+ * 一屏里 8 个入口权重完全相同，等于没有主次；标签只有一个词，点进去才知道是什么；
+ * 40dp 图标 + 小字挤在 1/4 屏宽里，视觉上比正文还弱。
+ * 「设置」也从这里拿掉了 —— 它是全局目的地，顶栏已经有入口。
+ */
 private fun workbenchTiles(zh: Boolean): List<Satellite> = listOf(
-    Satellite(Icons.Default.Code, if (zh) "伪代码" else "Decompile", MainTab.Home, "decompile"),
-    Satellite(Icons.Default.LockOpen, if (zh) "脱壳" else "Unpack", MainTab.Home, "unpack"),
-    Satellite(Icons.Default.Memory, if (zh) "SO 分析" else "SO", MainTab.Tools, null),
+    Satellite(
+        Icons.Default.Memory,
+        if (zh) "SO 分析" else "SO analysis",
+        if (zh) "结构 / 符号 / 反汇编 / 交叉引用" else "Sections, symbols, disasm, xrefs",
+        MainTab.Tools, null,
+    ),
+    Satellite(
+        Icons.Default.Code,
+        if (zh) "伪代码" else "Decompile",
+        if (zh) "把函数还原成可读的 C 代码" else "Lift functions back to C",
+        MainTab.Home, "decompile",
+    ),
+    Satellite(
+        Icons.Default.LockOpen,
+        if (zh) "脱壳" else "Unpack",
+        if (zh) "找加固特征，内存 dump 后重建" else "Detect hardening, dump and rebuild",
+        MainTab.Home, "unpack",
+    ),
     // categoryMap 里的键是 emulate（不是 unidbg）；写错会被当成「全部工具」，静默打开上百个工具
-    Satellite(Icons.Default.FlashOn, if (zh) "模拟执行" else "Emulate", MainTab.Home, "emulate"),
-    Satellite(Icons.Default.MyLocation, if (zh) "Frida" else "Frida", MainTab.Home, "frida"),
-    Satellite(Icons.Default.Inventory2, if (zh) "回编" else "Rebuild", MainTab.Home, "rebuild"),
-    Satellite(Icons.Default.RssFeed, if (zh) "日志" else "Logs", MainTab.Home, "logs"),
-    Satellite(Icons.Filled.Settings, if (zh) "设置" else "Settings", MainTab.Settings, null),
+    Satellite(
+        Icons.Default.FlashOn,
+        if (zh) "模拟执行" else "Emulate",
+        if (zh) "Unidbg 跑 JNI，看真实返回值" else "Run JNI under Unidbg",
+        MainTab.Home, "emulate",
+    ),
+    Satellite(
+        Icons.Default.Inventory2,
+        if (zh) "回编" else "Rebuild",
+        if (zh) "改写后重新打包并签名" else "Repack and sign after edits",
+        MainTab.Home, "rebuild",
+    ),
+    Satellite(
+        Icons.Default.RssFeed,
+        if (zh) "全部工具" else "All tools",
+        if (zh) "按分类浏览全部 MCP 工具" else "Browse every MCP tool",
+        MainTab.Home, null,
+    ),
 )

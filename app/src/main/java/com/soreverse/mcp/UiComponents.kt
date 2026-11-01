@@ -112,7 +112,7 @@ internal fun ScreenHeader(
             }
         },
         actions = { trailing?.invoke() },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
     )
 }
 
@@ -168,7 +168,7 @@ internal fun ToolPageScaffold(
                     }
                 },
                 actions = { actions?.invoke() },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { innerPad ->
@@ -191,16 +191,18 @@ internal fun GlassGroup(
                 // 用 primary 写组标题，一页七八个分组就变成彩色标签墙，而且会跟「值/状态」抢注意力。
                 fontSize = AppText.label,
                 fontWeight = FontWeight.Medium,
-                letterSpacing = 0.8.sp,
+                letterSpacing = 0.6.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp),
             )
         }
         Card(
             modifier = Modifier.fillMaxWidth(),
-            // Exbin `item_detail.xml`：cornerRadius 10dp / elevation 0 / stroke 0 / bg colorSurfaceVariant
-            shape = RoundedCornerShape(12.dp),
+            // 分组容器：底比页面亮一档 + 1dp 描边，不用 elevation ——
+            // 深色主题下的阴影只会让边缘发灰、看着脏。
+            shape = RoundedCornerShape(AppShape.md),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(Modifier.fillMaxWidth(), content = content)
@@ -209,7 +211,7 @@ internal fun GlassGroup(
             Text(
                 footer,
                 fontSize = AppText.body,
-                lineHeight = 17.sp,
+                lineHeight = 18.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
@@ -222,7 +224,7 @@ internal fun GroupDivider() {
     HorizontalDivider(
         // 缩进与卡片内边距一致（16dp）。不做 iOS 式 56dp 图标缩进：这里有一半的分隔线
         // 用在无图标的输入框/说明文字之间，56dp 会变成一截断头线。
-        modifier = Modifier.padding(start = 12.dp),
+        modifier = Modifier.padding(start = 16.dp),
         thickness = 1.dp,
         // 0.5dp + alpha 0.22 在深色主题下几乎看不见，行与行糊成一片
         color = MaterialTheme.colorScheme.outlineVariant,
@@ -241,17 +243,18 @@ internal fun NavRow(
     value: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
-    val resolvedTint = iconTint ?: MaterialTheme.colorScheme.primary
+    val resolvedTint = iconTint ?: MaterialTheme.colorScheme.onSurfaceVariant
     ListItem(
         modifier = Modifier
-            .heightIn(min = 48.dp)
+            // 56dp 是"一行一条信息"的舒适下限；48 在一堆两行文案的行里会显得挤。
+            .heightIn(min = 56.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint, modifier = Modifier.size(22.dp)) } },
+        leadingContent = icon?.let { { Icon(it, null, tint = resolvedTint, modifier = Modifier.size(20.dp)) } },
         headlineContent = {
             Text(
                 title,
-                style = MaterialTheme.typography.titleSmall,
+                fontSize = AppText.bodyStrong,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -273,8 +276,8 @@ internal fun NavRow(
                 if (!value.isNullOrBlank()) {
                     Text(
                         value,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = AppText.body,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -305,11 +308,12 @@ internal fun NavRow(
 internal fun ToggleRow(text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     ListItem(
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.heightIn(min = 56.dp),
         headlineContent = {
             Text(
                 text,
                 color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.bodyLarge,
+                fontSize = AppText.bodyStrong,
             )
         },
         trailingContent = {

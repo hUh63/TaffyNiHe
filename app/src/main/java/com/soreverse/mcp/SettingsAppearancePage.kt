@@ -102,46 +102,23 @@ internal fun SettingsAppearancePage(
             GroupDivider()
             ChipFieldLabel(if (t.zh) "强调色" else "Accent")
             ChipRow(
+                // 只留六个。红/黄留给状态（错误、警告），灰做主色会让"主操作"看不出是操作，
+                // 粉在深色下与紫几乎分不开。
                 listOf(
-                    "pink" to if (t.zh) "粉" else "Pink",
                     "blue" to if (t.zh) "蓝" else "Blue",
                     "teal" to if (t.zh) "青" else "Teal",
                     "indigo" to if (t.zh) "靛" else "Indigo",
                     "purple" to if (t.zh) "紫" else "Purple",
                     "green" to if (t.zh) "绿" else "Green",
                     "orange" to if (t.zh) "橙" else "Orange",
-                    "yellow" to if (t.zh) "黄" else "Yellow",
-                    "red" to if (t.zh) "红" else "Red",
-                    "mono" to if (t.zh) "灰" else "Mono",
                 ),
                 accentColor,
                 onAccent,
             )
         }
-        GlassGroup(title = if (t.zh) "布局与文字" else "Layout & text") {
-            ChipFieldLabel(if (t.zh) "布局密度" else "Density")
-            ChipRow(
-                listOf(
-                    "compact" to if (t.zh) "紧凑" else "Compact",
-                    "comfortable" to if (t.zh) "舒适" else "Comfortable",
-                    "spacious" to if (t.zh) "宽松" else "Spacious",
-                ),
-                uiDensity,
-                onDensity,
-            )
-            GroupDivider()
-            ChipFieldLabel(if (t.zh) "圆角" else "Corners")
-            ChipRow(
-                listOf(
-                    "small" to if (t.zh) "小" else "Small",
-                    "medium" to if (t.zh) "中" else "Medium",
-                    "large" to if (t.zh) "大" else "Large",
-                    "xlarge" to if (t.zh) "特大" else "XL",
-                ),
-                cornerStyle,
-                onCorner,
-            )
-            GroupDivider()
+        GlassGroup(title = if (t.zh) "文字" else "Text") {
+            // 版式（页边距 / 行高 / 圆角）已经固定成一套 4 的倍数 + 三档圆角，
+            // 再留「密度 / 圆角」两个旋钮只会让用户调出更怪的组合，所以整组去掉了。
             ChipFieldLabel(if (t.zh) "字号" else "Text size")
             ChipRow(
                 listOf(

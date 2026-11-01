@@ -52,7 +52,7 @@ class DotNetReaderRealSampleTest {
         assertEquals("MethodDef 行数", 35, methods.length())
         val first = methods.getJSONObject(0)
         assertEquals("get_ResourceManager", first.optString("name"))
-        assertEquals("0x2000", String.format("0x%x", first.optInt("rva")))
+        assertEquals("0x2050", String.format("0x%x", first.optInt("rva")))
         // RVA 0x2050 落在 .text（VA 0x2000 / raw 0x200）→ 文件偏移 0x250
         assertEquals(0x250, first.optInt("fileOffset"))
     }
@@ -146,11 +146,13 @@ class DotNetReaderRealSampleTest {
     @Test
     fun editStringRejectsLongerString() {
         val d = sample()
+        // 0x1 处是 ", "（blob 只有 5 字节：4 字节 UTF-16 + 终结字节），任何长一点的串都放不下
         assertNull(
             "新串比原串长时必须拒绝（会让后续 ldstr 偏移失效）",
-            DotNetReader.editString(d, 0x07, "这是一个非常非常非常长的字符串，长度远超原值，必须被拒绝掉"),
+            DotNetReader.editString(d, 0x01, "这是一个非常非常非常长的字符串，长度远超原值，必须被拒绝掉"),
         )
         assertNull("偏移越界要拒绝", DotNetReader.editString(d, 0xFFFF, "x"))
+        assertNull("不是条目起点要拒绝", DotNetReader.editString(d, 0x03, "x"))
     }
 
     @Test

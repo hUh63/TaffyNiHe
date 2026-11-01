@@ -27,6 +27,7 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 | demumble | `libdemumble.so` | [zhkl0228/demumble](https://github.com/zhkl0228/demumble)（fork 自 nico/demumble） | Apache-2.0（含 LLVM 部分） |
 | DexKit | `libdexkit*.so` / aar | [Luckypray/DexKit](https://github.com/Luckypray/DexKit) | Apache-2.0 |
 | xAnSo | `libxanso_native.so` | ⚠️ 待复核（来源与许可需补充） | ⚠️ 待复核 |
+| DSMCP（PE/.NET/ELF 结构解析引擎） | `libdsmcp_native.so`（源码 `app/src/main/cpp/dsmcp/`） | [zigou2162/DSMCP](https://github.com/zigou2162/DSMCP) | GPL-3.0（与本项目相同，源码随仓库分发；本地修了 metadata root 偏移 bug） |
 | JNA | `libjnidispatch.so` | [java-native-access/jna](https://github.com/java-native-access/jna) | LGPL-2.1 或 Apache-2.0（双许可） |
 | libc++（NDK） | `libc++_shared.so` | LLVM / Android NDK | Apache-2.0 with LLVM exception |
 | androidx.graphics.path | `libandroidx.graphics.path.so` | androidx | Apache-2.0 |

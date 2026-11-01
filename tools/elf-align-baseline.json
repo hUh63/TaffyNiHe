@@ -1,12 +1,10 @@
 {
   "_comment": [
-    "16 KiB page size 兼容基线。列表中的 .so 目前 p_align=0x1000（Android 15+ 的 16 KiB 页设备上会被 bionic 拒绝加载），",
-    "但它们的源码不在本仓库，无法用 NDK 重新链接，只能等上游出 16 KiB 版本或从源码重建。",
-    "门槛是「只允许收缩」：修好一个就从这里删一条。新增不达标的一律阻塞构建。",
-    "影响面：libdsmcp_native.so = .NET/PE 分析工具（BinaryEngine）；libtermux.so = 终端 JNI（pty fork/exec）。",
-    "libtermux.so 已于 v1.5.29 用 NDK 从 cpp/termux.c 重建（p_align=0x4000），已从基线移除。"
+    "16 KiB page size 兼容基线。列表中的 .so 若 p_align=0x1000，Android 15+ 的 16 KiB 页设备上会被 bionic 拒绝加载。",
+    "门槛是「只允许收缩」：修好一个就从这里删一条；新增不达标的一律阻塞构建。",
+    "libtermux.so 已于 v1.5.29 用 NDK 从 cpp/termux.c 重建（p_align=0x4000），已移除。",
+    "libdsmcp_native.so 已于 v1.5.31 用 NDK 从 vendored 源码 cpp/dsmcp/ 重建（p_align=0x4000，4 个 ABI），已移除。",
+    "当前基线为空：仓库内所有 .so 都满足 16 KiB 页加载要求。"
   ],
-  "known_mismatch": [
-    "app/src/main/jniLibs/arm64-v8a/libdsmcp_native.so"
-  ]
+  "known_mismatch": []
 }

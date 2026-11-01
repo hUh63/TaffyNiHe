@@ -1,3 +1,67 @@
+## 塔菲逆核 v1.5.29 —— 把 16 KiB 的遗留收尾，并抄了上游三处
+
+### 一、`libtermux.so` 真正重编了（16 KiB 页对齐）
+
+上一版把它记进基线，理由是「没有源码」。其实源码一直在 `termux-app` 仓库里 ——
+现在收进 `termux-terminal-emulator/src/main/cpp/termux.c`，配一个手动 workflow
+（`build-termux-native.yml`）用 NDK 重新编译：
+
+- 两个 `PT_LOAD` 的 `p_align` 从 `0x1000` 变成 `0x4000`；
+- 更关键的是**段不再共享 16 KiB 页**。旧版 R 段 `[0,0x1aa8)` 与 RW 段 `[0x1cd0,…)`
+  挤在同一个 4 KiB 页里，按 16 KiB 映射时一页只能有一种保护属性，后映射的会覆盖前一个；
+  新版由链接器按 16K 边界排开（`0x0` 与 `0x5950`），互不重叠；
+- 5 个 JNI 符号齐全（`createSubprocess` / `setPtyWindowSize` / `setPtyUTF8Mode` /
+  `waitFor` / `close`），产物回填 `jniLibs`，`termux-native.properties` 的 sha256 同步更新；
+- `elf-align-baseline.json` 里删掉这一条（基线只允许收缩），现在只剩 `libdsmcp_native.so`。
+
+`libdsmcp_native.so` 仍然做不了：它在 SOMCP 上游也没有源码 —— 上游 `cpp/` 里只有
+`rz_native` / `blutter_bridge` / `xanso_native` 三个 target，这个库是更早的预编译产物。
+所以改成**让它不再骗人**（见下一条）。
+
+### 二、PE/.NET 工具不再静默返回空
+
+`libdsmcp_native.so` 加载失败时，`BinaryEngine` 的各方法会安静地返回 `unknown` / 空数组，
+用户看到的是「这个 dll 不是 .NET 程序集」，而不是「解析器根本不可用」。
+现在 `BinaryEngineToolHandler` 先查 `nativeBridge().available()`，不可用就直接报错、
+带上 `loadStatus()`，并点明 16 KiB 页设备这个最常见成因。
+
+### 三、抄上游
+
+**SOMCP：Blutter 退出码不再全部塌成一个 `RUNNER_FAILED`**
+隔离进程对所有非零退出只报一个粗粒度的 `RUNNER_FAILED`，于是「15 MB `libapp.so` 在隔离进程里
+把 native 堆撑爆」「被取消」「写结果失败」在界面上完全一样，用户只能看到一个光秃秃的
+`exited with code 6`。补了退出码表（3 → `RUNNER_CANCELLED`、5 → `RUNNER_OUTPUT_FAILED`、
+6 → `RUNNER_NATIVE_FAILED` 并说明 tight-heap 与快照指纹的排查方向），并让它在服务侧
+兜底码之上生效。
+
+**太墟：工作区下载改流式，避免整份读进内存**
+`/api/workspace/download` 原来是 `file.readBytes()`，而工作区产物上限 128 MB 且没有下载闸门 ——
+手机上点一次「下载」就可能 OOM。改成 `sendFileResponse`（64 KiB 定长缓冲流式回写 socket）。
+
+**SOMCP：CA 黑名单** —— 核对过，25 条指纹与上游完全一致，无需移植。
+
+### 四、archive 的临时文件名唯一化
+
+`taffy_archive_add` / `delete` / `rename` 都不是 heavy 工具，两个请求可以并发操作同一个包。
+临时文件名固定成 `<file>.tmp` 时，两侧会在同一个文件里交错写入，最后
+`replaceAtomically` 把一个字节混着两份的包换成正式文件 —— zip 直接损坏。
+改成带 `nanoTime` 的唯一名。
+
+### 看过但没抄的
+
+- 太墟 v1.8.0（塔菲集成的是 v1.2.1）的 harness 改动：`ApiMessageProjector` 的图片 8 MB 预算、
+  `ManualCompactionBoundary` 的按轮次压缩 —— 塔菲 App 里的 AI 对话走自研的 `RikkaAgentEngine`，
+  不经过 harness 的 projector，移植过来没有调用方。
+- SOMCP 这半个多月的提交绝大部分在 CI 与依赖：fastjson → 1.2.84、jsoup → 1.23.2、
+  jna 的 artifact 选择、unidbg patched jar 去重。塔菲的依赖树不同，不适用。
+- 太墟整体升到 v1.8.0 不现实（跨 6 个大版本，chat / settings / a2ui / plugins 全面重构）。
+
+### 已知仍未修
+
+`libdsmcp_native.so` 的 16 KiB 对齐：没有源码，只能等上游重新发布，或者自己重写 .NET
+metadata 解析（ECMA-335 表流 + IL 反汇编，约 1500 行，且沙箱里没有 .NET 样本可以验证 ——
+盲写一个二进制解析器的风险远高于收益）。`tools/check-elf-align.py` 会持续提示。
+
 ## 塔菲逆核 v1.5.28 —— 16 KiB 页对齐的实测与门禁 + 畸形包能把工具打断
 
 上一版把「16 KiB 页兼容」列为已知风险没做，这次做了：先做**实测**，再决定怎么处置。

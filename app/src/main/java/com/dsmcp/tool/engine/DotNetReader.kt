@@ -706,4 +706,234 @@ internal object DotNetReader {
             .put("instructionCount", insns.length())
             .put("engine", "kotlin")
     }
+
+    // ── 写入：IL 与 #US 字符串 ──
+    //
+    // 两个写操作都只做「等长覆盖」，因为文件布局一旦变化就要重算所有
+    // 表/堆偏移、并让已有的 ldstr / 方法令牌失效 —— 那属于重写程序集，
+    // 风险与收益不成比例。等长改写能覆盖绝大多数 patch 场景。
+
+    private fun hexOf(b: ByteArray, max: Int = 64): String {
+        val n = minOf(b.size, max)
+        val sb = StringBuilder(n * 2)
+        for (i in 0 until n) {
+            val v = b[i].toInt() and 0xff
+            sb.append("0123456789abcdef"[v ushr 4]).append("0123456789abcdef"[v and 0x0f])
+        }
+        if (b.size > max) sb.append("…(").append(b.size).append("B)")
+        return sb.toString()
+    }
+
+    /** IL 体在文件中的 (代码起点, 代码长度)；tiny / fat 两种头都认，无 IL 体返回 null。 */
+    private fun ilCodeRange(data: ByteArray, m: Meta, methodRow: Int): Pair<Int, Int>? {
+        val rva = m.read(0x06, methodRow, "RVA")
+        if (rva == 0L) return null
+        val off = rvaToOffset(m.pe, rva)
+        if (off < 0 || off >= data.size) return null
+        val b0 = u8(data, off)
+        if (b0 and 0x03 == 0x02) {                                  // tiny: 1 字节头
+            val size = b0 ushr 2
+            if (size <= 0 || off + 1 + size > data.size) return null
+            return (off + 1) to size
+        }
+        if (b0 and 0x03 == 0x03) {                                  // fat: 12 字节头（可为 4 的倍数扩展）
+            if (off + 12 > data.size) return null
+            val flags = u16(data, off)
+            val hdrSize = (flags ushr 12) * 4
+            if (hdrSize < 12 || off + hdrSize > data.size) return null
+            val codeSize = u32(data, off + 4).toInt()
+            if (codeSize <= 0 || off + hdrSize + codeSize > data.size) return null
+            return (off + hdrSize) to codeSize
+        }
+        return null
+    }
+
+    /**
+     * 在方法体内 [ilOffset] 处覆盖写入 [patch]（等长，不改变文件长度）。
+     * 失败返回 null：令牌非法 / 方法没有 IL 体 / 越界 / 超出 codeSize。
+     */
+    fun editIl(data: ByteArray, methodToken: Int, ilOffset: Int, patch: ByteArray): ByteArray? {
+        if (patch.isEmpty()) return null
+        val m = open(data) ?: return null
+        if ((methodToken ushr 24) and 0xff != 0x06) return null
+        val row = methodToken and 0x00FFFFFF
+        if (row <= 0 || row > m.rowCount(0x06)) return null
+        val (codeAt, codeSize) = ilCodeRange(data, m, row) ?: return null
+        if (ilOffset < 0 || ilOffset.toLong() + patch.size > codeSize.toLong()) return null
+        val at = codeAt + ilOffset
+        if (at < 0 || at.toLong() + patch.size > data.size.toLong()) return null
+        val out = data.copyOf()
+        System.arraycopy(patch, 0, out, at, patch.size)
+        return out
+    }
+
+    /** 读 #US 里某条的压缩长度前缀，返回 (内容长度, 前缀宽度)；不合法返回 null。 */
+    private fun compressedUIntAt(d: ByteArray, off: Int, limit: Int): Pair<Int, Int>? {
+        if (off < 0 || off >= limit) return null
+        val b0 = u8(d, off)
+        return when {
+            b0 and 0x80 == 0 -> b0 to 1
+            b0 and 0xC0 == 0x80 -> {
+                if (off + 2 > limit) null
+                else (((b0 and 0x3F) shl 8) or u8(d, off + 1)) to 2
+            }
+            b0 and 0xE0 == 0xC0 -> {
+                if (off + 4 > limit) null
+                else (((b0 and 0x1F) shl 24) or (u8(d, off + 1) shl 16) or
+                    (u8(d, off + 2) shl 8) or u8(d, off + 3)) to 4
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * 改写 #US 堆里 [usOffset] 处的用户字符串。
+     *
+     * 只允许「等长或更短」：变长会挪动后面的条目，而 ldstr 指令里存的是
+     * 堆内偏移，所有引用都会指错地方。新串更短时用 0 填满原 blob 尾部，
+     * 堆总长度保持不变，所以后续条目偏移不受影响。
+     * 失败返回 null。
+     */
+    fun editString(data: ByteArray, usOffset: Int, newStr: String): ByteArray? {
+        val m = open(data) ?: return null
+        if (usOffset < 0 || usOffset >= m.usSize) return null
+        val at = m.usBase + usOffset
+        val usEnd = m.usBase + m.usSize
+        if (at < 0 || at >= data.size) return null
+        val (blobLen, prefixLen) = compressedUIntAt(data, at, minOf(usEnd, data.size)) ?: return null
+        if (blobLen <= 0) return null                                 // 原条目至少要有一个终结字节
+        // #US 内容是 UTF-16LE + 1 个终结字节
+        val utf16 = newStr.toByteArray(Charsets.UTF_16LE)
+        val newBlobLen = utf16.size + 1
+        if (newBlobLen > blobLen) return null
+        val prefixMax = when (prefixLen) {
+            1 -> 0x7f
+            2 -> 0x3fff
+            else -> 0x1fffffff
+        }
+        if (newBlobLen > prefixMax) return null
+        val end = at + prefixLen + blobLen
+        if (end > data.size) return null
+        val out = data.copyOf()
+        when (prefixLen) {
+            1 -> out[at] = newBlobLen.toByte()
+            2 -> {
+                out[at] = (((newBlobLen ushr 8) and 0x3F) or 0x80).toByte()
+                out[at + 1] = newBlobLen.toByte()
+            }
+            else -> {
+                out[at] = (((newBlobLen ushr 24) and 0x1F) or 0xC0).toByte()
+                out[at + 1] = (newBlobLen ushr 16).toByte()
+                out[at + 2] = (newBlobLen ushr 8).toByte()
+                out[at + 3] = newBlobLen.toByte()
+            }
+        }
+        var p = at + prefixLen
+        System.arraycopy(utf16, 0, out, p, utf16.size)
+        p += utf16.size
+        out[p] = 0                                                   // 终结字节
+        p += 1
+        while (p < end) {                                            // 余量清零，blob 总长不变
+            out[p] = 0
+            p += 1
+        }
+        return out
+    }
+
+    // ── 令牌解析 ──
+
+    private fun methodOwnerType(m: Meta, methodRow: Int): Int {
+        val types = m.rowCount(0x02)
+        val methods = m.rowCount(0x06)
+        var owner = 0
+        for (t in 1..types) {
+            val start = m.read(0x02, t, "MethodList").toInt()
+            val next = if (t < types) m.read(0x02, t + 1, "MethodList").toInt() else methods + 1
+            if (methodRow >= start && methodRow < next) owner = t
+        }
+        return owner
+    }
+
+    private fun fieldOwnerType(m: Meta, fieldRow: Int): Int {
+        val types = m.rowCount(0x02)
+        val fields = m.rowCount(0x04)
+        var owner = 0
+        for (t in 1..types) {
+            val start = m.read(0x02, t, "FieldList").toInt()
+            val next = if (t < types) m.read(0x02, t + 1, "FieldList").toInt() else fields + 1
+            if (fieldRow >= start && fieldRow < next) owner = t
+        }
+        return owner
+    }
+
+    private fun typeRefName(m: Meta, row: Int): String {
+        val ns = m.stringAt(m.read(0x01, row, "TypeNamespace"))
+        val name = m.stringAt(m.read(0x01, row, "TypeName"))
+        return if (ns.isEmpty()) name else "$ns.$name"
+    }
+
+    private fun memberRefParentName(m: Meta, raw: Long): String {
+        val dec = m.decodeCoded("MemberRefParent", raw) ?: return "?"
+        val (table, row) = dec
+        return when (table) {
+            0x01 -> typeRefName(m, row)
+            0x02 -> fullTypeName(m, row)
+            0x1A -> m.stringAt(m.read(0x1A, row, "Name"))
+            0x1B -> "TypeSpec(blob)" 
+            else -> "table$table#$row"
+        }
+    }
+
+    /**
+     * 解析一个 metadata 令牌（nativeDotnetResolveToken 的 Kotlin 版）。
+     * 支持 0x70 用户字符串、TypeRef/TypeDef/Field/MethodDef/MemberRef/ModuleRef/TypeSpec/MethodSpec；
+     * 其它表给出「表名 行号」。
+     */
+    fun resolveToken(data: ByteArray, token: Int): JSONObject {
+        val m = open(data) ?: return JSONObject().put("error", "不是 .NET 程序集（找不到 BSJB metadata）")
+        val tableId = (token ushr 24) and 0xff
+        val row = token and 0x00FFFFFF
+        val out = JSONObject()
+            .put("token", token)
+            .put("tableId", tableId)
+            .put("row", row)
+        if (tableId == 0x70) {
+            return out.put("table", "String")
+                .put("resolved", m.userStringAt(row))
+                .put("engine", "kotlin")
+        }
+        val tableName = SCHEMA[tableId]?.first
+        if (tableName == null) {
+            return out.put("table", "unknown")
+                .put("resolved", "未知令牌表：0x${tableId.toString(16)}")
+                .put("engine", "kotlin")
+        }
+        out.put("table", tableName)
+        if (row <= 0 || row > m.rowCount(tableId)) {
+            return out.put("resolved", "").put("error", "行号 $row 超出 $tableName 表的行数 ${m.rowCount(tableId)}")
+                .put("engine", "kotlin")
+        }
+        val resolved = when (tableId) {
+            0x01 -> typeRefName(m, row)
+            0x02 -> fullTypeName(m, row)
+            0x04 -> {
+                val owner = fieldOwnerType(m, row)
+                val ownerName = if (owner > 0) fullTypeName(m, owner) else "?"
+                "$ownerName::${m.stringAt(m.read(0x04, row, "Name"))}"
+            }
+            0x06 -> {
+                val owner = methodOwnerType(m, row)
+                val ownerName = if (owner > 0) fullTypeName(m, owner) else "?"
+                "$ownerName::${m.stringAt(m.read(0x06, row, "Name"))}"
+            }
+            0x0A -> "${memberRefParentName(m, m.read(0x0A, row, "Class"))}::${m.stringAt(m.read(0x0A, row, "Name"))}"
+            0x11 -> "Signature(${hexOf(m.blobAt(m.read(0x11, row, "Signature")))})"
+            0x1A -> m.stringAt(m.read(0x1A, row, "Name"))
+            0x1B -> "TypeSpec(${hexOf(m.blobAt(m.read(0x1B, row, "Signature")))})"
+            0x2B -> "MethodSpec(${hexOf(m.blobAt(m.read(0x2B, row, "Instantiation")))})"
+            0x20 -> m.stringAt(m.read(0x20, row, "Name"))
+            else -> "$tableName 行 $row"
+        }
+        return out.put("resolved", resolved).put("engine", "kotlin")
+    }
 }

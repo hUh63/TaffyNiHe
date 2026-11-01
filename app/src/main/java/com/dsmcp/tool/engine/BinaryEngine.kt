@@ -280,10 +280,10 @@ class BinaryEngine(
         val ws = workspaces[workspaceId]
             ?: return err("WORKSPACE_NOT_FOUND", "Workspace not found: $workspaceId")
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        // native 库（libdsmcp_native.so）是上游更早的预编译产物，PT_LOAD p_align 只有
-        // 0x1000，16 KiB page size 的设备上 bionic 直接拒绝加载。那时整条 .NET 链路会
-        // 静默返回空结果，所以这里用纯 Kotlin 的 DotNetReader 兜底。
-        val result = if (native.available()) native.dotnetDetect(data) else DotNetReader.detect(data)
+        // .NET 一律走纯 Kotlin 实现：libdsmcp_native 的 metadata root 解析把 Length
+        // 字段读在 +16（规范是 +12，+16 才是版本串起点），任何真实程序集都会报
+        // "truncated version string" —— 它在 arm64 上"能加载"但结果恒为错。
+        val result = DotNetReader.detect(data)
         // 直接返回诊断结果，不拦截 error
         val r = ok(
             "isDotNet" to result.optBoolean("isDotNet", false),
@@ -318,7 +318,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = if (native.available()) native.dotnetListTypes(data) else DotNetReader.listTypes(data)
+        val result = DotNetReader.listTypes(data)
         if (result.has("error")) {
             val msg = result.getString("error")
             return err("NOT_DOTNET", "$msg | 提示: 使用 dotnet_detect 获取详细诊断信息 | Hint: use dotnet_detect for diagnostics")
@@ -334,7 +334,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = if (native.available()) native.dotnetListMethods(data, typeFilter) else DotNetReader.listMethods(data, typeFilter)
+        val result = DotNetReader.listMethods(data, typeFilter)
         if (result.has("error")) {
             val msg = result.getString("error")
             return err("NOT_DOTNET", "$msg | 提示: 使用 dotnet_detect 获取详细诊断信息 | Hint: use dotnet_detect for diagnostics")
@@ -351,11 +351,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = if (native.available()) {
-            native.dotnetListStrings(data, maxCount.coerceIn(1, 10000))
-        } else {
-            DotNetReader.listStrings(data, maxCount.coerceIn(1, 10000))
-        }
+        val result = DotNetReader.listStrings(data, maxCount.coerceIn(1, 10000))
         if (result.has("error")) {
             return err("NOT_DOTNET", "${result.getString("error")} | Hint: use dotnet_detect for diagnostics")
         }
@@ -370,7 +366,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = if (native.available()) native.dotnetDumpIl(data, methodToken) else DotNetReader.dumpIl(data, methodToken)
+        val result = DotNetReader.dumpIl(data, methodToken)
         if (result.has("error")) {
             return err("DOTNET_IL_FAILED", result.getString("error"),
                 "methodToken" to "0x${methodToken.toString(16)}")
@@ -386,7 +382,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = if (native.available()) native.dotnetDisasm(data, methodToken, pseudoCode) else DotNetReader.disasm(data, methodToken, pseudoCode)
+        val result = DotNetReader.disasm(data, methodToken, pseudoCode)
         if (result.has("error")) {
             return err("DOTNET_DISASM_FAILED", result.getString("error"),
                 "methodToken" to "0x${methodToken.toString(16)}")
@@ -402,15 +398,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        // 令牌解析只在 native 实现里（需要跨程序集引用表），Kotlin 兜底不覆盖它
-        if (!native.available()) {
-            return err(
-                "BINARY_ENGINE_UNAVAILABLE",
-                "令牌解析需要 libdsmcp_native.so（Kotlin 兜底只覆盖检测/类型/方法/字符串/IL）",
-                "cause" to "native library not loadable",
-            )
-        }
-        val result = native.dotnetResolveToken(data, token)
+        val result = DotNetReader.resolveToken(data, token)
         if (result.has("error")) {
             return err("DOTNET_RESOLVE_FAILED", result.getString("error"),
                 "token" to "0x${token.toString(16)}")
@@ -421,13 +409,6 @@ class BinaryEngine(
 
     fun dotnetEditIl(workspaceId: String, editSessionId: String, methodToken: Int,
                      ilOffset: Int, hexData: String, dryRun: Boolean = false): JSONObject {
-        if (!native.available()) {
-            return err(
-                "BINARY_ENGINE_UNAVAILABLE",
-                "改写 IL 需要 libdsmcp_native.so（Kotlin 兜底只读不写）：${native.loadStatus()}",
-                "cause" to "native library not loadable",
-            )
-        }
         val session = sessions[editSessionId]
             ?: return err("EDIT_SESSION_NOT_FOUND", "Edit session not found: $editSessionId")
         val ws = workspaces[workspaceId]
@@ -436,20 +417,19 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         synchronized(session.lock) {
-            val patch = native.fromHex(hexData)
+            val patch = hexToBytesLocal(hexData)
             if (patch.isEmpty()) {
                 return err("INVALID_HEX", "Invalid hex data: $hexData")
             }
 
             // Dump current IL to show old bytes for preview
-            val oldIl = native.dotnetDumpIl(session.data, methodToken)
-            val ilHex = oldIl.optString("ilHex", "")
-            val ilBytes = native.fromHex(ilHex)
+            val oldIl = DotNetReader.dumpIl(session.data, methodToken)
+            val ilBytes = hexToBytesLocal(oldIl.optString("ilHex", ""))
             val oldPreview = if (ilOffset < ilBytes.size) {
                 val end = minOf(ilBytes.size, ilOffset + patch.size)
-                native.toHex(ilBytes.copyOfRange(ilOffset, end), spaced = true)
+                bytesToHexLocal(ilBytes.copyOfRange(ilOffset, end), spaced = true)
             } else ""
-            val newHex = native.toHex(patch, spaced = true)
+            val newHex = bytesToHexLocal(patch, spaced = true)
 
             if (dryRun) {
                 return ok("dryRun" to true, "methodToken" to "0x${methodToken.toString(16)}",
@@ -457,8 +437,8 @@ class BinaryEngine(
                     "patchSize" to patch.size)
             }
 
-            val result = native.dotnetEditIl(session.data, methodToken, ilOffset, patch)
-            if (result.isEmpty()) {
+            val result = DotNetReader.editIl(session.data, methodToken, ilOffset, patch)
+            if (result == null) {
                 return err("IL_PATCH_FAILED", "IL patch failed: method not found or offset out of range",
                     "methodToken" to "0x${methodToken.toString(16)}", "ilOffset" to ilOffset)
             }
@@ -472,13 +452,6 @@ class BinaryEngine(
 
     fun dotnetEditString(workspaceId: String, editSessionId: String,
                          usOffset: Int, newStr: String, dryRun: Boolean = false): JSONObject {
-        if (!native.available()) {
-            return err(
-                "BINARY_ENGINE_UNAVAILABLE",
-                "改写用户字符串需要 libdsmcp_native.so（Kotlin 兜底只读不写）：${native.loadStatus()}",
-                "cause" to "native library not loadable",
-            )
-        }
         val session = sessions[editSessionId]
             ?: return err("EDIT_SESSION_NOT_FOUND", "Edit session not found: $editSessionId")
         val ws = workspaces[workspaceId]
@@ -492,9 +465,12 @@ class BinaryEngine(
                     "newStr" to newStr, "newStrLen" to newStr.length)
             }
 
-            val result = native.dotnetEditString(session.data, usOffset, newStr)
-            if (result.isEmpty()) {
-                return err("STRING_PATCH_FAILED", "String patch failed: offset out of range or string too long",
+            val result = DotNetReader.editString(session.data, usOffset, newStr)
+            if (result == null) {
+                return err("STRING_PATCH_FAILED",
+                    "String patch failed: offset out of range, not a user string, or the new value " +
+                        "is longer than the original (in-place edits only — a longer blob would shift " +
+                        "every following #US entry and break all existing ldstr tokens)",
                     "usOffset" to usOffset, "newStr" to newStr)
             }
             session.data = result
@@ -783,6 +759,35 @@ class BinaryEngine(
     }
 
     // ── Helpers ──
+
+    /** 十六进制字符串 → 字节（容忍空格/换行/冒号/短横线分隔）；非法输入返回空数组。 */
+    private fun hexToBytesLocal(hex: String): ByteArray {
+        val clean = StringBuilder(hex.length)
+        for (c in hex) {
+            if (c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == ':' || c == '-') continue
+            clean.append(c)
+        }
+        if (clean.length % 2 != 0) return ByteArray(0)
+        val out = ByteArray(clean.length / 2)
+        for (i in out.indices) {
+            val hi = Character.digit(clean[i * 2], 16)
+            val lo = Character.digit(clean[i * 2 + 1], 16)
+            if (hi < 0 || lo < 0) return ByteArray(0)
+            out[i] = ((hi shl 4) or lo).toByte()
+        }
+        return out
+    }
+
+    /** 字节 → 小写十六进制；[spaced] 为 true 时每个字节之间加一个空格。 */
+    private fun bytesToHexLocal(b: ByteArray, spaced: Boolean): String {
+        val sb = StringBuilder(b.size * (if (spaced) 3 else 2))
+        for (i in b.indices) {
+            if (spaced && i > 0) sb.append(' ')
+            val v = b[i].toInt() and 0xff
+            sb.append("0123456789abcdef"[v ushr 4]).append("0123456789abcdef"[v and 0x0f])
+        }
+        return sb.toString()
+    }
 
     private fun getSessionData(workspaceId: String, editSessionId: String?): ByteArray? {
         if (editSessionId.isNullOrBlank()) return null

@@ -509,11 +509,10 @@ class BinaryEngineToolHandler(
     override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
         val be = ctx.binaryEngine
             ?: return err("BINARY_ENGINE_UNAVAILABLE",
-                "BinaryEngine (libdsmcp_native) is not loaded. PE/.NET tools are unavailable.")
-        // native 库不可用时不再在这里拦截：BinaryEngine 的只读方法已经接了纯 Kotlin 的
-        // DotNetReader 兜底（detect / types / methods / strings / IL），在这种设备上仍然可用；
-        // 只有真正的写操作（改 IL、改用户字符串）才会在 BinaryEngine 内部报
-        // BINARY_ENGINE_UNAVAILABLE 并带上 native loadStatus。
+                "PE/.NET 引擎未初始化（BinaryEngine 实例缺失），无法执行该操作。")
+        // .NET 链路（detect / types / methods / strings / IL / 令牌解析 / 改 IL / 改用户字符串）
+        // 已全部由纯 Kotlin 的 DotNetReader 实现，不依赖 libdsmcp_native.so；
+        // 只有 ELF/PE 的 parse/patch 仍在用 native 层。
         return invoke(be, args, ctx.settings)
     }
 }

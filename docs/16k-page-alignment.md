@@ -19,7 +19,7 @@ APK 侧还有一条：未压缩的 `lib/*.so` 条目起始偏移必须 16 KiB �
 | `libxanso_native.so` / `libdisassembler.so` / `libblutter_bridge.so` / `libblutter_*.so` / `libfrida_server.so` | 0x4000 | 达标 |
 | `libandroidx.graphics.path.so` / `libproot*.so` / `libandroid-shmem.so` / `libpty_native.so` / `libtalloc.so` | 0x4000 | 达标 |
 | `libtermux.so` | 0x4000 | 达标（v1.5.29 用 NDK 从 `cpp/termux.c` 重建） |
-| **`libdsmcp_native.so`** | **0x1000** | **不达标** |
+| `libdsmcp_native.so` | 0x4000 | 达标（v1.5.31 用 NDK 从 vendored 源码 `cpp/dsmcp/` 重建，4 个 ABI 全齐） |
 
 ## libtermux.so 是怎么修的
 
@@ -41,18 +41,22 @@ PT_LOAD off=0x1cd0 vaddr=0x1cd0     PT_LOAD off=0x1950 vaddr=0x5950
 `src/main/jniLibs/arm64-v8a/` 并同步 `termux-native.properties` 的 `binary.sha256`。
 `build-apk.yml` 因此仍不需要安装 NDK。
 
-## libdsmcp_native.so 为什么还没修
+## libdsmcp_native.so 是怎么修的
 
-它在 SOMCP 上游也没有源码 —— 上游 `app/src/main/cpp/CMakeLists.txt` 只构建
-`rz_native` / `blutter_bridge` / `xanso_native` 三个 target，这个库是更早的预编译产物。
-没有源码就只能重新链接，而重新链接必须改 `p_vaddr`（见下），那条路对已编译的 .so 不安全。
+那份二进制在 SOMCP 上游确实没有源码（上游 `cpp/CMakeLists.txt` 只构建
+`rz_native` / `blutter_bridge` / `xanso_native` 三个 target）。但顺着 33 个 JNI 导出符号
+反查，源码在 **`zigou2162/DSMCP`**（GPL-3.0，与本项目同许可），整份 vendored 进
+`app/src/main/cpp/dsmcp/`，用 `.github/workflows/build-dsmcp-native.yml` 重编。
 
-影响面：`BinaryEngine` 加载失败 → .NET / PE 相关工具不可用。v1.5.29 起这条不再是静默的：
-`BinaryEngineToolHandler` 会先查 `nativeBridge().available()`，不可用时直接报错并带上
-`loadStatus()`。
+除了 `p_align`，原来那份二进制还带着三个会让 .NET 结果**静默出错**的 bug
+（`parse_metadata_root` 偏移、表号枚举整组错位 4、IL 标签格式串），都在 vendored
+源码里一并修掉了，细节见 `THIRD_PARTY_NOTICES.md` 与 `RELEASE_NOTES.md` 的 v1.5.31 段。
 
-要彻底修有两条路：等上游重新发布 16 KiB 版本，或者自己重写 .NET metadata 解析
-（ECMA-335 表流 + IL 反汇编，约 1500 行，且需要 .NET 样本验证）。
+顺带解决的两件事：
+
+- 原来只有 `arm64-v8a` 有这份库，其它三个 ABI 上 .NET/PE 工具一直是不可用的；现在四个 ABI 都有。
+- .NET 的读写能力已用纯 Kotlin 重做（`com.dsmcp.tool.engine.DotNetReader`），
+  native 只负责 ELF/PE 的 parse 与 patch —— 即使某个 ABI 上 `.so` 加载失败，.NET 工具仍能用。
 
 ## 为什么不"手工改 p_align"
 

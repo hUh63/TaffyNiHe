@@ -294,7 +294,7 @@ inline std::string disassemble_il(const uint8_t* ilData, size_t ilLen,
 
     while (pc < ilLen) {
         // Offset
-        snprintf(line, sizeof(line), "IL_%0404X: ", (unsigned)pc);
+        snprintf(line, sizeof(line), "IL_%04X: ", (unsigned)pc);
         out += line;
 
         uint8_t op = ilData[pc];

@@ -56,12 +56,16 @@ enum DnTable : uint8_t {
     TBL_ASSEMBLYREF    = 0x21,
     TBL_FILE           = 0x22,
     TBL_EXPORTEDTYPE   = 0x23,
-    TBL_MANIFESTRES    = 0x24,
-    TBL_NESTEDCLASS    = 0x25,
-    TBL_GENERICPARAM   = 0x26,
-    TBL_METHODSPEC     = 0x27,
-    TBL_GENERICPARAMCONSTRAINT = 0x28,
-    TBL_MAX            = 0x2C,
+    TBL_MANIFESTRES    = 0x28,   // 原实现写成 0x24 — 与 NestedClass/GenericParam/MethodSpec 一起整组错位
+    TBL_NESTEDCLASS    = 0x29,   // 原实现写成 0x25 — 整组错位 4，导致这三张表行宽恒为 0
+    TBL_GENERICPARAM   = 0x2A,
+    TBL_METHODSPEC     = 0x2B,
+    TBL_GENERICPARAMCONSTRAINT = 0x2C,
+    TBL_FIELDMARSHAL   = 0x0D,
+    TBL_DECLSECURITY   = 0x0E,
+    TBL_CLASSLAYOUT    = 0x0F,
+    TBL_FIELDLAYOUT    = 0x10,
+    TBL_MAX            = 0x2D,
 };
 
 // ── Coded index definitions (ECMA-335 II.24.2.6) ──
@@ -297,6 +301,20 @@ inline void compute_row_sizes(DotNetMetadata& dn) {
                 { static const CodedIndexDef ci = {2, 3, {TBL_FIELD, TBL_PARAM, TBL_PROPERTY, TBL_MODULE, TBL_MODULE, TBL_MODULE}};
                   size = 1 + 1 + coded_index_size(dn, ci) + blob_idx_size(dn); }
                 break;
+            case TBL_FIELDMARSHAL: // Parent(coded HasFieldMarshal) NativeType(blob)
+                { static const CodedIndexDef ci = {1, 2, {TBL_FIELD, TBL_PARAM, TBL_MODULE, TBL_MODULE, TBL_MODULE, TBL_MODULE}};
+                  size = coded_index_size(dn, ci) + blob_idx_size(dn); }
+                break;
+            case TBL_DECLSECURITY: // Action(2) Parent(coded HasDeclSecurity) PermissionSet(blob)
+                { static const CodedIndexDef ci = {2, 3, {TBL_TYPEDEF, TBL_METHODDEF, TBL_ASSEMBLY, TBL_MODULE, TBL_MODULE, TBL_MODULE}};
+                  size = 2 + coded_index_size(dn, ci) + blob_idx_size(dn); }
+                break;
+            case TBL_CLASSLAYOUT: // PackingSize(2) ClassSize(4) Parent(TypeDef idx)
+                size = 2 + 4 + table_index_size(dn, TBL_TYPEDEF);
+                break;
+            case TBL_FIELDLAYOUT: // Offset(4) Field(Field idx)
+                size = 4 + table_index_size(dn, TBL_FIELD);
+                break;
             case TBL_CUSTOMATTR: // Parent(coded HasCustomAttribute) Type(coded CustomAttributeType) Value(blob)
                 // HasCustomAttribute: 5 bits, many tables — use max of all
                 { // Simplified: use 4 bytes if any table has > 8191 rows, else 2
@@ -382,8 +400,15 @@ inline void compute_row_sizes(DotNetMetadata& dn) {
                 size = table_index_size(dn, TBL_GENERICPARAM) + ci_size(CI_TYPEDEF_OR_REF);
                 break;
             default:
-                size = 0; // unknown table, skip
+                size = 0; // 未覆盖的表
                 break;
+        }
+        if (size == 0 && dn.tableRows[t] > 0) {
+            // 行宽算不出来就不能硬跳：后面每张表的偏移都会错，读出来是别的表的中间字节
+            dn.error = "unsupported metadata table " + std::to_string((int)t) +
+                       " (" + std::to_string(dn.tableRows[t]) + " rows)";
+            dn.valid = false;
+            return;
         }
         dn.tableRowSizes[t] = size;
     }
@@ -679,7 +704,7 @@ inline DotNetMetadata parse_metadata_root(const uint8_t* data, size_t len,
         }
     }
 
-    dn.valid = true;
+    dn.valid = dn.error.empty();
     return dn;
 }
 

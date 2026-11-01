@@ -976,7 +976,7 @@ class SettingsViewModel(
                         policy = BoundedStreamCopy.OverflowPolicy.ABORT,
                     )
                 } ?: error("无法读取所选 ZIP 文件")
-                val inspection = installer.inspectZipBytes(bos.toByteArray(), fallbackId = "custom_zip")
+                val inspection = installer.inspectZipBytes(bos.toByteArray())
                 _pendingSkillInspection.value = inspection
             } catch (e: Throwable) {
                 _skillArchiveMessage.value = "解析或审计技能包失败: ${e.message}"

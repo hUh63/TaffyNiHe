@@ -63,7 +63,9 @@ class SkillInstallationManager(
     /**
      * 对 ZIP 字节流执行解构与端侧静态安全审计。
      */
-    fun inspectZipBytes(zipBytes: ByteArray, fallbackId: String = "custom_skill"): SkillInstallInspection {
+    // fallbackId 必须是**每次唯一**的：两个都没声明 id 的技能包如果共用 "custom_skill"，
+    // 第二个会覆盖第一个（或直接被判成重复导入），社区 Agent Skills 常常连 id 都不写。
+    fun inspectZipBytes(zipBytes: ByteArray, fallbackId: String = "skill_${UUID.randomUUID()}"): SkillInstallInspection {
         val pkg = packageParser.parseFromZip(zipBytes, fallbackId)
         return inspectPackage(pkg)
     }

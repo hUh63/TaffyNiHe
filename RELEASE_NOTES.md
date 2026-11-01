@@ -1,3 +1,76 @@
+## 塔菲逆核 v1.5.30 —— .NET 工具摆脱 native 依赖 + 技能导入的 id 冲突
+
+### 一、.NET 只读能力改用纯 Kotlin 实现
+
+上一版把「`libdsmcp_native.so` 的 16 KiB 对齐」列为已知未修，理由是"没有源码，只能自己
+重写 .NET metadata 解析（约 1500 行，且没有样本可验证）"。这次把它做掉了。
+
+先说结论：这个库在 SOMCP 上游**确实没有源码** —— 上游 `app/src/main/cpp/CMakeLists.txt`
+只构建 `rz_native` / `blutter_bridge` / `xanso_native` 三个 target，它是更早的预编译产物。
+所以只能重写，而不是重编。
+
+新增两个文件：
+
+- **`DotNetReader`**：PE 头 → `DataDirectory[14]`（CLR runtime header）→ COR20 → metadata
+  root（`BSJB`）→ streams（`#~` / `#Strings` / `#US` / `#GUID` / `#Blob`）。核心难点是表流的
+  **行宽**：一列可能是定长、heap 索引（宽度由 `HeapSizes` 位决定）、表索引（目标表行数
+  超过 0xFFFF 用 4 字节）或 coded index（宽度由 tag 位数与目标表最大行数决定）。
+  要跳过前置表就必须把 ECMA-335 II.22 的 45 张表全部列出来 —— 这也是代码大半体积的来源。
+  如果表流里出现 schema 之外的表（PDB 才有的 0x30+），**直接放弃解析**而不是按 0 宽度硬跳：
+  后者会让后面每张表的偏移都是错的，读出来的是一堆看起来正常的垃圾。
+- **`IlDecoder`**：CIL opcode 表（单字节 + `0xFE` 前缀）与操作数宽度，分支目标输出 `IL_xxxx`
+  标签；遇到未知 opcode 按 `.byte` 继续单步前进，不整段放弃（被混淆过的 IL 很常见）。
+
+`BinaryEngine` 的 6 个只读 dotnet 方法改成 **native 优先、Kotlin 兜底**：
+`detect` / `listTypes` / `listMethods` / `listStrings` / `dumpIl` / `disasm`。
+`dotnetResolveToken` 与两个写操作（改 IL、改用户字符串）仍只走 native，不可用时给出带
+`loadStatus` 的明确错误 —— 写操作改的是文件字节，没有样本验证就不该硬来。
+
+单测用 `make_minimal_assembly.py` **手算**出来的最小程序集（1024 字节，只有
+Module / TypeDef / MethodDef 各 1 行），不依赖 .NET 工具链；断言精确到
+`My.Namespace.MyType` / `.ctor` / RVA；另有逐段截断与字节破坏用例，要求返回
+`null`/`error` 而不是抛异常。
+
+写测试时踩到自己埋的坑：`Meta.read(table, row, col)` 一开始按 0-based 算偏移，
+而调用方传的是 1-based 行号，于是每个类型名都读到下一行的位置、全是空串，
+`listTypes` 静默返回 0 条 —— 正是"看起来成功其实什么都没解析出来"的那种失败。
+现在 `read()` 统一 1-based，并对行号做边界检查。
+
+### 二、技能导入：没声明 id 的技能包会互相覆盖
+
+抄自太墟 v1.8.0（`fix(skills): 修复技能导入标识冲突`）。原来的 `inspectZipBytes`
+默认 `fallbackId = "custom_skill"`，调用处还硬编码成 `"custom_zip"` —— 两个都没写
+`id` 的技能包会共用同一个标识，第二个覆盖第一个（或被直接判成重复导入）。
+社区 Agent Skills 常常只声明 `name` 不声明 `id`，正好命中。
+
+- `fallbackId` 默认值改成 `skill_${UUID.randomUUID()}`（每次唯一）；
+- 解析时增加 `name` 作为 `id` 的备选（同一份技能重新导入仍是同一条目）；
+- 调用处去掉硬编码的 `"custom_zip"`。
+
+### 三、太墟 v1.8.0 的整体升级：核过了，收益为零
+
+把塔菲集成的太墟代码（v1.2.1）与上游 v1.8.0 做了三方比对：
+
+- 两个版本之间 **196 个提交**，`v1.3.0 → v1.8.0` 六个大版本；
+- 变更集中在 **chat UI / settings / a2ui / plugins / website**；
+- 塔菲与 v1.2.1 的共同路径有 **2320 个文件**，而这些**几乎全是塔菲不使用的层** ——
+  塔菲的界面是自己的（`com.soreverse.mcp` 下 1004 个文件），AI 对话走自研的
+  `RikkaAgentEngine`，不经过太墟的 chat / harness 会话编排。
+
+所以"整体替换到 v1.8.0"除了引入编译风险，拿不到对应功能。逐条核过之后真正有用的只有
+三条：webchat 流式下载（v1.5.29 已抄）、图片请求体预算、技能导入 id 冲突（本条）。
+前两条对塔菲没有调用方，第二条适用，已修。`AgentSkillEntity` 的目录发现重构
+（按主入口停止下钻）需要改造数据库同步逻辑，而塔菲的技能功能没有入口，暂不动。
+
+SOMCP 侧同样核过：v1.0.23 之后 App 代码层只有 Blutter 退出码表一条（v1.5.29 已抄），
+其余全是 CI 与依赖版本。
+
+### 四、仍然存在的限制
+
+`libdsmcp_native.so` 依然不在基线之外：它的 `.so` 还是 0x1000 对齐，16 KiB 页设备上
+加载失败 —— 但现在失败只会影响**两个写操作**（改 IL / 改用户字符串），只读能力由
+Kotlin 实现接管。门禁会继续提示它，但不再是"整块功能不可用"。
+
 ## 塔菲逆核 v1.5.29 —— 把 16 KiB 的遗留收尾，并抄了上游三处
 
 ### 一、`libtermux.so` 真正重编了（16 KiB 页对齐）

@@ -326,10 +326,11 @@ internal object DotNetReader {
 
         fun rowCount(table: Int): Int = rows[table]
 
-        /** 读某张表某一行的某个列（按列名）。 */
+        /** 读某张表某一行的某个列（按列名）。[row] 为 **1-based** 行号。 */
         fun read(table: Int, row: Int, col: String): Long {
             val sch = SCHEMA[table] ?: return 0L
-            var o = offsets[table] + row * widths[table]
+            if (row <= 0 || row > rows[table]) return 0L
+            var o = offsets[table] + (row - 1) * widths[table]
             for (c in sch.second) {
                 val sz = colSize(c.kind)
                 if (c.name == col) {
@@ -474,12 +475,12 @@ internal object DotNetReader {
         }
         val nAsm = meta.rowCount(0x20)
         if (nAsm > 0) {
-            out.put("assemblyName", meta.stringAt(meta.read(0x20, 0, "Name")))
+            out.put("assemblyName", meta.stringAt(meta.read(0x20, 1, "Name")))
             out.put("assemblyVersion",
-                "${meta.read(0x20, 0, "MajorVersion")}.${meta.read(0x20, 0, "MinorVersion")}." +
-                    "${meta.read(0x20, 0, "BuildNumber")}.${meta.read(0x20, 0, "RevisionNumber")}")
+                "${meta.read(0x20, 1, "MajorVersion")}.${meta.read(0x20, 1, "MinorVersion")}." +
+                    "${meta.read(0x20, 1, "BuildNumber")}.${meta.read(0x20, 1, "RevisionNumber")}")
         }
-        out.put("moduleName", if (meta.rowCount(0x00) > 0) meta.stringAt(meta.read(0x00, 0, "Name")) else "")
+        out.put("moduleName", if (meta.rowCount(0x00) > 0) meta.stringAt(meta.read(0x00, 1, "Name")) else "")
         out.put("typeCount", meta.rowCount(0x02))
         out.put("methodCount", meta.rowCount(0x06))
         out.put("fieldCount", meta.rowCount(0x04))
@@ -510,8 +511,8 @@ internal object DotNetReader {
         if (n == 0) return emptyMap()
         val map = HashMap<Int, Int>(n * 2)
         for (i in 0 until n) {
-            val nested = m.read(0x29, i, "NestedClass").toInt()
-            val enclosing = m.read(0x29, i, "EnclosingClass").toInt()
+            val nested = m.read(0x29, i + 1, "NestedClass").toInt()
+            val enclosing = m.read(0x29, i + 1, "EnclosingClass").toInt()
             if (nested > 0 && enclosing > 0) map[nested] = enclosing
         }
         return map

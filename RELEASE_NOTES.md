@@ -1,3 +1,63 @@
+## 塔菲逆核 v1.5.31 —— .NET 补齐写入能力，libdsmcp 从预编译二进制换成源码自建
+
+上一版把 .NET 的**只读**能力搬到了 Kotlin，写操作还挂在 `libdsmcp_native.so` 上。这一版把最后三块补上，同时把那个来路不明的 `.so` 彻底换成源码自建 —— 16 KiB 页的遗留到此清零。
+
+### 一、.NET 补上三个 Kotlin 实现
+
+`DotNetReader` 新增：
+
+- **`resolveToken`** —— 令牌解析。TypeRef / TypeDef / Field / MethodDef / MemberRef / ModuleRef / TypeSpec / MethodSpec / 用户字符串（0x70）都能给出可读名字，方法还会回溯到所属类型（`System.SR::get_ResourceManager` 这种形态）。
+- **`editIl`** —— 在方法体内按 IL 偏移等长覆盖写入。tiny / fat 两种头都认，越界、非方法令牌、空补丁一律明确拒绝。
+- **`editString`** —— 改 `#US` 堆里的用户字符串。
+
+两个写操作都只做**等长或更短**的改写。原因写进了错误消息里：变长会挪动 `#US` 堆后面的所有条目，而 `ldstr` 指令里存的是堆内偏移，改了就全指错地方。新串更短时用 0 填满原 blob 尾部，堆总长度不变，后续条目偏移不受影响。
+
+### 二、`libdsmcp_native.so`：从"来路不明的二进制"变成源码自建
+
+这个库原本是上游更早的预编译产物 —— SOMCP 现在的 `cpp/` 里只有 rizin / blutter / xanso 三个 target，没有它。顺着 JNI 符号反查，源码其实在 `zigou2162/DSMCP`（GPL-3.0，与本项目同许可），整份 vendored 进 `app/src/main/cpp/dsmcp/`。
+
+原来那份二进制有两个问题：
+
+1. `PT_LOAD p_align` 是 `0x1000` —— Android 15 起 16 KiB 页设备上 bionic 直接拒绝加载，PE/.NET 的结构视图整块静默消失。
+2. 更麻烦的是 `parse_metadata_root` 把 Length 字段读在 `metaOff+16`（规范是 `+12`，`+16` 才是版本串起点），**任何真实程序集都会报 `truncated version string`**。也就是说它在 arm64 上"能加载"，但 .NET 结果恒错 —— 这也是为什么上一版之后 .NET 全部改走 Kotlin。
+
+现在用 NDK 从源码重编，**4 个 ABI 全齐**（原来只有 arm64 有这份库，其它三个 ABI 上 .NET 工具一直是不可用的）：
+
+| ABI | 大小 | PT_LOAD | p_align |
+|---|---|---|---|
+| arm64-v8a | 300 KB | 3 | 0x4000 |
+| armeabi-v7a | 228 KB | 3 | 0x4000 |
+| x86 | 278 KB | 3 | 0x4000 |
+| x86_64 | 294 KB | 3 | 0x4000 |
+
+`tools/elf-align-baseline.json` 的 `known_mismatch` 现在是空数组 —— 仓库里已经没有不满足 16 KiB 页加载要求的 `.so`。
+
+顺手修掉源码里另外三个真 bug（都用真实程序集验证过）：
+
+- **表号枚举整组错位 4**：`ManifestResource / NestedClass / GenericParam / MethodSpec / GenericParamConstraint` 写成 `0x24..0x28`，实际是 `0x28..0x2C`。后果是这几张表行宽恒为 0，表流偏移累计少算，之后所有表都从上一张表的中间开始读 —— 实测 Assembly 名字被读成了 `DefaultArrayPool`1`（某个 TypeName）。
+- **`il_disasm` 的 `"IL_%0404X"`** 是笔误（宽度 404 零填充），每行 IL 标签后面跟着 400 个 0。
+- 补上 `ClassLayout / FieldLayout / FieldMarshal / DeclSecurity` 四张表的行宽；遇到算不出行宽的表改为**报错**而不是静默 `size=0` —— 原来那样会带着错误的偏移继续往下读，产出垃圾却不报错。
+
+### 三、测试用真实程序集，不再只有手算样本
+
+新增 `System.Buffers.dll`（21,376 字节，MIT，来自 nuget.org 的 `System.Buffers` 4.5.1 包）作为测试资源。上一个版本的最小样本是手算的 1024 字节 PE + 三张表各一行 —— 它能证明"表流能走通"，但证明不了 case 表宽度、coded index、`#US` 堆边界这些真实世界才会踩到的地方。
+
+11 条测试覆盖：真实版本号、10 个 TypeDef、35 个 MethodDef、`#US` 偏移、IL 反汇编、令牌解析、IL 等长改写（只允许 1 个字节差异）、超长字符串拒绝、UTF-16 代理对。**期望值由一份独立的 Python 解析器在同一文件上算出**，不是从被测代码里抄的。
+
+### 四、排查：把新引入的 C++ 当成不可信输入来打
+
+vendored 源码是全新的攻击面 —— 它在进程内解析用户给的 `.dll` / `.so`。所以：
+
+- **解析层**：ASAN + UBSAN 编译，3000 次变异（随机截断 / 字节翻转 / 0xFF 填充）灌进 `parse_elf` / `parse_pe` / `parse_dotnet`，零崩溃、零越界。
+- **JNI 层**：200 个变异样本 × 15 个 native 调用（含 JSON 生成与数组回填），JVM 零崩溃、零异常。
+
+上面那三个 native bug 就是这一路查出来的。
+
+### 仍然存在的边界
+
+- `editString` 只能等长或更短。想加长字符串需要重建 `#US` 堆并把所有 `ldstr` 的偏移重映射，那已经属于重写程序集范畴。
+- ELF / PE 的 parse 与 patch 仍走 native（Kotlin 侧只接管了 .NET）。这条链路在 4 个 ABI 上都可用，但它的正确性目前只有 fuzz 与结构化对照背书，没有大样本回归。
+
 ## 塔菲逆核 v1.5.30 —— .NET 工具摆脱 native 依赖 + 技能导入的 id 冲突
 
 ### 一、.NET 只读能力改用纯 Kotlin 实现

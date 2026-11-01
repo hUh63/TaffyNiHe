@@ -56,17 +56,17 @@ jobs:
         run: |
           NDK="${{ steps.ndk.outputs.ndk }}"
           case "${{ inputs.abi }}" in
-            arm64-v8a)    TARGET=aarch64-linux-android26 ; PAGESIZE=16384 ;;
-            armeabi-v7a)  TARGET=armv7a-linux-androideabi26 ; PAGESIZE=16384 ;;
-            x86)          TARGET=i686-linux-android26 ; PAGESIZE=16384 ;;
-            x86_64)       TARGET=x86_64-linux-android26 ; PAGESIZE=16384 ;;
+            arm64-v8a)    TARGET=aarch64-linux-android26 ;;
+            armeabi-v7a)  TARGET=armv7a-linux-androideabi26 ;;
+            x86)          TARGET=i686-linux-android26 ;;
+            x86_64)       TARGET=x86_64-linux-android26 ;;
             *) echo "::error::未知 ABI"; exit 1 ;;
           esac
           CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET}-clang++"
           SRC=app/src/main/cpp/dsmcp
           mkdir -p out
           "$CXX" -shared -O2 -fPIC -fexceptions -frtti -std=c++17 \
-            -Wl,-z,max-page-size=$PAGESIZE -Wl,-z,relro -Wl,-z,now \
+            -Wl,-z,max-page-size=16384 -Wl,-z,relro -Wl,-z,now \
             -static-libstdc++ \
             -o out/libdsmcp_native.so \
             "$SRC/native-lib.cpp" "$SRC/elf_bridge.cpp" "$SRC/pe_bridge.cpp" "$SRC/dotnet_bridge.cpp" \
@@ -84,37 +84,49 @@ jobs:
           d = open('out/libdsmcp_native.so', 'rb').read()
           assert d[:4] == b'\x7fELF', 'not an ELF'
           is64 = d[4] == 2
-          assert is64, 'expected ELF64 for these ABIs'
-          phoff, = struct.unpack_from('<Q', d, 0x20)
-          phentsize, = struct.unpack_from('<H', d, 0x36)
-          phnum, = struct.unpack_from('<H', d, 0x38)
           PAGE = 16384
           loads = []
+          if is64:
+              phoff, = struct.unpack_from('<Q', d, 0x20)
+              phentsize, = struct.unpack_from('<H', d, 0x36)
+              phnum, = struct.unpack_from('<H', d, 0x38)
+              for i in range(phnum):
+                  o = phoff + i * phentsize
+                  p_type, = struct.unpack_from('<I', d, o)
+                  if p_type != 1:
+                      continue
+                  p_offset, = struct.unpack_from('<Q', d, o + 8)
+                  p_vaddr, = struct.unpack_from('<Q', d, o + 16)
+                  p_memsz, = struct.unpack_from('<Q', d, o + 40)
+                  p_align, = struct.unpack_from('<Q', d, o + 48)
+                  loads.append((p_offset, p_vaddr, p_memsz, p_align))
+          else:
+              phoff, = struct.unpack_from('<I', d, 0x1C)
+              phentsize, = struct.unpack_from('<H', d, 0x2A)
+              phnum, = struct.unpack_from('<H', d, 0x2C)
+              for i in range(phnum):
+                  o = phoff + i * phentsize
+                  p_type, = struct.unpack_from('<I', d, o)
+                  if p_type != 1:
+                      continue
+                  p_offset, = struct.unpack_from('<I', d, o + 4)
+                  p_vaddr, = struct.unpack_from('<I', d, o + 8)
+                  p_memsz, = struct.unpack_from('<I', d, o + 20)
+                  p_align, = struct.unpack_from('<I', d, o + 28)
+                  loads.append((p_offset, p_vaddr, p_memsz, p_align))
+          assert loads, '没有 PT_LOAD'
           bad = []
-          for i in range(phnum):
-              o = phoff + i * phentsize
-              p_type, = struct.unpack_from('<I', d, o)
-              p_flags, = struct.unpack_from('<I', d, o + 4)
-              p_offset, = struct.unpack_from('<Q', d, o + 8)
-              p_vaddr, = struct.unpack_from('<Q', d, o + 16)
-              p_memsz, = struct.unpack_from('<Q', d, o + 40)
-              p_align, = struct.unpack_from('<Q', d, o + 48)
-              if p_type != 1:
-                  continue
-              loads.append((p_offset, p_vaddr, p_memsz, p_align, p_flags))
-              if p_align < PAGE:
-                  bad.append('PT_LOAD off=0x%x p_align=0x%x < 0x%x' % (p_offset, p_align, PAGE))
-              elif (p_offset % p_align) != (p_vaddr % p_align):
-                  bad.append('PT_LOAD off=0x%x vaddr=0x%x 不同余' % (p_offset, p_vaddr))
+          for off, va, sz, al in loads:
+              if al < PAGE:
+                  bad.append('PT_LOAD off=0x%x p_align=0x%x < 0x%x' % (off, al, PAGE))
+              elif (off % al) != (va % al):
+                  bad.append('PT_LOAD off=0x%x vaddr=0x%x 不同余' % (off, va))
           if bad:
               raise SystemExit('!! 16 KiB 对齐不达标:\n  ' + '\n  '.join(bad))
-          # 页独占：同一 16 KiB 页不能被两个 PT_LOAD 同时覆盖
           owner = {}
           clash = []
-          for idx, (off, va, sz, al, fl) in enumerate(loads):
-              first = va // PAGE
-              last = (va + max(sz, 1) - 1) // PAGE
-              for pg in range(first, last + 1):
+          for idx, (off, va, sz, al) in enumerate(loads):
+              for pg in range(va // PAGE, (va + max(sz, 1) - 1) // PAGE + 1):
                   if pg in owner:
                       clash.append('page 0x%x: PT_LOAD#%d 与 #%d 重叠' % (pg * PAGE, owner[pg], idx))
                   else:
@@ -128,8 +140,8 @@ jobs:
               if sym not in d:
                   raise SystemExit('!! 缺少 JNI 符号 ' + name)
           total = d.count(b'Java_com_dsmcp_tool_engine_NativeBridge_')
-          print('PT_LOAD 段数=%d  页数=%d  16 KiB 对齐与页独占均通过' % (len(loads), len(owner)))
-          print('JNI 符号（抽样校验 %d 个，文本命中 %d 处）齐全' % (len(need), total))
+          print('ELF%d  PT_LOAD 段数=%d  覆盖 16 KiB 页=%d' % (64 if is64 else 32, len(loads), len(owner)))
+          print('对齐与页独占均通过；抽样校验 %d 个 JNI 符号（文本命中 %d 处）齐全' % (len(need), total))
           PY
           file out/libdsmcp_native.so || true
 

@@ -1,3 +1,87 @@
+## 塔菲逆核 v1.5.28 —— 16 KiB 页对齐的实测与门禁 + 畸形包能把工具打断
+
+上一版把「16 KiB 页兼容」列为已知风险没做，这次做了：先做**实测**，再决定怎么处置。
+
+### 一、21 个 .so 的 p_align 实测：19 个达标，2 个不达标
+
+Android 15 起有 16 KiB page size 的设备，bionic 要求 APK 里每个 `.so` 的每个 `PT_LOAD`
+`p_align >= 16384`，否则 `dlopen` 直接拒绝（表现是功能静默不可用，不崩、不报错）。
+
+挨个读了 arm64-v8a 下全部 native 库的 program header：
+
+- **达标**：`libcloudflared.so` / `libjnidispatch.so`（0x10000），`librz_native.so` /
+  `libc++_shared.so` / `libcapstone.so` / `libkeystone.so` / `libunicorn.so` /
+  `libdemumble.so` / `libxanso_native.so` / `libdisassembler.so` / `libblutter_*.so` /
+  `libfrida_server.so` / taixu 的 `libproot*.so` 等（0x4000，NDK r30 默认）。
+- **不达标**：`libdsmcp_native.so`（.NET/PE 分析工具）、`libtermux.so`（终端 JNI），都是 0x1000。
+
+两个不达标的库**本仓库没有源码**（前者是上游 SOMCP 的预编译产物，后者来自
+`termux-app` 0.118.0 的 AAR），没法用 NDK 重新链接。
+
+顺带把「手工改 p_align 就行」这条路堵死了：拿真实 .so 做重排实验后验证，
+老链接器按 4 KiB 排段（R 段 `[0,0x22b0)`、R+X 段从 `0x3000` 开始），
+两段会落在**同一个 16 KiB 页**里 —— 一页只能有一个保护属性，后映射的覆盖前一个。
+所以只改头部字段必然出问题，必须重新链接。这条判据已写进工具。
+
+### 二、新增 16 KiB 对齐门禁
+
+`tools/check-elf-align.py`：遍历 `jniLibs/*/` 下所有 `.so`，检查 `p_align`、
+`p_offset % p_align == p_vaddr % p_align`，并统计「被两个以上 `PT_LOAD` 共同覆盖的
+16 KiB 页」（后者就是必须重链接的信号）。接在架构门禁之后跑：
+
+- 新引入的不达标 → **阻塞构建**；
+- 存量两个记在 `tools/elf-align-baseline.json`，只允许收缩（修好一个删一条）。
+
+另附 `docs/16k-page-alignment.md` 记录实测表、影响面与正确的修复路径。
+
+### 三、畸形 APK 能把签名分析整条打断
+
+`apk_sig_verify` / `apk_cert_info` / `apk_zip_anomaly` 对**任意选中的 APK** 都会跑，
+而签名块里的每个长度字段都来自文件内容：
+
+- `parseSigner` 里 `sigsLen` / `dLen` / `cLen` / `pkLen` 用 `u32().toInt()` 取，
+  值 ≥ 0x80000000 时变**负数** → `copyOfRange(s+4, s+4+负数)` 的 `from > to`
+  → `IllegalArgumentException`。脱壳工具改坏签名块的样本非常常见，正好命中；
+- `u64()` 没有边界检查；`sizeFooter` 直接 `.toInt()` 参与相减，截断后 `blockStart`
+  可能落在文件内但语义完全错位，也可能越过文件尾。
+
+全部加了范围判定。`ApkSigToolsTest` 补了 3 条畸形输入用例（其中一条在旧实现里
+必然抛异常，是真正的回归测试）。
+
+### 四、畸形的 `sh_size` 也能崩两个扫描器
+
+`AntiDebugScanner` 与 `PackerFingerprint` 算节内容长度时写的是
+`minOf(data.size - start, sec.size.toInt())` —— `sh_size` 是 `Long`，
+大于 `Int.MAX_VALUE` 的畸形值转 `Int` 变负数，`start + len < start`，
+`copyOfRange` 直接抛。改成用 `Long` 参与 `minOf` 再转 `Int`。
+
+### 五、MCP 服务：启动失败会漏一套线程池，停止后不能重启
+
+- `start()` 走端口探测失败的分支时只停了 ktor engine，**新建的工具线程池与协程作用域没回收**。
+  「改端口 → 启动 → 发现被占用 → 再改」循环几轮就能在进程里堆出好几套 8 线程的池子。
+  抽出 `releaseResources()`，`stop()` 与启动失败路径共用。
+- `toolExecutor.shutdownNow()` 与 `scopeJob.cancel()` **都是不可逆的**。同一实例
+  `stop()` 之后再 `start()`（改端口时很自然的使用路径）会照常起监听，但所有工具调用
+  都被 `RejectedExecutionException` 拒掉，上层还把它报成「tool executor saturated」——
+  完全误导。两个资源都改成可重建，`start()` 时确保它们在活的状态上。
+
+### 六、导出产物改走统一的原子写
+
+`EngineRuntimeBuild.writeAtomic` 自己实现了一份，有两个洞：临时文件名固定成
+`.<name>.tmp`（两个请求并发导出同一 `outputName` 时，两侧同时打开同一个临时文件写，
+rename 出来的是两份字节交错的 `.so`）；兜底分支直接 `target.writeBytes()`，先截断再写、
+非原子 —— 正好是它自己注释里说要避免的「0 字节产物」。改成复用 `core/AtomicWrite`
+（临时名带 nanoTime 后缀、`ATOMIC_MOVE`、失败兜底是流式 copy）。
+
+### 已知未修
+
+- `libdsmcp_native.so` / `libtermux.so` 的 16 KiB 对齐：需要拿到源码用 NDK 重编
+  （`libtermux.so` 的源码是 `termux-app` 的 `terminal-emulator/src/main/jni/termux.c`）。
+  在 16 KiB 设备上这两个功能会静默不可用，门禁会持续提示。
+- `ArchiveTools` 的 `add / delete / rename` 仍用固定名 `<file>.tmp`。那里每处都有
+  `replaceAtomically` + 失败清理，固定名是「下次覆盖」式的自清理，改成唯一名反而会
+  制造残留，暂不动；但两个操作并发打同一个 zip 会丢更新。
+
 ## 塔菲逆核 v1.5.27 —— 新系统上的硬坑：前台服务类型、16 KiB 页、Java 9 API
 
 这一轮把「新 Android 版本会静默打死我们的地方」逐个查了一遍。三个问题都会让功能在某些机型上**整个不可用**，但都不会崩、不会报错，最难查。

@@ -280,7 +280,10 @@ class BinaryEngine(
         val ws = workspaces[workspaceId]
             ?: return err("WORKSPACE_NOT_FOUND", "Workspace not found: $workspaceId")
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = native.dotnetDetect(data)
+        // native 库（libdsmcp_native.so）是上游更早的预编译产物，PT_LOAD p_align 只有
+        // 0x1000，16 KiB page size 的设备上 bionic 直接拒绝加载。那时整条 .NET 链路会
+        // 静默返回空结果，所以这里用纯 Kotlin 的 DotNetReader 兜底。
+        val result = if (native.available()) native.dotnetDetect(data) else DotNetReader.detect(data)
         // 直接返回诊断结果，不拦截 error
         val r = ok(
             "isDotNet" to result.optBoolean("isDotNet", false),
@@ -315,7 +318,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = native.dotnetListTypes(data)
+        val result = if (native.available()) native.dotnetListTypes(data) else DotNetReader.listTypes(data)
         if (result.has("error")) {
             val msg = result.getString("error")
             return err("NOT_DOTNET", "$msg | 提示: 使用 dotnet_detect 获取详细诊断信息 | Hint: use dotnet_detect for diagnostics")
@@ -331,7 +334,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = native.dotnetListMethods(data, typeFilter)
+        val result = if (native.available()) native.dotnetListMethods(data, typeFilter) else DotNetReader.listMethods(data, typeFilter)
         if (result.has("error")) {
             val msg = result.getString("error")
             return err("NOT_DOTNET", "$msg | 提示: 使用 dotnet_detect 获取详细诊断信息 | Hint: use dotnet_detect for diagnostics")
@@ -348,7 +351,11 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = native.dotnetListStrings(data, maxCount.coerceIn(1, 10000))
+        val result = if (native.available()) {
+            native.dotnetListStrings(data, maxCount.coerceIn(1, 10000))
+        } else {
+            DotNetReader.listStrings(data, maxCount.coerceIn(1, 10000))
+        }
         if (result.has("error")) {
             return err("NOT_DOTNET", "${result.getString("error")} | Hint: use dotnet_detect for diagnostics")
         }
@@ -363,7 +370,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = native.dotnetDumpIl(data, methodToken)
+        val result = if (native.available()) native.dotnetDumpIl(data, methodToken) else DotNetReader.dumpIl(data, methodToken)
         if (result.has("error")) {
             return err("DOTNET_IL_FAILED", result.getString("error"),
                 "methodToken" to "0x${methodToken.toString(16)}")
@@ -379,7 +386,7 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
-        val result = native.dotnetDisasm(data, methodToken, pseudoCode)
+        val result = if (native.available()) native.dotnetDisasm(data, methodToken, pseudoCode) else DotNetReader.disasm(data, methodToken, pseudoCode)
         if (result.has("error")) {
             return err("DOTNET_DISASM_FAILED", result.getString("error"),
                 "methodToken" to "0x${methodToken.toString(16)}")
@@ -395,6 +402,14 @@ class BinaryEngine(
             return err("UNSUPPORTED_FORMAT", ".NET operations require a PE (.dll) file, got: ${ws.format}")
         }
         val data = getSessionData(workspaceId, editSessionId) ?: ws.originalData
+        // 令牌解析只在 native 实现里（需要跨程序集引用表），Kotlin 兜底不覆盖它
+        if (!native.available()) {
+            return err(
+                "BINARY_ENGINE_UNAVAILABLE",
+                "令牌解析需要 libdsmcp_native.so（Kotlin 兜底只覆盖检测/类型/方法/字符串/IL）",
+                "cause" to "native library not loadable",
+            )
+        }
         val result = native.dotnetResolveToken(data, token)
         if (result.has("error")) {
             return err("DOTNET_RESOLVE_FAILED", result.getString("error"),
@@ -406,6 +421,13 @@ class BinaryEngine(
 
     fun dotnetEditIl(workspaceId: String, editSessionId: String, methodToken: Int,
                      ilOffset: Int, hexData: String, dryRun: Boolean = false): JSONObject {
+        if (!native.available()) {
+            return err(
+                "BINARY_ENGINE_UNAVAILABLE",
+                "改写 IL 需要 libdsmcp_native.so（Kotlin 兜底只读不写）：${native.loadStatus()}",
+                "cause" to "native library not loadable",
+            )
+        }
         val session = sessions[editSessionId]
             ?: return err("EDIT_SESSION_NOT_FOUND", "Edit session not found: $editSessionId")
         val ws = workspaces[workspaceId]
@@ -450,6 +472,13 @@ class BinaryEngine(
 
     fun dotnetEditString(workspaceId: String, editSessionId: String,
                          usOffset: Int, newStr: String, dryRun: Boolean = false): JSONObject {
+        if (!native.available()) {
+            return err(
+                "BINARY_ENGINE_UNAVAILABLE",
+                "改写用户字符串需要 libdsmcp_native.so（Kotlin 兜底只读不写）：${native.loadStatus()}",
+                "cause" to "native library not loadable",
+            )
+        }
         val session = sessions[editSessionId]
             ?: return err("EDIT_SESSION_NOT_FOUND", "Edit session not found: $editSessionId")
         val ws = workspaces[workspaceId]

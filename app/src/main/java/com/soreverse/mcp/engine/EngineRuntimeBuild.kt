@@ -15,12 +15,14 @@ import java.util.UUID
  * 而且同名的旧文件也一并被毁。
  */
 private fun writeAtomic(target: java.io.File, bytes: ByteArray) {
-    val dir = target.parentFile
-    val tmp = java.io.File(dir, "." + target.name + ".tmp")
-    tmp.writeBytes(bytes)
-    if (!tmp.renameTo(target)) {
-        target.writeBytes(bytes)
-        tmp.delete()
+    // 复用 core 的 AtomicWrite，而不是在这里自己写一份。原来那份有两个洞：
+    //  1. 临时文件名固定成 ".<name>.tmp" —— 两个请求并发导出同一 outputName 时，
+    //     两边会同时打开同一个临时文件写，rename 出来的 .so 是两份字节交错的结果；
+    //  2. 兜底分支直接 target.writeBytes(bytes)（先截断再写，非原子），
+    //     正好是上面注释里说要避免的「进程中途被杀 → 0 字节或半截产物」。
+    // AtomicWrite 的临时名带 nanoTime 后缀，兜底是流式 copy + ATOMIC_MOVE。
+    if (!com.soreverse.mcp.core.AtomicWrite.bytes(target, bytes)) {
+        throw java.io.IOException("failed to write ${target.absolutePath}")
     }
 }
 

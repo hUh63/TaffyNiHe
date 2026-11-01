@@ -11,6 +11,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -161,5 +162,51 @@ class ApkSigToolsTest {
     fun certInfoWithoutSignaturesReturnsZeroCerts() {
         val apk = buildZip(listOf(Triple("AndroidManifest.xml", "x".toByteArray(), false)))
         assertEquals(0, ApkSigTools.certInfo(apk).getInt("certCount"))
+    }
+
+    // ── 畸形输入：所有长度字段都来自文件内容，必须容忍任意值 ──
+    //
+    // 这三条曾经都会抛异常（ArrayIndexOutOfBoundsException / IllegalArgumentException），
+    // 而 apk_sig_verify / apk_cert_info / apk_zip_anomaly 对**任何**选中的 APK 都会跑，
+    // 所以一个被脱壳工具改坏签名块的样本就能把整条调用打断。
+
+    @Test
+    fun sizeFooterThatWrapsToANegativeIntIsRejected() {
+        val apk = buildZip(listOf(Triple("AndroidManifest.xml", "x".toByteArray(), false)))
+        val (signed, _) = insertBlock(apk, listOf(0x7109871aL to (u32(4) + u32(0))))
+        // 尾部 sizeFooter 改成 0xFFFFFC00：toInt() 得 -1024，旧实现算出
+        // blockStart = cdOffset + 1016，远超文件尾，随后 u64() 直接读越界。
+        val footerAt = signed.size - 22 - 24
+        u64(0xFFFFFC00L).copyInto(signed, footerAt)
+        val layout = ApkSigTools.parseZipLayout(signed)!!
+        assertNull(ApkSigTools.parseSigningBlock(signed, layout))
+        // 上层入口也不能抛
+        ApkSigTools.verify(signed)
+        ApkSigTools.certInfo(signed)
+        ApkSigTools.zipAnomalies(signed)
+    }
+
+    @Test
+    fun allOnesSizeFooterIsRejected() {
+        val apk = buildZip(listOf(Triple("AndroidManifest.xml", "x".toByteArray(), false)))
+        val (signed, _) = insertBlock(apk, listOf(0x7109871aL to (u32(4) + u32(0))))
+        val footerAt = signed.size - 22 - 24
+        u64(-1L).copyInto(signed, footerAt)
+        val layout = ApkSigTools.parseZipLayout(signed)!!
+        assertNull(ApkSigTools.parseSigningBlock(signed, layout))
+        assertEquals("unsigned", ApkSigTools.verify(signed).getString("verdict"))
+    }
+
+    @Test
+    fun negativeSignedDataLengthDoesNotThrow() {
+        val apk = buildZip(listOf(Triple("AndroidManifest.xml", "x".toByteArray(), false)))
+        // signer = [signedDataLen = 4][signedData = [digestsLen = 0xFFFFFFFF]]
+        // 旧实现在 digestsLen.toInt() 得 -1 后调 copyOfRange(s+4, s+3) 直接抛。
+        val signer = u32(4) + u32(-1)
+        val blockValue = u32(signer.size) + signer
+        val (signed, _) = insertBlock(apk, listOf(0x7109871aL to blockValue))
+        val verify = ApkSigTools.verify(signed)
+        assertEquals(0, verify.getJSONArray("signers").length())
+        assertEquals(0, ApkSigTools.certInfo(signed).getInt("certCount"))
     }
 }

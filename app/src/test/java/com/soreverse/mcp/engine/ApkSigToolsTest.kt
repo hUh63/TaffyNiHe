@@ -176,9 +176,10 @@ class ApkSigToolsTest {
         val (signed, _) = insertBlock(apk, listOf(0x7109871aL to (u32(4) + u32(0))))
         // 尾部 sizeFooter 改成 0xFFFFFC00：toInt() 得 -1024，旧实现算出
         // blockStart = cdOffset + 1016，远超文件尾，随后 u64() 直接读越界。
-        val footerAt = signed.size - 22 - 24
-        u64(0xFFFFFC00L).copyInto(signed, footerAt)
+        // 注意 footer 的位置是「签名块结束处 − 24」（magic 占前 16 字节），
+        // 不是「文件末尾 − 24」——CD 和 EOCD 都在它后面。
         val layout = ApkSigTools.parseZipLayout(signed)!!
+        u64(0xFFFFFC00L).copyInto(signed, layout.cdOffset - 24)
         assertNull(ApkSigTools.parseSigningBlock(signed, layout))
         // 上层入口也不能抛
         ApkSigTools.verify(signed)
@@ -190,9 +191,8 @@ class ApkSigToolsTest {
     fun allOnesSizeFooterIsRejected() {
         val apk = buildZip(listOf(Triple("AndroidManifest.xml", "x".toByteArray(), false)))
         val (signed, _) = insertBlock(apk, listOf(0x7109871aL to (u32(4) + u32(0))))
-        val footerAt = signed.size - 22 - 24
-        u64(-1L).copyInto(signed, footerAt)
         val layout = ApkSigTools.parseZipLayout(signed)!!
+        u64(-1L).copyInto(signed, layout.cdOffset - 24)
         assertNull(ApkSigTools.parseSigningBlock(signed, layout))
         assertEquals("unsigned", ApkSigTools.verify(signed).getString("verdict"))
     }

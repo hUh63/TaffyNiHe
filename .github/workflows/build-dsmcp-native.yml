@@ -71,6 +71,9 @@ jobs:
             -o out/libdsmcp_native.so \
             "$SRC/native-lib.cpp" "$SRC/elf_bridge.cpp" "$SRC/pe_bridge.cpp" "$SRC/dotnet_bridge.cpp" \
             -llog
+          # 去掉 .symtab/.strtab：不影响 PT_LOAD 布局，但能让 ~1.1MB 回到 ~0.6MB
+          STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          "$STRIP" --strip-unneeded out/libdsmcp_native.so
           ls -l out/libdsmcp_native.so
           sha256sum out/libdsmcp_native.so
 

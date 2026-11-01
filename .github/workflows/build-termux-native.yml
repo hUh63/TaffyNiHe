@@ -1,0 +1,104 @@
+name: Build termux native (libtermux.so)
+
+# libtermux.so 是终端 pty 的 JNI 层（termux-app 的 termux.c）。
+# 仓库里原来放的是从 terminal-emulator-0.118.0.aar 抠出来的预编译 .so，
+# 它的 PT_LOAD p_align 只有 0x1000 —— Android 15 起有 16 KiB page size 的设备
+# 会直接拒绝加载（终端整块功能静默不可用）。
+#
+# 这个 workflow 用 NDK 从 src/main/cpp/termux.c 重新编译，产物自动带
+# -Wl,-z,max-page-size=16384。它是手动触发的：编出来的 .so 直接提交进
+# jniLibs（这样 build-apk 不需要装 NDK），本 workflow 只负责产出与校验。
+
+on:
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: 'ABI'
+        required: true
+        default: 'arm64-v8a'
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86
+          - x86_64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v5
+
+      - name: 定位 NDK
+        id: ndk
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "sdk=$SDK"
+          if [ -d "$SDK/ndk" ]; then
+            NDK=$(ls -d "$SDK"/ndk/* | sort -V | tail -1)
+          else
+            echo "预装 NDK 不存在，安装一个"
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" >/dev/null
+            NDK="$SDK/ndk/27.2.12479018"
+          fi
+          echo "ndk=$NDK"
+          echo "ndk=$NDK" >> "$GITHUB_OUTPUT"
+          ls "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" | grep -E "android26-clang$" | head
+
+      - name: 编译 libtermux.so
+        run: |
+          NDK="${{ steps.ndk.outputs.ndk }}"
+          case "${{ inputs.abi }}" in
+            arm64-v8a)    TARGET=aarch64-linux-android26 ;;
+            armeabi-v7a)  TARGET=armv7a-linux-androideabi26 ;;
+            x86)          TARGET=i686-linux-android26 ;;
+            x86_64)       TARGET=x86_64-linux-android26 ;;
+            *) echo "::error::未知 ABI"; exit 1 ;;
+          esac
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET}-clang"
+          mkdir -p out
+          "$CC" -shared -O2 -fPIC -Wall -Wextra -Wno-unused-parameter \
+            -Wl,-z,max-page-size=16384 -Wl,-z,relro -Wl,-z,now \
+            -o out/libtermux.so termux-terminal-emulator/src/main/cpp/termux.c
+          ls -l out/libtermux.so
+          sha256sum out/libtermux.so
+
+      - name: 校验 ELF（16 KiB 对齐 + JNI 符号）
+        run: |
+          python3 - <<'PY'
+          import struct
+          d = open('out/libtermux.so', 'rb').read()
+          assert d[:4] == b'\x7fELF', 'not an ELF'
+          phoff, = struct.unpack_from('<Q', d, 0x20)
+          phentsize, = struct.unpack_from('<H', d, 0x36)
+          phnum, = struct.unpack_from('<H', d, 0x38)
+          bad = []
+          for i in range(phnum):
+              o = phoff + i * phentsize
+              t, = struct.unpack_from('<I', d, o)
+              if t != 1:
+                  continue
+              off, vaddr, _pa, filesz, memsz, align = struct.unpack_from('<QQQQQQ', d, o + 8)
+              print('PT_LOAD off=0x%x vaddr=0x%x filesz=0x%x memsz=0x%x align=0x%x'
+                    % (off, vaddr, filesz, memsz, align))
+              if align < 16384:
+                  bad.append('p_align=0x%x' % align)
+              if align and off % align != vaddr % align:
+                  bad.append('p_offset%%p_align != p_vaddr%%p_align')
+          if bad:
+              raise SystemExit('!! 16 KiB 对齐不达标: ' + ', '.join(bad))
+          need = ['createSubprocess', 'setPtyWindowSize', 'setPtyUTF8Mode', 'waitFor', 'close']
+          for name in need:
+              sym = ('Java_com_termux_terminal_JNI_' + name).encode()
+              if sym not in d:
+                  raise SystemExit('!! 缺少 JNI 符号 ' + name)
+          print('OK: 16 KiB 对齐 + 5 个 JNI 符号齐全')
+          PY
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: libtermux-${{ inputs.abi }}
+          path: out/libtermux.so

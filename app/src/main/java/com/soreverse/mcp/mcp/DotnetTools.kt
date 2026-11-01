@@ -510,6 +510,21 @@ class BinaryEngineToolHandler(
         val be = ctx.binaryEngine
             ?: return err("BINARY_ENGINE_UNAVAILABLE",
                 "BinaryEngine (libdsmcp_native) is not loaded. PE/.NET tools are unavailable.")
+        // native 库没加载时，各个方法会安静地返回 "unknown" / 空数组，用户看到的是
+        // 「这个 dll 不是 .NET 程序集」而不是「解析器根本不可用」——必须先在这里拦下来。
+        // 最常见的成因是 16 KiB page size 设备：libdsmcp_native.so 是本仓库随包的预编译
+        // 产物，PT_LOAD p_align 只有 0x1000，bionic 会直接拒绝加载。
+        val bridge = runCatching { be.nativeBridge() }.getOrNull()
+        if (bridge != null && !bridge.available()) {
+            return err(
+                "BINARY_ENGINE_UNAVAILABLE",
+                "PE/.NET 工具不可用：libdsmcp_native.so 加载失败（${bridge.loadStatus()}）。" +
+                    "该库是没有源码的预编译产物，PT_LOAD p_align 只有 0x1000，" +
+                    "Android 15 起 16 KiB page size 的设备会直接拒绝加载；" +
+                    "其它设备请查看日志确认具体原因。",
+                "cause", "native library not loadable"
+            )
+        }
         return invoke(be, args, ctx.settings)
     }
 }

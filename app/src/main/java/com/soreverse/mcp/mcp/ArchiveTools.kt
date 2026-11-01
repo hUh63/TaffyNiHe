@@ -597,7 +597,10 @@ object ArchiveTools {
         val baseDir = a.str("baseDir")
         val level = a.intValue("compressionLevel", 6).coerceIn(0, 9)
 
-        val tmpFile = File(file.absolutePath + ".tmp")
+        // 临时文件名带 nanoTime：add / delete / rename 都不是 heavy 工具，两个请求可以
+        // 并发操作同一个包。固定名 `<file>.tmp` 会让两侧在同一个文件里交错写入，
+        // 最后 replaceAtomically 把一个字节混着两份的包换成正式文件（直接损坏）。
+        val tmpFile = File(file.absolutePath + ".${System.nanoTime()}.tmp")
 
         try {
             // Collect new files
@@ -688,7 +691,10 @@ object ArchiveTools {
             regexes.add(Regex(re))
         }
 
-        val tmpFile = File(file.absolutePath + ".tmp")
+        // 临时文件名带 nanoTime：add / delete / rename 都不是 heavy 工具，两个请求可以
+        // 并发操作同一个包。固定名 `<file>.tmp` 会让两侧在同一个文件里交错写入，
+        // 最后 replaceAtomically 把一个字节混着两份的包换成正式文件（直接损坏）。
+        val tmpFile = File(file.absolutePath + ".${System.nanoTime()}.tmp")
         var deleted = 0
         var kept = 0
 
@@ -749,7 +755,10 @@ object ArchiveTools {
         val newName = a.str("newName")
         if (oldName.isBlank() || newName.isBlank()) return@EngineToolHandler err("INVALID_ARGUMENTS", "oldName 和 newName 必填", "oldName", oldName)
 
-        val tmpFile = File(file.absolutePath + ".tmp")
+        // 临时文件名带 nanoTime：add / delete / rename 都不是 heavy 工具，两个请求可以
+        // 并发操作同一个包。固定名 `<file>.tmp` 会让两侧在同一个文件里交错写入，
+        // 最后 replaceAtomically 把一个字节混着两份的包换成正式文件（直接损坏）。
+        val tmpFile = File(file.absolutePath + ".${System.nanoTime()}.tmp")
         val staged = File(file.absolutePath + ".entry.tmp")
         try {
             var isDir = false

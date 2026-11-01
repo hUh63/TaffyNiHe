@@ -61,19 +61,25 @@ import androidx.compose.ui.unit.sp
  * 图标色：分类入口用 secondaryContainer 瓦片（40dp），普通条目用 primary 单色 22dp。
  * 不把所有行都染成 primary —— 满屏彩色图标会让「哪个是入口、哪个是开关」失去层次。
  */
+/**
+ * 设置页的行度量。
+ *
+ * 全部落到 4 的倍数：原来 22 / 14 / 54 这些值单看没问题，但和页面 16dp 边距、
+ * 卡片 12dp 圆角混在一起就"对不齐"—— 换到新设计系统后统一成
+ * 行高 56 / 卡内 16 / 组间 24 / 圆角 14（[AppShape.md]）。
+ */
 internal object SettingsDensity {
-    val categoryMinHeight = 68.dp
-    val rowMinHeight = 54.dp
+    val categoryMinHeight = 64.dp
+    val rowMinHeight = 56.dp
     val rowHorizontalPadding = 16.dp
-    val rowVerticalPadding = 10.dp
-    val iconSize = 22.dp
-    val tileSize = 40.dp
-    val iconGap = 14.dp
+    val rowVerticalPadding = 12.dp
+    val iconSize = 20.dp
+    val tileSize = 36.dp
+    val iconGap = 12.dp
     val textGap = 2.dp
-    val cardPadding = 14.dp
-    val sectionGap = 22.dp
-    // Exbin 卡片圆角是 12dp；20dp 是太墟的「大圆角」语言，同一个 App 里不该有两套
-    val groupCorner = 12.dp
+    val cardPadding = 16.dp
+    val sectionGap = 24.dp
+    val groupCorner = AppShape.md
     val innerCorner = 0.dp
     val listPadding = 16.dp
 }
@@ -229,7 +235,7 @@ internal fun SettingsCategoryRow(
         horizontalArrangement = Arrangement.spacedBy(SettingsDensity.iconGap),
     ) {
         Surface(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(AppShape.md),
             color = MaterialTheme.colorScheme.secondaryContainer,
         ) {
             Box(Modifier.size(SettingsDensity.tileSize), contentAlignment = Alignment.Center) {

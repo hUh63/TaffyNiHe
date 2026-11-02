@@ -99,9 +99,13 @@ object SmaliEditTools {
         /** 列出 APK 中所有 DEX 的类 */
         private fun listClasses(apk: File, args: JSONObject): JSONObject {
             val pkgPrefix = args.str("packagePrefix")
-            val limit = args.intValue("limit", 100).coerceIn(1, 2000)
+            val limit = args.intValue("limit", 100).coerceIn(1, 20000)
             val results = JSONArray()
+            // total = 命中的真实类总数（不受 limit 影响），returned = 实际返回条数。
+            // 旧实现把 total 当"已返回数"并在到达 limit 时直接 break，导致
+            // ①调用方看不出被截断 ②多 DEX 包里后续 dex 的类一个都不出现。
             var total = 0
+            var returned = 0
 
             if (isDexFile(apk)) {
                 // 单 .dex：直接读这个文件，不走 ZIP
@@ -110,14 +114,18 @@ object SmaliEditTools {
                     for (classDef in dexFile.classes) {
                         val name = classDef.type.substring(1, classDef.type.length - 1).replace('/', '.')
                         if (pkgPrefix.isNotBlank() && !name.startsWith(pkgPrefix)) continue
-                        if (total >= limit) break
-                        results.put(JSONObject().put("className", name).put("dex", apk.name))
                         total++
+                        if (returned < limit) {
+                            results.put(JSONObject().put("className", name).put("dex", apk.name))
+                            returned++
+                        }
                     }
                 }
                 return ok(JSONObject()
                     .put("action", "list_classes")
                     .put("total", total)
+                    .put("returned", returned)
+                    .put("truncated", total > returned)
                     .put("results", results)
                     .put("source", "dex")
                     .put("hint", "用 taffy_smali_edit action=extract 提取某个类的 smali 代码"))
@@ -140,22 +148,25 @@ object SmaliEditTools {
                         for (classDef in dexFile.classes) {
                             val name = classDef.type.substring(1, classDef.type.length - 1).replace('/', '.')
                             if (pkgPrefix.isNotBlank() && !name.startsWith(pkgPrefix)) continue
-                            if (total >= limit) break
-                            results.put(JSONObject()
-                                .put("className", name)
-                                .put("dex", dexEntry.name))
                             total++
+                            if (returned < limit) {
+                                results.put(JSONObject()
+                                    .put("className", name)
+                                    .put("dex", dexEntry.name))
+                                returned++
+                            }
                         }
                     } finally {
                         tempDex.delete()
                     }
-                    if (total >= limit) break
                 }
             }
 
             return ok(JSONObject()
                 .put("action", "list_classes")
                 .put("total", total)
+                .put("returned", returned)
+                .put("truncated", total > returned)
                 .put("results", results)
                 .put("hint", "用 taffy_smali_edit action=extract 提取某个类的 smali 代码"))
         }
@@ -619,6 +630,15 @@ object SmaliEditTools {
             val escapedOld = Regex.escape(oldString)
             val escapedNew = newString.replace("\\", "\\\\").replace("\"", "\\\"")
 
+            // global 要把整个 dex 反汇编成上万个 smali 文件再逐个扫，超大 dex 在手机上会把
+            // 磁盘和内存一起吃掉；超过 40MB 就要求按类/按方法定位，别让用户以为程序死了。
+            if (scope == "global" && apk.length() > 40L * 1024 * 1024) {
+                return err(
+                    "INPUT_TOO_LARGE",
+                    "该 .dex ${apk.length() / 1024 / 1024}MB，全局替换需要反汇编整个文件，过大。改用 scope=class 或 scope=method",
+                    "path", apk.absolutePath,
+                )
+            }
             val dexFile = DexFileFactory.loadDexFile(apk, Opcodes.getDefault())
             if (classDescriptor != null && dexFile.classes.none { it.type == classDescriptor }) {
                 return err("CLASS_NOT_FOUND", "类 $className 不在该 .dex 中", "className", className)
@@ -699,7 +719,12 @@ object SmaliEditTools {
                     tmp.delete()
                     null
                 } catch (e: Throwable) {
-                    err("DEX_WRITE_FAILED", "写回 .dex 失败: ${e.message}", "className", className)
+                    err(
+                        "DEX_WRITE_FAILED",
+                        "写回 .dex 失败: ${e.message}。" +
+                            "常见原因：目标目录不可写（从 /sdcard 根或只读目录打开）。先把文件复制到应用可写目录再编辑。",
+                        "className", className,
+                    )
                 }
             }
             val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)

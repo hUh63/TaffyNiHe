@@ -119,6 +119,8 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
     var loading by remember { mutableStateOf(false) }
 
     var classes by remember { mutableStateOf<List<String>>(emptyList()) }
+    // list_classes 的 total：可能远大于已返回条数（超大 APK 会截断），要如实告诉用户
+    var classTotal by remember { mutableStateOf(0) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var expanded by remember { mutableStateOf<Set<String>>(emptySet()) }
     var filter by rememberSaveable { mutableStateOf("") }
@@ -147,7 +149,7 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             val r = dexTool(context, "taffy_smali_edit", JSONObject()
                 .put("action", "list_classes")
                 .put("path", f.absolutePath)
-                .put("limit", 5000))
+                .put("limit", 12000))
             loading = false
             if (r == null || r.has("error")) {
                 paneError = r?.let { it.optString("message").ifBlank { it.optString("error") } }
@@ -155,6 +157,7 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
                 return@safeLaunch
             }
             val arr = r.optJSONArray("results") ?: JSONArray()
+            classTotal = r.optInt("total", arr.length())
             classes = (0 until arr.length()).mapNotNull { i ->
                 arr.optJSONObject(i)?.optString("className")?.takeIf { it.isNotBlank() }
             }.sorted()
@@ -424,6 +427,7 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
                 0 -> BrowsePane(
                     zh = zh,
                     classes = classes,
+                    classTotal = classTotal,
                     filter = filter,
                     onFilter = { filter = it },
                     expanded = expanded,
@@ -596,6 +600,9 @@ private fun DexEditorMenu(
 private class PkgNode(val label: String, val path: String) {
     val children = sortedMapOf<String, PkgNode>()
     val classes = sortedSetOf<String>()
+
+    /** 子树（含自己）的类数，构建时累加 —— 逐层递归统计在几千个类时是 O(n²)。 */
+    var total = 0
 }
 
 private data class BrowseRow(
@@ -617,18 +624,22 @@ private fun buildRows(classes: List<String>, expandedSet: Set<String>, filter: S
     for (full in list) {
         val parts = full.split('.')
         var node = root
+        root.total++
         for (i in 0 until parts.size - 1) {
             val seg = parts[i]
-            node = node.children.getOrPut(seg) { PkgNode(seg, (if (node.path.isEmpty()) seg else node.path + "." + seg)) }
+            val child = node.children.getOrPut(seg) {
+                PkgNode(seg, if (node.path.isEmpty()) seg else node.path + "." + seg)
+            }
+            node = child
+            child.total++
         }
         node.classes.add(full)
     }
     val rows = ArrayList<BrowseRow>()
     fun walk(node: PkgNode, depth: Int) {
         for ((_, child) in node.children) {
-            val total = countClasses(child)
             val isOpen = child.path in expandedSet || filter.isNotBlank()
-            rows.add(BrowseRow(child.label, child.path, depth, false, true, isOpen, total))
+            rows.add(BrowseRow(child.label, child.path, depth, false, true, isOpen, child.total))
             if (isOpen) walk(child, depth + 1)
         }
         for (cls in node.classes) {
@@ -639,16 +650,11 @@ private fun buildRows(classes: List<String>, expandedSet: Set<String>, filter: S
     return rows
 }
 
-private fun countClasses(n: PkgNode): Int {
-    var c = n.classes.size
-    for (v in n.children.values) c += countClasses(v)
-    return c
-}
-
 @Composable
 private fun BrowsePane(
     zh: Boolean,
     classes: List<String>,
+    classTotal: Int,
     filter: String,
     onFilter: (String) -> Unit,
     expanded: Set<String>,
@@ -662,6 +668,15 @@ private fun BrowsePane(
                 value = filter,
                 onChange = onFilter,
                 placeholder = if (zh) "过滤类名（如 activity）" else "Filter classes",
+            )
+        }
+        if (classTotal > classes.size) {
+            Text(
+                if (zh) "已加载 ${classes.size} / 共 $classTotal 个类（超出部分未加载，用过滤框缩小范围）"
+                else "Loaded ${classes.size} of $classTotal classes — narrow it down with the filter",
+                fontSize = AppText.label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
             )
         }
         if (classes.isEmpty()) {

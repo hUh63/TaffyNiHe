@@ -1,3 +1,48 @@
+## 塔菲逆核 v1.5.33 —— 分析页新增 DEX 工作台（侧栏一级入口）
+
+你问的"DEX 编辑器的功能整合到哪去了"，查下来是这样：**MCP 工具全都在，界面没接上**。
+
+工具侧早就是齐的 —— `taffy_smali_edit`（list_classes / extract / replace / list_methods /
+patch_instruction / replace_string 六种 action）、`taffy_dex_index`、`taffy_dex_class_outline`、
+`taffy_dex_method_code`、`taffy_dex_xref`、`taffy_dex_incremental_rebuild`、`taffy_dex_deodex`、
+`taffy_dex_rename`、`taffy_dex_dump`、`taffy_dexkit`、`LocalDexInspect`。问题出在分析页：
+
+1. 只有一个**只读**的「DEX 查询」视图（类/方法/字符串搜出来复制走，不能改）；
+2. 侧栏 `analysisRailItems` 写死了 7 项，**不含 DEX**，所以它只能从顶栏「⋮ → 更多视图」进去。
+
+真机表现就是：看不到入口，也改不了任何东西。
+
+### 新增：DEX 工作台
+
+侧栏第二项「DEX」（图标在 home 之后，位置固定，不用再翻菜单）。整条链路：
+
+1. **载入 APK** —— 选择后复制到 cache 再操作，**不会动你原来的文件**；显示大小。
+2. **按包名列类** —— 包名前缀可留空，最多 2000 个类；列表出来后可以在本地二次过滤（不重复扫描）。
+3. **点类进入编辑** —— 一次拿回方法/字段清单 + 完整 smali；顶部方法芯片点一下就跳到对应
+   `.method` 行；等宽字体、可全选复制。
+4. **保存并重编** —— 走 `taffy_smali_edit action=replace`：自动定位类在哪个 DEX → baksmali
+   整个 DEX → 替换该类的 .smali → smali 重编 → 按原压缩方式/对齐写回 APK。原包会留一份
+   `xxx.bak.apk`，保存成功后提示里直接写明**签名已失效，需要重新签名**。
+5. 改动未保存时底部显示「未保存」，可「还原」回加载时的内容。
+
+空态和错误都在页内说明（工具缺失 / 类不在任何 DEX / smali 重编语法错 / APK 没落到产物上），
+不跳别处。
+
+### 实现说明
+
+- 全部走已注册的 MCP 工具，没有另造一套 DEX 引擎。
+- `AnalysisWorkspace.kt` 只改两行（when 分支换实现、侧栏列表加一项），行数不变 —— 那个文件
+  有 13755 行的架构基线，增长即 CI 报错，所以新界面单独放在 `DexWorkbenchView.kt`。
+- 标签从「DEX查询」改为「DEX」：它现在是"进得去、改得了"的工作台，不只是查询。
+
+### 已知边界
+
+- 只吃 APK（`taffy_smali_edit` 的定位逻辑按 APK 内的 `classes*.dex` 走）；单独的 `.dex` 文件
+  还不行，下一个版本再补。
+- 「保存并重编」会重编整个 DEX，大包上要等几秒到几十秒，期间按钮转圈、不可重复点。
+- 反编译到 Java 源码这块目前没有（塔菲走的是伪 C + smali）；上游那个 DEX 编辑器的 Java 视图
+  依赖 jadx，移植进来是另一个量级的事。
+
 ## 塔菲逆核 v1.5.32 —— 主题与版式整体重做
 
 前面几轮都在"修页面"，这一轮回头看了设计系统本身。问题不在某个页面丑，而是三处在打架：

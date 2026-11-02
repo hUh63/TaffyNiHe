@@ -144,7 +144,10 @@ internal object DexJavaDecompiler {
             return JSONObject().put("error", "反编译结果为空（可能是纯接口/注解类）").put("className", full)
         }
         val text = if (code.length > maxBytes) {
-            code.substring(0, maxBytes) + "\n\n// …结果超过 ${maxBytes / 1024} KB，已截断"
+            // 截断点若落在代理对中间，会留下孤立 surrogate（界面显示成 �）
+            var end = maxBytes
+            if (end > 0 && Character.isHighSurrogate(code[end - 1])) end--
+            code.substring(0, end) + "\n\n// …结果超过 ${maxBytes / 1024} KB，已截断"
         } else code
         return JSONObject()
             .put("className", full)

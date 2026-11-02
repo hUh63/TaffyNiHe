@@ -121,7 +121,10 @@ internal object DexIndex {
             return fail(cap, "关键字无效: ${e.message ?: e.javaClass.simpleName}")
         }
         val literal: Long? = if (kind == "int") parseLiteral(keyword) else null
-        if (kind == "int" && literal == null) {
+        // ".*" / "*" 是「列出全部整数字面量」的哨兵（界面里关键字留空时用它）：
+        // 此时 literal 为 null，但语义是"不限值"，不能当非法字面量拒掉。
+        val anyLiteral = kind == "int" && literal == null && keyword.trim().let { it == ".*" || it == "*" }
+        if (kind == "int" && literal == null && !anyLiteral) {
             return fail(cap, "整数关键字无法解析: $keyword（支持 123 / -1 / 0x7f0a0001 / #0x1）")
         }
 
@@ -182,7 +185,7 @@ internal object DexIndex {
                             }
                             "int" -> {
                                 val lv = literalOf(f.initialValue)
-                                if (lv != null && lv == literal) {
+                                if (lv != null && (anyLiteral || lv == literal)) {
                                     emit(Hit(kind, clsName, f.name,
                                         "${formatLiteral(lv)}（字段初值）", dexName))
                                 }
@@ -203,7 +206,7 @@ internal object DexIndex {
                         val impl = m.implementation ?: continue
                         for (insn in impl.instructions) {
                             insnCount++
-                            val h = matchInstruction(kind, insn, matcher, literal, clsName, m, dexName)
+                            val h = matchInstruction(kind, insn, matcher, literal, anyLiteral, clsName, m, dexName)
                             if (h != null) emit(h)
                         }
                     }
@@ -278,6 +281,7 @@ internal object DexIndex {
         insn: Instruction,
         m: KeywordMatcher,
         literal: Long?,
+        anyLiteral: Boolean,
         clsName: String,
         method: Method,
         dexName: String,
@@ -301,7 +305,7 @@ internal object DexIndex {
             }
             "int" -> {
                 val v = literalOf(insn) ?: return null
-                return if (v == literal) Hit(kind, clsName, sig, "$op ${formatLiteral(v)}", dexName) else null
+                return if (anyLiteral || v == literal) Hit(kind, clsName, sig, "$op ${formatLiteral(v)}", dexName) else null
             }
             "new_instance" -> {
                 if (op != "NEW_INSTANCE") return null

@@ -268,6 +268,10 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             }
             statusOk = true
             original = editor.text
+            // 内容已经变了：之前反编译出来的 Java 与 jadx 里那份已 load 的图全部作废，
+            // 否则用户改完 smali 再点「转成 Java」看到的是旧代码（这是最容易被误当成"没保存"的坑）
+            javaCode = ""
+            runCatching { DexJavaDecompiler.close() }
             val backup = r.optString("backupPath")
             statusMsg = if (zh) {
                 val head = if (isDexInput) "已重编并覆盖 .dex" else "已重编并写回 APK（签名已失效，需要重新签名）"
@@ -980,7 +984,13 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
                         .clip(RoundedCornerShape(AppShape.pill))
                         .background(if (sel) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
                         .border(1.dp, if (sel) Color.Transparent else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(AppShape.pill))
-                        .clickable { kind = k }
+                        .clickable {
+                            if (kind != k) {
+                                kind = k
+                                hits = emptyList()
+                                searched = false
+                            }
+                        }
                         .padding(horizontal = 12.dp, vertical = 5.dp),
                 ) {
                     Text(
@@ -1002,7 +1012,9 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
             return@Column
         }
         LazyColumn(Modifier.fillMaxSize()) {
-            items(hits, key = { it.className + it.detail + it.kind }) { h ->
+            // 不要用 className+detail 当 key：列全部整数时同一类里同一个值会出现多次，
+            // Compose 遇到重复 key 会抛 IllegalArgumentException 直接崩界面
+            items(hits) { h ->
                 Row(
                     Modifier.fillMaxWidth().clickable {
                         clip.setText(AnnotatedString(h.detail.ifBlank { h.member }))

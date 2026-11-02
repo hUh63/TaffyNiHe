@@ -74,7 +74,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -328,10 +330,10 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             dirty = dirty,
             saving = saving,
             onSave = { saveClass() },
-            actions = { menu ->
+            actions = { isOpen ->
                 DexEditorMenu(
                     zh = zh,
-                    expanded = menu,
+                    expanded = isOpen,
                     hasFile = srcFile != null,
                     inEditor = opened.isNotEmpty(),
                     showJava = showJava,
@@ -1135,7 +1137,7 @@ private fun EditorPane(
                 color = if (dirty && !showJava) cs.primary else cs.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { onDismiss(); onRevert() }, enabled = dirty && !saving) {
+            TextButton(onClick = onRevert, enabled = dirty && !saving) {
                 Text(if (zh) "还原" else "Revert", fontSize = AppText.body)
             }
             Spacer(Modifier.width(4.dp))
@@ -1190,7 +1192,9 @@ private fun CodeArea(
                     color = cs.onSurface,
                 ),
                 cursorBrush = SolidColor(cs.primary),
-                visualTransformation = { text -> highlightSmali(text.text, cs) },
+                visualTransformation = { text ->
+                    TransformedText(highlightSmali(text.text, cs), OffsetMapping.Identity)
+                },
                 modifier = Modifier.weight(1f).padding(start = 8.dp, top = 10.dp, bottom = 10.dp, end = 8.dp),
             )
         }

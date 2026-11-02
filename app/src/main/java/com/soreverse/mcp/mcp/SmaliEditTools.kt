@@ -75,7 +75,12 @@ object SmaliEditTools {
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
             // 清理历史任务残留：smali 流程有多条提前 return 分支，逐个补 finally 容易漏，
             // 改为进入时按前缀回收过期目录（baksmali 工作目录 + 临时 dex）。
-            com.soreverse.mcp.core.TempJanitor.sweep(ctx.context, listOf("smali_patch_", "smali_replace_", "class"))
+            // 前缀要覆盖所有临时产物：rstr_* 是单 .dex 字符串替换的（反汇编目录 + 重编 dex），
+            // dex_patched_ 是单 dex 写回的临时文件；进程被杀时它们只能靠这里回收。
+            com.soreverse.mcp.core.TempJanitor.sweep(
+                ctx.context,
+                listOf("smali_patch_", "smali_replace_", "rstr_dex_", "rstr_out_", "dex_patched_", "class"),
+            )
             val path = args.str("path")
             if (path.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 path(APK 路径)", "path", "")
             val file = File(path)

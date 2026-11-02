@@ -438,7 +438,12 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
                 2 -> SearchPane(zh = zh, path = srcFile!!.absolutePath, tmpDir = File(context.cacheDir, "dexidx")) {
                     if (it.isNotBlank()) openClass(it)
                 }
-                else -> ConstPane(zh = zh, path = srcFile!!.absolutePath, tmpDir = File(context.cacheDir, "dexidx"))
+                else -> ConstPane(
+                    zh = zh,
+                    path = srcFile!!.absolutePath,
+                    tmpDir = File(context.cacheDir, "dexidx"),
+                    onOpenClass = { openClass(it) },
+                )
             }
             return@Column
         }
@@ -972,7 +977,7 @@ private fun SearchPane(
 // ── 常量 ──
 
 @Composable
-private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
+private fun ConstPane(zh: Boolean, path: String, tmpDir: File, onOpenClass: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val clip = LocalClipboardManager.current
     var kind by rememberSaveable { mutableStateOf("string") }
@@ -1065,8 +1070,11 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
             // Compose 遇到重复 key 会抛 IllegalArgumentException 直接崩界面
             items(hits) { h ->
                 Row(
+                    // 点一行是「去它所在的类」—— 常量页是用来找用法的，不是复制板；
+                    // 要复制值点右侧图标（原来点整行只复制，跳不过去）
                     Modifier.fillMaxWidth().clickable {
-                        clip.setText(AnnotatedString(h.detail.ifBlank { h.member }))
+                        if (h.className.isNotBlank()) onOpenClass(h.className)
+                        else clip.setText(AnnotatedString(h.detail.ifBlank { h.member }))
                     }.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1093,7 +1101,11 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
                     Icon(
                         Icons.Filled.ContentCopy, null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(AppShape.sm))
+                            .clickable { clip.setText(AnnotatedString(h.detail.ifBlank { h.member })) }
+                            .padding(8.dp),
                     )
                 }
             }

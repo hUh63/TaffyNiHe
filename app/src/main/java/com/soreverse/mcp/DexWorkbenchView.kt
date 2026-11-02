@@ -799,6 +799,9 @@ private fun SearchPane(
     val scope = rememberCoroutineScope()
     var type by rememberSaveable { mutableStateOf("class") }
     var keyword by rememberSaveable { mutableStateOf("") }
+    // 之前 placeholder 写着"支持 . * 前缀后缀"，但没开 regex 时 . 和 * 只是普通字符，
+    // 用户输 *Activity 会搜字面量 —— 现在给一个明确的开关，文案也不再骗人
+    var useRegex by rememberSaveable { mutableStateOf(false) }
     var hits by remember { mutableStateOf<List<DexIndex.Hit>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -815,6 +818,7 @@ private fun SearchPane(
                         path = path,
                         type = type,
                         keyword = keyword.trim(),
+                        regex = useRegex,
                         limit = 300,
                         tmpDir = tmpDir,
                     )
@@ -838,7 +842,7 @@ private fun SearchPane(
                 DexField(
                     value = keyword,
                     onChange = { keyword = it },
-                    placeholder = if (zh) "关键字（支持 . * 前缀后缀）" else "Keyword",
+                    placeholder = if (zh) (if (useRegex) "正则表达式" else "关键字（包含匹配）") else if (useRegex) "Regex" else "Keyword",
                 )
             }
             OutlinedButton(onClick = { run() }, enabled = keyword.isNotBlank() && !busy) {
@@ -858,7 +862,13 @@ private fun SearchPane(
                         .clip(RoundedCornerShape(AppShape.pill))
                         .background(if (sel) cs.secondaryContainer else Color.Transparent)
                         .border(1.dp, if (sel) Color.Transparent else cs.outlineVariant, RoundedCornerShape(AppShape.pill))
-                        .clickable { type = k }
+                        .clickable {
+                            if (type != k) {
+                                type = k
+                                hits = emptyList()
+                                searched = false
+                            }
+                        }
                         .padding(horizontal = 12.dp, vertical = 5.dp),
                 ) {
                     Text(
@@ -867,6 +877,30 @@ private fun SearchPane(
                         color = if (sel) cs.onSecondaryContainer else cs.onSurfaceVariant,
                     )
                 }
+            }
+            Row(
+                Modifier
+                    .heightIn(min = 30.dp)
+                    .clip(RoundedCornerShape(AppShape.pill))
+                    .background(if (useRegex) cs.secondaryContainer else Color.Transparent)
+                    .border(
+                        1.dp,
+                        if (useRegex) Color.Transparent else cs.outlineVariant,
+                        RoundedCornerShape(AppShape.pill),
+                    )
+                    .clickable {
+                        useRegex = !useRegex
+                        hits = emptyList()
+                        searched = false
+                    }
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    ".*",
+                    fontSize = AppText.label,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (useRegex) cs.onSecondaryContainer else cs.onSurfaceVariant,
+                )
             }
         }
         error?.let {

@@ -50,8 +50,11 @@ internal object DexJavaDecompiler {
             lastError = "文件不存在：$path"
             return null
         }
-        if (f.length() > MAX_INPUT_BYTES) {
-            lastError = "文件 ${f.length() / 1024 / 1024}MB 超过反编译上限 ${MAX_INPUT_BYTES / 1024 / 1024}MB" +
+        // APK 的上限要看 dex 总和，不是包体积：一个 200MB 的包可能只有 30MB 代码，
+        // 按包体积判定会让大包彻底用不了 Java 视图（jadx 本来就只解析 dex）。
+        val codeBytes = codeBytesOf(f)
+        if (codeBytes > MAX_INPUT_BYTES) {
+            lastError = "代码区 ${codeBytes / 1024 / 1024}MB 超过反编译上限 ${MAX_INPUT_BYTES / 1024 / 1024}MB" +
                 "（jadx 会把整个 DEX 展开进内存，再大就会 OOM）。建议先用搜索定位类，或改用 smali 视图。"
             return null
         }
@@ -75,6 +78,19 @@ internal object DexJavaDecompiler {
             lastError = "jadx 解析失败：${t.javaClass.simpleName}: ${t.message ?: ""}"
             null
         }
+    }
+
+    /** APK 取 classes*.dex 的总大小；单个 dex 就是文件大小。 */
+    private fun codeBytesOf(f: File): Long {
+        if (!f.name.endsWith(".apk", true)) return f.length()
+        val sum = runCatching {
+            java.util.zip.ZipFile(f).use { zf ->
+                zf.entries().asSequence()
+                    .filter { it.name.matches(Regex("classes\\d*\\.dex")) }
+                    .sumOf { it.size.coerceAtLeast(0) }
+            }
+        }.getOrDefault(0L)
+        return if (sum > 0) sum else f.length()
     }
 
     /**

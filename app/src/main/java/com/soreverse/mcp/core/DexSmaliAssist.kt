@@ -202,7 +202,8 @@ internal object DexSmaliAssist {
      */
     fun expandRegisters(smali: String, caret: Int, delta: Int, preferLocals: Boolean = false): Pair<String, String>? {
         if (delta <= 0) return null
-        val lines = smali.split('\n')
+        // split 返回的是只读 List，后面要就地改声明行，必须转成 MutableList
+        val lines = smali.split('\n').toMutableList()
         val caretLine = lineOfOffset(smali, caret) // 1 起
         // 找到包住光标的方法区间；没有就退化成第一个方法
         var start = -1

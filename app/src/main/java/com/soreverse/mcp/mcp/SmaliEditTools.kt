@@ -81,17 +81,6 @@ object SmaliEditTools {
             val file = File(path)
             if (!file.isFile) return err("FILE_NOT_FOUND", "APK 不存在: $path", "path", path)
             val action = args.str("action", "list_classes")
-            // 单 .dex 文件没有 APK 那样的 ZIP 容器，patch_instruction / replace_string
-            // 的写回路径依赖重建 APK，这里直接说清楚，不要让它们改到一半失败。
-            if (isDexFile(file) && (action == "patch_instruction" || action == "replace_string")) {
-                return err(
-                    "DEX_MODE_UNSUPPORTED",
-                    "单 .dex 文件暂不支持 action=$action。请用 action=replace 整体替换该类的 smali" +
-                        "（编辑器里就是「保存并重编」）。",
-                    "action", action,
-                )
-            }
-
             return runCatching {
                 when (action) {
                     "list_classes" -> listClasses(file, args)
@@ -248,45 +237,19 @@ object SmaliEditTools {
                 newDex.delete()
                 tempDex.delete()
 
-                if (dexEntryName.isEmpty()) {
-                    // 单 .dex 文件：没有 ZIP 容器，直接把重编后的字节原子写回原文件
-                    val backup = File(apk.parentFile, "${apk.name}.bak")
-                    if (!backup.exists()) apk.copyTo(backup, overwrite = false)
-                    val tmp = File.createTempFile("dex_patched_", ".dex", apk.parentFile)
-                    tmp.writeBytes(newDexBytes)
-                    ZipRepack.replaceAtomically(tmp, apk)
-                    tmp.delete()
-                    return ok(JSONObject()
-                        .put("action", "replace")
-                        .put("className", className)
-                        .put("success", true)
-                        .put("source", "dex")
-                        .put("newDexSize", newDexBytes.size)
-                        .put("backupPath", backup.absolutePath)
-                        .put("hint", "DEX 已重编并覆盖原 .dex 文件（无需签名）"))
-                }
-
-                val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
-                // 保留原条目压缩方式/extra 并对齐（否则 resources.arsc 与 lib 下的 so 会被重新压缩，产物装不上）
-                val applied = ZipRepack.copyAll(apk, tempApk) { name -> if (name == dexEntryName) newDexBytes else null }
-                if (dexEntryName !in applied) {
-                    tempApk.delete()
-                    return err("PATCH_NOT_APPLIED", "APK 内没有条目 $dexEntryName，本次修改没有落到产物上（原包未改动）", "entry", dexEntryName)
-                }
-
-                // 备份原 APK + 替换
-                val backup = File(apk.parentFile, "${apk.nameWithoutExtension}.bak.apk")
-                if (!backup.exists()) apk.copyTo(backup, overwrite = false)
-                ZipRepack.replaceAtomically(tempApk, apk)
-                tempApk.delete()
-
+                val out = writeCompiledDexBack(ctx, apk, classDescriptor, dexEntryName, newDexBytes, className)
+                if (out != null) return out
+                val dexMode = dexEntryName.isEmpty()
                 return ok(JSONObject()
                     .put("action", "replace")
                     .put("className", className)
                     .put("success", true)
+                    .put("source", if (dexMode) "dex" else "apk")
                     .put("newDexSize", newDexBytes.size)
-                    .put("backupPath", backup.absolutePath)
-                    .put("hint", "DEX 已重编并写回 APK, 签名已失效. 用 taffy_apk_sign 或 taffy_apk_rebuild 重新签名"))
+                    .put("hint", if (dexMode)
+                        "DEX 已重编并覆盖原 .dex 文件（无需签名）"
+                    else
+                        "DEX 已重编并写回 APK, 签名已失效. 用 taffy_apk_sign 或 taffy_apk_rebuild 重新签名"))
 
             } finally {
                 tempDex.delete()
@@ -426,6 +389,7 @@ object SmaliEditTools {
             if (mode == "preserve" && newString.length > oldString.length) {
                 return err("STRING_TOO_LONG", "preserve 模式要求新串长度≤旧串(旧 ${oldString.length} / 新 ${newString.length})。改用 mode=recompile 允许变长", "newString", newString)
             }
+            if (isDexFile(apk)) return replaceStringInDex(apk, ctx, args)
             val classDescriptor = if (scope != "global") "L${className.replace('.', '/')};" else null
             val escapedOld = Regex.escape(oldString)
             val escapedNew = newString.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -639,7 +603,105 @@ object SmaliEditTools {
         }
 
         /** 将重编后的 DEX 字节写回 APK(重建 ZIP 替换目标 DEX), 带备份。成功返回 null, 失败返回错误 JSON。 */
+        /**
+         * 单 .dex 的字符串替换：没有 ZIP 容器，反汇编这一个 dex → 按 scope 选 smali 文件 →
+         * 替换字面量 → 重编 → 原子写回。参数已由 [replaceString] 校验过。
+         */
+        private fun replaceStringInDex(apk: File, ctx: ToolContext, args: JSONObject): JSONObject {
+            val oldString = args.str("oldString")
+            val newString = args.str("newString")
+            val mode = args.str("mode", "preserve").ifBlank { "preserve" }
+            val scope = args.str("scope", "method").ifBlank { "method" }
+            val className = args.str("className")
+            val method = args.str("method")
+            val occurrence = args.intValue("occurrence", 1).coerceAtLeast(1)
+            val classDescriptor = if (scope != "global") "L${className.replace('.', '/')};" else null
+            val escapedOld = Regex.escape(oldString)
+            val escapedNew = newString.replace("\\", "\\\\").replace("\"", "\\\"")
+
+            val dexFile = DexFileFactory.loadDexFile(apk, Opcodes.getDefault())
+            if (classDescriptor != null && dexFile.classes.none { it.type == classDescriptor }) {
+                return err("CLASS_NOT_FOUND", "类 $className 不在该 .dex 中", "className", className)
+            }
+            val outDir = File.createTempFile("rstr_dex_", "").apply { delete(); mkdirs() }
+            var newDex: File? = null
+            try {
+                val bopts = com.android.tools.smali.baksmali.BaksmaliOptions()
+                com.android.tools.smali.baksmali.Baksmali.disassembleDexFile(
+                    dexFile, outDir, Runtime.getRuntime().availableProcessors().coerceIn(1, 4), bopts,
+                )
+                val targets = if (scope == "global") {
+                    outDir.walkTopDown().filter { it.isFile && it.extension == "smali" }.toList()
+                } else {
+                    listOf(File(outDir, className.replace('.', '/') + ".smali")).filter { it.isFile }
+                }
+                if (targets.isEmpty()) {
+                    return err("SMALI_NOT_FOUND", "类 $className 的 smali 未找到(可能内部类)", "className", className)
+                }
+                var replaced = 0
+                for (f in targets) {
+                    sizeGuard(f)?.let { return it }
+                    val text = f.readText()
+                    val patched = if (scope == "method") {
+                        replaceMethodStringLiteral(text, method, oldString, newString, occurrence)
+                    } else {
+                        replaceAllStringLiteral(text, escapedOld, escapedNew)
+                    }
+                    if (patched != null) {
+                        f.writeText(patched)
+                        replaced += if (newString.isEmpty()) 1 else (patched.split(newString).size - 1).coerceAtLeast(1)
+                    }
+                }
+                if (replaced == 0) {
+                    return err("STRING_NOT_FOUND", "未找到字符串常量: $oldString", "oldString", oldString)
+                }
+                newDex = File.createTempFile("rstr_out_", ".dex")
+                val opts = SmaliOptions().apply {
+                    outputDexFile = newDex.absolutePath
+                    apiLevel = 34
+                    jobs = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+                }
+                val assembled = Smali.assemble(opts, listOf(outDir.absolutePath))
+                if (!assembled) {
+                    return err("SMALI_ASSEMBLE_FAILED", "字符串替换后 smali 重编失败, 类: $className", "className", className)
+                }
+                sizeGuard(newDex)?.let { return it }
+                val bytes = newDex.readBytes()
+                writeCompiledDexBack(ctx, apk, classDescriptor ?: "", "", bytes, className)?.let { return it }
+                return ok(JSONObject()
+                    .put("action", "replace_string")
+                    .put("scope", scope)
+                    .put("mode", mode)
+                    .put("oldString", oldString)
+                    .put("newString", newString)
+                    .put("dexTouched", 1)
+                    .put("replacements", replaced)
+                    .put("success", true)
+                    .put("source", "dex")
+                    .put("newDexSize", bytes.size)
+                    .put("hint", "DEX 已重编并覆盖原 .dex 文件（无需签名）"))
+            } finally {
+                outDir.deleteRecursively()
+                newDex?.delete()
+            }
+        }
+
         private fun writeCompiledDexBack(ctx: ToolContext, apk: File, classDescriptor: String, dexEntryName: String, newDexBytes: ByteArray, className: String): JSONObject? {
+            if (dexEntryName.isEmpty()) {
+                // 单 .dex：没有 ZIP 容器，直接原子覆盖原文件
+                return try {
+                    EditSnapshotService.snapshot(ctx.context, "taffy_smali_edit", apk.absolutePath)
+                    val backup = File(apk.parentFile, "${apk.name}.bak")
+                    if (!backup.exists()) apk.copyTo(backup, overwrite = false)
+                    val tmp = File.createTempFile("dex_patched_", ".dex", apk.parentFile)
+                    tmp.writeBytes(newDexBytes)
+                    ZipRepack.replaceAtomically(tmp, apk)
+                    tmp.delete()
+                    null
+                } catch (e: Throwable) {
+                    err("DEX_WRITE_FAILED", "写回 .dex 失败: ${e.message}", "className", className)
+                }
+            }
             val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
             try {
                 // 保留原条目压缩方式/extra 并对齐（否则 resources.arsc 与 lib 下的 so 会被重新压缩，产物装不上）

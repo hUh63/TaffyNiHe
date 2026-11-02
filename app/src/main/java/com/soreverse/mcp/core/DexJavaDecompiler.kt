@@ -41,10 +41,18 @@ internal object DexJavaDecompiler {
 
     fun errorMessage(): String = lastError
 
+    /** 超过这个大小就别反编译了：jadx 会把整个 DEX 展开成对象图，手机上必然 OOM。 */
+    private const val MAX_INPUT_BYTES = 120L * 1024 * 1024
+
     private fun open(path: String): JadxDecompiler? = synchronized(this) {
         val f = File(path)
         if (!f.isFile) {
             lastError = "文件不存在：$path"
+            return null
+        }
+        if (f.length() > MAX_INPUT_BYTES) {
+            lastError = "文件 ${f.length() / 1024 / 1024}MB 超过反编译上限 ${MAX_INPUT_BYTES / 1024 / 1024}MB" +
+                "（jadx 会把整个 DEX 展开进内存，再大就会 OOM）。建议先用搜索定位类，或改用 smali 视图。"
             return null
         }
         val key = keyOf(f)
@@ -68,6 +76,12 @@ internal object DexJavaDecompiler {
             null
         }
     }
+
+    /**
+     * 预热：后台把 DEX 分析一遍，之后 [decompileClass] 就只剩生成代码的时间。
+     * 返回值只是"是否就绪"，不产出内容。
+     */
+    fun warmUp(path: String): Boolean = open(path) != null
 
     fun close() = synchronized(this) {
         runCatching { cached?.second?.close() }

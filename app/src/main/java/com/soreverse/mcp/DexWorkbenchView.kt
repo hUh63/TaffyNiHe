@@ -81,12 +81,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.soreverse.mcp.core.DexJavaDecompiler
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.runCatchingCancellable
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.engine.DexIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -234,6 +236,14 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             } else {
                 original = text
                 editor = TextFieldValue(text)
+            }
+            // 预热：点开类之后很可能会看「转成 Java」。延迟 1.2s 再在后台把 DEX 分析完，
+            // 既不抢 smali 首屏的 CPU，又能让真正点 Java 时少等一大截。
+            scope.safeLaunch {
+                delay(1200)
+                withContext(Dispatchers.IO) {
+                    runCatchingCancellable { DexJavaDecompiler.warmUp(f.absolutePath) }
+                }
             }
         }
     }
@@ -912,6 +922,7 @@ private fun SearchPane(
 private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
     val scope = rememberCoroutineScope()
     val clip = LocalClipboardManager.current
+    var kind by rememberSaveable { mutableStateOf("string") }
     var keyword by rememberSaveable { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<DexIndex.Hit>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
@@ -919,13 +930,16 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
     var searched by remember { mutableStateOf(false) }
 
     fun run() {
-        if (keyword.isBlank()) return
         busy = true
         error = null
         scope.safeLaunch {
+            // 空关键字 = 列全部：用 .* 走正则匹配，不必给索引层加"允许空"的特例
+            val raw = keyword.trim()
+            val useRegex = raw.isEmpty()
+            val q = if (useRegex) ".*" else raw
             val r = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
-                    DexIndex.search(path = path, type = "string", keyword = keyword.trim(), limit = 500, tmpDir = tmpDir)
+                    DexIndex.search(path = path, type = kind, keyword = q, regex = useRegex, limit = 800, tmpDir = tmpDir)
                 }.getOrNull()
             }
             busy = false
@@ -949,9 +963,32 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
                     placeholder = if (zh) "字符串常量关键字" else "String constant",
                 )
             }
-            OutlinedButton(onClick = { run() }, enabled = keyword.isNotBlank() && !busy) {
+            OutlinedButton(onClick = { run() }, enabled = !busy) {
                 if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                else Text(if (zh) "查找" else "Find", fontSize = AppText.body)
+                else Text(if (zh) (if (keyword.isBlank()) "列全部" else "查找") else (if (keyword.isBlank()) "All" else "Find"), fontSize = AppText.body)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf("string" to (if (zh) "字符串" else "String"), "int" to (if (zh) "整数" else "Int")).forEach { (k, label) ->
+                val sel = kind == k
+                Row(
+                    Modifier
+                        .heightIn(min = 30.dp)
+                        .clip(RoundedCornerShape(AppShape.pill))
+                        .background(if (sel) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                        .border(1.dp, if (sel) Color.Transparent else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(AppShape.pill))
+                        .clickable { kind = k }
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        label,
+                        fontSize = AppText.label,
+                        color = if (sel) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         error?.let {
@@ -960,7 +997,7 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File) {
         if (!busy && searched && hits.isEmpty() && error == null) {
             DexEmpty(
                 title = if (zh) "没有匹配的常量" else "No constants",
-                hint = if (zh) "换关键字再试；这里搜的是 DEX 字符串池" else "Search the DEX string pool",
+                hint = if (zh) "换关键字再试，或留空点「列全部」" else "Try another keyword or list all",
             )
             return@Column
         }
@@ -1033,8 +1070,9 @@ private fun EditorPane(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val lines = editor.text.count { it == '\n' } + 1
             Text(
-                if (zh) "${editor.text.count { it == '\n' } + 1} 行" else "${editor.text.count { it == '\n' } + 1} lines",
+                (if (zh) "$lines 行" else "$lines lines") + if (lines > 8000) (if (zh) " · 文件较大，已关闭高亮" else " · large file, highlight off") else "",
                 fontSize = AppText.label,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -1163,6 +1201,11 @@ private fun CodeArea(
     val cs = MaterialTheme.colorScheme
     val scroll = rememberScrollState()
     val lineCount = remember(editor.text) { editor.text.count { it == '\n' } + 1 }
+    // 几万行的 smali 每帧重算高亮会直接卡死；超过阈值就退回纯文本（编辑体验优先）
+    val tooLargeForHighlight = lineCount > 8000
+    val shown = remember(editor.text, tooLargeForHighlight) {
+        if (tooLargeForHighlight) AnnotatedString(editor.text) else highlightSmali(editor.text, cs)
+    }
     val numbers = remember(lineCount) { (1..lineCount).joinToString("\n") }
     Box(
         modifier
@@ -1192,9 +1235,9 @@ private fun CodeArea(
                     color = cs.onSurface,
                 ),
                 cursorBrush = SolidColor(cs.primary),
-                visualTransformation = { text ->
-                    TransformedText(highlightSmali(text.text, cs), OffsetMapping.Identity)
-                },
+                // 用上面 remember 好的结果：visualTransformation 每帧都会被调用，
+                // 在里面重新算一遍高亮是典型的"打字卡顿"来源。
+                visualTransformation = { TransformedText(shown, OffsetMapping.Identity) },
                 modifier = Modifier.weight(1f).padding(start = 8.dp, top = 10.dp, bottom = 10.dp, end = 8.dp),
             )
         }

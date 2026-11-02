@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -50,6 +51,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -82,6 +84,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.soreverse.mcp.core.DexJavaDecompiler
+import com.soreverse.mcp.core.DexSmaliAssist
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.runCatchingCancellable
@@ -138,8 +141,15 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
     var saving by remember { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf<String?>(null) }
     var statusOk by remember { mutableStateOf(false) }
+    // 寄存器分析报告 / 寄存器扩充弹窗 / 指令补全弹窗
+    var regReport by remember { mutableStateOf<String?>(null) }
+    var expandOpen by remember { mutableStateOf(false) }
+    var insertOpen by remember { mutableStateOf(false) }
+    // 大文件（>300KB 文本）默认只读浏览：BasicTextField 对几万行每次按键都复制整串，必然卡
+    var forceEditBig by remember { mutableStateOf(false) }
 
     val dirty = opened.isNotEmpty() && !showJava && editor.text != original
+    val bigText = editor.text.length > 300_000
     val isDexInput = srcName.endsWith(".dex", true)
 
     fun loadClasses(f: File) {
@@ -215,6 +225,7 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
         paneError = null
         statusMsg = null
         loadingSmali = true
+        forceEditBig = false
         if (name !in recent) recent = (listOf(name) + recent).take(40)
         scope.safeLaunch {
             val info = dexTool(context, "taffy_smali_edit", JSONObject()
@@ -469,7 +480,71 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             onJump = { jumpToMethod(it) },
             onRevert = { editor = TextFieldValue(original) },
             onSave = { saveClass() },
+            bigReadOnly = bigText && !forceEditBig,
+            onEnableEdit = { forceEditBig = true },
+            onInsertOpen = { insertOpen = true },
+            onRegAnalysis = { regReport = DexSmaliAssist.report(editor.text) },
+            onExpandRegs = { expandOpen = true },
         )
+
+        regReport?.let { txt ->
+            AlertDialog(
+                onDismissRequest = { regReport = null },
+                title = { Text(if (zh) "寄存器分析" else "Register analysis", fontSize = AppText.title) },
+                text = {
+                    Text(
+                        txt,
+                        fontSize = AppText.label,
+                        lineHeight = 16.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { regReport = null }) {
+                        Text(if (zh) "关闭" else "Close", fontSize = AppText.body)
+                    }
+                },
+            )
+        }
+
+        if (expandOpen) {
+            ExpandRegsDialog(
+                zh = zh,
+                onConfirm = { delta ->
+                    val r = DexSmaliAssist.expandRegisters(editor.text, editor.selection.start, delta)
+                    expandOpen = false
+                    if (r == null) {
+                        statusOk = false
+                        statusMsg = if (zh) "扩充失败：没有找到 .method 段落" else "Expand failed: no .method block"
+                    } else {
+                        editor = TextFieldValue(r.first, editor.selection)
+                        statusOk = true
+                        statusMsg = r.second
+                    }
+                },
+                onDismiss = { expandOpen = false },
+            )
+        }
+
+        if (insertOpen) {
+            InsertInstructionDialog(
+                zh = zh,
+                onInsert = { snippet ->
+                    insertOpen = false
+                    val sel = editor.selection
+                    val text = editor.text
+                    val start = sel.start.coerceIn(0, text.length)
+                    val end = sel.end.coerceIn(0, text.length)
+                    editor = TextFieldValue(
+                        text.substring(0, start) + snippet + text.substring(end),
+                        TextRange(start + snippet.length),
+                    )
+                },
+                onDismiss = { insertOpen = false },
+            )
+        }
     }
 }
 
@@ -1136,6 +1211,11 @@ private fun EditorPane(
     onJump: (String) -> Unit,
     onRevert: () -> Unit,
     onSave: () -> Unit,
+    bigReadOnly: Boolean = false,
+    onEnableEdit: () -> Unit = {},
+    onInsertOpen: () -> Unit = {},
+    onRegAnalysis: () -> Unit = {},
+    onExpandRegs: () -> Unit = {},
 ) {
     val cs = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize()) {
@@ -1194,6 +1274,23 @@ private fun EditorPane(
             }
         }
 
+        if (!showJava) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onInsertOpen, enabled = !bigReadOnly) {
+                    Text(if (zh) "指令补全" else "Insert", fontSize = AppText.label, color = cs.primary)
+                }
+                TextButton(onClick = onRegAnalysis) {
+                    Text(if (zh) "寄存器分析" else "Registers", fontSize = AppText.label, color = cs.primary)
+                }
+                TextButton(onClick = onExpandRegs, enabled = !bigReadOnly) {
+                    Text(if (zh) "寄存器扩充" else "Expand regs", fontSize = AppText.label, color = cs.primary)
+                }
+            }
+        }
+
         when {
             loading || javaLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -1215,6 +1312,12 @@ private fun EditorPane(
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                 )
             }
+            bigReadOnly -> LargeSmaliViewer(
+                zh = zh,
+                text = editor.text,
+                onEnableEdit = onEnableEdit,
+                modifier = Modifier.weight(1f),
+            )
             else -> CodeArea(editor, onEditorChange, Modifier.weight(1f))
         }
 
@@ -1503,3 +1606,142 @@ private suspend fun dexTool(context: Context, name: String, args: JSONObject): J
             handler.handle(tcx, args)
         }.getOrNull()
     }
+
+/**
+ * 大文件的只读浏览：LazyColumn 虚拟化，几万行也只组合可见的几十行。
+ * 编辑仍然回退到 BasicTextField —— 那是 Compose 的固有成本，只能让用户显式选择。
+ */
+@Composable
+private fun LargeSmaliViewer(
+    zh: Boolean,
+    text: String,
+    onEnableEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cs = MaterialTheme.colorScheme
+    val lines = remember(text) { text.split('\n') }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(AppShape.sm))
+            .background(cs.surfaceVariant)
+            .border(1.dp, cs.outlineVariant, RoundedCornerShape(AppShape.sm)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().background(cs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (zh) "${lines.size} 行 · 只读浏览（长行会被裁切，需要横向看请进编辑）"
+                else "${lines.size} lines · read-only (long lines clipped)",
+                fontSize = AppText.label,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onEnableEdit) {
+                Text(if (zh) "进入编辑" else "Edit", fontSize = AppText.label, color = cs.primary)
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize()) {
+            itemsIndexed(lines) { idx, line ->
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        (idx + 1).toString(),
+                        fontSize = AppText.label,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.End,
+                        color = cs.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.width(44.dp).padding(end = 6.dp, top = 5.dp, bottom = 5.dp),
+                    )
+                    Text(
+                        line.ifEmpty { " " },
+                        fontSize = AppText.body,
+                        lineHeight = 18.sp,
+                        fontFamily = FontFamily.Monospace,
+                        softWrap = false,
+                        color = cs.onSurface,
+                        modifier = Modifier.weight(1f).padding(top = 5.dp, bottom = 5.dp, end = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 指令补全：按分类列出常用 smali 指令模板，点一下插到光标处。 */
+@Composable
+private fun InsertInstructionDialog(zh: Boolean, onInsert: (String) -> Unit, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (zh) "指令补全" else "Insert instruction", fontSize = AppText.title) },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                DexSmaliAssist.templates.forEach { (group, rows) ->
+                    item(key = "g-" + group) {
+                        Text(
+                            group,
+                            fontSize = AppText.label,
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(rows.size) { i ->
+                        val row = rows[i]
+                        Text(
+                            row.first,
+                            fontSize = AppText.body,
+                            fontFamily = FontFamily.Monospace,
+                            color = cs.onSurface,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(AppShape.xs))
+                                .clickable { onInsert(row.second) }
+                                .padding(horizontal = 4.dp, vertical = 7.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(if (zh) "关闭" else "Close", fontSize = AppText.body) }
+        },
+    )
+}
+
+/** 寄存器扩充：只允许增大。增大不会改变 p 寄存器语义，所以是安全的。 */
+@Composable
+private fun ExpandRegsDialog(zh: Boolean, onConfirm: (Int) -> Unit, onDismiss: () -> Unit) {
+    var deltaText by remember { mutableStateOf("8") }
+    val delta = deltaText.trim().toIntOrNull() ?: 0
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (zh) "寄存器扩充" else "Expand registers", fontSize = AppText.title) },
+        text = {
+            Column {
+                Text(
+                    if (zh) "给光标所在方法增加寄存器数量（.registers / .locals）。只能加大 —— 加大不改变 p 寄存器的映射，减小会把参数错位。"
+                    else "Add registers to the method at the caret. Increase only: shrinking breaks p-register mapping.",
+                    fontSize = AppText.label,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                DexField(
+                    value = deltaText,
+                    onChange = { deltaText = it.filter { c -> c.isDigit() }.take(3) },
+                    placeholder = if (zh) "增加数量（如 8）" else "How many",
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (delta > 0) onConfirm(delta) }, enabled = delta > 0) {
+                Text(if (zh) "扩充" else "Expand", fontSize = AppText.body)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(if (zh) "取消" else "Cancel", fontSize = AppText.body) }
+        },
+    )
+}

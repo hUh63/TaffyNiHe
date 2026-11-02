@@ -30,6 +30,34 @@ internal object DexJavaDecompiler {
 
     private var cached: Pair<String, JadxDecompiler>? = null
 
+    /**
+     * 反编译工作线程。jadx 的 `code` 是纯 CPU 计算、不吃协程取消，只能靠 Future 超时把
+     * 结果面向上层"切掉"：线程本身停不下来，但界面不会无限转圈。
+     * 用 cached pool 而不是单线程，避免一个卡住的类把后面所有请求都堵死。
+     */
+    private val worker = java.util.concurrent.Executors.newCachedThreadPool { r ->
+        Thread(r, "jadx-decompile").apply { isDaemon = true }
+    }
+
+    /** 在 worker 上跑 [block]，超时返回 null 并写 [lastError]。 */
+    private fun <T> timed(timeoutMs: Long, label: String, block: () -> T): T? {
+        val fut = worker.submit(java.util.concurrent.Callable { block() })
+        return try {
+            fut.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            fut.cancel(true)
+            lastError = "$label 超时（>${timeoutMs / 1000}s）。这个类可能用了 jadx 处理不动的构造，" +
+                "可以先用 smali 视图看，或换一个类。"
+            null
+        } catch (e: java.util.concurrent.ExecutionException) {
+            lastError = "$label 失败：${e.cause?.javaClass?.simpleName ?: "unknown"}: ${e.cause?.message ?: ""}"
+            null
+        } catch (t: Throwable) {
+            lastError = "$label 失败：${t.javaClass.simpleName}: ${t.message ?: ""}"
+            null
+        }
+    }
+
     private fun keyOf(f: File): String =
         "${f.absolutePath}@${f.length()}@${f.lastModified()}"
 
@@ -149,13 +177,14 @@ internal object DexJavaDecompiler {
         if (cls == null) {
             return JSONObject().put("error", "找不到类：$full（可先用 action=classes 列出来）")
         }
-        val code = try {
-            cls.code
-        } catch (t: Throwable) {
-            return JSONObject()
-                .put("error", "反编译失败（该类可能用了 jadx 不支持的构造）：${t.javaClass.simpleName}")
-                .put("className", full)
+        // 单类反编译限时 25s：jadx 对少数病态方法会跑到几分钟，界面不能陪着等。
+        // 注意要区分"超时/异常"与"正常返回 null（纯接口）"——后者不是错误。
+        lastError = ""
+        val rawCode = timed(25_000, "反编译 $full") { cls.code }
+        if (lastError.isNotEmpty()) {
+            return JSONObject().put("error", lastError).put("className", full)
         }
+        val code = rawCode
         if (code.isNullOrBlank()) {
             return JSONObject().put("error", "反编译结果为空（可能是纯接口/注解类）").put("className", full)
         }

@@ -468,7 +468,7 @@ internal fun AnalysisWorkspace(
 
                         "sodiff" -> SoDiffView(zh = zh, context = context)
 
-                        "dexindex" -> DexIndexView(zh = zh, context = context)
+                        "dexindex" -> DexWorkbenchView(zh = zh, context = context)
 
                         "insnexp" -> InsnExplainView(zh = zh, context = context)
 
@@ -2923,7 +2923,7 @@ private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
  * 塔菲沿用同一范式：Exbin 没有的分析页（加固 / 脱壳 / 导出 / Flutter / AI / 转码 …）只在 ⋮ 菜单出现，
  * 侧栏与主页页签保持与 Exbin 一一对应。
  */
-private val analysisRailItems = listOf("home", "search", "vtable", "callgraph", "xrefs", "settings", "back")
+private val analysisRailItems = listOf("home", "dexindex", "search", "vtable", "callgraph", "xrefs", "settings", "back")
 
 /**
  * 左侧导航栏：对齐 Explorer So 的 NavigationRailView

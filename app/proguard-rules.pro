@@ -175,3 +175,14 @@
 # === 移植自太墟：release 崩溃堆栈保留行号（全局选项不能放 consumer rules，只能放宿主） ===
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# ── jadx（DEX → Java 反编译）────────────────────────────────────────────
+# jadx 的输入插件通过 META-INF/services + ServiceLoader 注册，visitors 也大量按类名反射装配；
+# R8 一旦重命名/裁剪，运行时就是 "no input plugins found" 或空结果（不报错，只反编译不出东西）。
+-keep class jadx.** { *; }
+-keep class io.github.skylot.** { *; }
+-dontwarn jadx.**
+-dontwarn org.slf4j.**
+# 资源/XML 解析用不到，但类还在引用链上（skipResources 只是运行时不走），保留 message 类
+-keep class com.google.protobuf.** { *; }
+-dontwarn com.google.protobuf.**

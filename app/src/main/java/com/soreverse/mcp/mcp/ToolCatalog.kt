@@ -1235,6 +1235,8 @@ object ToolCatalog {
         // 塔菲逆核: DEX 索引查询(13 种类型一次遍历，纯 dexlib2)
         *DexIndexTool.ALL.toTypedArray(),
         *DexRenameTool.ALL.toTypedArray(),
+        // 塔菲逆核: DEX → Java 反编译（jadx，配套 smali 编辑的「转成 Java」）
+        *DexJavaTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

@@ -296,6 +296,11 @@ dependencies {
     // 纯 Java, aapt 无关, 基于 ARSCLib。补齐 MT 管理器的"改完完整回编成 APK"最后一环。
     implementation("com.github.REAndroid:APKEditor:V1.4.9")
     // smali/baksmali: dex↔smali 汇编(Google 维护的 Android 友好 fork)
+    // DEX → Java 反编译（jadx 1.5.0）。纯 JVM 实现，class 版本 55（d8 可处理），
+    // 用到的 java.nio.file / Stream 在 minSdk 29 上齐全。只做代码反编译（skipResources），
+    // 所以不依赖 aapt2 的资源解析路径。
+    implementation("io.github.skylot:jadx-core:1.5.0")
+    implementation("io.github.skylot:jadx-dex-input:1.5.0")
     implementation("com.android.tools.smali:smali:3.0.10")
     implementation("com.android.tools.smali:smali-baksmali:3.0.10")
     implementation("com.android.tools.smali:smali-dexlib2:3.0.10")

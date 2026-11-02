@@ -34,6 +34,9 @@ object SmaliEditTools {
     /** APK/输入大小上限(512MB), 防大 APK 全局替换 OOM */
     private const val MAX_INPUT_BYTES = 512L * 1024L * 1024L
 
+    /** 输入是单个 .dex 文件（而不是 APK）。 */
+    private fun isDexFile(f: java.io.File): Boolean = f.name.endsWith(".dex", ignoreCase = true)
+
     /** 安全加固：装载前大小守卫（超限返回 err，null 表示放行）。 */
     private fun sizeGuard(f: java.io.File?): JSONObject? {
         if (f == null || !f.isFile) return null
@@ -47,13 +50,13 @@ object SmaliEditTools {
     /** Smali 增量编辑 */
     val smaliEdit: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta("taffy_smali_edit",
-            "【Smali 增量编辑】不改包整个 APK, 只提取/替换单个类或单条指令的 smali。action=list_classes 列出 APK 中的类(按包名过滤); action=extract 提取指定类的 smali 代码; action=replace 用新 smali 替换指定类(自动定位 DEX→重编→写回 APK); action=list_methods 列出类的方法签名; action=patch_instruction 仅替换方法内一条指令(如改 const 常量/return 返回值, 对标 MT 改一行代码)。参考 MT管理器的 edit_open/edit_text 增量流程, 用 Google smali 库实现, 多 DEX 自动定位。注意: replace/patch_instruction 会重编整个 DEX 再写回, 大 DEX 较慢。",
+            "【Smali 增量编辑】支持 APK 与单个 .dex 文件, 不改包整个 APK, 只提取/替换单个类或单条指令的 smali。action=list_classes 列出 APK 中的类(按包名过滤); action=extract 提取指定类的 smali 代码; action=replace 用新 smali 替换指定类(自动定位 DEX→重编→写回 APK); action=list_methods 列出类的方法签名; action=patch_instruction 仅替换方法内一条指令(如改 const 常量/return 返回值, 对标 MT 改一行代码)。参考 MT管理器的 edit_open/edit_text 增量流程, 用 Google smali 库实现, 多 DEX 自动定位。注意: replace/patch_instruction 会重编整个 DEX 再写回, 大 DEX 较慢。",
             "Incremental smali editing without full APK unpacking. action=list_classes lists classes (filter by package); extract gets smali for one class; replace writes new smali (auto-locates DEX→recompiles→writes back to APK); list_methods lists method signatures; patch_instruction replaces a single instruction inside a method (e.g. change a const literal / return value — MT-style 'change one line'). Uses Google smali library, auto multi-DEX. Note: replace/patch_instruction recompile the whole DEX then write back, slow on large DEX.",
             "build", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
                 "action".oneOf("list_classes | extract | replace | list_methods | patch_instruction | replace_string", "list_classes", "extract", "replace", "list_methods", "patch_instruction", "replace_string")
-                "path" str "APK 文件路径"
+                "path" str "APK 或单 .dex 文件路径"
                 "className" str "类全名(如 com.example.Foo), list_classes/extract/replace/list_methods/replace_string 用"
                 "packagePrefix" str "list_classes: 包名前缀过滤(如 com.example), 加快速度"
                 "smali" str "replace: 新的 smali 代码(完整 .smali 文件内容)"
@@ -78,6 +81,16 @@ object SmaliEditTools {
             val file = File(path)
             if (!file.isFile) return err("FILE_NOT_FOUND", "APK 不存在: $path", "path", path)
             val action = args.str("action", "list_classes")
+            // 单 .dex 文件没有 APK 那样的 ZIP 容器，patch_instruction / replace_string
+            // 的写回路径依赖重建 APK，这里直接说清楚，不要让它们改到一半失败。
+            if (isDexFile(file) && (action == "patch_instruction" || action == "replace_string")) {
+                return err(
+                    "DEX_MODE_UNSUPPORTED",
+                    "单 .dex 文件暂不支持 action=$action。请用 action=replace 整体替换该类的 smali" +
+                        "（编辑器里就是「保存并重编」）。",
+                    "action", action,
+                )
+            }
 
             return runCatching {
                 when (action) {
@@ -100,6 +113,26 @@ object SmaliEditTools {
             val limit = args.intValue("limit", 100).coerceIn(1, 2000)
             val results = JSONArray()
             var total = 0
+
+            if (isDexFile(apk)) {
+                // 单 .dex：直接读这个文件，不走 ZIP
+                run {
+                    val dexFile = DexFileFactory.loadDexFile(apk, Opcodes.getDefault())
+                    for (classDef in dexFile.classes) {
+                        val name = classDef.type.substring(1, classDef.type.length - 1).replace('/', '.')
+                        if (pkgPrefix.isNotBlank() && !name.startsWith(pkgPrefix)) continue
+                        if (total >= limit) break
+                        results.put(JSONObject().put("className", name).put("dex", apk.name))
+                        total++
+                    }
+                }
+                return ok(JSONObject()
+                    .put("action", "list_classes")
+                    .put("total", total)
+                    .put("results", results)
+                    .put("source", "dex")
+                    .put("hint", "用 taffy_smali_edit action=extract 提取某个类的 smali 代码"))
+            }
 
             ZipFile(apk).use { zf ->
                 val dexEntries = zf.entries().toList().filter {
@@ -214,6 +247,24 @@ object SmaliEditTools {
                 val newDexBytes = newDex.readBytes()
                 newDex.delete()
                 tempDex.delete()
+
+                if (dexEntryName.isEmpty()) {
+                    // 单 .dex 文件：没有 ZIP 容器，直接把重编后的字节原子写回原文件
+                    val backup = File(apk.parentFile, "${apk.name}.bak")
+                    if (!backup.exists()) apk.copyTo(backup, overwrite = false)
+                    val tmp = File.createTempFile("dex_patched_", ".dex", apk.parentFile)
+                    tmp.writeBytes(newDexBytes)
+                    ZipRepack.replaceAtomically(tmp, apk)
+                    tmp.delete()
+                    return ok(JSONObject()
+                        .put("action", "replace")
+                        .put("className", className)
+                        .put("success", true)
+                        .put("source", "dex")
+                        .put("newDexSize", newDexBytes.size)
+                        .put("backupPath", backup.absolutePath)
+                        .put("hint", "DEX 已重编并覆盖原 .dex 文件（无需签名）"))
+                }
 
                 val tempApk = File.createTempFile("apk_patched_", ".apk", apk.parentFile)
                 // 保留原条目压缩方式/extra 并对齐（否则 resources.arsc 与 lib 下的 so 会被重新压缩，产物装不上）
@@ -611,6 +662,16 @@ object SmaliEditTools {
 
         /** 在 APK 的所有 DEX 中查找指定类, 返回 (dex条目名, 临时DEX文件) */
         private fun findClassInApk(apk: File, classDescriptor: String): Pair<String, File>? {
+            if (isDexFile(apk)) {
+                // 返回的是**副本**：调用方在 finally 里会 delete，给原文件会直接把用户文件删掉
+                val copy = File.createTempFile("dex_single_", ".dex")
+                apk.copyTo(copy, overwrite = true)
+                val has = runCatching {
+                    DexFileFactory.loadDexFile(copy, Opcodes.getDefault()).classes.any { it.type == classDescriptor }
+                }.getOrDefault(false)
+                if (!has) { copy.delete(); return null }
+                return "" to copy
+            }
             ZipFile(apk).use { zf ->
                 val dexEntries = zf.entries().toList().filter {
                     it.name.matches(Regex("classes\\d*\\.dex"))

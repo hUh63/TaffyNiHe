@@ -84,7 +84,7 @@ internal object DexJavaDecompiler {
         var total = 0
         try {
             for (cls in d.classesWithInners) {
-                val name = cls.origFullName
+                val name = cls.fullName
                 if (name.isEmpty()) continue
                 if (q.isNotEmpty() && !name.lowercase().contains(q)) continue
                 total++
@@ -112,7 +112,7 @@ internal object DexJavaDecompiler {
         val full = className.trim().replace('/', '.')
         val cls: JavaClass? = try {
             d.searchJavaClassByOrigFullName(full)
-                ?: d.classesWithInners.firstOrNull { it.origFullName == full }
+                ?: d.classesWithInners.firstOrNull { it.fullName == full }
         } catch (t: Throwable) {
             null
         }

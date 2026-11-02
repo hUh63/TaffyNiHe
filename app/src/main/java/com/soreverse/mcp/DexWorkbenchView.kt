@@ -330,14 +330,14 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             dirty = dirty,
             saving = saving,
             onSave = { saveClass() },
-            actions = { isOpen ->
+            actions = { isOpen, closeMenu ->
                 DexEditorMenu(
                     zh = zh,
                     expanded = isOpen,
                     hasFile = srcFile != null,
                     inEditor = opened.isNotEmpty(),
                     showJava = showJava,
-                    onDismiss = { menu = false },
+                    onDismiss = closeMenu,
                     onPickFile = { picker.launch(arrayOf("*/*")) },
                     onReloadClasses = { srcFile?.let { loadClasses(it) } },
                     onToggleJava = { if (showJava) showJava = false else decompileJava() },
@@ -461,7 +461,7 @@ private fun DexTopBar(
     dirty: Boolean,
     saving: Boolean,
     onSave: () -> Unit,
-    actions: @Composable (Boolean) -> Unit,
+    actions: @Composable (Boolean, () -> Unit) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     var menu by remember { mutableStateOf(false) }
@@ -505,7 +505,7 @@ private fun DexTopBar(
                 Icon(Icons.Filled.MoreVert, null, modifier = Modifier.size(20.dp))
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                actions(menu)
+                actions(menu) { menu = false }
             }
         }
         HorizontalDivider(thickness = 1.dp, color = cs.outlineVariant)

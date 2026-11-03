@@ -39,9 +39,27 @@ internal object DexJavaDecompiler {
         Thread(r, "jadx-decompile").apply { isDaemon = true }
     }
 
+    /** 同时在跑的反编译数。超时的任务停不下来，只能靠这个把新请求挡在外面。 */
+    private val inFlight = java.util.concurrent.atomic.AtomicInteger(0)
+    private const val MAX_IN_FLIGHT = 3
+
     /** 在 worker 上跑 [block]，超时返回 null 并写 [lastError]。 */
     private fun <T> timed(timeoutMs: Long, label: String, block: () -> T): T? {
-        val fut = worker.submit(java.util.concurrent.Callable { block() })
+        // 超时的反编译线程不会真的停下（jadx 是纯 CPU 计算），连续点五个类就是五个线程
+        // 各跑二十秒、手机直接发烫。超过上限就明确拒绝，让用户等前一个结束。
+        val running = inFlight.get()
+        if (running >= MAX_IN_FLIGHT) {
+            lastError = "已有 $running 个反编译任务在跑（上一个可能卡在难解的类上），稍等再试。"
+            return null
+        }
+        inFlight.incrementAndGet()
+        val fut = worker.submit(java.util.concurrent.Callable {
+            try {
+                block()
+            } finally {
+                inFlight.decrementAndGet()
+            }
+        })
         return try {
             fut.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
         } catch (e: java.util.concurrent.TimeoutException) {

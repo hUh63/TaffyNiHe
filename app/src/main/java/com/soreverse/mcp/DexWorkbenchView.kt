@@ -145,6 +145,7 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
     var regReport by remember { mutableStateOf<String?>(null) }
     var expandOpen by remember { mutableStateOf(false) }
     var insertOpen by remember { mutableStateOf(false) }
+    var gotoOpen by remember { mutableStateOf(false) }
     // 大文件（>300KB 文本）默认只读浏览：BasicTextField 对几万行每次按键都复制整串，必然卡
     var forceEditBig by remember { mutableStateOf(false) }
 
@@ -297,6 +298,18 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
         }
     }
 
+    /** 跳到指定行（对标截图里的「转到指定行」）。 */
+    fun jumpToLine(lineNo: Int) {
+        val lines = editor.text.split('\n')
+        if (lines.isEmpty()) return
+        val idx = (lineNo - 1).coerceIn(0, lines.size - 1)
+        var offset = 0
+        for (i in 0 until idx) offset += lines[i].length + 1
+        editor = editor.copy(selection = TextRange(offset.coerceIn(0, editor.text.length)))
+        statusOk = true
+        statusMsg = if (zh) "已跳到第 ${idx + 1} 行（共 ${lines.size} 行）" else "Jumped to line ${idx + 1} of ${lines.size}"
+    }
+
     fun jumpToMethod(m: String) {
         val lines = editor.text.split('\n')
         val idx = lines.indexOfFirst { it.trimStart().startsWith(".method") && it.contains(m) }
@@ -374,6 +387,7 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
                         statusOk = true
                         statusMsg = if (zh) "已复制" else "Copied"
                     },
+                    onGotoLine = { if (opened.isNotEmpty() && !showJava) gotoOpen = true },
                     onRevert = { editor = TextFieldValue(original) },
                     onLineOp = { op ->
                         val r = applyLineOp(editor, op)
@@ -528,6 +542,15 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             )
         }
 
+        if (gotoOpen) {
+            GotoLineDialog(
+                zh = zh,
+                lineCount = editor.text.count { it == '\n' } + 1,
+                onGo = { n -> gotoOpen = false; jumpToLine(n) },
+                onDismiss = { gotoOpen = false },
+            )
+        }
+
         if (insertOpen) {
             InsertInstructionDialog(
                 zh = zh,
@@ -622,6 +645,7 @@ private fun DexEditorMenu(
     onReloadClasses: () -> Unit,
     onToggleJava: () -> Unit,
     onCopyAll: () -> Unit,
+    onGotoLine: () -> Unit,
     onRevert: () -> Unit,
     onLineOp: (LineOp) -> Unit,
 ) {
@@ -646,6 +670,11 @@ private fun DexEditorMenu(
         DropdownMenuItem(
             text = { Text(if (zh) "复制全部" else "Copy all", fontSize = AppText.body) },
             onClick = { onDismiss(); onCopyAll() },
+        )
+        DropdownMenuItem(
+            text = { Text(if (zh) "转到指定行" else "Go to line", fontSize = AppText.body) },
+            onClick = { onDismiss(); onGotoLine() },
+            enabled = !showJava,
         )
         DropdownMenuItem(
             text = { Text(if (zh) "还原改动" else "Revert", fontSize = AppText.body) },
@@ -1738,6 +1767,40 @@ private fun ExpandRegsDialog(zh: Boolean, onConfirm: (Int) -> Unit, onDismiss: (
         confirmButton = {
             TextButton(onClick = { if (delta > 0) onConfirm(delta) }, enabled = delta > 0) {
                 Text(if (zh) "扩充" else "Expand", fontSize = AppText.body)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(if (zh) "取消" else "Cancel", fontSize = AppText.body) }
+        },
+    )
+}
+
+/** 转到指定行：输入行号回车/点确定即把光标放到行首。 */
+@Composable
+private fun GotoLineDialog(zh: Boolean, lineCount: Int, onGo: (Int) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val target = text.trim().toIntOrNull() ?: 0
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (zh) "转到指定行" else "Go to line", fontSize = AppText.title) },
+        text = {
+            Column {
+                Text(
+                    if (zh) "共 $lineCount 行，输入 1..$lineCount" else "$lineCount lines, enter 1..$lineCount",
+                    fontSize = AppText.label,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                DexField(
+                    value = text,
+                    onChange = { text = it.filter { c -> c.isDigit() }.take(6) },
+                    placeholder = if (zh) "行号" else "Line",
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (target > 0) onGo(target.coerceAtMost(lineCount)) }, enabled = target > 0) {
+                Text(if (zh) "跳转" else "Go", fontSize = AppText.body)
             }
         },
         dismissButton = {

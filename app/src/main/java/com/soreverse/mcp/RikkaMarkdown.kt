@@ -312,7 +312,7 @@ private fun inlineHtml(element: Element) = buildAnnotatedString {
                         withLink(LinkAnnotation.Url(safeHref)) {
                             withStyle(
                                 SpanStyle(
-                                    color = Color(0xFF007AFF),
+                                    color = MaterialTheme.colorScheme.primary,
                                     textDecoration = TextDecoration.Underline,
                                 ),
                             ) { node.childNodes().forEach(::appendNode) }

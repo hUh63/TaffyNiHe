@@ -219,7 +219,7 @@ internal fun TunnelStatsSection(t: UiText) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             MetricPill(if (t.zh) "状态" else "State", state, if (state == "RUNNING") AppleColors.systemGreen else AppleColors.systemOrange)
             MetricPill(if (t.zh) "运行" else "Uptime", fmtDuration(totalRunningMs), MaterialTheme.colorScheme.primary)
-            MetricPill(if (t.zh) "保活" else "Keepalive", if (keepaliveEnabled) "ON" else "OFF", if (keepaliveEnabled) AppleColors.systemGreen else Color(0xFF8E8E93))
+            MetricPill(if (t.zh) "保活" else "Keepalive", if (keepaliveEnabled) "ON" else "OFF", if (keepaliveEnabled) AppleColors.systemGreen else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(10.dp))
         val maxCount = maxOf(totalRestarts, keepaliveRestarts, probeOks, probeFailures, 1)

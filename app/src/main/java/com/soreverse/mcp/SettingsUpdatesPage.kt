@@ -426,7 +426,8 @@ private fun UpdateHero(icon: ImageVector, headline: String, subtitle: String, ti
                 Modifier
                     .size(84.dp)
                     .clip(CircleShape)
-                    .background(Brush.verticalGradient(listOf(Color(0xFF1D2027), Color(0xFF14161C))))
+                    // 原来写死深色渐变，浅色主题下这块圆盘会突然变黑；改成强调色容器
+                    .background(LocalAccentPalette.current.container)
                     .border(androidx.compose.foundation.BorderStroke(1.dp, tint.copy(alpha = 0.35f)), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
@@ -459,13 +460,16 @@ private fun UpdateHero(icon: ImageVector, headline: String, subtitle: String, ti
 @Composable
 private fun UpdateVersionCard(versionText: String, badge: String?, accent: Color, zh: Boolean) {
     val shape = RoundedCornerShape(AppShape.xl)
-    val bg = Brush.verticalGradient(listOf(Color(0xFF1E2026), Color(0xFF15171D)))
+    // 强调色软底 + 主题描边：浅色/深色主题下都成立（原来写死深色渐变，浅色下像异物）
+    val bg = Brush.verticalGradient(
+        listOf(LocalAccentPalette.current.soft, MaterialTheme.colorScheme.surfaceVariant),
+    )
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(bg)
-            .border(androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), shape)
+            .border(androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shape)
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -493,7 +497,7 @@ private fun UpdateVersionCard(versionText: String, badge: String?, accent: Color
                 Text(
                     if (zh) "当前版本" else "Current version",
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color(0xFF9AA0AF),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     versionText,

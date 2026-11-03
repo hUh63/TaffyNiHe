@@ -12,6 +12,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -107,6 +109,16 @@ internal fun SettingsAppearancePage(
             ChipRow(listOf("system" to if (t.zh) "跟随系统" else "System", "light" to if (t.zh) "浅色" else "Light", "dark" to if (t.zh) "深色" else "Dark"), themeMode, onTheme)
             GroupDivider()
             ChipFieldLabel(if (t.zh) "强调色" else "Accent")
+            if (dynamicColor) {
+                Text(
+                    if (t.zh) "已开启动态取色（Material You）：实际配色由壁纸决定，下面的选择暂时不生效"
+                    else "Dynamic color is on — the palette follows your wallpaper, so the choice below has no effect yet",
+                    fontSize = AppText.label,
+                    lineHeight = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+                )
+            }
             // 标出色块：只有文字的话，用户点完不知道"粉"长什么样。
             // 粉放在第一位（也是默认值）；深色下用 #FF8FBC，与紫能区分开。
             AccentChipRow(
@@ -122,6 +134,7 @@ internal fun SettingsAppearancePage(
                 accentColor,
                 onAccent,
             )
+            AccentPreviewRow(accentColor, t.zh)
         }
         GlassGroup(title = if (t.zh) "文字" else "Text") {
             // 版式（页边距 / 行高 / 圆角）已经固定成一套 4 的倍数 + 三档圆角，
@@ -191,10 +204,13 @@ private fun AccentChipRow(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        items.forEach { (value, label, swatch) ->
+        val dark = isDarkColor(cs.background)
+        items.forEach { (value, label, _) ->
             val isSel = selected == value
-            // 选中项的底用"该强调色派生出来的容器色"，所以选粉时是浅粉底、选青时是浅青底
-            val pal = accentPaletteOf(swatch, isDarkColor(cs.background), value)
+            // 用当前主题下的强调色（深色主题用亮版，色点才不会在深底上糊成一团）；
+            // 选中项的底用"该强调色派生出来的容器色"，所以选粉是浅粉底、选青是浅青底
+            val swatch = AppPalette.accent(value, dark)
+            val pal = accentPaletteOf(swatch, dark, value)
             FilterChip(
                 selected = isSel,
                 onClick = { onSelected(value) },
@@ -229,3 +245,34 @@ private fun AccentChipRow(
 
 /** 当前主题是深色还是浅色（用表面亮度判断，避免再往这里传一个参数）。 */
 private fun isDarkColor(c: Color): Boolean = c.luminance() < 0.5f
+
+/**
+ * 强调色下方的"整套配色"预览：六个色块就是 [AccentPalette.chart]，
+ * 让用户选色的时候就能看到容器/互补/三角色长什么样，而不是选完回首页看。
+ */
+@Composable
+private fun AccentPreviewRow(accentName: String, zh: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val dark = isDarkColor(cs.background)
+    val pal = accentPaletteOf(AppPalette.accent(accentName, dark), dark, accentName)
+    Column(Modifier.padding(horizontal = 14.dp).padding(bottom = 10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            pal.chart.forEach { c ->
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(AppShape.xs))
+                        .background(c),
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (zh) "主色 · 互补 · 三角 120° / 240° · 邻近 · 中性 —— 这组色会同时用在容器、页签、图表和首页入口图标上"
+            else "accent · complement · triadic 120°/240° · analogous · neutral — used across containers, tabs, charts and launcher icons",
+            fontSize = AppText.label,
+            color = cs.onSurfaceVariant,
+        )
+    }
+}

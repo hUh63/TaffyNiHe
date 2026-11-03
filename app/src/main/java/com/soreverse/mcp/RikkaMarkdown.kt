@@ -228,7 +228,7 @@ private fun MarkdownElement(element: Element) {
         "h1", "h2", "h3", "h4", "h5", "h6" -> {
             val level = element.tagName().drop(1).toIntOrNull() ?: 3
             Text(
-                inlineHtml(element),
+                inlineHtml(element, MaterialTheme.colorScheme.primary),
                 fontSize = when (level) {
                     1 -> 24.sp
                     2 -> 21.sp
@@ -239,7 +239,7 @@ private fun MarkdownElement(element: Element) {
                 modifier = Modifier.padding(top = if (level <= 2) 10.dp else 6.dp, bottom = 2.dp),
             )
         }
-        "p" -> Text(inlineHtml(element), style = MaterialTheme.typography.bodyMedium, lineHeight = 24.sp)
+        "p" -> Text(inlineHtml(element, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodyMedium, lineHeight = 24.sp)
         "pre" -> {
             val code = element.selectFirst("code")?.wholeText() ?: element.wholeText()
             Surface(
@@ -272,7 +272,7 @@ private fun MarkdownElement(element: Element) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         val nested = item.children().filter { it.tagName() == "ul" || it.tagName() == "ol" }
                         val own = item.clone().apply { select("ul,ol").remove() }
-                        Text(inlineHtml(own), style = MaterialTheme.typography.bodyMedium, lineHeight = 24.sp)
+                        Text(inlineHtml(own, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodyMedium, lineHeight = 24.sp)
                         nested.forEach { MarkdownElement(it) }
                     }
                 }
@@ -281,14 +281,18 @@ private fun MarkdownElement(element: Element) {
         "table" -> MarkdownTable(element)
         "hr" -> HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
         else -> if (element.children().isEmpty()) {
-            Text(inlineHtml(element), style = MaterialTheme.typography.bodyMedium, lineHeight = 24.sp)
+            Text(inlineHtml(element, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodyMedium, lineHeight = 24.sp)
         } else {
             element.childNodes().forEach { MarkdownNode(it) }
         }
     }
 }
 
-private fun inlineHtml(element: Element) = buildAnnotatedString {
+/**
+ * 行内元素 → AnnotatedString。[linkColor] 由调用方（@Composable 的 MarkdownElement）传入，
+ * 因为这个函数本身不是 @Composable，读不到 MaterialTheme。
+ */
+private fun inlineHtml(element: Element, linkColor: Color) = buildAnnotatedString {
     fun appendNode(node: Node) {
         when (node) {
             is TextNode -> append(node.wholeText)
@@ -312,7 +316,7 @@ private fun inlineHtml(element: Element) = buildAnnotatedString {
                         withLink(LinkAnnotation.Url(safeHref)) {
                             withStyle(
                                 SpanStyle(
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = linkColor,
                                     textDecoration = TextDecoration.Underline,
                                 ),
                             ) { node.childNodes().forEach(::appendNode) }

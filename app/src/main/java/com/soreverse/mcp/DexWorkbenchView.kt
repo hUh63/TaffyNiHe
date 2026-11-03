@@ -287,7 +287,11 @@ internal fun DexWorkbenchView(zh: Boolean, context: Context = LocalContext.curre
             // 否则用户改完 smali 再点「转成 Java」看到的是旧代码（这是最容易被误当成"没保存"的坑）
             javaCode = ""
             runCatching { DexJavaDecompiler.close() }
-            val backup = r.optString("backupPath")
+            // 单 .dex 的写回分支在 core 里，不返回 backupPath；但备份文件就是同目录的 <name>.bak，
+            // 这里补上推断路径，用户改坏了知道去哪儿找。
+            val backup = r.optString("backupPath").ifBlank {
+                if (isDexInput) "${f.absolutePath}.bak" else ""
+            }
             statusMsg = if (zh) {
                 val head = if (isDexInput) "已重编并覆盖 .dex" else "已重编并写回 APK（签名已失效，需要重新签名）"
                 "$head · ${r.optInt("newDexSize")} 字节" + if (backup.isNotBlank()) "\n备份：$backup" else ""

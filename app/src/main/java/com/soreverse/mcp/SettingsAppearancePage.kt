@@ -1,5 +1,11 @@
 package com.soreverse.mcp
 
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -101,16 +107,17 @@ internal fun SettingsAppearancePage(
             ChipRow(listOf("system" to if (t.zh) "跟随系统" else "System", "light" to if (t.zh) "浅色" else "Light", "dark" to if (t.zh) "深色" else "Dark"), themeMode, onTheme)
             GroupDivider()
             ChipFieldLabel(if (t.zh) "强调色" else "Accent")
-            ChipRow(
-                // 只留六个。红/黄留给状态（错误、警告），灰做主色会让"主操作"看不出是操作，
-                // 粉在深色下与紫几乎分不开。
+            // 标出色块：只有文字的话，用户点完不知道"粉"长什么样。
+            // 粉放在第一位（也是默认值）；深色下用 #FF8FBC，与紫能区分开。
+            AccentChipRow(
                 listOf(
-                    "blue" to if (t.zh) "蓝" else "Blue",
-                    "teal" to if (t.zh) "青" else "Teal",
-                    "indigo" to if (t.zh) "靛" else "Indigo",
-                    "purple" to if (t.zh) "紫" else "Purple",
-                    "green" to if (t.zh) "绿" else "Green",
-                    "orange" to if (t.zh) "橙" else "Orange",
+                    Triple("pink", if (t.zh) "粉" else "Pink", AppPalette.pink),
+                    Triple("blue", if (t.zh) "蓝" else "Blue", AppPalette.blue),
+                    Triple("teal", if (t.zh) "青" else "Teal", AppPalette.teal),
+                    Triple("indigo", if (t.zh) "靛" else "Indigo", AppPalette.indigo),
+                    Triple("purple", if (t.zh) "紫" else "Purple", AppPalette.purple),
+                    Triple("green", if (t.zh) "绿" else "Green", AppPalette.green),
+                    Triple("orange", if (t.zh) "橙" else "Orange", AppPalette.orange),
                 ),
                 accentColor,
                 onAccent,
@@ -170,3 +177,55 @@ private fun ChipFieldLabel(text: String) {
         modifier = Modifier.padding(start = 16.dp, top = 12.dp),
     )
 }
+
+/** 带色块的强调色选择器：文字 + 实际颜色圆点，选中用该色自己的容器底。 */
+@Composable
+private fun AccentChipRow(
+    items: List<Triple<String, String, Color>>,
+    selected: String,
+    onSelected: (String) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        items.forEach { (value, label, swatch) ->
+            val isSel = selected == value
+            // 选中项的底用"该强调色派生出来的容器色"，所以选粉时是浅粉底、选青时是浅青底
+            val pal = accentPaletteOf(swatch, isDarkColor(cs.background), value)
+            FilterChip(
+                selected = isSel,
+                onClick = { onSelected(value) },
+                label = { Text(label) },
+                leadingIcon = {
+                    Box(
+                        Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .background(swatch)
+                            .border(1.dp, cs.outline.copy(alpha = 0.30f), CircleShape),
+                    )
+                },
+                shape = RoundedCornerShape(AppShape.pill),
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = pal.container,
+                    selectedLabelColor = pal.onContainer,
+                    selectedLeadingIconColor = pal.onContainer,
+                    containerColor = cs.surfaceVariant.copy(alpha = 0.55f),
+                    labelColor = cs.onSurface,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = isSel,
+                    borderColor = cs.outline.copy(alpha = 0.28f),
+                    selectedBorderColor = pal.line,
+                ),
+            )
+        }
+    }
+}
+
+/** 当前主题是深色还是浅色（用表面亮度判断，避免再往这里传一个参数）。 */
+private fun isDarkColor(c: Color): Boolean = c.luminance() < 0.5f

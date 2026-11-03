@@ -118,7 +118,7 @@ internal fun ToolStatsSection(t: UiText, settings: SettingsStore) {
         MetricPill(if (t.zh) "总调用" else "Calls", totalCalls.toString(), MaterialTheme.colorScheme.primary)
         MetricPill(if (t.zh) "成功" else "OK", totalOk.toString(), AppleColors.systemGreen)
         MetricPill(if (t.zh) "失败" else "Failed", totalFailed.toString(), AppleColors.systemRed)
-        MetricPill(if (t.zh) "工具" else "Tools", distinct.toString(), AppleColors.systemIndigo)
+        MetricPill(if (t.zh) "工具" else "Tools", distinct.toString(), LocalAccentPalette.current.complement)
     }
     Spacer(Modifier.height(8.dp))
     val toolsArr = snapshot.optJSONArray("tools")

@@ -433,16 +433,20 @@ internal fun SoReverseApp(
         else -> isSystemInDarkTheme()
     }
     val accent = AppPalette.accent(accentColor, dark)
-    val colors = remember(dark, accent, pureBlackDark, highContrast, dynamicColor) {
+    val colors = remember(dark, accent, accentColor, pureBlackDark, highContrast, dynamicColor) {
         if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Material You：Android 12+ 跟随系统壁纸动态取色
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         } else if (dark) {
-            appDarkColors(accent, pureBlackDark, highContrast)
+            appDarkColors(accent, pureBlackDark, highContrast, accentColor)
         } else {
-            appLightColors(accent, highContrast)
+            appLightColors(accent, highContrast, accentColor)
         }
     }
+    // 整套派生色板（容器 / 邻近 / 互补 / 图表六色 / 表面 tint）—— 页面读 LocalAccentPalette 取用。
+    // 用 colors.primary 而不是手算的 accent：开了 Material You 时 M3 主色来自壁纸，
+    // 派生色板必须跟它走，否则图表/胶囊会是"设置里的色"而不是"屏幕上的色"。
+    val accentPalette = remember(colors, dark, accentColor) { accentPaletteOf(colors.primary, dark, accentColor) }
     // 深色模式下同步系统栏底色/图标：XML theme 把 statusBarColor/navigationBarColor 写死成浅色 #F2F2F7，
     // 且 windowLightStatusBar=true。Android 14 及以下这两个属性仍然生效，
     // 不动态改写就会出现「深色界面 + 一条浅灰状态栏 + 深色图标」的割裂（Android 15+ 强制 edge-to-edge，此赋值被忽略但无害）。
@@ -553,6 +557,7 @@ internal fun SoReverseApp(
     androidx.compose.runtime.CompositionLocalProvider(
         LocalUiMetrics provides metrics,
         LocalReduceMotion provides reduceMotion,
+        LocalAccentPalette provides accentPalette,
     ) {
         ReverseThemeScope(hostThemed, colors, typography) {
             Box(
@@ -565,9 +570,12 @@ internal fun SoReverseApp(
                     Modifier
                         .fillMaxSize()
                         .background(
+                            // 主色 + 互补色的双段 wash：换强调色后整页底色气质一起变
+                            // （只有单色渐变时，换了色也只剩"淡淡的灰"）
                             Brush.verticalGradient(
                                 listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.10f else 0.06f),
+                                    accentPalette.accent.copy(alpha = if (dark) 0.12f else 0.07f),
+                                    accentPalette.complement.copy(alpha = if (dark) 0.05f else 0.035f),
                                     Color.Transparent,
                                     MaterialTheme.colorScheme.background,
                                 ),

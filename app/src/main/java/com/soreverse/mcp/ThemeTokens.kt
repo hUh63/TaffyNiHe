@@ -1,5 +1,6 @@
 package com.soreverse.mcp
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -43,7 +44,7 @@ internal object AppPalette {
     val orange = Color(0xFFC97A16)
     val red = Color(0xFFD93A34)
     val yellow = Color(0xFFC99A16)
-    val pink = Color(0xFFC2417F)
+    val pink = Color(0xFFD6336C)
     val mono = Color(0xFF6B7280)
 
     fun accent(name: String, dark: Boolean): Color = when (name) {
@@ -55,11 +56,163 @@ internal object AppPalette {
         "orange" -> if (dark) Color(0xFFF0B267) else Color(0xFFC97A16)
         "red" -> if (dark) Color(0xFFFF9E97) else Color(0xFFD93A34)
         "yellow" -> if (dark) Color(0xFFE8C766) else Color(0xFFC99A16)
-        "pink" -> if (dark) Color(0xFFEFA0C4) else Color(0xFFC2417F)
+        "pink" -> if (dark) Color(0xFFFF8FBC) else Color(0xFFD6336C)
         "mono" -> if (dark) Color(0xFFA3ACBA) else Color(0xFF565E6C)
-        else -> if (dark) Color(0xFF8FB4FF) else Color(0xFF2C6BED)
+        // 默认就是粉：设置里 accentColor 的默认值也是 "pink"
+        else -> if (dark) Color(0xFFFF8FBC) else Color(0xFFD6336C)
     }
 }
+
+
+/**
+ * 一个强调色的**完整**派生色板。
+ *
+ * 上一版 `appLightColors(accent)` 只把传入色塞进 primary，其余槽位（primaryContainer、
+ * secondary、tertiary、surfaceVariant）全是写死的蓝紫灰 —— 选粉色之后只有按钮变粉，
+ * 卡片、chip、选中底、容器描边还是蓝的，看起来像"没换主题"。
+ *
+ * 这里以强调色的**色相**为基准用 HSL 派生整套：
+ *   · 容器 container      ＝ 同色相、高亮、降饱和（选中底 / 主色卡片）
+ *   · 邻近 analogous      ＝ 色相 −30°，进 secondaryContainer（次级容器、进度底）
+ *   · 互补 complement     ＝ 色相 +180°，进 tertiary（对比强调、图表第二色）
+ *   · 表面 tintedSurface  ＝ 表面色微带主色相（3~8% 饱和），让整页底色"跟着走"
+ *   · 图表 chart          ＝ 主色 / 互补 / 三角 120°·240° / 邻近 / 冷灰
+ *
+ * 文字槽（secondary / onSecondary / onSurfaceVariant）仍保持近乎中性，只带一点色相 ——
+ * 否则"次要文字"会变成粉字，满屏像链接。
+ */
+internal data class AccentPalette(
+    /** 强调色名（blue/pink/…），给需要按名字分支的地方用。 */
+    val name: String,
+    val accent: Color,
+    val onAccent: Color,
+    /** 主色容器：选中项底、主 CTA 的浅底、状态胶囊。 */
+    val container: Color,
+    val onContainer: Color,
+    /** 邻近色：进 secondaryContainer。 */
+    val analogous: Color,
+    val analogousContainer: Color,
+    val onAnalogousContainer: Color,
+    /** 互补色：进 tertiary / tertiaryContainer。 */
+    val complement: Color,
+    val complementContainer: Color,
+    val onComplementContainer: Color,
+    /** 极浅/极暗的主色底，给状态胶囊、图表高亮区用。 */
+    val soft: Color,
+    /** 主色描边（1dp 线）—— 需要"轻强调"而不是实心块时用。 */
+    val line: Color,
+    /** 表面色微带主色相（surfaceVariant / surfaceContainerHigh）。 */
+    val tintedSurface: Color,
+    val tintedSurfaceHigh: Color,
+    /** 图表/多分类色序列（6 个，已按深浅调过亮度）。 */
+    val chart: List<Color>,
+)
+
+/** HSL → Color。s/l 取值 0..1，h 任意角度。 */
+private fun hslColor(h: Float, s: Float, l: Float): Color {
+    val hh = ((h % 360f) + 360f) % 360f
+    val ss = s.coerceIn(0f, 1f)
+    val ll = l.coerceIn(0f, 1f)
+    val c = (1f - kotlin.math.abs(2f * ll - 1f)) * ss
+    val x = c * (1f - kotlin.math.abs((hh / 60f) % 2f - 1f))
+    val m = ll - c / 2f
+    val r: Float
+    val g: Float
+    val b: Float
+    when {
+        hh < 60f -> { r = c; g = x; b = 0f }
+        hh < 120f -> { r = x; g = c; b = 0f }
+        hh < 180f -> { r = 0f; g = c; b = x }
+        hh < 240f -> { r = 0f; g = x; b = c }
+        hh < 300f -> { r = x; g = 0f; b = c }
+        else -> { r = c; g = 0f; b = x }
+    }
+    return Color(r + m, g + m, b + m)
+}
+
+/** Color → (h, s, l)。 */
+private fun Color.toHsl(): FloatArray {
+    val r = red
+    val g = green
+    val b = blue
+    val max = kotlin.math.max(r, kotlin.math.max(g, b))
+    val min = kotlin.math.min(r, kotlin.math.min(g, b))
+    val l = (max + min) / 2f
+    if (max == min) return floatArrayOf(0f, 0f, l)
+    val d = max - min
+    val s = if (l > 0.5f) d / (2f - max - min) else d / (max + min)
+    val h = when (max) {
+        r -> ((g - b) / d + if (g < b) 6f else 0f)
+        g -> ((b - r) / d + 2f)
+        else -> ((r - g) / d + 4f)
+    } * 60f
+    return floatArrayOf(h, s, l)
+}
+
+/**
+ * 由强调色派生整套色板。[name] 只用于标记来源，不影响取色逻辑 ——
+ * 即使开了 Material You（系统色），也能从传入的任意颜色派生出一致的配色。
+ */
+internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): AccentPalette {
+    val hsl = accent.toHsl()
+    val h = hsl[0]
+    val s = hsl[1]
+    val l = hsl[2]
+    fun tone(hh: Float, ss: Float, ll: Float) = hslColor(hh, ss, ll)
+
+    // 主色很亮时（深色主题里的浅粉/浅青）用深色字，否则白字
+    val onAccent = if (l > 0.64f) Color(0xFF11151C) else Color(0xFFFFFFFF)
+    val container = if (dark) tone(h, s * 0.60f, 0.245f) else tone(h, kotlin.math.min(s, 0.80f), 0.930f)
+    val onContainer = if (dark) tone(h, 0.70f, 0.900f) else tone(h, 0.62f, 0.185f)
+
+    val analogousContainer = if (dark) tone(h - 30f, 0.28f, 0.225f) else tone(h - 30f, 0.46f, 0.945f)
+    val onAnalogousContainer = if (dark) tone(h - 30f, 0.58f, 0.900f) else tone(h - 30f, 0.55f, 0.185f)
+
+    val complement = if (dark) tone(h + 180f, 0.60f, 0.740f) else tone(h + 180f, 0.56f, 0.380f)
+    val complementContainer = if (dark) tone(h + 180f, 0.38f, 0.225f) else tone(h + 180f, 0.50f, 0.920f)
+    val onComplementContainer = if (dark) tone(h + 180f, 0.52f, 0.900f) else tone(h + 180f, 0.58f, 0.180f)
+
+    // 近乎中性的"次强调"：只带一点主色相，正文/次要文字用它才不会变粉字
+    val analogous = if (dark) tone(h, 0.12f, 0.780f) else tone(h, 0.14f, 0.420f)
+
+    val soft = if (dark) tone(h, s * 0.52f, 0.200f) else tone(h, kotlin.math.min(s, 0.66f), 0.955f)
+    val line = if (dark) tone(h, s * 0.48f, 0.420f) else tone(h, kotlin.math.min(s, 0.55f), 0.745f)
+
+    // 表面微 tint：亮度必须保持原石墨档位（深色 0.155 → 浅色 0.945），只把色相掺进去
+    val tintedSurface = if (dark) tone(h, 0.10f, 0.155f) else tone(h, 0.22f, 0.945f)
+    val tintedSurfaceHigh = if (dark) tone(h, 0.10f, 0.128f) else tone(h, 0.20f, 0.965f)
+
+    val chart = listOf(
+        accent,
+        complement,
+        if (dark) tone(h + 120f, 0.52f, 0.700f) else tone(h + 120f, 0.50f, 0.400f),
+        if (dark) tone(h + 240f, 0.52f, 0.720f) else tone(h + 240f, 0.48f, 0.420f),
+        if (dark) tone(h - 30f, 0.52f, 0.720f) else tone(h - 30f, 0.46f, 0.440f),
+        if (dark) tone(h, 0.10f, 0.620f) else tone(h, 0.10f, 0.500f),
+    )
+
+    return AccentPalette(
+        name = name,
+        accent = accent,
+        onAccent = onAccent,
+        container = container,
+        onContainer = onContainer,
+        analogous = analogous,
+        analogousContainer = analogousContainer,
+        onAnalogousContainer = onAnalogousContainer,
+        complement = complement,
+        complementContainer = complementContainer,
+        onComplementContainer = onComplementContainer,
+        soft = soft,
+        line = line,
+        tintedSurface = tintedSurface,
+        tintedSurfaceHigh = tintedSurfaceHigh,
+        chart = chart,
+    )
+}
+
+/** 当前生效的强调色板。页面要"跟着强调色变"的地方（图表、胶囊、图标底）读它。 */
+internal val LocalAccentPalette = staticCompositionLocalOf { accentPaletteOf(AppPalette.pink, false, "pink") }
 
 /** 形状 token：只保留三档做主用（控件 10 / 卡片 14 / 弹层 20），另留两档给极小与胶囊。 */
 internal object AppShape {
@@ -157,41 +310,47 @@ internal fun scaledTypography(scale: Float): Typography {
  * 上一版 background 和 surface 都是 #FEFBFF（带紫调），卡片又用 surfaceVariant
  * #E0E2EC（偏蓝灰），三者色相不一致，叠在一起就显得脏。
  */
-internal fun appLightColors(accent: Color, highContrast: Boolean) = lightColorScheme(
-    primary = accent,
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFDCE6FF),
-    onPrimaryContainer = Color(0xFF0B2A63),
-    secondary = Color(0xFF57606F),
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE6EAF1),
-    onSecondaryContainer = Color(0xFF1A1F28),
-    tertiary = Color(0xFF6B5B95),
-    onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFEAE2F8),
-    onTertiaryContainer = Color(0xFF241A38),
-    error = Color(0xFFC62828),
-    onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFDE0DE),
-    onErrorContainer = Color(0xFF4A0B09),
-    background = Color(0xFFF6F7F9),
-    onBackground = if (highContrast) Color(0xFF000000) else Color(0xFF111419),
-    surface = Color(0xFFFFFFFF),
-    onSurface = if (highContrast) Color(0xFF000000) else Color(0xFF111419),
-    surfaceVariant = Color(0xFFEEF0F4),
-    onSurfaceVariant = if (highContrast) Color(0xFF2A2F38) else Color(0xFF565E6C),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFFAFBFC),
-    surfaceContainer = Color(0xFFFFFFFF),
-    surfaceContainerHigh = Color(0xFFF2F4F7),
-    surfaceContainerHighest = Color(0xFFE9ECF1),
-    outline = if (highContrast) Color(0xFF3F4650) else Color(0xFFC7CDD6),
-    outlineVariant = Color(0xFFE3E7ED),
-    inverseSurface = Color(0xFF1E232B),
-    inverseOnSurface = Color(0xFFF2F4F7),
-    inversePrimary = Color(0xFF8FB4FF),
-    surfaceTint = accent,
-)
+internal fun appLightColors(accent: Color, highContrast: Boolean, accentName: String = ""): ColorScheme {
+    // 整套槽位都从强调色派生：换色之后卡片底、chip、选中底、描边一起变，而不是只有按钮变
+    val p = accentPaletteOf(accent, dark = false, name = accentName)
+    return lightColorScheme(
+        primary = p.accent,
+        onPrimary = p.onAccent,
+        primaryContainer = p.container,
+        onPrimaryContainer = p.onContainer,
+        // secondary 只带一点主色相（近乎中性），避免"次要文字变粉字"
+        secondary = p.analogous,
+        onSecondary = Color(0xFFFFFFFF),
+        secondaryContainer = p.analogousContainer,
+        onSecondaryContainer = p.onAnalogousContainer,
+        // tertiary 用互补色：对比强调（徽标、图表第二色、对比按钮）
+        tertiary = p.complement,
+        onTertiary = Color(0xFFFFFFFF),
+        tertiaryContainer = p.complementContainer,
+        onTertiaryContainer = p.onComplementContainer,
+        error = Color(0xFFC62828),
+        onError = Color(0xFFFFFFFF),
+        errorContainer = Color(0xFFFDE0DE),
+        onErrorContainer = Color(0xFF4A0B09),
+        background = Color(0xFFF6F7F9),
+        onBackground = if (highContrast) Color(0xFF000000) else Color(0xFF111419),
+        surface = Color(0xFFFFFFFF),
+        onSurface = if (highContrast) Color(0xFF000000) else Color(0xFF111419),
+        surfaceVariant = p.tintedSurface,
+        onSurfaceVariant = if (highContrast) Color(0xFF2A2F38) else Color(0xFF565E6C),
+        surfaceContainerLowest = Color(0xFFFFFFFF),
+        surfaceContainerLow = Color(0xFFFAFBFC),
+        surfaceContainer = Color(0xFFFFFFFF),
+        surfaceContainerHigh = p.tintedSurfaceHigh,
+        surfaceContainerHighest = p.tintedSurface,
+        outline = if (highContrast) Color(0xFF3F4650) else Color(0xFFC7CDD6),
+        outlineVariant = Color(0xFFE3E7ED),
+        inverseSurface = Color(0xFF1E232B),
+        inverseOnSurface = Color(0xFFF2F4F7),
+        inversePrimary = accentPaletteOf(accent, dark = true, name = accentName).accent,
+        surfaceTint = p.accent,
+    )
+}
 
 /**
  * 深色 —— 石墨。底色 #0B0D11 是不带色相的冷灰，卡片逐级提亮
@@ -200,41 +359,44 @@ internal fun appLightColors(accent: Color, highContrast: Boolean) = lightColorSc
  * pureBlack 仍保留：用户显式要纯黑时把背景压到 #000000，
  * 但卡片仍按石墨档位走，否则纯黑下所有层次都会消失。
  */
-internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Boolean) = darkColorScheme(
-    primary = accent,
-    onPrimary = Color(0xFF0B2A63),
-    primaryContainer = Color(0xFF1C3A70),
-    onPrimaryContainer = Color(0xFFD8E4FF),
-    secondary = Color(0xFFB6BFCC),
-    onSecondary = Color(0xFF1A1F28),
-    secondaryContainer = Color(0xFF262D38),
-    onSecondaryContainer = Color(0xFFDDE3EC),
-    tertiary = Color(0xFFC7B4E8),
-    onTertiary = Color(0xFF241A38),
-    tertiaryContainer = Color(0xFF35294F),
-    onTertiaryContainer = Color(0xFFEADFFA),
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF4A0B09),
-    errorContainer = Color(0xFF6E1512),
-    onErrorContainer = Color(0xFFFFD9D6),
-    background = if (pureBlack) Color(0xFF000000) else Color(0xFF0B0D11),
-    onBackground = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFE7EAF0),
-    surface = if (pureBlack) Color(0xFF000000) else Color(0xFF0B0D11),
-    onSurface = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFE7EAF0),
-    surfaceVariant = Color(0xFF1A1F27),
-    onSurfaceVariant = if (highContrast) Color(0xFFE7EAF0) else Color(0xFFA3ACBA),
-    surfaceContainerLowest = Color(0xFF08090C),
-    surfaceContainerLow = Color(0xFF10131A),
-    surfaceContainer = Color(0xFF141821),
-    surfaceContainerHigh = Color(0xFF191E27),
-    surfaceContainerHighest = Color(0xFF1F252F),
-    outline = if (highContrast) Color(0xFFA3ACBA) else Color(0xFF4B5360),
-    outlineVariant = Color(0xFF262C36),
-    inverseSurface = Color(0xFFE7EAF0),
-    inverseOnSurface = Color(0xFF0B0D11),
-    inversePrimary = Color(0xFF2C6BED),
-    surfaceTint = accent,
-)
+internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Boolean, accentName: String = ""): ColorScheme {
+    val p = accentPaletteOf(accent, dark = true, name = accentName)
+    return darkColorScheme(
+        primary = p.accent,
+        onPrimary = p.onAccent,
+        primaryContainer = p.container,
+        onPrimaryContainer = p.onContainer,
+        secondary = p.analogous,
+        onSecondary = Color(0xFF14181F),
+        secondaryContainer = p.analogousContainer,
+        onSecondaryContainer = p.onAnalogousContainer,
+        tertiary = p.complement,
+        onTertiary = Color(0xFF11151C),
+        tertiaryContainer = p.complementContainer,
+        onTertiaryContainer = p.onComplementContainer,
+        error = Color(0xFFFFB4AB),
+        onError = Color(0xFF4A0B09),
+        errorContainer = Color(0xFF6E1512),
+        onErrorContainer = Color(0xFFFFD9D6),
+        background = if (pureBlack) Color(0xFF000000) else Color(0xFF0B0D11),
+        onBackground = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFE7EAF0),
+        surface = if (pureBlack) Color(0xFF000000) else Color(0xFF0B0D11),
+        onSurface = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFE7EAF0),
+        surfaceVariant = p.tintedSurface,
+        onSurfaceVariant = if (highContrast) Color(0xFFE7EAF0) else Color(0xFFA3ACBA),
+        surfaceContainerLowest = Color(0xFF08090C),
+        surfaceContainerLow = Color(0xFF10131A),
+        surfaceContainer = Color(0xFF141821),
+        surfaceContainerHigh = p.tintedSurfaceHigh,
+        surfaceContainerHighest = p.tintedSurface,
+        outline = if (highContrast) Color(0xFFA3ACBA) else Color(0xFF4B5360),
+        outlineVariant = Color(0xFF262C36),
+        inverseSurface = Color(0xFFE7EAF0),
+        inverseOnSurface = Color(0xFF0B0D11),
+        inversePrimary = accentPaletteOf(accent, dark = false, name = accentName).accent,
+        surfaceTint = p.accent,
+    )
+}
 
 internal fun statusSuccess(dark: Boolean = false): Color = if (dark) Color(0xFF4ED17E) else Color(0xFF1E9E5A)
 internal fun statusError(dark: Boolean = false): Color = if (dark) Color(0xFFFF8C85) else Color(0xFFD93A34)
@@ -300,8 +462,8 @@ internal object AppleColors {
     }
 }
 
-internal fun appleLightColors() = appLightColors(AppPalette.blue, false)
-internal fun appleDarkColors() = appDarkColors(AppPalette.blue, true, false)
+internal fun appleLightColors() = appLightColors(AppPalette.pink, false, "pink")
+internal fun appleDarkColors() = appDarkColors(AppPalette.pink, true, false, "pink")
 internal fun appleSuccess(dark: Boolean = false): Color = statusSuccess(dark)
 internal fun appleError(dark: Boolean = false): Color = statusError(dark)
 internal fun appleWarning(dark: Boolean = false): Color = statusWarning(dark)

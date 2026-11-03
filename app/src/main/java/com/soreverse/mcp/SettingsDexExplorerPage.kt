@@ -232,7 +232,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                             GlassGroup {
                                 DataRow(
                                     title = m.second,
-                                    leading = { TypeChip(m.first, if (m.first == "field") AppPalette.orange else AppPalette.blue) },
+                                    leading = { TypeChip(m.first, if (m.first == "field") AppPalette.orange else MaterialTheme.colorScheme.primary) },
                                 )
                             }
                         }

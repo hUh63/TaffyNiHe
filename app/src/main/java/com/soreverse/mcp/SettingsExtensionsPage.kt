@@ -542,7 +542,7 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                 title = o.optString("name", mid),
                                 subtitle = "by ${o.optString("author", "?").ifBlank { "?" }}",
                                 meta = o.optString("description").ifBlank { null },
-                                leading = { TypeChip("v${o.optString("version", "1.0")}", AppPalette.blue) },
+                                leading = { TypeChip("v${o.optString("version", "1.0")}", MaterialTheme.colorScheme.primary) },
                                 trailingText = if (installed) (if (zh) "已安装" else "installed") else null,
                                 onClick = { if (!installed && !marketLoading) installFromMarket(o) },
                             )

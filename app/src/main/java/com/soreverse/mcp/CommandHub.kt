@@ -57,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -262,15 +263,13 @@ private fun EngineCard(
     zh: Boolean,
 ) {
     val cs = MaterialTheme.colorScheme
+    // 运行中整张卡切成强调色的"软底 + 描边"：不只是按钮变，卡片本身也跟着换色
+    val pal = LocalAccentPalette.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(AppShape.lg),
-        colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant),
-        // 运行中套一圈主色描边：一屏只有一个元素该带颜色，就是"服务在跑"这件事
-        border = BorderStroke(
-            1.dp,
-            if (running) cs.primary.copy(alpha = 0.55f) else cs.outlineVariant,
-        ),
+        colors = CardDefaults.cardColors(containerColor = if (running) pal.soft else cs.surfaceVariant),
+        border = BorderStroke(1.dp, if (running) pal.line else cs.outlineVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
@@ -446,17 +445,25 @@ private fun SectionTitle(
 // ══════════════════════════ 工作台 4 列网格 ══════════════════════════
 
 /**
- * 4 列图标网格：图标底 40dp（12dp 圆角、surfaceVariant）+ 11sp 单行标签。
- * 全部中性色 —— 8 个入口若各配一个主题色，整页会像调色板；Exbin 里彩色只用在
- * 状态（在线/运行中）与主按钮上。
+ * 2 列入口卡：图标底 32dp（10dp 圆角）+ 主文案 + 一行说明。
+ *
+ * 图标底取强调色派生的六色循环（主 / 互补 / 三角 120°·240° / 邻近 / 冷灰），
+ * 卡片底保持中性 —— 只有图标这一小块带色，既统一又能看出当前主题色。
  */
 @Composable
 private fun WorkbenchGrid(items: List<Satellite>, onNavigate: (MainTab, String?) -> Unit) {
     val cs = MaterialTheme.colorScheme
+    // 图标底用强调色派生的六色（主色 / 互补 / 三角 / 邻近 / 冷灰）循环：
+    // 卡片底仍保持中性，只有图标这一小块带色 —— 既不花，又一眼看出主题是粉还是青。
+    val pal = LocalAccentPalette.current
+    val darkBg = cs.background.luminance() < 0.5f
+    var colorIndex = 0
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { sat ->
+                    val tint = pal.chart[colorIndex % pal.chart.size]
+                    colorIndex++
                     Row(
                         Modifier
                             .weight(1f)
@@ -471,13 +478,13 @@ private fun WorkbenchGrid(items: List<Satellite>, onNavigate: (MainTab, String?)
                             Modifier
                                 .size(32.dp)
                                 .clip(RoundedCornerShape(AppShape.sm))
-                                .background(cs.surface),
+                                .background(tint.copy(alpha = if (darkBg) 0.22f else 0.14f)),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 sat.icon,
                                 contentDescription = null,
-                                tint = cs.onSurfaceVariant,
+                                tint = tint,
                                 modifier = Modifier.size(18.dp),
                             )
                         }

@@ -68,7 +68,7 @@ internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
             )
             Text(
                 if (zh) "复制 Skill" else "Copy skill",
-                style = MaterialTheme.typography.labelSmall, color = AppPalette.blue,
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.clickable {
                     clipboard.setText(AnnotatedString(MCP_SKILL))
                     Toast.makeText(context, if (zh) "MCP Skill 已复制" else "Skill copied", Toast.LENGTH_LONG).show()
@@ -76,7 +76,7 @@ internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
             )
             Text(
                 if (zh) "导出工具契约 (Markdown)" else "Export tool contracts (Markdown)",
-                style = MaterialTheme.typography.labelSmall, color = AppPalette.blue,
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.clickable {
                     val md = buildToolContractsMarkdown(zh)
                     val f = java.io.File(context.filesDir, "taffy-tools-SKILL.md")

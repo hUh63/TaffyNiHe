@@ -63,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -309,6 +310,7 @@ private fun EditorGutter(
     lineCount: Int,
     currentLine: Int,
     marks: Map<Int, EditorDiffMarks.Mark>,
+    dim: Color,
     onLineClick: (Int) -> Unit,
 ) {
     if (lineCount <= 0 || lineCount > 3000) return
@@ -344,7 +346,7 @@ private fun EditorGutter(
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 19.sp,
                     ),
-                    color = if (active) MaterialTheme.colorScheme.primary else TerminalColors.dim,
+                    color = if (active) MaterialTheme.colorScheme.primary else dim,
                     textAlign = TextAlign.End,
                 )
             }
@@ -368,12 +370,19 @@ private enum class EditorPanel { CONSOLE, FILES, OUTLINE }
 @Composable
 internal fun SettingsEditorPage(t: UiText) {
     val editorContext = LocalContext.current.applicationContext
-    // 高亮配色必须跟 App 实际主题走：设置里选了深色而系统是浅色时，
-    // 用系统值会在深色编辑底上取到浅色关键字，代码几乎看不清。
-    CodeHighlighter.useDarkPalette = when (SettingsStore(editorContext).themeMode) {
-        "dark" -> true
-        "light" -> false
-        else -> androidx.compose.foundation.isSystemInDarkTheme()
+    // 编辑区配色跟**实际生效的 colorScheme** 走，而不是 themeMode + 系统值各判一遍：
+    // 之前只把语法高亮切成了 One Light，编辑底仍是终端深色 ——
+    // 结果深灰关键字（#383A42）写在黑底上，浅色主题下代码几乎看不见。
+    val editorDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    CodeHighlighter.useDarkPalette = editorDark
+    val edBg = if (editorDark) TerminalColors.bg else MaterialTheme.colorScheme.surfaceContainerLowest
+    val edFg = if (editorDark) TerminalColors.fg else MaterialTheme.colorScheme.onSurface
+    val edDim = if (editorDark) TerminalColors.dim else MaterialTheme.colorScheme.onSurfaceVariant
+    val edCursor = if (editorDark) AppPalette.teal else MaterialTheme.colorScheme.primary
+    val edBorder = if (editorDark) {
+        TerminalColors.fg.copy(alpha = 0.10f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant
     }
     val context = editorContext
     val scope = rememberCoroutineScope()
@@ -1547,7 +1556,7 @@ internal fun SettingsEditorPage(t: UiText) {
                         if (regexErr) (if (zh) "正则错误" else "bad regex")
                         else if (findQuery.isEmpty()) "" else "${matchCount.size} ${if (zh) "处" else "hits"}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (regexErr) MaterialTheme.colorScheme.error else AppPalette.teal,
+                        color = if (regexErr) MaterialTheme.colorScheme.error else edCursor,
                     )
                     MiniAction("Aa", accent = findCaseSensitive, enabled = !findRegex) { findCaseSensitive = !findCaseSensitive }
                     MiniAction(".*", accent = findRegex) { findRegex = !findRegex }
@@ -1580,8 +1589,8 @@ internal fun SettingsEditorPage(t: UiText) {
                 .weight(1f)
                 .heightIn(min = 180.dp)
                 .clip(RoundedCornerShape(AppShape.md))
-                .background(TerminalColors.bg)
-                .border(1.dp, TerminalColors.fg.copy(alpha = 0.10f), RoundedCornerShape(AppShape.md)),
+                .background(edBg)
+                .border(1.dp, edBorder, RoundedCornerShape(AppShape.md)),
         ) {
             Box(Modifier.fillMaxSize().onSizeChanged { editorViewport = it.height }) {
                 if (viewerMode) {
@@ -1593,20 +1602,20 @@ internal fun SettingsEditorPage(t: UiText) {
                                     (idx + 1).toString(),
                                     modifier = Modifier.width(50.dp).padding(end = 6.dp),
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = if (idx + 1 == curLn) AppPalette.teal else TerminalColors.dim,
+                                    color = if (idx + 1 == curLn) edCursor else edDim,
                                     textAlign = TextAlign.End,
                                 )
                                 Text(
                                     line.ifEmpty { " " },
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp),
-                                    color = TerminalColors.fg,
+                                    color = edFg,
                                 )
                             }
                         }
                     }
                 } else {
                     Row(Modifier.fillMaxWidth().verticalScroll(editorScroll).padding(vertical = 6.dp)) {
-                        if (showLineNumbers) EditorGutter(editorLineCount, curLn, marks) { n -> jumpToLine(n) }
+                        if (showLineNumbers) EditorGutter(editorLineCount, curLn, marks, edDim) { n -> jumpToLine(n) }
                         BasicTextField(
                             value = tf,
                             onValueChange = {
@@ -1616,9 +1625,9 @@ internal fun SettingsEditorPage(t: UiText) {
                             },
                             modifier = Modifier.weight(1f),
                             readOnly = readOnly,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp, color = TerminalColors.fg),
-                            cursorBrush = SolidColor(AppPalette.teal),
-                            visualTransformation = remember(mode) {
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp, color = edFg),
+                            cursorBrush = SolidColor(edCursor),
+                            visualTransformation = remember(mode, editorDark) {
                                 val cache = HashMap<String, androidx.compose.ui.text.AnnotatedString>()
                                 VisualTransformation { text ->
                                     val src = text.text
@@ -1642,7 +1651,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                                 CodeHighlighter.Lang.JSON -> "{ \"key\": \"value\" }"
                                                 else -> if (zh) "纯文本" else "plain text"
                                             },
-                                            color = TerminalColors.dim, fontFamily = FontFamily.Monospace,
+                                            color = edDim, fontFamily = FontFamily.Monospace,
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
                                             modifier = Modifier.padding(6.dp),
                                         )
@@ -1658,12 +1667,13 @@ internal fun SettingsEditorPage(t: UiText) {
                     Text(
                         if (zh) "只读" else "read-only",
                         style = MaterialTheme.typography.labelSmall,
-                        color = AppPalette.orange,
+                        // 深色编辑底用亮橙、浅色用压暗橙（AppPalette.orange 在白底上只有 3.15:1）
+                        color = statusWarning(editorDark),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(6.dp)
                             .clip(RoundedCornerShape(AppShape.xs))
-                            .background(TerminalColors.bg.copy(alpha = 0.82f))
+                            .background(edBg.copy(alpha = 0.82f))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
@@ -1674,19 +1684,19 @@ internal fun SettingsEditorPage(t: UiText) {
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .heightIn(max = 190.dp)
-                            .background(TerminalColors.bg.copy(alpha = 0.96f), RoundedCornerShape(AppShape.md)),
+                            .background(edBg.copy(alpha = 0.96f), RoundedCornerShape(AppShape.md)),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 (completionVia.ifBlank { if (zh) "补全" else "Completion" }) + if (completing) " · 分析中…" else "",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = AppPalette.teal,
+                                color = edCursor,
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
                                 if (zh) "关闭" else "close",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TerminalColors.dim,
+                                color = edDim,
                                 modifier = Modifier.clip(RoundedCornerShape(AppShape.xs)).clickable { showCompletions = false }.padding(horizontal = 6.dp),
                             )
                         }
@@ -1705,7 +1715,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                     Text(
                                         c.optString("name"),
                                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                        color = TerminalColors.fg,
+                                        color = edFg,
                                         modifier = Modifier.weight(1f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -1713,7 +1723,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                     Text(
                                         c.optString("doc").lineSequence().firstOrNull().orEmpty(),
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = TerminalColors.dim,
+                                        color = edDim,
                                         modifier = Modifier.weight(1.2f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -1802,14 +1812,14 @@ internal fun SettingsEditorPage(t: UiText) {
                 Text(
                     "±${marks.size}",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = AppPalette.orange,
+                    color = statusWarning(editorDark),
                 )
             }
             Box {
                 Text(
                     langLabel(mode, zh) + " ▾",
                     style = MaterialTheme.typography.labelSmall,
-                    color = AppPalette.teal,
+                    color = edCursor,
                     modifier = Modifier.clip(RoundedCornerShape(AppShape.xs)).clickable { showLangMenu = true }.padding(horizontal = 2.dp),
                 )
                 DropdownMenu(expanded = showLangMenu, onDismissRequest = { showLangMenu = false }) {
@@ -1832,7 +1842,7 @@ internal fun SettingsEditorPage(t: UiText) {
             Text(
                 (if (dirty) "● " else "✓ ") + (if (zh) "未保存" else "unsaved"),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (dirty) AppPalette.orange else AppPalette.green,
+                color = if (dirty) statusWarning(editorDark) else statusSuccess(editorDark),
             )
         }
     }
@@ -1941,7 +1951,11 @@ internal fun SettingsEditorPage(t: UiText) {
                                         modifier = Modifier.weight(1f),
                                     )
                                     if (cmd.isOn(host)) {
-                                        Text(if (zh) "开" else "on", style = MaterialTheme.typography.labelSmall, color = AppPalette.green)
+                                        Text(
+                                            if (zh) "开" else "on",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = statusSuccess(editorDark),
+                                        )
                                     }
                                     Text(
                                         cmd.id,
@@ -1951,7 +1965,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                     Icon(
                                         if (inToolbar) Icons.Default.Star else Icons.Default.StarBorder,
                                         null,
-                                        tint = if (inToolbar) AppPalette.yellow else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (inToolbar) AppPalette.ink("yellow", editorDark) else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier
                                             .size(20.dp)
                                             .clickable { EditorCommands.toggleInToolbar(context, cmd.id); toolbarVersion++ },
@@ -2072,7 +2086,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                                     name,
                                                     fontSize = AppText.label,
                                                     fontFamily = FontFamily.Monospace,
-                                                    color = if (isDir) MaterialTheme.colorScheme.primary else TerminalColors.fg,
+                                                    color = if (isDir) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
@@ -2097,7 +2111,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
-                                            TypeChip(text = item.kind, color = AppPalette.indigo)
+                                            TypeChip(text = item.kind, color = AppPalette.ink("indigo", editorDark))
                                             Text(
                                                 item.name,
                                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -2254,7 +2268,7 @@ internal fun SettingsEditorPage(t: UiText) {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    TypeChip(item.kind, AppPalette.indigo)
+                                    TypeChip(item.kind, AppPalette.ink("indigo", editorDark))
                                     Text(
                                         item.name,
                                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),

@@ -54,13 +54,15 @@ object CodeHighlighter {
     @Volatile
     var useDarkPalette: Boolean = true
 
+    // 两套调色板都按"文字色要过 AA"定过：浅色底（编辑区在浅色主题下是纯白）上
+    // One Light 原版的注释 #A0A1A7（2.6:1）和字符串 #50A14F（3.4:1）太淡，已压暗。
     private val KW get() = if (useDarkPalette) Color(0xFFC586C0) else Color(0xFFA626A4)   // 关键字
-    private val STR get() = if (useDarkPalette) Color(0xFF6AAB73) else Color(0xFF50A14F)  // 字符串
-    private val COM get() = if (useDarkPalette) Color(0xFF6E7681) else Color(0xFFA0A1A7)  // 注释
-    private val NUM get() = if (useDarkPalette) Color(0xFFB5CEA8) else Color(0xFF986801)  // 数字
-    private val FNC get() = if (useDarkPalette) Color(0xFFDCDCAA) else Color(0xFF4078F2)  // 函数名/内置
+    private val STR get() = if (useDarkPalette) Color(0xFF6AAB73) else Color(0xFF3F813E)  // 字符串
+    private val COM get() = if (useDarkPalette) Color(0xFF7E8894) else Color(0xFF6C7178)  // 注释
+    private val NUM get() = if (useDarkPalette) Color(0xFFB5CEA8) else Color(0xFF7C5700)  // 数字
+    private val FNC get() = if (useDarkPalette) Color(0xFFDCDCAA) else Color(0xFF2D63D6)  // 函数名/内置
     private val DEF get() = if (useDarkPalette) Color(0xFFD6E2F0) else Color(0xFF383A42)  // 默认
-    private val KEY get() = if (useDarkPalette) Color(0xFF9CDCFE) else Color(0xFF4078F2)  // JSON 键
+    private val KEY get() = if (useDarkPalette) Color(0xFF9CDCFE) else Color(0xFF2D63D6)  // JSON 键
 
     private val PY_KEYWORDS = setOf(
         "def", "class", "import", "from", "as", "return", "if", "elif", "else", "for", "while",

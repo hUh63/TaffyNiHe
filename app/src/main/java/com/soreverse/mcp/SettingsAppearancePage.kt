@@ -59,6 +59,8 @@ internal fun SettingsAppearancePage(
     onTextScale: (String) -> Unit,
     predictiveBack: Boolean,
     onPredictiveBack: (Boolean) -> Unit,
+    editorTheme: String,
+    onEditorTheme: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     SettingsScaffold(
@@ -163,6 +165,25 @@ internal fun SettingsAppearancePage(
                 ),
                 motionMode,
                 onMotion,
+            )
+        }
+        GlassGroup(title = if (t.zh) "编辑器" else "Editor") {
+            Text(
+                if (t.zh) "编辑器（设置 → 编辑器）的代码区配色。默认跟随 App 主题；也可以单独钉成深色，像 VS Code 深色主题那样在白页里放一块深色代码区。"
+                else "Code area colors for the editor. Defaults to the app theme; pin it dark to keep a dark code area inside a light app.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            ChipFieldLabel(if (t.zh) "代码区配色" else "Code area")
+            ChipRow(
+                listOf(
+                    "auto" to if (t.zh) "跟随主题" else "Auto",
+                    "dark" to if (t.zh) "固定深色" else "Dark",
+                    "light" to if (t.zh) "固定浅色" else "Light",
+                ),
+                editorTheme,
+                onEditorTheme,
             )
         }
         GlassGroup {

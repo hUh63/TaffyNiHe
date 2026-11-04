@@ -13,6 +13,6 @@ import androidx.compose.runtime.Composable
  * 通过 [EditorBridge.pendingPath] 接收外部页面（扩展页、工作流页）传来的待编辑文件。
  */
 @Composable
-internal fun EditorScreen(t: UiText) {
-    SettingsEditorPage(t)
+internal fun EditorScreen(t: UiText, editorTheme: String = "auto") {
+    SettingsEditorPage(t, editorTheme)
 }

@@ -197,6 +197,16 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("themeMode", "system") ?: "system"
         set(value) = prefs.edit().putString("themeMode", if (value in setOf("system", "light", "dark")) value else "system").apply()
 
+    /**
+     * 编辑器配色：auto（跟随 App 主题）| dark | light。
+     * 有人喜欢在浅色 App 里也保持深色代码区（像 VS Code 深色主题），单独给个开关。
+     */
+    var editorTheme: String
+        get() = prefs.getString("editorTheme", "auto") ?: "auto"
+        set(value) = prefs.edit()
+            .putString("editorTheme", if (value in setOf("auto", "dark", "light")) value else "auto")
+            .apply()
+
     /** Accent color preset for the whole UI. */
     var accentColor: String
         get() = prefs.getString("accentColor", "pink") ?: "pink"
@@ -815,6 +825,7 @@ class SettingsStore(context: Context) {
             .put("appearance", org.json.JSONObject()
                 .put("language", language)
                 .put("themeMode", themeMode)
+                .put("editorTheme", editorTheme)
                 .put("accentColor", accentColor)
                 .put("pureBlackDark", pureBlackDark)
                 .put("dynamicColor", dynamicColor)
@@ -956,6 +967,7 @@ class SettingsStore(context: Context) {
         val appearance = obj("appearance") ?: patch
         applyStr(appearance, "language") { language = it }
         applyStr(appearance, "themeMode") { themeMode = it }
+        applyStr(appearance, "editorTheme") { editorTheme = it }
         applyStr(appearance, "accentColor") { accentColor = it }
         applyBool(appearance, "pureBlackDark") { pureBlackDark = it }
         applyBool(appearance, "dynamicColor") { dynamicColor = it }
@@ -1077,7 +1089,7 @@ class SettingsStore(context: Context) {
 
         // Flat key support for AI convenience: taffy_app_config set key=value
         val flatKeys = listOf(
-            "language", "themeMode", "accentColor", "pureBlackDark", "dynamicColor", "uiDensity", "cornerStyle",
+            "language", "themeMode", "editorTheme", "accentColor", "pureBlackDark", "dynamicColor", "uiDensity", "cornerStyle",
             "motionMode", "showAdvancedHome", "highContrast", "textScale", "predictiveBackEnabled",
             "port", "bindHost", "authEnabled", "accessToken", "floatingEnabled",
             "wakeLockEnabled", "bootAutoStart", "defaultLimit", "stringLimit", "disasmLimit",
@@ -1092,6 +1104,7 @@ class SettingsStore(context: Context) {
             when (key) {
                 "language" -> { language = patch.optString(key); touch(key) }
                 "themeMode" -> { themeMode = patch.optString(key); touch(key) }
+                "editorTheme" -> { editorTheme = patch.optString(key); touch(key) }
                 "accentColor" -> { accentColor = patch.optString(key); touch(key) }
                 "pureBlackDark" -> { pureBlackDark = patch.optBoolean(key); touch(key) }
                 "dynamicColor" -> { dynamicColor = patch.optBoolean(key); touch(key) }

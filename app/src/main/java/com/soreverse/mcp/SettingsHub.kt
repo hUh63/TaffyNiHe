@@ -146,6 +146,8 @@ internal fun SettingsHub(
     onTextScale: (String) -> Unit,
     predictiveBack: Boolean,
     onPredictiveBack: (Boolean) -> Unit,
+    editorTheme: String,
+    onEditorTheme: (String) -> Unit,
     dest: SettingsDest,
     onDest: (SettingsDest) -> Unit,
     onLogs: () -> Unit = {},
@@ -174,7 +176,7 @@ internal fun SettingsHub(
         Box(Modifier.fillMaxSize()) {
         when (dest) {
             SettingsDest.ServiceConfig -> SettingsServiceConfigPage(t, settings, onBack)
-            SettingsDest.Appearance -> SettingsAppearancePage(t, language, onLanguage, themeMode, onTheme, accentColor, onAccent, pureBlackDark, onPureBlack, uiDensity, onDensity, cornerStyle, onCorner, motionMode, onMotion, showAdvancedHome, onShowAdvancedHome, highContrast, onHighContrast, dynamicColor, onDynamicColor, textScale, onTextScale, predictiveBack, onPredictiveBack, onBack)
+            SettingsDest.Appearance -> SettingsAppearancePage(t, language, onLanguage, themeMode, onTheme, accentColor, onAccent, pureBlackDark, onPureBlack, uiDensity, onDensity, cornerStyle, onCorner, motionMode, onMotion, showAdvancedHome, onShowAdvancedHome, highContrast, onHighContrast, dynamicColor, onDynamicColor, textScale, onTextScale, predictiveBack, onPredictiveBack, editorTheme, onEditorTheme, onBack)
             SettingsDest.KeepAlive -> SettingsKeepAlivePage(t, settings, onBack)
             SettingsDest.Limits -> SettingsLimitsPage(t, settings, onBack)
             SettingsDest.Export -> SettingsExportPage(t, settings, onBack)

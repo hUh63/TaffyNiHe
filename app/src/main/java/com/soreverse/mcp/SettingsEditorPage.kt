@@ -368,12 +368,15 @@ private enum class EditorPanel { CONSOLE, FILES, OUTLINE }
  *  - 终端：控制台改用 :terminal-view 的 TerminalScreen（终端内核已下沉到 :terminal-emulator）
  */
 @Composable
-internal fun SettingsEditorPage(t: UiText) {
+internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     val editorContext = LocalContext.current.applicationContext
-    // 编辑区配色跟**实际生效的 colorScheme** 走，而不是 themeMode + 系统值各判一遍：
-    // 之前只把语法高亮切成了 One Light，编辑底仍是终端深色 ——
-    // 结果深灰关键字（#383A42）写在黑底上，浅色主题下代码几乎看不见。
-    val editorDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // 编辑区配色默认跟**实际生效的 colorScheme** 走（而不是 themeMode + 系统值各判一遍）；
+    // 设置 → 外观 里可以把编辑器单独钉成深色或浅色（有人喜欢浅色 App + 深色代码区）。
+    val editorDark = when (editorTheme) {
+        "dark" -> true
+        "light" -> false
+        else -> MaterialTheme.colorScheme.background.luminance() < 0.5f
+    }
     CodeHighlighter.useDarkPalette = editorDark
     val edBg = if (editorDark) TerminalColors.bg else MaterialTheme.colorScheme.surfaceContainerLowest
     val edFg = if (editorDark) TerminalColors.fg else MaterialTheme.colorScheme.onSurface

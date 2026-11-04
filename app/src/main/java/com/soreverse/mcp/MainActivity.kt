@@ -416,6 +416,8 @@ internal fun SoReverseApp(
     var dynamicColor by remember { mutableStateOf(settings.dynamicColor) }
     var textScale by remember { mutableStateOf(settings.textScale) }
     var predictiveBack by remember { mutableStateOf(settings.predictiveBackEnabled) }
+    // 编辑器代码区配色：auto 跟随主题 / dark / light（设置 → 外观）
+    var editorTheme by remember { mutableStateOf(settings.editorTheme) }
     var disclaimerAccepted by remember { mutableStateOf(settings.disclaimerAccepted) }
     val analyzeState = appViewModel.analyzeState
     var pendingDeepLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -660,7 +662,7 @@ internal fun SoReverseApp(
                                     .fillMaxSize()
                                     .then(if (editorActive) Modifier else Modifier.offset(y = -20000.dp)),
                             ) {
-                                EditorScreen(t)
+                                EditorScreen(t, editorTheme)
                             }
                         }
                         if (!editorActive) {
@@ -785,6 +787,8 @@ internal fun SoReverseApp(
                                     onTextScale = { textScale = it; settings.textScale = it },
                                     predictiveBack = predictiveBack,
                                     onPredictiveBack = { predictiveBack = it; settings.predictiveBackEnabled = it },
+                                    editorTheme = editorTheme,
+                                    onEditorTheme = { editorTheme = it; settings.editorTheme = it },
                                     dest = settingsDest,
                                     onDest = { settingsDest = it },
                                     onBack = { settingsDest = SettingsDest.Root },

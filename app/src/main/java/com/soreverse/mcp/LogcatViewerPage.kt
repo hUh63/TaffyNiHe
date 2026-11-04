@@ -69,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -794,8 +795,8 @@ internal fun LogcatViewerPage(t: UiText) {
             // 状态胶囊：圆点 + 状态文字
             val statusColor = when {
                 !running -> MaterialTheme.colorScheme.outline
-                paused -> AppPalette.orange
-                else -> AppPalette.green
+                paused -> statusWarning(logPageDark())
+                else -> statusSuccess(logPageDark())
             }
             val statusText = when {
                 !running -> if (zh) "待机" else "Standby"
@@ -860,7 +861,7 @@ internal fun LogcatViewerPage(t: UiText) {
             Text(
                 if (readLogsGranted) (if (zh) "已授权 ✓" else "Granted ✓") else (if (zh) "未授予" else "Not granted"),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (readLogsGranted) AppPalette.green else MaterialTheme.colorScheme.error,
+                color = if (readLogsGranted) statusSuccess(logPageDark()) else MaterialTheme.colorScheme.error,
                 maxLines = 1,
             )
         }
@@ -1124,9 +1125,9 @@ internal fun LogcatViewerPage(t: UiText) {
                                         },
                                         null,
                                         tint = when (g.type) {
-                                            "NATIVE" -> AppPalette.red
-                                            "ANR" -> AppPalette.orange
-                                            else -> AppPalette.indigo
+                                            "NATIVE" -> AppPalette.ink("red", logPageDark())
+                                            "ANR" -> AppPalette.ink("orange", logPageDark())
+                                            else -> AppPalette.ink("indigo", logPageDark())
                                         },
                                         modifier = Modifier.size(18.dp),
                                     )
@@ -1177,11 +1178,12 @@ internal fun LogcatViewerPage(t: UiText) {
                                         Text(if (zh) "删除" else "Delete", fontSize = AppText.label)
                                     }
                                 }
-                                // 日志内容（黑色背景，LogFox 终端样式）
+                                // 日志内容：深色主题用 LogFox 黑底，浅色主题跟卡片面走
                                 val showLines = if (expanded) g.lines else g.lines.take(6)
+                                val (logBg, logFg, logDim) = logBlockColors()
                                 Column(
                                     Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
-                                        .background(Color(0xFF111111))
+                                        .background(logBg)
                                         .padding(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(1.dp),
                                 ) {
@@ -1189,7 +1191,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                         Text(
                                             l.raw,
                                             style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.label, fontFamily = FontFamily.Monospace),
-                                            color = Color(0xFFE0E0E0),
+                                            color = logFg,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
@@ -1198,7 +1200,7 @@ internal fun LogcatViewerPage(t: UiText) {
                                         Text(
                                             if (zh) "… 共 ${g.lines.size} 行，点击展开" else "… ${g.lines.size} lines, tap to expand",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF888888),
+                                            color = logDim,
                                         )
                                     }
                                 }
@@ -1768,5 +1770,20 @@ private fun SettingSwitchRow(label: String, checked: Boolean, onChange: (Boolean
             color = MaterialTheme.colorScheme.onSurface,
         )
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** 页面当前是否深色 —— 从实际生效的 colorScheme 判定（含 Material You / pureBlack）。 */
+@Composable
+private fun logPageDark(): Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+/** 日志内容块配色：深色主题保持 LogFox 黑底，浅色主题跟卡片面走（与编辑器同一套逻辑）。 */
+@Composable
+private fun logBlockColors(): Triple<Color, Color, Color> {
+    val cs = MaterialTheme.colorScheme
+    return if (logPageDark()) {
+        Triple(Color(0xFF111111), Color(0xFFE0E0E0), Color(0xFF888888))
+    } else {
+        Triple(cs.surfaceContainerHigh, cs.onSurface, cs.onSurfaceVariant)
     }
 }

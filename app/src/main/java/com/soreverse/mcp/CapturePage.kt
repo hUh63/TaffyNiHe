@@ -517,19 +517,20 @@ private fun GuideView(zh: Boolean, modifier: Modifier = Modifier) {
                 Text(if (zh) "复制" else "Copy")
             }
         }
+        val (guideBg, guideFg) = monoBlockColors()
         Box(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
                 .clip(shape)
-                .background(TerminalColors.bg)
+                .background(guideBg)
                 .padding(12.dp),
         ) {
             SelectionContainer {
                 Text(
                     CAPTURE_GUIDE,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, lineHeight = 16.sp),
-                    color = TerminalColors.fg,
+                    color = guideFg,
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                 )
             }
@@ -602,17 +603,32 @@ private fun MonoLabel(text: String) {
 @Composable
 private fun MonoBlock(text: String) {
     val metrics = LocalUiMetrics.current
+    val (bg, fg) = monoBlockColors()
     SelectionContainer {
         Text(
             text,
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, lineHeight = 14.sp),
-            color = TerminalColors.fg,
+            color = fg,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(metrics.controlRadius))
-                .background(TerminalColors.bg)
+                .background(bg)
                 .padding(8.dp),
         )
+    }
+}
+
+/**
+ * 等宽文本块配色：深色主题用终端深底，浅色主题跟卡片面走 ——
+ * 白页里嵌一块纯黑（#0B0F14）会显得像"另一个 App 的窗口"。
+ */
+@Composable
+private fun monoBlockColors(): Pair<Color, Color> {
+    val cs = MaterialTheme.colorScheme
+    return if (cs.background.luminance() < 0.5f) {
+        TerminalColors.bg to TerminalColors.fg
+    } else {
+        cs.surfaceContainerHigh to cs.onSurface
     }
 }
 

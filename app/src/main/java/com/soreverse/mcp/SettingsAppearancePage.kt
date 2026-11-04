@@ -135,7 +135,8 @@ internal fun SettingsAppearancePage(
                 accentColor,
                 onAccent,
             )
-            AccentPreviewRow(accentColor, t.zh)
+            // 动态取色时实际配色来自壁纸，这里的预览会误导，直接不显示
+            if (!dynamicColor) AccentPreviewRow(accentColor, t.zh)
         }
         GlassGroup(title = if (t.zh) "文字" else "Text") {
             // 版式（页边距 / 行高 / 圆角）已经固定成一套 4 的倍数 + 三档圆角，

@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.CoroutineScope
 import androidx.compose.material.icons.filled.Close
@@ -4475,7 +4476,7 @@ private fun FuncXRefView(
 
     // 默认「外部引用」列表页（对齐 Exbin XRefTabFragment：currentTab = TAB_EXTERNAL），
     // 旧实现默认图形化 —— 图形化在无邻域时只显示一屏空态，看起来就是「看不到调用」。
-    var tab by remember { mutableStateOf("external") }
+    var tab by rememberSaveable { mutableStateOf("external") }
     var query by rememberSaveable { mutableStateOf("") }
     var ext by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
     var int by remember(loc, tick) { mutableStateOf<List<JSONObject>>(emptyList()) }
@@ -4754,7 +4755,7 @@ private fun FuncDetailView(
     val cs = MaterialTheme.colorScheme
     val fn = tools.selectedFunctionName
     val va = tools.selectedFunctionVa
-    var tab by remember { mutableStateOf("disasm") }
+    var tab by rememberSaveable { mutableStateOf("disasm") }
     var menu by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
@@ -13366,19 +13367,24 @@ private fun SegButton(label: String, selected: Boolean, onClick: () -> Unit) {
 
 /** Explorer So 统计 chip（ChipGroup 中的 chip）。 */
 @Composable
-private fun StatChip(text: String) {
+private fun StatChip(text: String, accentIndex: Int = -1) {
     val cs = MaterialTheme.colorScheme
+    // accentIndex >= 0 时取强调色派生的图表色（主/互补/三角/邻近…）：
+    // 一排统计里每个指标一种色，比全灰更好认，而且换强调色会整套跟着变
+    val pal = LocalAccentPalette.current
+    val tint = if (accentIndex >= 0) pal.chart[accentIndex % pal.chart.size] else cs.onSurfaceVariant
+    val dark = cs.background.luminance() < 0.5f
     Surface(
         shape = RoundedCornerShape(AppShape.sm),
-        color = cs.surfaceVariant,
-        border = BorderStroke(1.dp, cs.outlineVariant),
+        color = if (accentIndex >= 0) tint.copy(alpha = if (dark) 0.18f else 0.10f) else cs.surfaceVariant,
+        border = BorderStroke(1.dp, if (accentIndex >= 0) tint.copy(alpha = 0.45f) else cs.outlineVariant),
     ) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             fontSize = AppText.label,
-            color = cs.onSurfaceVariant,
+            color = if (accentIndex >= 0) tint else cs.onSurfaceVariant,
             maxLines = 1,
         )
     }
@@ -13658,10 +13664,10 @@ private fun CallGraphGraphPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                StatChip(if (zh) "函数 ${nodes.size}" else "fns ${nodes.size}")
-                StatChip(if (zh) "调用边 ${edges.size}" else "edges ${edges.size}")
-                StatChip(if (zh) "入口 $entryCount" else "entries $entryCount")
-                StatChip(if (zh) "显示 ${subPair.first.size}/${nodes.size}" else "shown ${subPair.first.size}/${nodes.size}")
+                StatChip(if (zh) "函数 ${nodes.size}" else "fns ${nodes.size}", 0)
+                StatChip(if (zh) "调用边 ${edges.size}" else "edges ${edges.size}", 1)
+                StatChip(if (zh) "入口 $entryCount" else "entries $entryCount", 2)
+                StatChip(if (zh) "显示 ${subPair.first.size}/${nodes.size}" else "shown ${subPair.first.size}/${nodes.size}", 4)
             }
             Text(
                 if (zh) "来源：rizin 调用图" else "source: rizin call graph",

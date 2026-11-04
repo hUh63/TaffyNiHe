@@ -105,6 +105,14 @@ internal data class AccentPalette(
     /** 表面色微带主色相（surfaceVariant / surfaceContainerHigh）。 */
     val tintedSurface: Color,
     val tintedSurfaceHigh: Color,
+    /**
+     * 页面底与三层容器也跟着掺色相（背景 / Lowest / Low / Container）。
+     * 亮度与原来的中性灰档位逐一持平 —— 只换色相，层次与对比度一点不动。
+     */
+    val tintedBackground: Color,
+    val tintedLowest: Color,
+    val tintedLow: Color,
+    val tintedBase: Color,
     /** 1dp 描边：带一点主色相，整页的线才跟卡片、容器是同一套色。 */
     val outline: Color,
     val outlineVariant: Color,
@@ -187,6 +195,12 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
     // 表面微 tint：亮度必须保持原石墨档位（深色 0.155 → 浅色 0.945），只把色相掺进去
     val tintedSurface = if (dark) tone(h, 0.10f, 0.155f) else tone(h, 0.22f, 0.945f)
     val tintedSurfaceHigh = if (dark) tone(h, 0.10f, 0.128f) else tone(h, 0.20f, 0.965f)
+    // 页面底与上层容器：亮度沿用原中性格（深 0.055 / 0.039 / 0.082 / 0.104，浅 0.971 / 1.0 / 0.984 / 1.0）。
+    // 浅色的 Lowest 与 Container 本来就是纯白（l=1.0，s 再高也还是白），所以浅色实际只动了背景和 Low。
+    val tintedBackground = if (dark) tone(h, 0.10f, 0.055f) else tone(h, 0.18f, 0.971f)
+    val tintedLowest = if (dark) tone(h, 0.10f, 0.039f) else tone(h, 0f, 1f)
+    val tintedLow = if (dark) tone(h, 0.10f, 0.082f) else tone(h, 0.16f, 0.984f)
+    val tintedBase = if (dark) tone(h, 0.10f, 0.104f) else tone(h, 0f, 1f)
     // 亮度与原灰阶持平（浅 0.80 / 深 0.335），只把色相掺进来；对比度不变，观感统一
     val outline = if (dark) tone(h, 0.12f, 0.335f) else tone(h, 0.13f, 0.800f)
     val outlineVariant = if (dark) tone(h, 0.10f, 0.200f) else tone(h, 0.12f, 0.910f)
@@ -216,6 +230,10 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
         line = line,
         tintedSurface = tintedSurface,
         tintedSurfaceHigh = tintedSurfaceHigh,
+        tintedBackground = tintedBackground,
+        tintedLowest = tintedLowest,
+        tintedLow = tintedLow,
+        tintedBase = tintedBase,
         outline = outline,
         outlineVariant = outlineVariant,
         chart = chart,
@@ -343,15 +361,15 @@ internal fun appLightColors(accent: Color, highContrast: Boolean, accentName: St
         onError = Color(0xFFFFFFFF),
         errorContainer = Color(0xFFFDE0DE),
         onErrorContainer = Color(0xFF4A0B09),
-        background = Color(0xFFF6F7F9),
+        background = p.tintedBackground,
         onBackground = if (highContrast) Color(0xFF000000) else Color(0xFF111419),
-        surface = Color(0xFFFFFFFF),
+        surface = p.tintedLowest,
         onSurface = if (highContrast) Color(0xFF000000) else Color(0xFF111419),
         surfaceVariant = p.tintedSurface,
         onSurfaceVariant = if (highContrast) Color(0xFF2A2F38) else Color(0xFF565E6C),
-        surfaceContainerLowest = Color(0xFFFFFFFF),
-        surfaceContainerLow = Color(0xFFFAFBFC),
-        surfaceContainer = Color(0xFFFFFFFF),
+        surfaceContainerLowest = p.tintedLowest,
+        surfaceContainerLow = p.tintedLow,
+        surfaceContainer = p.tintedBase,
         surfaceContainerHigh = p.tintedSurfaceHigh,
         surfaceContainerHighest = p.tintedSurface,
         outline = if (highContrast) Color(0xFF3F4650) else p.outline,
@@ -364,8 +382,9 @@ internal fun appLightColors(accent: Color, highContrast: Boolean, accentName: St
 }
 
 /**
- * 深色 —— 石墨。底色 #0B0D11 是不带色相的冷灰，卡片逐级提亮
- * （Low #10131A → Container #141821 → High #191E27 → Highest #1F252F）。
+ * 深色 —— 石墨。底色与卡片逐级提亮（背景 → Lowest → Low → Container → High → Highest），
+ * 每一档的亮度固定不变，只把强调色的色相掺进来（v1.5.41 起），所以整套界面是
+ * 「一片同色系的深底上浮起几层」，而不是中性格里嵌着几张彩色卡片。
  *
  * pureBlack 仍保留：用户显式要纯黑时把背景压到 #000000，
  * 但卡片仍按石墨档位走，否则纯黑下所有层次都会消失。
@@ -389,15 +408,15 @@ internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Bool
         onError = Color(0xFF4A0B09),
         errorContainer = Color(0xFF6E1512),
         onErrorContainer = Color(0xFFFFD9D6),
-        background = if (pureBlack) Color(0xFF000000) else Color(0xFF0B0D11),
+        background = if (pureBlack) Color(0xFF000000) else p.tintedBackground,
         onBackground = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFE7EAF0),
-        surface = if (pureBlack) Color(0xFF000000) else Color(0xFF0B0D11),
+        surface = if (pureBlack) Color(0xFF000000) else p.tintedBackground,
         onSurface = if (highContrast) Color(0xFFFFFFFF) else Color(0xFFE7EAF0),
         surfaceVariant = p.tintedSurface,
         onSurfaceVariant = if (highContrast) Color(0xFFE7EAF0) else Color(0xFFA3ACBA),
-        surfaceContainerLowest = Color(0xFF08090C),
-        surfaceContainerLow = Color(0xFF10131A),
-        surfaceContainer = Color(0xFF141821),
+        surfaceContainerLowest = p.tintedLowest,
+        surfaceContainerLow = p.tintedLow,
+        surfaceContainer = p.tintedBase,
         surfaceContainerHigh = p.tintedSurfaceHigh,
         surfaceContainerHighest = p.tintedSurface,
         outline = if (highContrast) Color(0xFFA3ACBA) else p.outline,

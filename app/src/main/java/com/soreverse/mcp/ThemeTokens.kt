@@ -249,9 +249,10 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
     val tintedBase = if (dark) tone(h, 0.10f, 0.104f) else tone(h, 0f, 1f)
     // 亮度与原灰阶持平（浅 0.80 / 深 0.335），只把色相掺进来；对比度不变，观感统一
     val outline = if (dark) tone(h, 0.12f, 0.335f) else tone(h, 0.13f, 0.800f)
-    // 浅色 outlineVariant 压到 0.884：surfaceVariant（chip 底，l=0.945）是最暗的浅色表面，
-    // 0.910 时对比只有 1.08:1，1dp 分割线在 chip 里等于没有；0.878 留到 ≥1.16:1（青/绿相最低）
-    val outlineVariant = if (dark) tone(h, 0.10f, 0.200f) else tone(h, 0.12f, 0.878f)
+    // 描边要压在 surfaceVariant 上还看得见（chip 底是最暗的浅色表面，l=0.945 / 深色 0.155）：
+    // 原来的 0.910 / 0.200 只有 1.08 / 1.16:1，1dp 分割线在 chip 里等于没有。
+    // 现在留 1.18:1 的余量 —— Compose 的 Color 内部是半精度浮点，卡在 1.15 附近测不准。
+    val outlineVariant = if (dark) tone(h, 0.10f, 0.216f) else tone(h, 0.12f, 0.870f)
 
     val chart = listOf(
         accent,

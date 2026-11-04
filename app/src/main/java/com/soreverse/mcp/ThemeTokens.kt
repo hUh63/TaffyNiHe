@@ -178,12 +178,13 @@ private fun Color.toHsl(): FloatArray {
 }
 
 /**
- * 把颜色压暗到「能当文字/图标用」的亮度（默认 ≤0.16，即对最亮的卡片面 ≥4.5:1 ——
- * 页底 #F6F7F9 尚可，但 surfaceContainerHigh 掺了色相后亮度只有 0.90，得按它算）。
+ * 把颜色压暗到「能当文字/图标用」的亮度（默认 ≤0.15，即对最亮的卡片面 ≥4.5:1）。
+ * 阈值按**最低**的浅色表面反算：surfaceVariant（l=0.945）比页底和 surfaceContainerHigh
+ * 都暗，按页底算会漏掉 chip 底上的字（实测差 0.05~0.15）。
  * 只动 HSL 的 lightness、保留色相与饱和度，所以压暗后还是"用户选的那个颜色"，
  * 只是深了一档 —— 与 Material 3 动态取色把浅色 primary 定在 tone 40 是同一个道理。
  */
-private fun inkOf(c: Color, maxLum: Float = 0.16f): Color {
+private fun inkOf(c: Color, maxLum: Float = 0.15f): Color {
     if (c.luminance() <= maxLum) return c
     val hsl = c.toHsl()
     var l = hsl[2]

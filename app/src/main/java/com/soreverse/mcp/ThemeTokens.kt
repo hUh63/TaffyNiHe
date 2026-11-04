@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -104,6 +105,9 @@ internal data class AccentPalette(
     /** 表面色微带主色相（surfaceVariant / surfaceContainerHigh）。 */
     val tintedSurface: Color,
     val tintedSurfaceHigh: Color,
+    /** 1dp 描边：带一点主色相，整页的线才跟卡片、容器是同一套色。 */
+    val outline: Color,
+    val outlineVariant: Color,
     /** 图表/多分类色序列（6 个，已按深浅调过亮度）。 */
     val chart: List<Color>,
 )
@@ -160,8 +164,10 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
     val l = hsl[2]
     fun tone(hh: Float, ss: Float, ll: Float) = hslColor(hh, ss, ll)
 
-    // 主色很亮时（深色主题里的浅粉/浅青）用深色字，否则白字
-    val onAccent = if (l > 0.64f) Color(0xFF11151C) else Color(0xFFFFFFFF)
+    // 用相对亮度（不是 HSL 的 lightness）判白字还是深色字：
+    // 白/黑对比相等的临界点是 L=0.179；按 HSL 的 l 判会把橙色/青色主色判成白字，
+    // 实测 #C97A16 上白字只有 4.2:1、深色字 4.7:1，后者才过 AA。
+    val onAccent = if (accent.luminance() > 0.179f) Color(0xFF11151C) else Color(0xFFFFFFFF)
     val container = if (dark) tone(h, s * 0.60f, 0.245f) else tone(h, kotlin.math.min(s, 0.80f), 0.930f)
     val onContainer = if (dark) tone(h, 0.70f, 0.900f) else tone(h, 0.62f, 0.185f)
 
@@ -181,6 +187,9 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
     // 表面微 tint：亮度必须保持原石墨档位（深色 0.155 → 浅色 0.945），只把色相掺进去
     val tintedSurface = if (dark) tone(h, 0.10f, 0.155f) else tone(h, 0.22f, 0.945f)
     val tintedSurfaceHigh = if (dark) tone(h, 0.10f, 0.128f) else tone(h, 0.20f, 0.965f)
+    // 亮度与原灰阶持平（浅 0.80 / 深 0.335），只把色相掺进来；对比度不变，观感统一
+    val outline = if (dark) tone(h, 0.12f, 0.335f) else tone(h, 0.13f, 0.800f)
+    val outlineVariant = if (dark) tone(h, 0.10f, 0.200f) else tone(h, 0.12f, 0.910f)
 
     val chart = listOf(
         accent,
@@ -207,6 +216,8 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
         line = line,
         tintedSurface = tintedSurface,
         tintedSurfaceHigh = tintedSurfaceHigh,
+        outline = outline,
+        outlineVariant = outlineVariant,
         chart = chart,
     )
 }
@@ -343,8 +354,8 @@ internal fun appLightColors(accent: Color, highContrast: Boolean, accentName: St
         surfaceContainer = Color(0xFFFFFFFF),
         surfaceContainerHigh = p.tintedSurfaceHigh,
         surfaceContainerHighest = p.tintedSurface,
-        outline = if (highContrast) Color(0xFF3F4650) else Color(0xFFC7CDD6),
-        outlineVariant = Color(0xFFE3E7ED),
+        outline = if (highContrast) Color(0xFF3F4650) else p.outline,
+        outlineVariant = p.outlineVariant,
         inverseSurface = Color(0xFF1E232B),
         inverseOnSurface = Color(0xFFF2F4F7),
         inversePrimary = accentPaletteOf(accent, dark = true, name = accentName).accent,
@@ -389,8 +400,8 @@ internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Bool
         surfaceContainer = Color(0xFF141821),
         surfaceContainerHigh = p.tintedSurfaceHigh,
         surfaceContainerHighest = p.tintedSurface,
-        outline = if (highContrast) Color(0xFFA3ACBA) else Color(0xFF4B5360),
-        outlineVariant = Color(0xFF262C36),
+        outline = if (highContrast) Color(0xFFA3ACBA) else p.outline,
+        outlineVariant = p.outlineVariant,
         inverseSurface = Color(0xFFE7EAF0),
         inverseOnSurface = Color(0xFF0B0D11),
         inversePrimary = accentPaletteOf(accent, dark = false, name = accentName).accent,

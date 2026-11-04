@@ -48,6 +48,13 @@ internal object AppPalette {
     val pink = Color(0xFFD6336C)
     val mono = Color(0xFF6B7280)
 
+    /**
+     * 当文字/图标用的强调色：浅色下压暗到 ≥4.5:1（深色下原样）。
+     * 直接拿 accent() 上色做文字，浅色主题里的橙/绿/黄只有 2.4~3.9:1。
+     */
+    fun ink(name: String, dark: Boolean): Color =
+        if (dark) accent(name, dark) else inkOf(accent(name, dark))
+
     fun accent(name: String, dark: Boolean): Color = when (name) {
         "blue" -> if (dark) Color(0xFF8FB4FF) else Color(0xFF2C6BED)
         "teal" -> if (dark) Color(0xFF5FD3C0) else Color(0xFF0E8C7F)
@@ -87,6 +94,13 @@ internal data class AccentPalette(
     val name: String,
     val accent: Color,
     val onAccent: Color,
+    /**
+     * 当"文字色"用的强调色。浅色下 primary 会被压暗到相对亮度 ≤0.18 ——
+     * 否则橙/绿/青/黄当文字放在浅底上只有 2.4~3.9:1（读不清）。
+     * 深色下与 accent 相同（亮色放在深底上本来就够）。
+     */
+    val ink: Color,
+    val onInk: Color,
     /** 主色容器：选中项底、主 CTA 的浅底、状态胶囊。 */
     val container: Color,
     val onContainer: Color,
@@ -96,6 +110,8 @@ internal data class AccentPalette(
     val onAnalogousContainer: Color,
     /** 互补色：进 tertiary / tertiaryContainer。 */
     val complement: Color,
+    /** 互补色上的文字色（与 onAccent 同规则）。 */
+    val onTertiary: Color,
     val complementContainer: Color,
     val onComplementContainer: Color,
     /** 极浅/极暗的主色底，给状态胶囊、图表高亮区用。 */
@@ -162,6 +178,26 @@ private fun Color.toHsl(): FloatArray {
 }
 
 /**
+ * 把颜色压暗到「能当文字/图标用」的亮度（默认 ≤0.16，即对最亮的卡片面 ≥4.5:1 ——
+ * 页底 #F6F7F9 尚可，但 surfaceContainerHigh 掺了色相后亮度只有 0.90，得按它算）。
+ * 只动 HSL 的 lightness、保留色相与饱和度，所以压暗后还是"用户选的那个颜色"，
+ * 只是深了一档 —— 与 Material 3 动态取色把浅色 primary 定在 tone 40 是同一个道理。
+ */
+private fun inkOf(c: Color, maxLum: Float = 0.16f): Color {
+    if (c.luminance() <= maxLum) return c
+    val hsl = c.toHsl()
+    var l = hsl[2]
+    var out = c
+    var guard = 0
+    while (guard < 60 && out.luminance() > maxLum && l > 0.05f) {
+        l -= 0.01f
+        out = hslColor(hsl[0], hsl[1], l)
+        guard++
+    }
+    return out
+}
+
+/**
  * 由强调色派生整套色板。[name] 只用于标记来源，不影响取色逻辑 ——
  * 即使开了 Material You（系统色），也能从传入的任意颜色派生出一致的配色。
  */
@@ -172,22 +208,31 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
     val l = hsl[2]
     fun tone(hh: Float, ss: Float, ll: Float) = hslColor(hh, ss, ll)
 
-    // 用相对亮度（不是 HSL 的 lightness）判白字还是深色字：
-    // 白/黑对比相等的临界点是 L=0.179；按 HSL 的 l 判会把橙色/青色主色判成白字，
-    // 实测 #C97A16 上白字只有 4.2:1、深色字 4.7:1，后者才过 AA。
-    val onAccent = if (accent.luminance() > 0.179f) Color(0xFF11151C) else Color(0xFFFFFFFF)
+    // 用相对亮度判白字还是深色字，临界点 L=0.194：
+    // 白字对比 = 1.05/(L+0.05)，深字（#0A0D11，L≈0.0046）对比 = (L+0.05)/0.0546，
+    // 两者相等时 L≈0.194 —— 低于它白字更高、高于它深字更高。
+    // v1.5.40 用的 0.179 偏低：红色 #D93A34（L=0.180）被判成深字，只有 4.05:1，
+    // 而白字其实是 4.56:1 已过 AA。
+    fun onColorOf(c: Color) = if (c.luminance() > 0.194f) Color(0xFF0A0D11) else Color(0xFFFFFFFF)
+    val onAccent = onColorOf(accent)
+    // 浅色下 primary 要当文字/图标用，必须压到对纯白 ≥4.5:1
+    val ink = if (dark) accent else inkOf(accent)
+    val onInk = onColorOf(ink)
     val container = if (dark) tone(h, s * 0.60f, 0.245f) else tone(h, kotlin.math.min(s, 0.80f), 0.930f)
     val onContainer = if (dark) tone(h, 0.70f, 0.900f) else tone(h, 0.62f, 0.185f)
 
     val analogousContainer = if (dark) tone(h - 30f, 0.28f, 0.225f) else tone(h - 30f, 0.46f, 0.945f)
     val onAnalogousContainer = if (dark) tone(h - 30f, 0.58f, 0.900f) else tone(h - 30f, 0.55f, 0.185f)
 
-    val complement = if (dark) tone(h + 180f, 0.60f, 0.740f) else tone(h + 180f, 0.56f, 0.380f)
+    val complementRaw = if (dark) tone(h + 180f, 0.60f, 0.740f) else tone(h + 180f, 0.56f, 0.380f)
+    // 浅色下 tertiary 也当文字/图标用（对比按钮、图例），l=0.38 的黄绿只有 3.0:1，要压暗
+    val complement = if (dark) complementRaw else inkOf(complementRaw)
     val complementContainer = if (dark) tone(h + 180f, 0.38f, 0.225f) else tone(h + 180f, 0.50f, 0.920f)
     val onComplementContainer = if (dark) tone(h + 180f, 0.52f, 0.900f) else tone(h + 180f, 0.58f, 0.180f)
 
     // 近乎中性的"次强调"：只带一点主色相，正文/次要文字用它才不会变粉字
-    val analogous = if (dark) tone(h, 0.12f, 0.780f) else tone(h, 0.14f, 0.420f)
+    val analogousRaw = if (dark) tone(h, 0.12f, 0.780f) else tone(h, 0.14f, 0.395f)
+    val analogous = if (dark) analogousRaw else inkOf(analogousRaw)
 
     val soft = if (dark) tone(h, s * 0.52f, 0.200f) else tone(h, kotlin.math.min(s, 0.66f), 0.955f)
     val line = if (dark) tone(h, s * 0.48f, 0.420f) else tone(h, kotlin.math.min(s, 0.55f), 0.745f)
@@ -207,7 +252,7 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
 
     val chart = listOf(
         accent,
-        complement,
+        complementRaw,
         if (dark) tone(h + 120f, 0.52f, 0.700f) else tone(h + 120f, 0.50f, 0.400f),
         if (dark) tone(h + 240f, 0.52f, 0.720f) else tone(h + 240f, 0.48f, 0.420f),
         if (dark) tone(h - 30f, 0.52f, 0.720f) else tone(h - 30f, 0.46f, 0.440f),
@@ -218,12 +263,15 @@ internal fun accentPaletteOf(accent: Color, dark: Boolean, name: String = ""): A
         name = name,
         accent = accent,
         onAccent = onAccent,
+        ink = ink,
+        onInk = onInk,
         container = container,
         onContainer = onContainer,
         analogous = analogous,
         analogousContainer = analogousContainer,
         onAnalogousContainer = onAnalogousContainer,
         complement = complement,
+        onTertiary = onColorOf(complement),
         complementContainer = complementContainer,
         onComplementContainer = onComplementContainer,
         soft = soft,
@@ -343,8 +391,10 @@ internal fun appLightColors(accent: Color, highContrast: Boolean, accentName: St
     // 整套槽位都从强调色派生：换色之后卡片底、chip、选中底、描边一起变，而不是只有按钮变
     val p = accentPaletteOf(accent, dark = false, name = accentName)
     return lightColorScheme(
-        primary = p.accent,
-        onPrimary = p.onAccent,
+        // 浅色底上的主色要当文字/图标用，所以取压暗后的 ink（对比 ≥4.5）；
+        // 原色 p.accent 仍给图表/填充块/预览色块用
+        primary = p.ink,
+        onPrimary = p.onInk,
         primaryContainer = p.container,
         onPrimaryContainer = p.onContainer,
         // secondary 只带一点主色相（近乎中性），避免"次要文字变粉字"
@@ -354,7 +404,7 @@ internal fun appLightColors(accent: Color, highContrast: Boolean, accentName: St
         onSecondaryContainer = p.onAnalogousContainer,
         // tertiary 用互补色：对比强调（徽标、图表第二色、对比按钮）
         tertiary = p.complement,
-        onTertiary = Color(0xFFFFFFFF),
+        onTertiary = p.onTertiary,
         tertiaryContainer = p.complementContainer,
         onTertiaryContainer = p.onComplementContainer,
         error = Color(0xFFC62828),
@@ -401,7 +451,7 @@ internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Bool
         secondaryContainer = p.analogousContainer,
         onSecondaryContainer = p.onAnalogousContainer,
         tertiary = p.complement,
-        onTertiary = Color(0xFF11151C),
+        onTertiary = p.onTertiary,
         tertiaryContainer = p.complementContainer,
         onTertiaryContainer = p.onComplementContainer,
         error = Color(0xFFFFB4AB),
@@ -428,9 +478,19 @@ internal fun appDarkColors(accent: Color, pureBlack: Boolean, highContrast: Bool
     )
 }
 
-internal fun statusSuccess(dark: Boolean = false): Color = if (dark) Color(0xFF4ED17E) else Color(0xFF1E9E5A)
-internal fun statusError(dark: Boolean = false): Color = if (dark) Color(0xFFFF8C85) else Color(0xFFD93A34)
-internal fun statusWarning(dark: Boolean = false): Color = if (dark) Color(0xFFF0B267) else Color(0xFFC97A16)
+/**
+ * 语义状态色。浅色下这三个值会被压暗到对浅底 ≥4.5:1 ——
+ * 它们几乎总是当**文字/图标**用（"成功""失败"、状态点、日志级别），
+ * 原来的 #1E9E5A / #C97A16 在浅色底上只有 3.2:1，小字号看不清。
+ */
+internal fun statusSuccess(dark: Boolean = false): Color =
+    if (dark) Color(0xFF4ED17E) else inkOf(Color(0xFF1E9E5A))
+
+internal fun statusError(dark: Boolean = false): Color =
+    if (dark) Color(0xFFFF8C85) else inkOf(Color(0xFFD93A34))
+
+internal fun statusWarning(dark: Boolean = false): Color =
+    if (dark) Color(0xFFF0B267) else inkOf(Color(0xFFC97A16))
 
 /**
  * 历史遗留的 iOS 色板 —— 仍有几处引用（深层聊天、部分面板）。

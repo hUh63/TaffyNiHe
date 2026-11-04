@@ -51,6 +51,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -479,12 +481,20 @@ internal fun CapturePage(t: UiText) {
     )
 }
 
-private fun methodColor(method: String) = when (method.uppercase()) {
-    "GET" -> AppPalette.green
-    "POST" -> AppPalette.orange
-    "CONNECT" -> AppPalette.purple
-    "WS" -> AppPalette.yellow
-    else -> AppPalette.mono
+/**
+ * HTTP 方法色：这是当**文字**用的（TypeChip 的标签色），所以取 ink 版 ——
+ * 浅色主题下 AppPalette 原色（绿 #1E9E5A 3.25:1 / 黄 #C99A16 2.44:1）读不清。
+ */
+@Composable
+private fun methodColor(method: String): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return when (method.uppercase()) {
+        "GET" -> AppPalette.ink("green", dark)
+        "POST" -> AppPalette.ink("orange", dark)
+        "CONNECT" -> AppPalette.ink("purple", dark)
+        "WS" -> AppPalette.ink("yellow", dark)
+        else -> AppPalette.ink("mono", dark)
+    }
 }
 
 /** 教程区：深色等宽 + 复制按钮（内容较长，独立滚动）。 */
@@ -564,7 +574,7 @@ private fun ReplayAwareDetail(
                     Text(
                         if (zh) "ⓘ HTTPS 为加密隧道：无明文请求头，不可重放。解密方案见「教程」。" else "ⓘ HTTPS tunnel: no plaintext headers, not replayable. See Guide.",
                         style = MaterialTheme.typography.labelSmall,
-                        color = AppPalette.orange,
+                        color = statusWarning(MaterialTheme.colorScheme.background.luminance() < 0.5f),
                     )
                 }
                 if (replayResult.isNotBlank()) {
@@ -610,16 +620,18 @@ private fun MonoBlock(text: String) {
 @Composable
 private fun StatusPill(label: String, ok: Boolean, modifier: Modifier = Modifier) {
     val metrics = LocalUiMetrics.current
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val okColor = statusSuccess(dark)
     Row(
         modifier
             .clip(RoundedCornerShape(metrics.controlRadius))
-            .background(if (ok) AppPalette.green.copy(alpha = 0.15f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
+            .background(if (ok) okColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(if (ok) "●" else "○", color = if (ok) AppPalette.green else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = if (ok) AppPalette.green else MaterialTheme.colorScheme.error, maxLines = 1)
+        Text(if (ok) "●" else "○", color = if (ok) okColor else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = if (ok) okColor else MaterialTheme.colorScheme.error, maxLines = 1)
     }
 }
 

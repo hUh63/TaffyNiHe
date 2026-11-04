@@ -102,6 +102,7 @@ class ThemeContrastTest {
     @Test
     fun everyAccentTextMeetsAaInLightScheme() {
         val fails = accents.flatMap { audit(lightScheme(it), "light/$it") }
+        if (fails.isNotEmpty()) fails.forEach { System.err.println("TEXT-CONTRAST-FAIL $it") }
         assertTrue(
             "浅色方案有 ${fails.size} 处文字对比度低于 4.5:1：\n" + fails.joinToString("\n"),
             fails.isEmpty(),
@@ -111,6 +112,7 @@ class ThemeContrastTest {
     @Test
     fun everyAccentTextMeetsAaInDarkScheme() {
         val fails = accents.flatMap { audit(darkScheme(it), "dark/$it") }
+        if (fails.isNotEmpty()) fails.forEach { System.err.println("TEXT-CONTRAST-FAIL $it") }
         assertTrue(
             "深色方案有 ${fails.size} 处文字对比度低于 4.5:1：\n" + fails.joinToString("\n"),
             fails.isEmpty(),
@@ -158,6 +160,11 @@ class ThemeContrastTest {
                     if (r < 1.15) fails += "$mode/$name · outlineVariant on $surfaceName = ${fmt(r)}"
                 }
             }
+        }
+        // Gradle 只打印 AssertionError 的行号、不打印 message，所以同时写到 stderr，
+        // 让 CI 日志直接看得出是哪一组（否则每次都要靠猜）
+        if (fails.isNotEmpty()) {
+            fails.forEach { System.err.println("OUTLINE-CONTRAST-FAIL $it") }
         }
         assertTrue("描边在这些组合下看不见：\n" + fails.joinToString("\n"), fails.isEmpty())
     }

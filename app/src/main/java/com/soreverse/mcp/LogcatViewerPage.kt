@@ -1794,6 +1794,6 @@ private fun logBlockColors(): Triple<Color, Color, Color> {
     return if (logPageDark()) {
         Triple(Color(0xFF111111), Color(0xFFE0E0E0), Color(0xFF888888))
     } else {
-        Triple(cs.surfaceContainerHigh, cs.onSurface, cs.onSurfaceVariant)
+        Triple(cs.surfaceVariant, cs.onSurface, cs.onSurfaceVariant)
     }
 }

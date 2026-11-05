@@ -628,7 +628,7 @@ private fun monoBlockColors(): Pair<Color, Color> {
     return if (cs.background.luminance() < 0.5f) {
         TerminalColors.bg to TerminalColors.fg
     } else {
-        cs.surfaceContainerHigh to cs.onSurface
+        cs.surfaceVariant to cs.onSurface
     }
 }
 

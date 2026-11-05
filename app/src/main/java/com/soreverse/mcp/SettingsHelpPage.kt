@@ -42,7 +42,7 @@ internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     // 代码块配色跟随主题（与编辑器 / 日志块一致）：浅色主题下白页里嵌一块纯黑太割裂
     val blockDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val bg = if (blockDark) Color(0xFF0B0F14) else MaterialTheme.colorScheme.surfaceContainerHigh
+    val bg = if (blockDark) Color(0xFF0B0F14) else MaterialTheme.colorScheme.surfaceVariant
     val fg = if (blockDark) Color(0xFFD6E2F0) else MaterialTheme.colorScheme.onSurface
     var tab by remember { mutableStateOf(0) }   // 0=功能教程 1=实现原理 2=MCP Skill
 

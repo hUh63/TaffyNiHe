@@ -1,3 +1,37 @@
+## 塔菲逆核 v1.5.49 —— 批量重命名 / ProGuard mapping 导入
+
+### 新增 `taffy_dex_rename_mapping`
+已有的 `taffy_dex_rename` 适合改**一两个**符号：每改一个就重写一次 dex（`DexRenameApi`）。
+但反混淆的真实场景是"一次应用几百条改名"（jadx / R8 导出的 mapping），
+逐个调用等于几百次全量重写，手机上要几分钟。
+
+新工具走 dexlib2 的 `DexRewriter`：**一次遍历应用全部改名**。
+
+- `action=export_mapping`：导出符号骨架（类 + 成员），人工改右边的名字
+- `action=import_mapping`：读 ProGuard mapping（自动剥 `12:34:` 行号前缀、区分方法/字段、
+  Java 参数列表转描述符）或 `renames` 数组（class / method / field / package）
+- `action=plan`：dryRun，返回将改多少项 + **冲突列表**（两个类改成一个名字、
+  同类里两个方法改成同名同签名 —— 后者会让 dex 写出失败或调用错方法）
+- `action=apply`：输入 APK 时额外用 `ZipRepack.copyAll(replace=...)` 产出
+  `<name>-renamed.apk`（保留 method/extra 与对齐，空替换集就不报产物），并提示需要重签
+
+映射 key 按「所属类 + 名称 + 签名」精确匹配 —— 只按名字映射会把所有 `toString` 一起改。
+方法不填 descriptor 时落 `类->名字:*` 通配（用户多半不知道该填 `(I)V`）。
+
+**开发期验证**：用真实 916KB dex 跑重命名，一个被调用 140 次的方法 → 定义改名 1 个、
+旧名引用 0 个、新名引用 140 个。单测覆盖类型转换（`int[]` → `[I` 这种基本类型数组，
+第一版写成 `[Lint;` 被单测抓到）、mapping 解析、坏行容错。
+
+### 一个必须说明的失误
+第一版我把这个能力做成了**同名**的 `taffy_dex_rename`，直接覆盖了 main 上已有的实现
+（`engine/DexRenameApi` + 4 个 Renamer，而且 `SettingsDexExplorerPage` 已经在调用它）。
+后果是重复注册导致 `ToolCatalog.ALL` 与 `names` 数量不一致、单测红，原实现被顶掉。
+已完整回滚（恢复原版文件、删除重复实现），这一版改成互补定位的独立工具。
+
+教训：**新增工具前先 grep 工具名**，光看 UI 有没有入口不够 —— 那个工具可能只被 MCP 客户端用。
+
+---
+
 ## 塔菲逆核 v1.5.48 —— 代码块在白页上"消失"了
 
 v1.5.44~45 把几处深色代码块改成了跟随主题，浅色主题下用 `surfaceContainerHigh`。

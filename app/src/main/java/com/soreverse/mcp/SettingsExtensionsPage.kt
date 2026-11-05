@@ -55,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import com.soreverse.mcp.core.PluginManager
@@ -700,7 +701,8 @@ ${if (name.isBlank()) clean else name} —— 塔菲逆核插件。
                                     if (zh) "字节码逻辑无法自动翻译——用「AI 全自动转换」复制 prompt 给 AI，产出完整 plugin.py 后粘贴保存"
                                     else "Bytecode logic can't be auto-translated — use AI convert then paste the generated plugin.py",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = AppPalette.orange,
+                                    // 浅色主题下 AppPalette.orange 只有 3.15:1，用压暗版
+                                    color = statusWarning(MaterialTheme.colorScheme.background.luminance() < 0.5f),
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                                 )
                             }

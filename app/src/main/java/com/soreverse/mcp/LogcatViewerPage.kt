@@ -113,14 +113,19 @@ private data class LogLine(
 )
 
 /** 级别着色：对标 LogFox 桌面版配色。 */
-private fun levelColor(level: String): Color = when (level) {
-    "V" -> Color(0xFF9E9E9E)
-    "D" -> Color(0xFF64B5F6)
-    "I" -> Color(0xFF66BB6A)
-    "W" -> Color(0xFFFFB74D)
-    "E" -> Color(0xFFEF5350)
-    "F" -> Color(0xFFAB47BC)
-    else -> Color(0xFF9E9E9E)
+/**
+ * 日志级别色（当**文字**用）。深色主题用原来的亮色；浅色主题换深色等价物 ——
+ * #64B5F6 / #66BB6A / #FFB74D 都是按深底设计的，放在浅色主题的白底日志上只有
+ * 1.9~3.3:1，等于看不见。浅色这一列的取值都对白底 ≥5:1。
+ */
+private fun levelColor(level: String, dark: Boolean = true): Color = when (level) {
+    "V" -> if (dark) Color(0xFF9E9E9E) else Color(0xFF616161)
+    "D" -> if (dark) Color(0xFF64B5F6) else Color(0xFF1565C0)
+    "I" -> if (dark) Color(0xFF66BB6A) else Color(0xFF2E7D32)
+    "W" -> if (dark) Color(0xFFFFB74D) else Color(0xFF9C5A00)
+    "E" -> if (dark) Color(0xFFEF5350) else Color(0xFFC62828)
+    "F" -> if (dark) Color(0xFFAB47BC) else Color(0xFF7B1FA2)
+    else -> if (dark) Color(0xFF9E9E9E) else Color(0xFF616161)
 }
 
 /** 是否为崩溃段起始行（LogFox 风格：JAVA / NATIVE / ANR 三分类）。 */
@@ -1543,7 +1548,7 @@ internal fun LogcatViewerPage(t: UiText) {
                             FilterChip(
                                 selected = lv in levelSet,
                                 onClick = { levelSet = if (lv in levelSet) levelSet - lv else levelSet + lv },
-                                label = { Text(lv, fontSize = AppText.label, fontWeight = FontWeight.Bold, color = levelColor(lv)) },
+                                label = { Text(lv, fontSize = AppText.label, fontWeight = FontWeight.Bold, color = levelColor(lv, logPageDark())) },
                             )
                         }
                     }
@@ -1652,19 +1657,24 @@ internal fun LogcatViewerPage(t: UiText) {
                 }
             } else {
                 items(visible) { line ->
+                    // 时间/pid/级别/tag 原来是写死的深色系（#90A4AE / #4DD0E1），
+                    // 浅色主题下压在页面底色上只有 1.7~2.6:1 —— 整行日志等于看不见
+                    val logDark = logPageDark()
+                    val metaColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    val tagColor = if (logDark) Color(0xFF4DD0E1) else MaterialTheme.colorScheme.primary
                     SelectionContainer {
                         Text(
                             text = buildAnnotatedString {
-                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
+                                withStyle(SpanStyle(color = metaColor, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append(line.time + " ")
                                 }
-                                withStyle(SpanStyle(color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
+                                withStyle(SpanStyle(color = metaColor, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append(line.pid + " ")
                                 }
-                                withStyle(SpanStyle(color = levelColor(line.level), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
+                                withStyle(SpanStyle(color = levelColor(line.level, logDark), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append(line.level + " ")
                                 }
-                                withStyle(SpanStyle(color = Color(0xFF4DD0E1), fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
+                                withStyle(SpanStyle(color = tagColor, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, fontSize = AppText.label)) {
                                     append("${line.tag} ")
                                 }
                                     // 消息（关键字高亮）

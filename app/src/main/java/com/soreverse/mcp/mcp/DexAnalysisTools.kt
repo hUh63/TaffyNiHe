@@ -483,6 +483,166 @@ object DexAnalysisTools {
         }
     }
 
+    /**
+     * 包使用统计 —— 回答「这个 SDK / 库还被用着吗、能不能删」。
+     *
+     * 参考 Dex 编辑器 1.021 的 PackageUsageStats：只统计**其它包**对目标包（含子包）的引用，
+     * 包内互引不计 —— 否则任何一个内部调用很多的库都会显得"被重度使用"。
+     * 按类汇总四类引用（实例化 / 静态调用 / 方法调用 / 字段读写），再给成员明细。
+     */
+    val dexPackageUsage: ToolHandler = object : ToolHandler {
+        override val meta = ToolMeta(
+            "taffy_dex_package_usage",
+            "【DEX 包使用统计】统计某个包（含子包）被**其它包**引用了多少次：实例化(new-instance)、" +
+                "静态调用(invoke-static)、方法调用、字段读写，按类汇总并按成员排序。用来判断一个 SDK / 库" +
+                "是不是死代码、删掉安不安全。包内互引会被排除。需要 Markdown 表格时传 markdown=true。",
+            "Package-level usage statistics: counts references from OUTSIDE the package into it " +
+                "(new-instance / invoke-static / method / field), aggregated per class and per member. " +
+                "Answers \"is this SDK dead code\". Intra-package references are excluded. " +
+                "Set markdown=true for a Markdown table.",
+            "decompile", ToolClass.EXTRA, heavy = true,
+        ) {
+            objectSchema(props {
+                "path" str "APK 或 DEX 文件路径"
+                "package" str "目标包名（如 com.example.sdk，也接受 com/example/sdk）"
+                "includeSubpackages" bool "是否包含子包（默认 true）"
+                "topMembers" int "成员明细条数，默认 30，按引用次数降序，0 = 不返回"
+                "markdown" bool "是否额外返回 Markdown 表格（默认 false）"
+            })
+        }
+
+        override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
+            val path = args.str("path")
+            if (path.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 path", "path", "")
+            val file = File(path)
+            if (!file.isFile) return err("FILE_NOT_FOUND", "文件不存在: $path", "path", path)
+
+            val rawPkg = args.str("package").trim().trim('.', '/', ';', 'L')
+            if (rawPkg.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 package", "package", "")
+            val prefix = rawPkg.replace('.', '/')
+            val includeSub = args.str("includeSubpackages", "true").toBoolean()
+            val topMembers = args.intValue("topMembers", 30).coerceIn(0, 500)
+            val wantMarkdown = args.str("markdown", "false").toBoolean()
+
+            val dexFiles = loadAllDex(file)
+            if (dexFiles.isEmpty()) return err("NO_DEX", "未在 $path 中找到 DEX", "path", path)
+
+            // 先记下包内类，扫描时用来排除「包内互引」
+            val targetClasses = HashSet<String>()
+            var scannedClasses = 0
+            for ((_, dex) in dexFiles) {
+                for (cls in dex.classes) {
+                    scannedClasses++
+                    if (inPackage(cls.type, prefix, includeSub)) targetClasses.add(cls.type)
+                }
+            }
+            if (targetClasses.isEmpty())
+                return err("PACKAGE_NOT_FOUND", "包里没有类: $rawPkg（检查包名，或该包在别的 DEX）", "package", rawPkg)
+
+            // 类级计数：0=实例化 1=静态调用 2=方法调用 3=字段读写
+            val classStats = HashMap<String, IntArray>()
+            val memberStats = HashMap<String, Int>()
+            fun bump(key: String, idx: Int) {
+                val arr = classStats.getOrPut(key) { IntArray(4) }
+                arr[idx] = arr[idx] + 1
+            }
+
+            for ((_, dex) in dexFiles) {
+                for (cls in dex.classes) {
+                    val callerInside = inPackage(cls.type, prefix, includeSub)
+                    if (callerInside) continue          // 包内互引，整类跳过（不会有外部引用混在同一条指令里）
+                    for (m in cls.methods) {
+                        val impl = m.implementation ?: continue
+                        for (insn in impl.instructions) {
+                            if (insn !is ReferenceInstruction) continue
+                            val op = insn.opcode.name
+                            if (op == "NEW_INSTANCE") {
+                                val t = insn.reference as? TypeReference ?: continue
+                                if (inPackage(t.type, prefix, includeSub)) bump(t.type, 0)
+                            } else if (op.startsWith("INVOKE_")) {
+                                val r = insn.reference as? MethodReference ?: continue
+                                if (!inPackage(r.definingClass, prefix, includeSub)) continue
+                                val isStatic = op.contains("STATIC")
+                                bump(r.definingClass, if (isStatic) 1 else 2)
+                                val mk = "${r.definingClass}|m|${r.name}"
+                                memberStats[mk] = (memberStats[mk] ?: 0) + 1
+                            } else if (op.startsWith("IGET") || op.startsWith("IPUT") ||
+                                op.startsWith("SGET") || op.startsWith("SPUT")
+                            ) {
+                                val r = insn.reference as? FieldReference ?: continue
+                                if (!inPackage(r.definingClass, prefix, includeSub)) continue
+                                bump(r.definingClass, 3)
+                                val fk = "${r.definingClass}|f|${r.name}"
+                                memberStats[fk] = (memberStats[fk] ?: 0) + 1
+                            }
+                        }
+                    }
+                }
+            }
+
+            var newInstance = 0; var staticCall = 0; var methodRefs = 0; var fieldRefs = 0
+            val classRows = classStats.entries
+                .map { (type, a) ->
+                    newInstance += a[0]; staticCall += a[1]; methodRefs += a[2]; fieldRefs += a[3]
+                    Triple(type, a, a[0] + a[1] + a[2] + a[3])
+                }
+                .sortedByDescending { it.third }
+
+            val classesJson = JSONArray()
+            for ((type, a, sum) in classRows) {
+                classesJson.put(
+                    JSONObject()
+                        .put("className", typeToName(type))
+                        .put("newInstance", a[0])
+                        .put("staticCall", a[1])
+                        .put("methodRefs", a[2])
+                        .put("fieldRefs", a[3])
+                        .put("total", sum),
+                )
+            }
+
+            val membersJson = JSONArray()
+            if (topMembers > 0) {
+                memberStats.entries
+                    .sortedByDescending { it.value }
+                    .take(topMembers)
+                    .forEach { (key, count) ->
+                        val owner = key.substringBefore("|")
+                        val rest = key.substringAfter("|")
+                        val kind = rest.substringBefore("|")
+                        val name = rest.substringAfter("|")
+                        membersJson.put(
+                            JSONObject()
+                                .put("owner", typeToName(owner))
+                                .put("kind", if (kind == "m") "method" else "field")
+                                .put("name", name)
+                                .put("count", count),
+                        )
+                    }
+            }
+
+            val totalRefs = newInstance + staticCall + methodRefs + fieldRefs
+            val unusedWarn = if (totalRefs == 0) "该包没有任何外部引用（可作为死代码候选）" else ""
+            val result = JSONObject()
+                .put("tool", "taffy_dex_package_usage")
+                .put("package", rawPkg.replace('/', '.'))
+                .put("includeSubpackages", includeSub)
+                .put("scannedClasses", scannedClasses)
+                .put("targetClasses", targetClasses.size)
+                .put("referencedClasses", classStats.size)
+                .put("newInstance", newInstance)
+                .put("staticCall", staticCall)
+                .put("methodRefs", methodRefs)
+                .put("fieldRefs", fieldRefs)
+                .put("totalRefs", totalRefs)
+                .put("classes", classesJson)
+                .put("members", membersJson)
+            if (unusedWarn.isNotBlank()) result.put("warning", unusedWarn)
+            if (wantMarkdown) result.put("markdown", usageMarkdown(rawPkg.replace('/', '.'), result, classRows, memberStats))
+            return ok(result)
+        }
+    }
+
     // ===== 工具方法 =====
 
     private fun loadAllDex(file: File): List<Pair<String, DexFile>> {
@@ -547,6 +707,64 @@ object DexAnalysisTools {
     private fun typeToName(type: String): String =
         type.substring(1, type.length - 1).replace('/', '.')
 
+    /**
+     * 类描述符是否落在包 [prefix]（已是斜杠形式）内。
+     * 嵌套类 `Lcom/x/Foo$Bar;` 的「目录」仍是 `com/x`，所以取最后一个 `/` 前的部分即可。
+     */
+    internal fun inPackage(type: String, prefix: String, includeSub: Boolean = true): Boolean {
+        if (!type.startsWith("L") || !type.endsWith(";")) return false
+        val dir = type.substring(1, type.length - 1).substringBeforeLast('/', "")
+        if (dir.isBlank()) return false
+        return if (includeSub) dir == prefix || dir.startsWith("$prefix/") else dir == prefix
+    }
+
+    /** 包使用统计的 Markdown 表格（类汇总 + 成员明细）。 */
+    private fun usageMarkdown(
+        pkg: String,
+        result: JSONObject,
+        classRows: List<Triple<String, IntArray, Int>>,
+        memberStats: Map<String, Int>,
+    ): String {
+        val b = StringBuilder()
+        b.append("# 包使用统计：").append(pkg).append("\n\n")
+        b.append("- 扫描类数：").append(result.optInt("scannedClasses")).append('\n')
+        b.append("- 包内类数：").append(result.optInt("targetClasses")).append('\n')
+        b.append("- 被引用类数：").append(result.optInt("referencedClasses")).append('\n')
+        b.append("- 实例化次数：").append(result.optInt("newInstance")).append('\n')
+        b.append("- 静态调用次数：").append(result.optInt("staticCall")).append('\n')
+        b.append("- 方法调用次数：").append(result.optInt("methodRefs")).append('\n')
+        b.append("- 字段读写次数：").append(result.optInt("fieldRefs")).append('\n')
+        b.append("- 合计引用次数：").append(result.optInt("totalRefs")).append("\n\n")
+        b.append("> 仅统计其它包对该包（含子包）的引用，包内互引已排除\n\n")
+        b.append("## 按类汇总（").append(classRows.size).append("）\n\n")
+        if (classRows.isEmpty()) {
+            b.append("无\n")
+        } else {
+            b.append("| 类名 | 实例化 | 静态调用 | 方法 | 字段 | 合计 |\n")
+            b.append("| --- | ---: | ---: | ---: | ---: | ---: |\n")
+            for ((type, a, sum) in classRows) {
+                b.append("| ").append(typeToName(type))
+                    .append(" | ").append(a[0])
+                    .append(" | ").append(a[1])
+                    .append(" | ").append(a[2])
+                    .append(" | ").append(a[3])
+                    .append(" | ").append(sum).append(" |\n")
+            }
+        }
+        if (memberStats.isNotEmpty()) {
+            b.append("\n## 成员明细（Top ").append(minOf(30, memberStats.size)).append("）\n\n")
+            b.append("| 成员 | 类型 | 次数 |\n| --- | --- | ---: |\n")
+            memberStats.entries.sortedByDescending { it.value }.take(30).forEach { (key, count) ->
+                val owner = typeToName(key.substringBefore("|"))
+                val kind = if (key.substringAfter("|").substringBefore("|") == "m") "方法" else "字段"
+                val name = key.substringAfterLast("|")
+                b.append("| ").append(owner).append('.').append(name)
+                    .append(" | ").append(kind).append(" | ").append(count).append(" |\n")
+            }
+        }
+        return b.toString()
+    }
+
     private fun accessFlagsToString(flags: Int): String {
         val parts = mutableListOf<String>()
         if (flags and 0x0001 != 0) parts.add("public")
@@ -567,5 +785,5 @@ object DexAnalysisTools {
         return parts.joinToString(" ")
     }
 
-    val ALL = listOf(dexXref, dexClassOutline, dexMethodCode, dexDeodex, dexIncrementalRebuild)
+    val ALL = listOf(dexXref, dexClassOutline, dexMethodCode, dexDeodex, dexIncrementalRebuild, dexPackageUsage)
 }

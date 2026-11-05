@@ -147,10 +147,12 @@ action=apply; output goes to the workspace renamed/ dir (the original APK is nev
                         "method" -> {
                             val owner = toDescriptor(o.str("from"))
                             val name = o.str("name")
-                            val desc = o.str("descriptor").ifBlank { "()V" }
+                            val desc = o.str("descriptor").trim()
                             val to = o.str("to")
                             if (owner.startsWith("L") && name.isNotBlank() && to.isNotBlank()) {
-                                methodMap["$owner->$name$desc"] = to
+                                // 不写 descriptor = 按名字匹配该类下所有同名方法（: * 通配）
+                                val key = if (desc.isBlank()) "$owner->$name:*" else "$owner->$name$desc"
+                                methodMap[key] = to
                             } else warnings.add("方法改名缺参数: $o")
                         }
                         "field" -> {

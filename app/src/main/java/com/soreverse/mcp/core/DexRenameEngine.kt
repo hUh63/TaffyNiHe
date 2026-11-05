@@ -65,7 +65,7 @@ internal object DexRenameEngine {
         for ((_, dex) in loadAllDex(path)) {
             for (cls in dex.classes) {
                 if (out.size >= limit) return out
-                out.add(Triple(cls.type, cls.methods.size, cls.fields.size))
+                out.add(Triple(cls.type, cls.methods.count(), cls.fields.count()))
             }
         }
         return out.sortedBy { it.first }
@@ -76,7 +76,7 @@ internal object DexRenameEngine {
     private fun mapType(type: String?, typeMap: Map<String, String>): String? {
         if (type == null) return null
         var dims = 0
-        var s = type
+        var s: String = type   // K2 不给 var 推断 smart cast，必须显式标注
         while (s.startsWith("[")) { dims++; s = s.substring(1) }
         val mapped = typeMap[s] ?: return null
         if (dims == 0) return mapped
@@ -90,19 +90,19 @@ internal object DexRenameEngine {
         val module = object : RewriterModule() {
             override fun getTypeRewriter(rewriters: Rewriters): Rewriter<String> =
                 object : Rewriter<String> {
-                    override fun rewrite(value: String?): String? {
-                        val mapped = mapType(value, plan.typeMap)
-                        return mapped ?: value
-                    }
+                    override fun rewrite(value: String): String =
+                        mapType(value, plan.typeMap) ?: value
                 }
 
             override fun getMethodReferenceRewriter(rewriters: Rewriters): Rewriter<MethodReference> =
                 object : Rewriter<MethodReference> {
-                    override fun rewrite(value: MethodReference?): MethodReference? {
-                        if (value == null) return null
+                    override fun rewrite(value: MethodReference): MethodReference {
                         val newClass = rewriters.typeRewriter.rewrite(value.definingClass) ?: value.definingClass
                         val key = methodKey(value.definingClass, value.name, value)
-                        val newName = plan.methodMap[key] ?: value.name
+                        // 精确 key 优先；用户没写 descriptor 时落在 "类->名字:*" 通配条目上
+                        val newName = plan.methodMap[key]
+                            ?: plan.methodMap["${value.definingClass}->${value.name}:*"]
+                            ?: value.name
                         if (newClass == value.definingClass && newName == value.name) return value
                         return ImmutableMethodReference(
                             newClass, newName, value.parameterTypes, value.returnType,
@@ -112,8 +112,7 @@ internal object DexRenameEngine {
 
             override fun getFieldReferenceRewriter(rewriters: Rewriters): Rewriter<FieldReference> =
                 object : Rewriter<FieldReference> {
-                    override fun rewrite(value: FieldReference?): FieldReference? {
-                        if (value == null) return null
+                    override fun rewrite(value: FieldReference): FieldReference {
                         val newClass = rewriters.typeRewriter.rewrite(value.definingClass) ?: value.definingClass
                         val newType = rewriters.typeRewriter.rewrite(value.type) ?: value.type
                         val newName = plan.fieldMap["${value.definingClass}->${value.name}:${value.type}"]
@@ -157,7 +156,9 @@ internal object DexRenameEngine {
             for (cls in dex.classes) {
                 if (plan.typeMap.containsKey(cls.type)) renamedClasses++
                 cls.methods.forEach { m ->
-                    if (plan.methodMap.containsKey(methodKey(cls.type, m.name, m))) renamedMethods++
+                    if (plan.methodMap.containsKey(methodKey(cls.type, m.name, m)) ||
+                        plan.methodMap.containsKey("${cls.type}->${m.name}:*")
+                    ) renamedMethods++
                 }
                 cls.fields.forEach { f ->
                     if (plan.fieldMap.containsKey("${cls.type}->${f.name}:${f.type}") ||
@@ -285,7 +286,7 @@ internal object DexRenameEngine {
                         .append(f.name).append(" -> ").append(f.name).append('\n')
                 }
                 cls.methods.take(60).forEach { m ->
-                    val params = m.parameterTypes.joinToString(",") { descriptorToJavaType(it) }
+                    val params = m.parameterTypes.joinToString(",") { descriptorToJavaType(it.toString()) }
                     b.append("    ").append(descriptorToJavaType(m.returnType)).append(' ')
                         .append(m.name).append('(').append(params).append(") -> ").append(m.name).append('\n')
                 }
@@ -298,7 +299,7 @@ internal object DexRenameEngine {
     // ─────────────────────────── 类型转换 ───────────────────────────
 
     internal fun methodKey(owner: String, name: String, ref: MethodReference): String =
-        "$owner->$name(" + ref.parameterTypes.joinToString("") { it } + ")" + ref.returnType
+        "$owner->$name(" + ref.parameterTypes.joinToString("") { it.toString() } + ")" + ref.returnType
 
     internal fun descriptorToName(desc: String): String =
         desc.removePrefix("L").removeSuffix(";").replace('/', '.')
@@ -393,12 +394,11 @@ internal object DexRenameEngine {
                 for (m in cls.methods) {
                     val key = methodKey(cls.type, m.name, m)
                     val newName = plan.methodMap[key] ?: m.name
-                    val finalKey = "$newClass->$newName(" + m.parameterTypes.joinToString("") { it } + ")" + m.returnType
+                    val finalKey = "$newClass->$newName(" + m.parameterTypes.joinToString("") { it.toString() } + ")" + m.returnType
                     val prev = seenMethods.put(finalKey, m.name)
                     if (prev != null && prev != m.name) {
                         issues.add("方法冲突: ${descriptorToName(finalKey.substringBefore("->"))} 里 $prev 与 ${m.name} 会重名（$finalKey）")
                     }
-                    newClass.let { methodKeys[finalKey] = m.name }
                 }
                 val seenFields = HashMap<String, String>()
                 for (f in cls.fields) {
@@ -409,7 +409,6 @@ internal object DexRenameEngine {
                     if (prev != null && prev != f.name) {
                         issues.add("字段冲突: ${descriptorToName(newClass)} 里 $prev 与 ${f.name} 会重名（$finalKey）")
                     }
-                    fieldKeys[finalKey] = f.name
                 }
             }
         }

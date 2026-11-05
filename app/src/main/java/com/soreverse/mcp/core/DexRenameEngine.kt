@@ -135,6 +135,8 @@ internal object DexRenameEngine {
      */
     internal class ApplyResult(
         val outFiles: List<File>,
+        /** APK 入口名 → 重写后的 dex 文件（`classes.dex` / `classes2.dex` …），用于装回 APK。 */
+        val dexByEntry: Map<String, File>,
         val classes: Int,
         val renamedClasses: Int,
         val renamedMethods: Int,
@@ -146,6 +148,7 @@ internal object DexRenameEngine {
         val dexFiles = loadAllDex(input)
         outDir.mkdirs()
         val outFiles = mutableListOf<File>()
+        val dexByEntry = LinkedHashMap<String, File>()
         var totalClasses = 0
         var renamedClasses = 0
         var renamedMethods = 0
@@ -183,9 +186,10 @@ internal object DexRenameEngine {
             val out = File(outDir, if (name.isBlank()) "renamed.dex" else "renamed_$name")
             out.writeBytes(store.data)
             outFiles.add(out)
+            dexByEntry[name] = out
             totalClasses += count
         }
-        return ApplyResult(outFiles, totalClasses, renamedClasses, renamedMethods, renamedFields)
+        return ApplyResult(outFiles, dexByEntry, totalClasses, renamedClasses, renamedMethods, renamedFields)
     }
 
     // ─────────────────────────── mapping ───────────────────────────

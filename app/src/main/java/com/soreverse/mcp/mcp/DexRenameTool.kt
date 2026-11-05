@@ -2,6 +2,7 @@ package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.DexRenameEngine
 import com.soreverse.mcp.core.WorkspacePolicy
+import com.soreverse.mcp.core.ZipRepack
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
@@ -64,8 +65,8 @@ action=apply; output goes to the workspace renamed/ dir (the original APK is nev
             return when (action) {
                 "list" -> doList(file, args)
                 "export_mapping" -> doExport(file, args)
-                "plan", "import_mapping" -> doPlan(file, args, apply = false)
-                "apply" -> doPlan(file, args, apply = true)
+                "plan", "import_mapping" -> doPlan(ctx, file, args, apply = false)
+                "apply" -> doPlan(ctx, file, args, apply = true)
                 else -> err("INVALID_ARGUMENT", "未知 action: $action", "action", action)
             }
         }
@@ -108,7 +109,7 @@ action=apply; output goes to the workspace renamed/ dir (the original APK is nev
             )
         }
 
-        private fun doPlan(file: File, args: JSONObject, apply: Boolean): JSONObject {
+        private fun doPlan(ctx: ToolContext, file: File, args: JSONObject, apply: Boolean): JSONObject {
             val typeMap = LinkedHashMap<String, String>()
             val methodMap = LinkedHashMap<String, String>()
             val fieldMap = LinkedHashMap<String, String>()
@@ -229,15 +230,40 @@ action=apply; output goes to the workspace renamed/ dir (the original APK is nev
                 }
             val outs = JSONArray()
             result.outFiles.forEach { outs.put(it.absolutePath) }
-            return ok(
-                base.put("dryRun", false)
-                    .put("outFiles", outs)
+
+            // 输入是 APK 时顺手产出一个替换好 dex 的新 APK：否则只给一堆 dex，用户没法装回去。
+            // 用 ZipRepack.copyAll 替换 entry（保留 method/extra 与 resources.arsc、so 的对齐），
+            // 它返回真正被替换的条目集合，避免"报告说改了、产物其实原样"。
+            var outApkPath: String? = null
+            var replacedEntries: Set<String> = emptySet()
+            if (file.name.endsWith(".apk")) {
+                val target = File(outDir, file.nameWithoutExtension + "-renamed.apk")
+                replacedEntries = runCatching {
+                    ZipRepack.copyAll(
+                        input = file,
+                        output = target,
+                        replace = { entry -> result.dexByEntry[entry]?.readBytes() },
+                    )
+                }.getOrElse { emptySet() }
+                if (replacedEntries.isNotEmpty()) outApkPath = target.absolutePath
+            }
+
+            val resp = base.put("dryRun", false)
+                .put("outFiles", outs)
                     .put("totalClasses", result.classes)
                     .put("renamedClasses", result.renamedClasses)
                     .put("renamedMethods", result.renamedMethods)
                     .put("renamedFields", result.renamedFields)
-                    .put("hint", "输出目录: ${outDir.absolutePath}"),
-            )
+                    .put("hint", "输出目录: ${outDir.absolutePath}")
+            if (outApkPath != null) {
+                resp.put("outApk", outApkPath)
+                resp.put("replacedEntries", JSONArray(replacedEntries.toList()))
+                resp.put(
+                    "signingWarning",
+                    "APK 已被修改，原签名失效，安装前用 taffy_apk_sign 重新签名（v1/v2/v3）",
+                )
+            }
+            return ok(resp)
         }
 
         /** `com.a.B` → `Lcom/a/B;`；已经是描述符的原样返回。 */

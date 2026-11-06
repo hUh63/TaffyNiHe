@@ -48,7 +48,7 @@ internal object AnalysisCfgRebuild {
             val mnem = body.substringBefore(' ').trim().lowercase()
             val targets = HEX.findAll(body).mapNotNull { m ->
                 m.value.removePrefix("0x").toLongOrNull(16)
-            }.filter { it != addr && it in addrSet }
+            }.filter { it != addr && it in addrSet }.toList()
             val isRet = RET_PREFIX.any { mnem.startsWith(it) } || mnem == "ret"
             val isUncond = (mnem in UNCOND || mnem == "b") && !isRet
             val isCond = !isUncond && !isRet && COND_PREFIX.any { mnem.startsWith(it) } && targets.isNotEmpty()

@@ -4422,6 +4422,9 @@ private fun graphXrefRows(
 }
 
 /** 把线性 pdfj 指令按「所属基本块起始地址」归并（块列表来自已解析的 CFG）。 */
+/** 单一返回指令（`ret` / `ret.w`，不匹配 `retxx` 之类）。 */
+private val RET_INSN = Regex("\\bret(\\.w)?\\b")
+
 private fun mergeLinearInsns(
     linear: List<Pair<Long, String>>,
     graph: CfgGraph?,
@@ -4450,9 +4453,16 @@ private fun mergeLinearInsns(
         return b
     }
     val m = LinkedHashMap<Long, MutableList<String>>()
+    // 块没有 endAddr 时（「整个函数被识别成一个块」就是这种情况）没有上界，
+    // 线性反汇编会一路吃到下一个函数 —— 用户看到的就是「loc_d2c 1000 条指令」。
+    // 退化成「遇到 ret 就封口」：ret 是块末尾，之后的指令不可能还属于这个块。
+    val closed = HashSet<Long>()
     linear.forEach { (off, txt) ->
         val b = owner(off)
-        if (b >= 0) m.getOrPut(b) { ArrayList() }.add(txt)
+        if (b >= 0 && b !in closed) {
+            m.getOrPut(b) { ArrayList() }.add(txt)
+            if (endOf[b] == null && RET_INSN.containsMatchIn(txt)) closed.add(b)
+        }
     }
     return m
 }
@@ -5783,7 +5793,10 @@ private fun CfgView(
     }
     // 块级指令（pdfj）：画布「汇编块」模式要用它，控制流「节点列表」的「N 条指令」也要用它
     // —— 所以三种内容模式（summary/asm/pseudo）都要取，不能只在非 summary 时取（那样节点列表恒显 0 条指令）。
+    // 单块兜底重建的图（rzCfg 只给 1 个块时用线性指令自己切块）
+    var rebuiltCfg by remember { mutableStateOf<CfgGraph?>(null) }
     LaunchedEffect(tools.cfgUi.contentMode, tools.cfgJson, target, ws) {
+        rebuiltCfg = null
         if (ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
         val m = withContext(Dispatchers.IO) {
             runCatchingCancellable {
@@ -5834,7 +5847,16 @@ private fun CfgView(
                         }
                         byLinear.forEach { (k, v) -> if (k !in merged) merged[k] = v }
                         byGraph.forEach { (k, v) -> if (k !in merged) merged[k] = v }
-                        merged
+                        // rzCfg 只给 1 个块（函数边界没切）而线性指令很多 → 按跳转自己重建：
+                        // 否则「控制流图形化」只有一个框，节点列表里那一个块挂着上千条指令。
+                        val rebuilt = if ((g?.blocks?.size ?: 0) <= 1 && linear.size > 8) {
+                            AnalysisCfgRebuild.rebuild(
+                                tools.selectedFunctionName.ifBlank { target }, target, linear,
+                            )
+                        } else null
+                        rebuiltCfg = rebuilt
+                        // 重建出的块换了起点，块内指令要按新块区间重新归并，否则列表全是 0 条
+                        if (rebuilt != null) mergeLinearInsns(linear, rebuilt) else merged
                     }
                 }
             }.getOrNull() ?: emptyMap()
@@ -5865,8 +5887,9 @@ private fun CfgView(
         }
     }
 
-    val graph = remember(tools.cfgJson) {
-        if (tools.cfgJson.isBlank()) null else runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
+    val graph = remember(tools.cfgJson, rebuiltCfg) {
+        rebuiltCfg ?: if (tools.cfgJson.isBlank()) null
+        else runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
     }
     val treeRows = remember(graph) { buildCfgTree(graph) }
 
@@ -10424,7 +10447,9 @@ private fun GlobalXRefView(
     val effRoot = drillRoot.ifBlank { roots.firstOrNull().orEmpty() }
     val drillDag = remember(names, edges, effRoot, cs.primary, df) {
         if (effRoot.isBlank()) null
-        else buildDrillDag(names, edges, effRoot, 5, 1500, 12, cs.primary, df, 240f * df)
+        // 默认展开**全部可达节点**（以前固定 depth=5，调用链一深就只剩一大个根节点，
+        // 用户看到「根下钻只有一个节点」）。仍受 cap=1500 与 omitted 计数保护。
+        else buildDrillDag(names, edges, effRoot, Int.MAX_VALUE, 1500, 12, cs.primary, df, 240f * df)
     }
     // 完整分析：对「全部函数 + 全部调用边」做一次 Tarjan，DAG 与统计共用同一份结果
     val sccs = remember(names, edges) { if (names.isEmpty()) emptyList() else tarjanScc(names, edges) }
@@ -10466,12 +10491,27 @@ private fun GlobalXRefView(
             else "Global xref · ${edges.size} edges · ${roots.size} entries · ${names.size} fns") + partialHint
     }
 
-    /** 完整分析：跑 rizin `aaaa`（全量分析）后重建全局调用图，保证 SCC / 交叉引用基于完整调用关系。 */
+    /**
+     * 完整分析。
+     *
+     * 分两段：native 侧每次 rzCommand 都会新建 RzCore 并跑一遍全量分析，
+     * 所以直接发 `aaaa` 等于在同一份结果上再算一遍 —— 大 SO 上要几分钟，界面像卡死。
+     * 第一次只清缓存重取（秒级）；仍为空时再点一次才真的跑 `aaaa`。
+     */
+    var deepTried by remember { mutableStateOf(false) }
     fun runFullAnalysis() {
         if (ws.isBlank() || deepLoading) return
+        if (!deepTried) {
+            deepTried = true
+            tools.clearViewCaches()
+            tools.reloadTick = tools.reloadTick + 1
+            savedMsg = if (zh) "已重新读取调用关系；若仍为空，再点一次做深度分析（较慢）"
+            else "reloaded call relations; tap again for deep analysis (slow)"
+            return
+        }
         scope.safeLaunch {
             deepLoading = true
-            savedMsg = if (zh) "完整分析中（aaaa）…" else "running full analysis (aaaa)…"
+            savedMsg = if (zh) "深度分析中（aaaa，大 SO 可能需要几分钟）…" else "deep analysis (aaaa, may take minutes)…"
             withContext(Dispatchers.IO) {
                 runCatchingCancellable {
                     val eng = EngineProvider.get(context)

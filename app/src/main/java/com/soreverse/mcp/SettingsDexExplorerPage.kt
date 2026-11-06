@@ -330,8 +330,8 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     )
                     Text(
-                        if (zh) "会级联字段类型/方法签名/指令/注解；字符串常量里的反射类名不改。"
-                        else "Cascades field types / signatures / instructions / annotations. Reflective class names in string constants are untouched.",
+                        if (zh) "会级联字段类型/方法签名/指令/注解；字符串常量里的反射类名不改。\n点「重命名」先做预检：新名冲突或没有命中会直接告诉你，不会写盘。"
+                        else "Cascades field types / signatures / instructions / annotations. Reflective class names in string constants are untouched.\nRename runs a pre-flight first: conflicts or zero hits are reported without touching the file.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
@@ -350,35 +350,70 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                                 runCatchingCancellable {
                                     val handler = ToolCatalog.byName["taffy_dex_rename"]
                                         ?: throw IllegalStateException("taffy_dex_rename not registered")
-                                    val args = JSONObject()
-                                        .put("path", inputPath)
-                                        .put("action", "class")
-                                        .put("oldName", cls.removePrefix("L").removeSuffix(";").replace('/', '.'))
-                                        .put("newName", renameTo.trim())
-                                    handler.handle(
-                                        ToolContext(
-                                            context,
-                                            SettingsStore(context),
-                                            EngineProvider.get(context),
-                                            runCatching { EngineProvider.getBinaryEngine(context) }.getOrNull(),
-                                        ),
-                                        args,
+                                    val tcx = ToolContext(
+                                        context,
+                                        SettingsStore(context),
+                                        EngineProvider.get(context),
+                                        runCatching { EngineProvider.getBinaryEngine(context) }.getOrNull(),
                                     )
+                                    val oldDotted = cls.removePrefix("L").removeSuffix(";").replace('/', '.')
+                                    // ① 冲突预检：改成一个已存在的类名会产生两个同名类，dex 写出会失败
+                                    ToolCatalog.byName["taffy_dex_rename_mapping"]?.let { preflight ->
+                                        val planArgs = JSONObject()
+                                            .put("path", inputPath)
+                                            .put("action", "plan")
+                                            .put(
+                                                "renames",
+                                                org.json.JSONArray().put(
+                                                    JSONObject()
+                                                        .put("kind", "class")
+                                                        .put("from", oldDotted)
+                                                        .put("to", renameTo.trim()),
+                                                ),
+                                            )
+                                        val plan = preflight.handle(tcx, planArgs)
+                                        val conflicts = plan.optJSONArray("conflicts")
+                                        if (conflicts != null && conflicts.length() > 0) {
+                                            return@runCatchingCancellable JSONObject()
+                                                .put("ok", false)
+                                                .put("error", "命名冲突: " + conflicts.optString(0))
+                                        }
+                                    }
+                                    // ② 命中预检 + 执行
+                                    fun call(dry: Boolean): JSONObject = handler.handle(
+                                        tcx,
+                                        JSONObject()
+                                            .put("path", inputPath)
+                                            .put("action", "class")
+                                            .put("oldName", oldDotted)
+                                            .put("newName", renameTo.trim())
+                                            .put("dryRun", dry),
+                                    )
+                                    val dryRes = call(true)
+                                    val hits = dryRes.optInt("totalRenamed", 0)
+                                    if (!dryRes.optBoolean("ok", false) || hits <= 0) {
+                                        return@runCatchingCancellable dryRes.put("preflightOnly", true)
+                                    }
+                                    call(false).put("preflightHits", hits)
                                 }
                             }
                             renameBusy = false
                             res.onSuccess { r ->
-                                val total = r.optInt("totalRenamed", 0)
-                                renameMsg = if (r.optBoolean("ok", false)) {
-                                    "OK · ${if (zh) "重命名 $total 处，已写回" else "renamed $total hits, written back"}"
-                                } else {
-                                    r.optString("error").ifBlank { if (zh) "重命名失败" else "rename failed" }
-                                }
-                                renameOpen = false
-                                if (r.optBoolean("ok", false)) {
+                                val hits = r.optInt("preflightHits", 0)
+                                if (r.optBoolean("preflightOnly", false)) {
+                                    // 预检没通过：不写盘，对话框保持打开，把工具给的提示带上
+                                    val why = r.optString("hint").ifBlank { r.optString("error") }
+                                    renameMsg = if (zh) "预检未通过，未写盘。$why"
+                                    else "Pre-flight failed, nothing written. $why"
+                                } else if (r.optBoolean("ok", false)) {
+                                    renameMsg = "OK · " + (if (zh) "影响 $hits 处，已写回" else "$hits hits, written back")
                                     selected = null
                                     members = emptyList()
                                     load(inputPath)
+                                    renameOpen = false
+                                } else {
+                                    renameMsg = r.optString("error").ifBlank { if (zh) "重命名失败" else "rename failed" }
+                                    renameOpen = false
                                 }
                             }.onFailure {
                                 renameMsg = it.message ?: "failed"

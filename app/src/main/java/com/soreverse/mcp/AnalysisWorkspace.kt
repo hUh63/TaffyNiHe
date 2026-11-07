@@ -5850,8 +5850,19 @@ private fun CfgView(
                         // rzCfg 只给 1 个块（函数边界没切）而线性指令很多 → 按跳转自己重建：
                         // 否则「控制流图形化」只有一个框，节点列表里那一个块挂着上千条指令。
                         val rebuilt = if ((g?.blocks?.size ?: 0) <= 1 && linear.size > 8) {
+                            // pageSize>8：说明 rizin 把整段当一块，才需要自己切。
+                            // memReader 供 AArch64 跳表解析（`adrp`+`add`+`br xN`）读表项：每次读都是一次
+                            // rzCommand 全量分析，所以按表地址缓存，一个函数最多读几次。
+                            val memCache = HashMap<Long, ByteArray?>()
                             AnalysisCfgRebuild.rebuild(
                                 tools.selectedFunctionName.ifBlank { target }, target, linear,
+                                memReader = { a, n ->
+                                    memCache.getOrPut(a) {
+                                        AnalysisCfgRebuild.hexToBytes(
+                                            rzText(eng.rzCommand(ws, "", "p8 $n @ 0x" + java.lang.Long.toHexString(a))),
+                                        )
+                                    }
+                                },
                             )
                         } else null
                         rebuiltCfg = rebuilt

@@ -82,7 +82,7 @@ class AnalysisCfgRebuildTest {
         assertTrue(cfg.blocks.any { it.addrValue == 0x1030L })
         assertTrue(cfg.blocks.any { it.addrValue == 0x1040L })
         // 跳表块不该被标成"间接跳转"（目标已解析出来）
-        assertFalse(brBlock.summary.contains("间接跳转"))
+        assertFalse(brBlock!!.summary.contains("间接跳转"))
     }
 
     @Test
@@ -157,7 +157,8 @@ class AnalysisCfgRebuildTest {
     fun unreadableTableIsIgnored() {
         val g = AnalysisCfgRebuild.rebuild("f", "0x1000", linear()) { _, _ -> null }
         assertNotNull(g)
-        val targets = g!!.edges.map { g.blocks[it.to].addrValue }.toSet()
+        val cfg = g!!
+        val targets = cfg.edges.map { cfg.blocks[it.to].addrValue }.toSet()
         assertTrue(0x1030L !in targets)
     }
 

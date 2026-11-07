@@ -5854,15 +5854,19 @@ private fun CfgView(
                             // memReader 供 AArch64 跳表解析（`adrp`+`add`+`br xN`）读表项：每次读都是一次
                             // rzCommand 全量分析，所以按表地址缓存，一个函数最多读几次。
                             val memCache = HashMap<Long, ByteArray?>()
+                            val readMem: (Long, Int) -> ByteArray? = { a, n ->
+                                memCache.getOrPut(a) {
+                                    AnalysisCfgRebuild.hexToBytes(
+                                        rzText(eng.rzCommand(ws, "", "p8 $n @ 0x" + java.lang.Long.toHexString(a))),
+                                    )
+                                }
+                            }
+                            // irj 走 lazy：函数里没有 br 时不必为它跑一次全量分析
+                            val relocs by lazy { AnalysisCfgRebuild.parseRelocNames(rzText(eng.rzCommand(ws, "", "irj"))) }
                             AnalysisCfgRebuild.rebuild(
                                 tools.selectedFunctionName.ifBlank { target }, target, linear,
-                                memReader = { a, n ->
-                                    memCache.getOrPut(a) {
-                                        AnalysisCfgRebuild.hexToBytes(
-                                            rzText(eng.rzCommand(ws, "", "p8 $n @ 0x" + java.lang.Long.toHexString(a))),
-                                        )
-                                    }
-                                },
+                                memReader = readMem,
+                                slotReader = AnalysisCfgRebuild.makeSlotReader(readMem, relocs),
                             )
                         } else null
                         rebuiltCfg = rebuilt

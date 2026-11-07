@@ -1,3 +1,59 @@
+## 塔菲逆核 v1.5.54 —— 间接尾跳真的跟上了
+
+上一版说"尾调用静态无解"，那话只对了一半：**目标确实不知道，但"跳到谁"很多时候能查出来**。
+这版做的是数据流溯源 + 数据槽解析。
+
+### 怎么做
+
+对每条 `br xN`，往前回溯 xN 的来源（含 `mov`/`add`/`sub` 传递，深度 4、窗口 40 条），
+拿到"从哪个数据地址取的指针"，再按槽的类型三条路：
+
+| 形态 | 机器码 | 解析结果 |
+|---|---|---|
+| GOT / PLT 槽 | `adrp x8,got; ldr x16,[x8,#0x10]; br x16` | 查重定位表 → **符号名**（`memcpy`、`__cxa_finalize`） |
+| 本地指针槽 | `adrp x8,tbl; ldr x9,[x8,#off]; br x9` | 读 8 字节 → **本 SO 内的函数地址** |
+| 表（多目标） | `ldr x9,[x8,x0,lsl #3]; br x9` | 逐项解析成多目标 |
+| 对象槽 | `ldr x8,[x0,#8]; ldr x1,[x8,#0x68]; br x1` | 静态无解，但标出 **`[obj+0x68]`** |
+
+槽地址有重定位符号名时直接用名字（`irj`）；否则读槽内容（`p8`，8 字节小端）当目标地址。
+同一个槽被多条 `br` 引用时只读一次内存。
+
+### 三个样本实测
+
+| SO | `br` 总数 | 解出符号名 | 对象槽（报字段偏移） | 其它 |
+|---|---|---|---|---|
+| libpython3.12.so | 1,600 | **1,353**（85%） | 105 | 142 |
+| libcrypto_python.so | 458 | 124 | 95 | 239 |
+| numpy `_simd.so`（网上取的第三方样本） | 61 | **58**（95%） | 0 | 3 |
+
+libpython 里那些 `br x17` 现在都能说出目标：
+
+```
+br@0x48c2cc  → __cxa_finalize
+br@0x48c2fc  → sincos
+br@0x48c30c  → atan2
+br@0x48c31c  → hypot
+```
+
+numpy 的 `_simd` 同理：`memcpy` / `PyUnicode_FromFormat` / `PyList_New` / `PyDict_SetItemString` / `strtok`。
+
+### 界面上
+
+块摘要后面直接跟目标：
+
+```
+adrp x8, 0x5000 · 尾跳 → memcpy
+ldr x1, [x8, 0x68] · 尾跳 → [obj+0x68]
+```
+
+如果槽内容指向**本函数内**的地址（computed goto 的本地 label 表），就直接连边 —— 那种情况是真边。
+
+新增测试：`gotTailCallIsNamed` / `objectSlotTailCallReportsFieldOffset` /
+`slotPointingInsideFunctionBecomesEdge` / `parseRelocNamesReadsVaddrAndName` / `slotHitReadsPointerValue`。
+
+> 剩下的 27%~15% 是 `br x0`/`br x8` 直接从参数或返回值跳（虚调用、回调），
+> 寄存器值在运行时才定 —— 这部分静态确实没有答案，仍按"间接跳转"标注不建边。
+
 ## 塔菲逆核 v1.5.53 —— 用两个真实 SO 校正 `br xN`
 
 拿 `libpython3.12.so`（6.4MB，aarch64）和 `libcrypto_python.so`（3.5MB）实测了一遍，

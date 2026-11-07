@@ -15,9 +15,11 @@ package com.soreverse.mcp
  * 只做"能确定的"：跳转目标必须落在函数自己的指令地址集合里（跳出去的一律当外部调用，
  * 不建边），这样不会把相邻函数误并联进来。
  *
- * AArch64 的 `br xN`（跳表/switch）静态看不出目标，靠 `resolveJumpTable` 反推：
- * `adrp x8, page` + `add x8, x8, #off` 得到表基址，表项是 4 字节有符号偏移，
- * 目标 = 表基址 + offset[i]。读表通过调用方给的 [memReader]（UI 侧用 rizin `p8`）。
+ * AArch64 的 `br xN` 静态看不出目标，分三种情况处理：
+ *   · 跳表（switch）—— 严格匹配编译器生成的固定指令链后反推目标，见 [resolveJumpTable]
+ *   · 间接尾调用（`ldr x1,[x9]; br x1` / `br x16` 走 PLT）—— 静态不可解，
+ *     在块摘要里标注"间接跳转"，不建边（不猜）
+ *   · 其它计算跳转 —— 同上，标注不建边
  */
 internal object AnalysisCfgRebuild {
 
@@ -31,10 +33,15 @@ internal object AnalysisCfgRebuild {
     )
     private val RET_PREFIX = listOf("ret", "bx lr", "leave")
 
-    private val ADRP = Regex("""adrp\s+(x\d+)\s*,\s*(0x[0-9a-fA-F]+)""")
+    private val BR_X = Regex("""\bbr\s+(x\d+)""")
+    private val ADRP = Regex("""adrp\s+(x\d+)\s*,\s*#?(0x[0-9a-fA-F]+|[0-9]+)""")
     private val ADD_REG_IMM = Regex("""add\s+(x\d+)\s*,\s*(x\d+)\s*,\s*#?(0x[0-9a-fA-F]+|\d+)""")
+    private val ADD_REG_REG_REG = Regex("""add\s+(x\d+)\s*,\s*(x\d+)\s*,\s*(x\d+)""")
     private val CMP_IMM = Regex("""cmp\s+w\d+\s*,\s*#?(0x[0-9a-fA-F]+|\d+)""")
-    private val BR_REG = Regex("""\bbr\s+x\d+""")
+    /** 形态 A 的取表项：`ldrsw x9, [x8, w0, uxtw #2]`。 */
+    private val LDR_SIGNED_INDEXED = Regex("""ldrs[whb]\s+(x\d+)\s*,\s*\[\s*(x\d+)\s*,[^\]]*\]""")
+    /** 形态 B 的取表项：`ldr x9, [x8, x0, lsl #3]`（8 字节绝对地址表）。 */
+    private val LDR_PTR_INDEXED = Regex("""ldr\s+(x\d+)\s*,\s*\[\s*(x\d+)\s*,[^\]]*lsl\s*#?\s*3[^\]]*\]""")
 
     private data class Insn(
         val addr: Long,
@@ -45,6 +52,9 @@ internal object AnalysisCfgRebuild {
         val isUncond: Boolean,
         val isRet: Boolean,
     )
+
+    /** 跳表反推结果。 */
+    private class JumpTable(val targets: List<Long>, val itemWidth: Int)
 
     private fun hex(v: String): Long? =
         if (v.startsWith("0x") || v.startsWith("0X")) v.substring(2).toLongOrNull(16) else v.toLongOrNull()
@@ -82,12 +92,14 @@ internal object AnalysisCfgRebuild {
             Insn(addr, body, mnem, if (isCond || isUncond) targets else emptyList(), isCond, isUncond, isRet)
         }
 
-        // br xN：静态没有目标，用跳表反推补上（只对能确定的项，解析失败就保持原样）
+        // br xN：严格匹配跳表链才反推目标；匹配不上就当间接尾调用（保留"无边"语义）
         if (memReader != null) {
             infos = infos.mapIndexed { i, inf ->
-                if (inf.mnem == "br" && inf.targets.isEmpty() && BR_REG.containsMatchIn(inf.text)) {
+                if (inf.mnem == "br" && inf.targets.isEmpty() && BR_X.containsMatchIn(inf.text)) {
                     val jt = resolveJumpTable(infos, i, memReader) ?: return@mapIndexed inf
-                    val valid = jt.filter { it in addrSet }
+                    // 只认真落在本函数指令流里的目标：表项如果是绝对地址（形态 B），
+                    // 重定位后的值是 VA，这里能直接对上；对不上说明表不是本函数的跳表。
+                    val valid = jt.targets.filter { it in addrSet }
                     if (valid.isEmpty()) inf else inf.copy(targets = valid)
                 } else inf
             }
@@ -118,13 +130,18 @@ internal object AnalysisCfgRebuild {
         val lines = Array(blocks.size) { mutableListOf<String>() }
         infos.forEach { lines[owner(it.addr)].add(it.text) }
 
-        val edges = LinkedHashSet<Triple<Int, Int, String>>()
+        // 块尾：决定出边，也决定摘要里要不要标"间接跳转"
         val infoByAddr = infos.associateBy { it.addr }
-        blocks.forEachIndexed { bi, start ->
+        val tails = blocks.mapIndexed { bi, start ->
             val lastAddr = lines[bi].lastOrNull()?.let { t ->
                 infos.lastOrNull { it.text == t && it.addr >= start }?.addr
             } ?: start
-            val tail = infoByAddr[lastAddr] ?: return@forEachIndexed
+            infoByAddr[lastAddr]
+        }
+
+        val edges = LinkedHashSet<Triple<Int, Int, String>>()
+        blocks.forEachIndexed { bi, _ ->
+            val tail = tails[bi] ?: return@forEachIndexed
             if (tail.isRet) return@forEachIndexed
             tail.targets.forEach { t ->
                 val ti = indexOf[t] ?: return@forEach
@@ -137,13 +154,19 @@ internal object AnalysisCfgRebuild {
         if (edges.isEmpty()) return null
 
         val cfgBlocks = blocks.mapIndexed { i, a ->
+            // 块尾是 `br xN` 但没解析出目标 = 间接尾跳（函数指针 / PLT / 篡改过的跳表）：
+            // 控制流在这里离开本函数，静态跟不了 —— 标出来，免得看着像"函数就这么结束了"。
+            val tail = tails[i]
+            val note = if (tail != null && tail.mnem == "br" && tail.targets.isEmpty()) {
+                " · " + tail.text.take(24) + " 间接跳转"
+            } else ""
             CfgBlock(
                 index = i,
                 addrText = "0x" + java.lang.Long.toHexString(a),
                 addrValue = a,
                 // 块上界 = 下一块起点：mergeLinearInsns 靠它把线性指令归到正确的块
                 endText = if (i + 1 < blocks.size) "0x" + java.lang.Long.toHexString(blocks[i + 1]) else "",
-                summary = lines[i].firstOrNull().orEmpty().take(80),
+                summary = lines[i].firstOrNull().orEmpty().take(maxOf(0, 80 - note.length)) + note,
             )
         }
         val cfgEdges = edges.map { CfgEdge(it.first, it.second, it.third) }
@@ -151,59 +174,115 @@ internal object AnalysisCfgRebuild {
     }
 
     /**
-     * 反推 AArch64 跳表（PIC 布局）：
+     * 反推 AArch64 跳表（switch）。**严格匹配编译器生成的指令链，任何一环对不上就返回 null。**
      *
+     * 形态 A（4 字节有符号偏移，相对表基址；clang 默认，switch 最常见）：
      * ```
-     * cmp  w0, #7
-     * b.hi default
-     * adrp x8, 0x12000            ; 页基址
-     * add  x8, x8, #0x3c0         ; 表地址 = 页基址 + 页内偏移
-     * ldrsw x9, [x8, w0, uxtw #2] ; 取 4 字节有符号偏移
-     * add  x8, x8, x9
-     * br   x8
+     * adrp  x8, 0x12000            ; 页基址
+     * add   x8, x8, #0x3c0         ; 表地址 = 页基址 + 页内偏移
+     * ldrsw x9, [x8, w0, uxtw #2]  ; 取 4 字节有符号偏移
+     * add   x8, x8, x9             ; 目标 = 表基址 + offset
+     * br    x8
      * ```
      *
-     * 表项 = 相对**表基址**的 32 位有符号偏移。项数优先用前面的 `cmp wN, #imm`（imm+1），
-     * 否则按 64 项试读；读到的目标如果全都不在函数内，由调用方丢弃。
+     * 形态 B（8 字节绝对地址表）：
+     * ```
+     * adrp x8, 0x12000
+     * add  x8, x8, #0x40
+     * ldr  x9, [x8, x0, lsl #3]    ; 直接取指针
+     * br   x9
+     * ```
+     *
+     * 为什么必须严格：实测 libpython3.12.so / libcrypto 这类真实 SO 里，`br xN` 的
+     * 绝大多数是**间接尾调用**（`ldr x1, [x9]; br x1` 走函数指针，或 `br x16` 走 PLT），
+     * 跳表一条都没有。只要放松成"窗口内有 adrp 就当跳表"，就会把随机内存读成目标
+     * —— 目标过滤能挡住大部分，但仍会漏出假边。宁可跟不了，也不能乱连。
+     *
+     * 项数优先用前面的 `cmp wN, #imm`（imm+1），否则按 64 项试读，上限 512。
      */
     private fun resolveJumpTable(
         infos: List<Insn>,
         brIndex: Int,
         reader: (Long, Int) -> ByteArray?,
-    ): List<Long>? {
-        val from = maxOf(0, brIndex - 14)
-        var pageReg: String? = null
-        var pageBase = 0L
-        var addOff = 0L
-        var hasAdd = false
-        var count = 0
-
-        for (k in from until brIndex) {
-            val t = infos[k].text
-            ADRP.find(t)?.let { m ->
-                pageReg = m.groupValues[1]
-                pageBase = hex(m.groupValues[2]) ?: 0L
-            }
-            ADD_REG_IMM.find(t)?.let { m ->
-                if (pageReg != null && m.groupValues[1] == pageReg && m.groupValues[2] == pageReg) {
-                    addOff = hex(m.groupValues[3]) ?: 0L
-                    hasAdd = true
+    ): JumpTable? {
+        val dst = BR_X.find(infos[brIndex].text)?.groupValues?.get(1) ?: return null
+        val count = run {
+            var c = 0
+            for (k in maxOf(0, brIndex - 16) until brIndex) {
+                CMP_IMM.find(infos[k].text)?.let { m ->
+                    val v = hex(m.groupValues[1]) ?: 0L
+                    if (v in 1..1023) c = (v + 1).toInt()
                 }
             }
-            CMP_IMM.find(t)?.let { m ->
-                val v = hex(m.groupValues[1]) ?: 0L
-                if (v in 1..1023) count = (v + 1).toInt()
-            }
+            if (c > 0) c.coerceAtMost(512) else 64
         }
-        if (pageReg == null || pageBase == 0L) return null
-        val table = if (hasAdd) pageBase + addOff else pageBase
-        if (table <= 0L) return null
 
-        val n = if (count > 0) count.coerceAtMost(512) else 64
-        val bytes = reader(table, n * 4) ?: return null
+        // ── 形态 A：add xD, xB, xK → ldrsw xK, [xB, idx] → adrp xB ──
+        for (j in (brIndex - 1) downTo maxOf(0, brIndex - 4)) {
+            val add = ADD_REG_REG_REG.find(infos[j].text) ?: continue
+            val d = add.groupValues[1]
+            val b = add.groupValues[2]
+            val k = add.groupValues[3]
+            if (d != dst && b != dst) continue
+            if (d == k || b == k) continue
+
+            val ldrIdx = ((j - 1) downTo maxOf(0, j - 5)).firstOrNull { p ->
+                LDR_SIGNED_INDEXED.find(infos[p].text)?.let { lm ->
+                    lm.groupValues[1] == k && lm.groupValues[2] == b
+                } ?: false
+            } ?: continue
+
+            val page = ((ldrIdx - 1) downTo maxOf(0, ldrIdx - 7)).firstNotNullOfOrNull { p ->
+                ADRP.find(infos[p].text)?.let { am ->
+                    if (am.groupValues[1] == b) hex(am.groupValues[2]) else null
+                }
+            } ?: continue
+
+            var pageOff = 0L
+            for (p in (ldrIdx - 1) downTo maxOf(0, ldrIdx - 7)) {
+                val am = ADD_REG_IMM.find(infos[p].text) ?: continue
+                if (am.groupValues[1] == b && am.groupValues[2] == b) {
+                    pageOff = hex(am.groupValues[3]) ?: 0L
+                    break
+                }
+            }
+            val table = page + pageOff
+            if (table <= 0L) continue
+            val targets = readRelativeTable(reader, table, count) ?: continue
+            return JumpTable(targets, 4)
+        }
+
+        // ── 形态 B：ldr xK, [xB, idx, lsl #3] → adrp xB（K 就是 br 的寄存器）──
+        for (j in (brIndex - 1) downTo maxOf(0, brIndex - 5)) {
+            val ldr = LDR_PTR_INDEXED.find(infos[j].text) ?: continue
+            if (ldr.groupValues[1] != dst) continue
+            val b = ldr.groupValues[2]
+            val page = ((j - 1) downTo maxOf(0, j - 7)).firstNotNullOfOrNull { p ->
+                ADRP.find(infos[p].text)?.let { am ->
+                    if (am.groupValues[1] == b) hex(am.groupValues[2]) else null
+                }
+            } ?: continue
+            var pageOff = 0L
+            for (p in (j - 1) downTo maxOf(0, j - 7)) {
+                val am = ADD_REG_IMM.find(infos[p].text) ?: continue
+                if (am.groupValues[1] == b && am.groupValues[2] == b) {
+                    pageOff = hex(am.groupValues[3]) ?: 0L
+                    break
+                }
+            }
+            val table = page + pageOff
+            if (table <= 0L) continue
+            val targets = readAbsoluteTable(reader, table, count) ?: continue
+            return JumpTable(targets, 8)
+        }
+        return null
+    }
+
+    /** 形态 A：每项 4 字节有符号，目标 = 表基址 + offset。 */
+    private fun readRelativeTable(reader: (Long, Int) -> ByteArray?, table: Long, count: Int): List<Long>? {
+        val bytes = reader(table, count * 4) ?: return null
         if (bytes.size < 4) return null
-
-        val out = ArrayList<Long>(n)
+        val out = ArrayList<Long>(count)
         var i = 0
         while (i + 4 <= bytes.size) {
             var v = (bytes[i].toLong() and 0xFF)
@@ -214,6 +293,23 @@ internal object AnalysisCfgRebuild {
             val tgt = table + off
             if (tgt > 0L) out.add(tgt)
             i += 4
+        }
+        return out.distinct().takeIf { it.isNotEmpty() }
+    }
+
+    /** 形态 B：每项 8 字节无符号，值本身就是目标地址（R_AARCH64_RELATIVE 的 addend 已是 VA）。 */
+    private fun readAbsoluteTable(reader: (Long, Int) -> ByteArray?, table: Long, count: Int): List<Long>? {
+        val bytes = reader(table, count * 8) ?: return null
+        if (bytes.size < 8) return null
+        val out = ArrayList<Long>(count)
+        var i = 0
+        while (i + 8 <= bytes.size) {
+            var v = 0L
+            for (b in 7 downTo 0) {
+                v = (v shl 8) or (bytes[i + b].toLong() and 0xFF)
+            }
+            if (v > 0L) out.add(v)
+            i += 8
         }
         return out.distinct().takeIf { it.isNotEmpty() }
     }

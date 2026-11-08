@@ -383,6 +383,78 @@ internal object AnalysisCfgRebuild {
         return SlotHit(label, targets.distinct())
     }
 
+    // ───────────────────────── 跨调用点展开 ─────────────────────────
+
+    /**
+     * 找出函数内所有**参数尾跳**：`br xN` 且 xN 是本函数的入口参数（函数内从未被改写，
+     * 或经栈中转后追回参数）。返回值是 (br 地址, 参数名)。
+     *
+     * 这类目标由调用方决定，单看本函数只能是"参数 x2"；展开要用 [evalParamAtCaller]。
+     */
+    fun paramTailJumps(linear: List<Pair<Long, String>>): List<Pair<Long, String>> {
+        if (linear.size < 2) return emptyList()
+        val infos = linear.sortedBy { it.first }.map { (addr, text) ->
+            val body = text.trim()
+            Insn(addr, body, body.substringBefore(' ').trim().lowercase(), emptyList(), false, false, false)
+        }
+        val states = analyzeBranches(infos)
+        val out = ArrayList<Pair<Long, String>>()
+        infos.forEachIndexed { i, inf ->
+            if (inf.mnem != "br") return@forEachIndexed
+            val dst = BR_X.find(inf.text)?.groupValues?.get(1) ?: return@forEachIndexed
+            val abs = states.getOrNull(i)?.get(dst) ?: return@forEachIndexed
+            if (abs.any { it.kind == K_PARAM }) out.add(inf.addr to dst)
+        }
+        return out
+    }
+
+    /**
+     * 调用点前的指令里 [param] 被赋成了什么 —— 跨调用点展开的核心。
+     *
+     * 典型形态（libcrypto `0x212xxx` 调用一个 thunk）：
+     * ```
+     * adrp x2, 0x1e000
+     * add  x2, x2, #0x8c0      ; x2 = 0x1e8c0 ← 真正被尾跳的函数
+     * bl   0x2126a0
+     * ```
+     *
+     * @param ctx 调用点之前的一段线性反汇编（按地址升序）
+     * @return 描述文本（`0x1e8c0` / `[0x1e8d0]` / `[obj+0x68]` / `参数 x0`），空串表示没赋过值
+     */
+    fun evalParamAtCaller(ctx: List<Pair<Long, String>>, param: String): String {
+        if (ctx.isEmpty()) return ""
+        val infos = ctx.sortedBy { it.first }.map { (addr, text) ->
+            val body = text.trim()
+            Insn(addr, body, body.substringBefore(' ').trim().lowercase(), emptyList(), false, false, false)
+        }
+        val state = HashMap<String, Set<Abs>>()
+        // 调用点里的 x0~x7 是**调用者函数**的参数，从这里往下推
+        for (r in 0..7) state["x$r"] = setOf(Abs(K_PARAM, name = "x$r"))
+        val stack = HashMap<Long, Set<Abs>>()
+        infos.forEach { inf ->
+            val writes = writesOf(inf)
+            if (writes.isEmpty()) return@forEach
+            val v = evalInsn(inf, state, stack)
+            writes.forEach { state[it] = v }
+        }
+        val v = state[param] ?: EMPTY
+        // 调用点没动过这个寄存器 → 目标仍由更上层决定，报空（不误导成"参数 x2 = 参数 x2"）
+        if (v.all { it.kind == K_PARAM }) return ""
+        return describeAbs(v)
+    }
+
+    private fun describeAbs(abs: Set<Abs>): String {
+        if (abs.isEmpty()) return ""
+        return abs.take(4).joinToString(" / ") {
+            when (it.kind) {
+                K_CONST -> "0x" + java.lang.Long.toHexString(it.v)
+                K_SLOT -> "[0x" + java.lang.Long.toHexString(it.v) + "]"
+                K_OBJ -> "[obj+0x" + java.lang.Long.toHexString(it.v) + "]"
+                else -> "参数 " + it.name
+            }
+        }
+    }
+
     // ───────────────────────── switch 跳表 ─────────────────────────
 
     /**

@@ -5795,6 +5795,9 @@ private fun CfgView(
     // —— 所以三种内容模式（summary/asm/pseudo）都要取，不能只在非 summary 时取（那样节点列表恒显 0 条指令）。
     // 单块兜底重建的图（rzCfg 只给 1 个块时用线性指令自己切块）
     var rebuiltCfg by remember { mutableStateOf<CfgGraph?>(null) }
+    // 尾跳调用点展开要用整函数线性指令（数据流靠它做栈槽配对）
+    var cfgLinear by remember { mutableStateOf<List<Pair<Long, String>>>(emptyList()) }
+    val funcVaLong = remember(target) { parseCfgAddr(target) }
     LaunchedEffect(tools.cfgUi.contentMode, tools.cfgJson, target, ws) {
         rebuiltCfg = null
         if (ws.isBlank() || tools.cfgJson.isBlank() || target.isBlank()) return@LaunchedEffect
@@ -5869,6 +5872,7 @@ private fun CfgView(
                                 slotReader = AnalysisCfgRebuild.makeSlotReader(readMem, relocs),
                             )
                         } else null
+                        cfgLinear = linear
                         rebuiltCfg = rebuilt
                         // 重建出的块换了起点，块内指令要按新块区间重新归并，否则列表全是 0 条
                         if (rebuilt != null) mergeLinearInsns(linear, rebuilt) else merged
@@ -5952,6 +5956,7 @@ private fun CfgView(
                     )
                 }
             }
+            TailExpandButton(context, ws, funcVaLong, cfgLinear, zh)
         }
         GroupDivider()
         Box(Modifier.weight(1f).fillMaxWidth()) {

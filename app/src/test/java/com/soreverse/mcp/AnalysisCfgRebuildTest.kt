@@ -272,6 +272,56 @@ class AnalysisCfgRebuildTest {
         assertTrue(0x1030L !in targets)
     }
 
+    // ── 跨调用点展开 ──
+
+    @Test
+    fun paramTailJumpsFindsParameterBranches() {
+        val lin = listOf(
+            0x1000L to "cbz x0, 0x1020",
+            0x1004L to "br x2",
+            0x1020L to "ret",
+        )
+        val j = AnalysisCfgRebuild.paramTailJumps(lin)
+        assertEquals(1, j.size)
+        assertEquals(0x1004L, j[0].first)
+        assertEquals("x2", j[0].second)
+    }
+
+    @Test
+    fun paramTailJumpsIgnoresLoadedRegisters() {
+        val lin = listOf(
+            0x1000L to "ldr x9, [sp, #0x8]",
+            0x1004L to "br x9",
+            0x1020L to "ret",
+        )
+        assertTrue(AnalysisCfgRebuild.paramTailJumps(lin).isEmpty())
+    }
+
+    @Test
+    fun evalParamAtCallerResolvesAdrpAdd() {
+        val ctx = listOf(
+            0x2000L to "adrp x2, 0x1e000",
+            0x2004L to "add x2, x2, #0x8c0",
+            0x2008L to "bl 0x1234",
+        )
+        assertEquals("0x1e8c0", AnalysisCfgRebuild.evalParamAtCaller(ctx, "x2"))
+    }
+
+    @Test
+    fun evalParamAtCallerReportsObjectSlot() {
+        val ctx = listOf(
+            0x2000L to "ldr x8, [x0, 0x8]",
+            0x2004L to "ldr x2, [x8, 0x68]",
+        )
+        assertEquals("[obj+0x68]", AnalysisCfgRebuild.evalParamAtCaller(ctx, "x2"))
+    }
+
+    @Test
+    fun evalParamAtCallerBlankWhenUntouched() {
+        val ctx = listOf(0x2000L to "bl 0x1234")
+        assertEquals("", AnalysisCfgRebuild.evalParamAtCaller(ctx, "x2"))
+    }
+
     // ── 工具函数 ──
 
     @Test

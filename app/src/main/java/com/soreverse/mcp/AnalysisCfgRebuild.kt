@@ -1,7 +1,7 @@
 package com.soreverse.mcp
 
 /**
- * 从线性反汇编重建控制流图，并尽力解析 AArch64 的寄存器间接跳转。
+ * 从线性反汇编重建控制流图，并解析 AArch64 的寄存器间接跳转。
  *
  * 为什么需要重建：rizin 有时把整段代码识别成**一个基本块**（函数边界没切、或 `af` 只做了线性扫描），
  * 于是 `agfj/rzCfg` 只返回 1 个块 —— 界面上就是"控制流图形化只有一个框"，
@@ -11,17 +11,24 @@ package com.soreverse.mcp
  *   · 块起点 = 函数入口 + 所有跳转目标 + 所有跳转指令的下一条
  *   · 块尾 = 跳转/返回指令
  *   · 边 = 顺序边（块尾不是无条件跳转/返回时）+ 跳转边
- * 跳转目标必须落在函数自己的指令地址集合里（跳出去的一律当外部调用，不建边），
- * 这样不会把相邻函数误并联进来。
+ * 跳转目标必须落在函数自己的指令地址集合里，否则当外部调用不建边。
  *
- * `br xN` 静态看不出目标，按三种编译器产物分别处理：
- *   1. **跳表**（switch）：严格匹配 `adrp`+`add`+`ldrsw`+`add`+`br` 五连，读表反推，见 [resolveJumpTable]
- *   2. **槽表尾跳**（PLT / 函数指针表）：`ldr xN, [xBase, #off]` + `br xN`，
- *      xBase 来自 `adrp`+`add`（常量地址）→ 该槽是 GOT/.data.rel.ro 项。
- *      把槽地址交给 [SlotHit] 解析器就能拿到**符号名**（`memcpy` / `__cxa_finalize` / 本地函数地址），
- *      见 [resolveIndirectTail]。实测 libpython3.12.so 的 1600 条 `br` 里 1353 条走这条路。
- *   3. **对象槽尾跳**（`ldr x1, [x9]` 其中 x9 来自对象字段）：静态无唯一解，
- *      但能把字段偏移标出来（`[obj+0x68]`），让用户知道"尾跳到哪个 slot"。
+ * `br xN` 的解析分两层：
+ *
+ * **① 函数内数据流**（[analyzeBranches]）：顺着指令顺序维护每个寄存器的抽象值
+ * （常量地址 / 数据槽 / 对象字段 / 入口参数），并跟踪 `str/stp → [sp,#off]` 的栈槽。
+ * 这样 `ldr x19,[sp,#0x10]; br x19`（epilogue 恢复后尾跳）这种跨几十条指令的情况也能追到源头。
+ *
+ * **② 抽象值落地**（[resolveBranch]）：
+ *
+ * | 抽象值 | 例子 | 结果 |
+ * |---|---|---|
+ * | 常量槽 | `adrp x8,got; ldr x16,[x8,#0x10]; br x16` | 重定位符号名（`memcpy`） |
+ * | 常量表 | `ldr x9,[x8,x0,lsl #3]; br x9` | 逐项解析成多目标 |
+ * | 对象字段 | `ldr x8,[x0,#8]; ldr x1,[x8,#0x68]; br x1` | 无解，标 `[obj+0x68]` |
+ * | 入口参数 | 函数内从未改写的 x0~x7 | 标 `参数 x2（调用方传入）` |
+ *
+ * 另外单独处理 switch 跳表（[resolveJumpTable]）：严格匹配 `adrp`+`add`+`ldrsw`+`add`+`br` 五连。
  */
 internal object AnalysisCfgRebuild {
 
@@ -41,31 +48,30 @@ internal object AnalysisCfgRebuild {
     private val BR_X = Regex("""\bbr\s+(x\d+)""")
     private val ADRP = Regex("""adrp\s+(x\d+)\s*,\s*#?(0x[0-9a-fA-F]+|[0-9]+)""")
     private val ADD_REG_IMM = Regex("""add\s+(x\d+)\s*,\s*(x\d+)\s*,\s*#?(0x[0-9a-fA-F]+|\d+)""")
+    private val SUB_REG_IMM = Regex("""sub\s+(x\d+)\s*,\s*(x\d+)\s*,\s*#?(0x[0-9a-fA-F]+|\d+)""")
     private val ADD_REG_REG_REG = Regex("""add\s+(x\d+)\s*,\s*(x\d+)\s*,\s*(x\d+)""")
     private val CMP_IMM = Regex("""cmp\s+w\d+\s*,\s*#?(0x[0-9a-fA-F]+|\d+)""")
     /** 形态 A 的取表项：`ldrsw x9, [x8, w0, uxtw #2]`。 */
     private val LDR_SIGNED_INDEXED = Regex("""ldrs[whb]\s+(x\d+)\s*,\s*\[\s*(x\d+)\s*,[^\]]*\]""")
     /** 形态 B 的取表项：`ldr x9, [x8, x0, lsl #3]`（8 字节绝对地址表）。 */
-    private val LDR_PTR_INDEXED = Regex("""ldr\s+(x\d+)\s*,\s*\[\s*(x\d+)\s*,[^\]]*lsl\s*#?\s*3[^\]]*\]""")
+    private val LDR_PTR_INDEXED = Regex("""ldr\s+(x\d+)\s*,\s*\[\s*(x\d+)\s*,[^\]]*lsl\s*#?\s*(2|3)[^\]]*\]""")
 
-    // ── 数据流溯源用的形态 ──
-    /** 目标寄存器（第一条操作数是 xN）。 */
+    // ── 数据流用的形态 ──
     private val FIRST_X = Regex("""^[a-z][a-z0-9.]*\s+(x\d+)""")
+    private val FIRST_TWO_X = Regex("""^ldp(?:sw)?\s+(x\d+)\s*,\s*(x\d+)""")
     private val MOV_RR = Regex("""^mov\s+(x\d+)\s*,\s*(x\d+)\s*$""")
     private val ORR_RR = Regex("""^orr\s+(x\d+)\s*,\s*xzr\s*,\s*(x\d+)""")
-    /** `ldr/ldur/ldrsb/... xD, [xBase, #disp]`（无索引）。 */
-    private val LD_DISP = Regex("""^ld(?:ur|rsw|rsh|rb|rh|r)?\s+(x\d+)\s*,\s*\[\s*(x\d+)\s*(?:,\s*#?(0x[0-9a-fA-F]+|\d+))?\s*\]""")
-    /** `ldr xD, [xBase, xIdx, lsl #3]`（索引取表）。 */
+    /** `ldr/ldur/ldrb/... xD, [xBase, #disp]`（无索引）。 */
+    private val LD_DISP = Regex("""^ld(?:ur|rsw|rsh|rb|rh|r)?\s+(x\d+)\s*,\s*\[\s*(x\d+|sp)\s*(?:,\s*#?(0x[0-9a-fA-F]+|\d+))?\s*\]""")
     private val LD_INDEXED = Regex("""^ldr\s+(x\d+)\s*,\s*\[\s*(x\d+)\s*,\s*x\d+\s*,\s*lsl\s*#?\s*(2|3)[^\]]*\]""")
-    private val SUB_INST = Regex("""^sub\s+(x\d+)\s*,\s*(x\d+)\s*,\s*#?(0x[0-9a-fA-F]+|\d+)""")
+    private val ST_DISP = Regex("""^st(?:ur|rb|rh|r)?\s+(x\d+)\s*,\s*\[\s*sp\s*(?:,\s*#?(0x[0-9a-fA-F]+|\d+))?\s*\]""")
+    private val STP_DISP = Regex("""^stp\s+(x\d+)\s*,\s*(x\d+)\s*,\s*\[\s*sp\s*(?:,\s*#?(0x[0-9a-fA-F]+|\d+))?\s*\]""")
 
-    /** 这些助记符的首个寄存器操作数**不是**写（读/比较/存）。 */
     private val NO_WRITE = setOf(
         "str", "stur", "stp", "st1", "st2", "st3", "st4", "cmp", "cmn", "tst",
         "cbz", "cbnz", "tbz", "tbnz", "b", "br", "blr", "bl", "blx", "ret",
         "nop", "bti", "prfm", "dmb", "dsb", "isb",
     )
-    private val BOUNDARY = setOf("b", "br", "blr", "bl", "blx", "ret", "cbz", "cbnz", "tbz", "tbnz")
 
     private data class Insn(
         val addr: Long,
@@ -77,15 +83,17 @@ internal object AnalysisCfgRebuild {
         val isRet: Boolean,
     )
 
-    /** 跳表反推结果。 */
-    private class JumpTable(val targets: List<Long>, val itemWidth: Int)
+    /** 寄存器的抽象值。 */
+    private data class Abs(val kind: Int, val v: Long = 0L, val scale: Int = 0, val name: String = "")
 
-    /** 寄存器溯源结果。 */
-    private sealed class Traced {
-        class Const(val v: Long) : Traced()
-        class Slot(val addr: Long, val scale: Int) : Traced()
-        class ObjField(val off: Long) : Traced()
-    }
+    private const val K_CONST = 0
+    private const val K_SLOT = 1
+    private const val K_OBJ = 2
+    private const val K_PARAM = 3
+
+    private val EMPTY: Set<Abs> = emptySet()
+
+    private class JumpTable(val targets: List<Long>, val itemWidth: Int)
 
     private fun hex(v: String): Long? =
         if (v.startsWith("0x") || v.startsWith("0X")) v.substring(2).toLongOrNull(16) else v.toLongOrNull()
@@ -93,10 +101,11 @@ internal object AnalysisCfgRebuild {
     /**
      * @param funcName 函数名（进 CfgGraph）
      * @param funcVa 函数入口地址文本（进 CfgGraph）
-     * @param linear `pdfj` 逐指令结果：地址 → 反汇编文本（按地址升序）
+     * @param linear `pdfj` 逐指令结果：地址 → 反汇编文本（按地址升序）—— **必须是完整函数体**，
+     *               数据流靠它做栈槽配对与跨块传播
      * @param density 保留参数（历史兼容，当前布局不吃这个值）
      * @param memReader 读内存（地址, 长度）→ 字节；给跳表解析用
-     * @param slotReader 解析数据槽（槽地址, 项宽）→ [SlotHit]；给间接尾跳符号化用
+     * @param slotReader 解析数据槽（槽地址, 项宽）→ [SlotHit]
      * @return 重建结果；无法重建时返回 null，调用方保留原图
      */
     @Suppress("UNUSED_PARAMETER")
@@ -125,11 +134,15 @@ internal object AnalysisCfgRebuild {
             Insn(addr, body, mnem, if (isCond || isUncond) targets else emptyList(), isCond, isUncond, isRet)
         }.toMutableList()
 
-        // br xN：① 严格匹配跳表链 ② 槽表尾跳符号化 ③ 对象槽标字段偏移
+        // ① 函数内数据流：每条 br 处目标寄存器的可能来源
+        val brStates = analyzeBranches(infos)
+
+        // ② 落地：跳表优先，其次按抽象值解析
         val tailLabels = HashMap<Int, String>()
         for (i in infos.indices) {
             val inf = infos[i]
-            if (inf.mnem != "br" || inf.targets.isNotEmpty() || !BR_X.containsMatchIn(inf.text)) continue
+            if (inf.mnem != "br" || inf.targets.isNotEmpty()) continue
+            val dst = BR_X.find(inf.text)?.groupValues?.get(1) ?: continue
 
             val jt = memReader?.let { resolveJumpTable(infos, i, it) }
             if (jt != null) {
@@ -139,10 +152,12 @@ internal object AnalysisCfgRebuild {
                     continue
                 }
             }
-            val hit = slotReader?.let { resolveIndirectTail(infos, i, it) } ?: continue
-            tailLabels[i] = hit.label
-            val inner = hit.targets.filter { it in addrSet }
+            val abs = brStates.getOrNull(i)?.get(dst) ?: EMPTY
+            if (abs.isEmpty()) continue
+            val resolved = resolveBranch(abs, slotReader)
+            val inner = resolved.targets.filter { it in addrSet }
             if (inner.isNotEmpty()) infos[i] = inf.copy(targets = inner)
+            if (resolved.label.isNotEmpty()) tailLabels[i] = resolved.label
         }
 
         // 块起点
@@ -170,7 +185,6 @@ internal object AnalysisCfgRebuild {
         val lines = Array(blocks.size) { mutableListOf<String>() }
         infos.forEach { lines[owner(it.addr)].add(it.text) }
 
-        // 块尾：决定出边，也决定摘要里要不要标"尾跳 → 目标"
         val infoByAddr = infos.associateBy { it.addr }
         val tailIdx = blocks.mapIndexed { bi, start ->
             val lastAddr = lines[bi].lastOrNull()?.let { t ->
@@ -213,101 +227,168 @@ internal object AnalysisCfgRebuild {
         return CfgGraph(funcName, funcVa, cfgBlocks, cfgEdges)
     }
 
-    // ───────────────────────── br xN 解析 ─────────────────────────
+    // ───────────────────────── 函数内数据流 ─────────────────────────
 
     /**
-     * 尾跳符号化：从 `br xN` 往前溯源 xN 的来源。
+     * 顺序扫描整个函数体，维护 `寄存器 → 抽象值集合` 与 `[sp+off] 栈槽 → 抽象值集合`。
+     * 在每条 `br` 处快照当前状态。
      *
-     * | 形态 | 例子 | 结果 |
-     * |---|---|---|
-     * | 常量槽 | `adrp x8,got; ldr x16,[x8,#0x10]; br x16` | → `SlotHit("memcpy", [])`（重定位符号名） |
-     * | 常量表 | `adrp x8,tbl; ldr x9,[x8,x0,lsl #3]; br x9` | → `SlotHit("N 项", [目标...])` |
-     * | 对象字段 | `ldr x8,[x0,#8]; ldr x1,[x8,#0x68]; br x1` | → `SlotHit("[obj+0x68]", [])` |
-     * | 直接地址 | `adrp x9,f; add x9,x9,#off; br x9` | → `SlotHit("0x...", [地址])` |
+     * 为什么用集合：分支汇合时同一个寄存器可能有多个来源（`csel`、if-else），
+     * 集合天然表示"N 个候选"，不会因为取最后一个而丢掉分支。
+     * 单点候选超过 8 个时视为无法确定，不再展开。
      */
-    private fun resolveIndirectTail(
-        infos: List<Insn>,
-        brIndex: Int,
-        slotReader: (Long, Int) -> SlotHit?,
-    ): SlotHit? {
-        val dst = BR_X.find(infos[brIndex].text)?.groupValues?.get(1) ?: return null
-        return when (val t = traceReg(infos, brIndex, dst, 4)) {
-            is Traced.Slot -> slotReader(t.addr, t.scale)
-            is Traced.ObjField -> SlotHit("[obj+0x" + java.lang.Long.toHexString(t.off) + "]", emptyList())
-            is Traced.Const -> SlotHit("0x" + java.lang.Long.toHexString(t.v), listOf(t.v))
-            null -> null
-        }
-    }
+    private fun analyzeBranches(infos: List<Insn>): Array<Map<String, Set<Abs>>> {
+        val out = Array<Map<String, Set<Abs>>>(infos.size) { emptyMap() }
+        val state = HashMap<String, Set<Abs>>()
+        for (r in 0..7) state["x$r"] = setOf(Abs(K_PARAM, name = "x$r"))
+        val stack = HashMap<Long, Set<Abs>>()
 
-    /** 近似数据流：往前找最后一次写 [reg] 的指令，回溯它的来源（不含跨基本块的 phi）。 */
-    private fun traceReg(infos: List<Insn>, fromIndex: Int, reg: String, depth: Int): Traced? {
-        if (depth <= 0) return null
-        var k = fromIndex - 1
-        var steps = 0
-        while (k >= 0 && steps < 40) {
-            val ins = infos[k]
-            if (!writesReg(ins, reg)) {
-                if (ins.mnem in BOUNDARY || ins.mnem.startsWith("b.")) return null
-                k--; steps++
+        for (i in infos.indices) {
+            val inf = infos[i]
+            if (inf.mnem == "br") {
+                out[i] = HashMap(state)
                 continue
             }
-            val t = ins.text
-            ADRP.find(t)?.let { m ->
-                if (m.groupValues[1] == reg) return hex(m.groupValues[2])?.let { Traced.Const(it) }
-            }
-            ADD_REG_IMM.find(t)?.let { m ->
-                if (m.groupValues[1] == reg) {
-                    val base = traceReg(infos, k, m.groupValues[2], depth - 1) as? Traced.Const
-                    val imm = hex(m.groupValues[3]) ?: 0L
-                    return base?.let { Traced.Const(it.v + imm) }
+            // 栈写入：记录槽里存的是谁的当前值
+            when (inf.mnem) {
+                "str", "stur", "strb", "strh" -> ST_DISP.find(inf.text)?.let { m ->
+                    val off = hex(m.groupValues[2]) ?: 0L
+                    stack[off] = state[m.groupValues[1]] ?: EMPTY
+                }
+                "stp" -> STP_DISP.find(inf.text)?.let { m ->
+                    val off = hex(m.groupValues[3]) ?: 0L
+                    stack[off] = state[m.groupValues[1]] ?: EMPTY
+                    stack[off + 8] = state[m.groupValues[2]] ?: EMPTY
                 }
             }
-            SUB_INST.find(t)?.let { m ->
-                if (m.groupValues[1] == reg) {
-                    val base = traceReg(infos, k, m.groupValues[2], depth - 1) as? Traced.Const
-                    val imm = hex(m.groupValues[3]) ?: 0L
-                    return base?.let { Traced.Const(it.v - imm) }
+            val writes = writesOf(inf)
+            if (writes.isEmpty()) continue
+
+            // ldp 从栈恢复两个寄存器：分别取两个槽
+            if (inf.mnem == "ldp" || inf.mnem == "ldpsw") {
+                val m = FIRST_TWO_X.find(inf.text)
+                val ld = LD_DISP.find(inf.text)
+                if (m != null && ld != null && ld.groupValues[2] == "sp") {
+                    val off = hex(ld.groupValues[3]) ?: 0L
+                    state[m.groupValues[1]] = stack[off] ?: EMPTY
+                    state[m.groupValues[2]] = stack[off + 8] ?: EMPTY
+                    continue
                 }
             }
-            MOV_RR.find(t)?.let { m ->
-                if (m.groupValues[1] == reg) return traceReg(infos, k, m.groupValues[2], depth - 1)
-            }
-            ORR_RR.find(t)?.let { m ->
-                if (m.groupValues[1] == reg) return traceReg(infos, k, m.groupValues[2], depth - 1)
-            }
-            LD_INDEXED.find(t)?.let { m ->
-                if (m.groupValues[1] == reg) {
-                    val base = traceReg(infos, k, m.groupValues[2], depth - 1) as? Traced.Const
-                    val scale = m.groupValues[3].toIntOrNull() ?: 3
-                    return base?.let { Traced.Slot(it.v, if (scale == 2) 4 else 8) }
-                }
-            }
-            LD_DISP.find(t)?.let { m ->
-                if (m.groupValues[1] == reg) {
-                    val disp = hex(m.groupValues[3]) ?: 0L
-                    return when (val b = traceReg(infos, k, m.groupValues[2], depth - 1)) {
-                        is Traced.Const -> Traced.Slot(b.v + disp, 0)
-                        is Traced.Slot -> Traced.ObjField(disp)
-                        is Traced.ObjField -> Traced.ObjField(disp)
-                        null -> Traced.ObjField(disp)
-                    }
-                }
-            }
-            return null      // 写了但不是可识别的形态
+            val v = evalInsn(inf, state, stack)
+            writes.forEach { state[it] = v }
         }
-        return null
+        return out
     }
 
-    private fun writesReg(ins: Insn, reg: String): Boolean {
-        if (ins.mnem in NO_WRITE) return false
-        val m = FIRST_X.find(ins.text) ?: return false
-        return m.groupValues[1] == reg
+    private fun writesOf(inf: Insn): List<String> {
+        if (inf.mnem in NO_WRITE) return emptyList()
+        if (inf.mnem == "ldp" || inf.mnem == "ldpsw") {
+            val m = FIRST_TWO_X.find(inf.text) ?: return emptyList()
+            return listOf(m.groupValues[1], m.groupValues[2])
+        }
+        val m = FIRST_X.find(inf.text) ?: return emptyList()
+        return listOf(m.groupValues[1])
+    }
+
+    /** 算一条指令写出的抽象值。返回 [EMPTY] 表示"未知"（区别于"没写过"）。 */
+    private fun evalInsn(
+        inf: Insn,
+        state: Map<String, Set<Abs>>,
+        stack: Map<Long, Set<Abs>>,
+    ): Set<Abs> {
+        val t = inf.text
+        ADRP.find(t)?.let { m ->
+            val v = hex(m.groupValues[2]) ?: 0L
+            return if (v != 0L) setOf(Abs(K_CONST, v)) else EMPTY
+        }
+        ADD_REG_IMM.find(t)?.let { m ->
+            val base = state[m.groupValues[2]] ?: return EMPTY
+            val imm = hex(m.groupValues[3]) ?: 0L
+            val out = HashSet<Abs>()
+            base.forEach { if (it.kind == K_CONST) out.add(Abs(K_CONST, it.v + imm)) }
+            return if (out.isEmpty()) EMPTY else out
+        }
+        SUB_REG_IMM.find(t)?.let { m ->
+            val base = state[m.groupValues[2]] ?: return EMPTY
+            val imm = hex(m.groupValues[3]) ?: 0L
+            val out = HashSet<Abs>()
+            base.forEach { if (it.kind == K_CONST) out.add(Abs(K_CONST, it.v - imm)) }
+            return if (out.isEmpty()) EMPTY else out
+        }
+        MOV_RR.find(t)?.let { m -> return state[m.groupValues[2]] ?: EMPTY }
+        ORR_RR.find(t)?.let { m -> return state[m.groupValues[2]] ?: EMPTY }
+        LD_INDEXED.find(t)?.let { m ->
+            val base = state[m.groupValues[2]] ?: return EMPTY
+            val scale = if (m.groupValues[3] == "2") 4 else 8
+            val out = HashSet<Abs>()
+            base.forEach { if (it.kind == K_CONST) out.add(Abs(K_SLOT, it.v, scale)) }
+            return if (out.isEmpty()) EMPTY else out
+        }
+        LD_DISP.find(t)?.let { m ->
+            val baseName = m.groupValues[2]
+            val disp = hex(m.groupValues[3]) ?: 0L
+            // 栈槽恢复：这就是 `ldr x19,[sp,#0x10]; ...; br x19` 能追到源头的原因
+            if (baseName == "sp") return stack[disp] ?: EMPTY
+            val base = state[baseName] ?: return EMPTY
+            val out = HashSet<Abs>()
+            base.forEach {
+                when (it.kind) {
+                    K_CONST -> out.add(Abs(K_SLOT, it.v + disp))
+                    K_PARAM -> out.add(Abs(K_OBJ, disp))      // 从参数指向的结构体取字段
+                    else -> out.add(Abs(K_OBJ, disp))
+                }
+            }
+            return out
+        }
+        return EMPTY
     }
 
     /**
-     * 反推 AArch64 跳表（switch）。**严格匹配编译器生成的指令链，任何一环对不上就返回 null。**
+     * 抽象值 → 可展示目标。
+     * 多个候选（分支汇合）时全部列出，标一条"多目标"。
+     */
+    private fun resolveBranch(
+        abs: Set<Abs>,
+        slotReader: ((Long, Int) -> SlotHit?)?,
+    ): SlotHit {
+        val targets = ArrayList<Long>()
+        val labels = ArrayList<String>()
+        var guard = 0
+        for (a in abs) {
+            if (guard++ >= 8) break
+            when (a.kind) {
+                K_CONST -> {
+                    targets.add(a.v)
+                    labels.add("0x" + java.lang.Long.toHexString(a.v))
+                }
+                K_SLOT -> {
+                    val hit = slotReader?.invoke(a.v, a.scale)
+                    if (hit != null) {
+                        labels.add(hit.label)
+                        targets.addAll(hit.targets)
+                    } else {
+                        labels.add("槽 0x" + java.lang.Long.toHexString(a.v))
+                    }
+                }
+                K_OBJ -> labels.add("[obj+0x" + java.lang.Long.toHexString(a.v) + "]")
+                K_PARAM -> labels.add("参数 " + a.name + "（调用方传入）")
+            }
+        }
+        val label = when {
+            labels.isEmpty() -> ""
+            labels.size == 1 -> labels[0]
+            else -> labels.take(3).joinToString(" / ") + if (labels.size > 3) " …" else ""
+        }
+        return SlotHit(label, targets.distinct())
+    }
+
+    // ───────────────────────── switch 跳表 ─────────────────────────
+
+    /**
+     * 反推 AArch64 跳表。**严格匹配编译器生成的指令链，任何一环对不上就返回 null。**
      *
-     * 形态 A（4 字节有符号偏移，相对表基址；clang 默认）：
+     * 形态 A（4 字节有符号偏移，相对表基址）：
      * ```
      * adrp  x8, 0x12000
      * add   x8, x8, #0x3c0
@@ -322,10 +403,7 @@ internal object AnalysisCfgRebuild {
      * ldr  x9, [x8, x0, lsl #3]
      * br   x9
      * ```
-     *
-     * 为什么必须严格：实测 libpython3.12.so / libcrypto 里 `br xN` 绝大多数是间接尾调用，
-     * 跳表一条都没有。放松成"窗口内有 adrp 就当跳表"会把随机内存读成目标
-     * —— 目标过滤能挡住大部分，但仍会漏出假边。
+     * 放松成"窗口内有 adrp 就当跳表"会把随机内存读成目标 —— 目标过滤能挡住大部分，但仍会漏出假边。
      */
     private fun resolveJumpTable(
         infos: List<Insn>,
@@ -424,7 +502,7 @@ internal object AnalysisCfgRebuild {
         return out.distinct().takeIf { it.isNotEmpty() }
     }
 
-    /** 形态 B：每项 8 字节无符号，值本身就是目标地址（R_AARCH64_RELATIVE 的 addend 已是 VA）。 */
+    /** 形态 B：每项 8 字节无符号，值本身就是目标地址。 */
     private fun readAbsoluteTable(reader: (Long, Int) -> ByteArray?, table: Long, count: Int): List<Long>? {
         val bytes = reader(table, count * 8) ?: return null
         if (bytes.size < 8) return null
@@ -432,9 +510,7 @@ internal object AnalysisCfgRebuild {
         var i = 0
         while (i + 8 <= bytes.size) {
             var v = 0L
-            for (b in 7 downTo 0) {
-                v = (v shl 8) or (bytes[i + b].toLong() and 0xFF)
-            }
+            for (b in 7 downTo 0) v = (v shl 8) or (bytes[i + b].toLong() and 0xFF)
             if (v > 0L) out.add(v)
             i += 8
         }
@@ -445,10 +521,8 @@ internal object AnalysisCfgRebuild {
 
     /**
      * `irj`（重定位 JSON）→ 槽地址 → 符号名。
-     *
-     * rizin 的每项形如 `{"vaddr":5306880,"type":"R_AARCH64_JUMP_SLOT","name":"memcpy"}`；
-     * RELATIVE 项没有名字（原本就是本地地址），这里跳过 —— 那些槽的内容本身就是目标地址，
-     * 由 [slotHitOf] 读 8 字节得到。
+     * rizin 每项形如 `{"vaddr":5306880,"type":"R_AARCH64_JUMP_SLOT","name":"memcpy"}`；
+     * RELATIVE 项没有名字，那些槽的内容本身就是目标地址。
      */
     fun parseRelocNames(json: String): Map<Long, String> {
         val out = HashMap<Long, String>()
@@ -463,12 +537,7 @@ internal object AnalysisCfgRebuild {
         return out
     }
 
-    /**
-     * 造一个带缓存的槽解析器。同一个槽被多个 `br` 引用时只读一次内存。
-     *
-     * @param readMem (地址, 长度) → 字节（UI 侧用 rizin `p8`）
-     * @param relocNames [parseRelocNames] 的结果
-     */
+    /** 造一个带缓存的槽解析器：同一个槽被多个 `br` 引用时只读一次内存。 */
     fun makeSlotReader(
         readMem: (Long, Int) -> ByteArray?,
         relocNames: Map<Long, String>,
@@ -483,11 +552,8 @@ internal object AnalysisCfgRebuild {
     }
 
     /**
-     * 槽内容 → 目标。
-     *
-     * · 有重定位符号名 → 外部函数（`memcpy`），无本地目标
-     * · 槽内容落在本 SO 代码段 → 本地函数地址（调用方再过滤"是否在本函数内"决定建不建边）
-     * · `scale > 0` 表示这是一张表（`ldr x,[base,idx,lsl #3]`），逐项解析成多目标
+     * 槽内容 → 目标：有重定位符号名就用名字；否则读 8 字节当目标地址；
+     * `scale > 0` 表示这是一张表，逐项解析成多目标。
      */
     fun slotHitOf(addr: Long, bytes: ByteArray?, scale: Int, relocNames: Map<Long, String>): SlotHit? {
         relocNames[addr]?.let { return SlotHit(it, emptyList()) }
@@ -528,7 +594,7 @@ internal object AnalysisCfgRebuild {
         return if (v >= 0x80000000L) v - 0x100000000L else v
     }
 
-    /** rizin `p8` 的十六进制输出 → 字节。解析失败返回 null（不抛，解析是可选的）。 */
+    /** rizin `p8` 的十六进制输出 → 字节。解析失败返回 null。 */
     fun hexToBytes(hexText: String): ByteArray? {
         val clean = hexText.filter { !it.isWhitespace() }
         if (clean.length < 2) return null

@@ -191,6 +191,46 @@ class AnalysisCfgRebuildTest {
         assertTrue("槽内容指向 0x1010，应连上这条边", 0x1010L in targets)
     }
 
+    /** 入口参数直接尾跳（回调）：要标出"参数 xN"，但不许造边。 */
+    @Test
+    fun parameterTailCallIsLabeled() {
+        val lin = listOf(
+            0x1000L to "cbz x0, 0x1020",
+            0x1004L to "mov x0, x2",
+            0x1008L to "br x2",
+            0x1020L to "ret",
+        )
+        val cfg = AnalysisCfgRebuild.rebuild(
+            "f", "0x1000", lin,
+            density = 1f,
+            memReader = null,
+            slotReader = null,
+        )
+        assertNotNull(cfg)
+        val note = cfg!!.blocks.firstOrNull { it.summary.contains("尾跳") }
+        assertNotNull("参数尾跳没有标注", note)
+        assertTrue("应标出参数 x2，实际：" + note!!.summary, note.summary.contains("参数 x2"))
+        assertTrue("参数尾跳不该造边", cfg.edges.none { it.from == note.index })
+    }
+
+    /** `str x19,[sp]; ...; ldr x19,[sp]; br x19` —— 栈恢复后尾跳要能追回参数。 */
+    @Test
+    fun stackRestoredTailCallTracesBackToParameter() {
+        val lin = listOf(
+            0x1000L to "mov x19, x0",
+            0x1004L to "str x19, [sp, #0x8]",
+            0x1008L to "cbz x1, 0x1020",
+            0x1010L to "ldr x19, [sp, #0x8]",
+            0x1014L to "br x19",
+            0x1020L to "ret",
+        )
+        val cfg = AnalysisCfgRebuild.rebuild("f", "0x1000", lin)
+        assertNotNull(cfg)
+        val note = cfg!!.blocks.firstOrNull { it.summary.contains("尾跳") }
+        assertNotNull("栈恢复尾跳没有标注", note)
+        assertTrue("应追到参数 x0，实际：" + note!!.summary, note.summary.contains("参数 x0"))
+    }
+
     /** 窗口里有 adrp 但不是跳表链 → 一条边都不许出（防误判）。 */
     @Test
     fun indirectTailCallIsNotMistakenForJumpTable() {
@@ -206,8 +246,9 @@ class AnalysisCfgRebuildTest {
             int64Le(0x1020L, 0x1030L, 0x1040L)
         })
         assertNotNull(cfg)
-        val brBlock = cfg!!.blocks.firstOrNull { it.summary.contains("间接跳转") }
-        assertNotNull("br x16 块没有标成间接跳转", brBlock)
+        // mov x16, x0 之后 br x16：数据流能认出"参数 x0"，但绝不能当成跳表目标
+        val brBlock = cfg!!.blocks.firstOrNull { it.summary.contains("尾跳") }
+        assertNotNull("br x16 块没有标注", brBlock)
         assertTrue("br x16 块不该有任何出边", cfg.edges.none { it.from == brBlock!!.index })
     }
 

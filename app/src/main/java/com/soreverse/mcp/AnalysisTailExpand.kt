@@ -31,7 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.runCatchingCancellable
 import com.soreverse.mcp.core.safeLaunch
-import com.soreverse.mcp.engine.EngineProvider
+import com.soreverse.mcp.core.EngineProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray

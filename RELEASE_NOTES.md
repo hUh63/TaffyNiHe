@@ -1,3 +1,43 @@
+## 塔菲逆核 v1.5.56 —— 尾跳调用点按需展开
+
+上一版把 `br x2` 这类参数尾跳标成了 `尾跳 → 参数 x2（调用方传入）`，但目标还是没答案。
+这版补上**跨调用点展开**：控制流页页签行右侧新增一个按钮（双向箭头图标），点一下就会去查
+"到底谁调用了这个函数、每次传的是哪个函数"。
+
+### 怎么算的
+
+1. `axtj` 拿本函数入口的所有调用点（`bl` 到这里的地址）
+2. 每个调用点往回取 20 条指令（80 字节，AArch64 定长）
+3. 用和 CFG 同一套数据流（[AnalysisCfgRebuild.evalParamAtCaller]）算：调用前 xN 被赋成了什么
+4. 结果按调用点列出：
+
+```
+bl 0x1f3a20
+  x2 = 0x1e8c0
+bl 0x1f3b04
+  x2 = 0x1e910
+```
+
+那个 `0x1e8c0` 就是真正被尾跳的函数地址 —— 很多情况下是 `adrp x2, page` + `add x2, x2, #off` 两条算出来的，
+也可能来自 `ldr x2, [x8]`（这时显示 `[0x...]`）或 `[obj+0x68]`。
+
+### 为什么做成按钮而不是自动
+
+一次展开 = 1 次 `axtj` + N 次 `pDj`（N = 调用点数，上限 24）。对这种 thunk 函数，调用点常常十几个，
+自动跑会把每次 CFG 重建都拖慢十几秒。做成按需：想看才点。
+
+### 边界
+
+- 调用点超过 24 个只取前 24 个（按地址排序）
+- 经 GOT/PLT 间接调用的查不到（`axtj` 看不到跨 SO 的调用），会明确提示「没有找到调用点」
+- 调用点没给该参数赋值时显示 `?`（目标由更上层决定）
+
+新增单测：`paramTailJumpsFindsParameterBranches` / `paramTailJumpsIgnoresLoadedRegisters` /
+`evalParamAtCallerResolvesAdrpAdd` / `evalParamAtCallerReportsObjectSlot` / `evalParamAtCallerBlankWhenUntouched`。
+
+> 顺带：build-apk 流水线的 frida-server 下载改成**失败不阻断**（沿用仓库内已有的
+> libfrida_server.so）。GitHub release CDN 今天大面积 504，外部网络问题不该让发版卡住。
+
 ## 塔菲逆核 v1.5.55 —— 剩余 `br xN` 的成因与处理
 
 上一版解出了 libpython 85% 的 `br`，剩下那些到底是什么？把 libcrypto 的 458 条全部归类了一遍：

@@ -74,7 +74,9 @@ internal fun TailExpandButton(
                 loading = true
                 message = ""
                 scope.safeLaunch {
-                    val r = withContext(Dispatchers.IO) { runCatchingCancellable { analyze(context, ws, funcVa, linear) }.getOrDefault(emptyList()) }
+                    val r: List<TailCallRow> = withContext(Dispatchers.IO) {
+                        runCatchingCancellable { analyze(context, ws, funcVa, linear) }.getOrDefault(emptyList())
+                    }
                     rows = r
                     if (r.isEmpty()) {
                         message = if (zh) "没有找到调用点（可能经 GOT/PLT 间接调用，或本函数无人调用）"

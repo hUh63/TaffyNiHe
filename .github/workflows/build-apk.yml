@@ -119,11 +119,14 @@ jobs:
           SO_PATH="app/src/main/jniLibs/arm64-v8a/libfrida_server.so"
           URL="https://github.com/frida/frida/releases/download/${FRIDA_VERSION}/frida-server-${FRIDA_VERSION}-android-arm64.xz"
           echo "下载 frida-server ${FRIDA_VERSION} ..."
-          curl -sL --retry 3 --max-time 500 "${URL}" -o /tmp/frida.xz || { echo "::error::frida-server 下载失败"; exit 1; }
+          # GitHub release 的 CDN 偶发 5xx（实测 504），此时沿用仓库内已有的
+          # libfrida_server.so —— 外部网络问题不该阻断构建/发版。
+          curl -sL --retry 3 --max-time 500 "${URL}" -o /tmp/frida.xz || rm -f /tmp/frida.xz
           export FRIDA_SO_PATH="${SO_PATH}"
-          python3 - <<'PY'
+          python3 - <<'PY' || echo "::warning::frida-server 下载/解压失败，沿用仓库内已有的 libfrida_server.so"
           import lzma, os
           data = lzma.open('/tmp/frida.xz').read()
+          assert len(data) > 1000000, 'not a frida-server xz'
           open(os.environ['FRIDA_SO_PATH'], 'wb').write(data)
           print(f"frida-server 已注入: {len(data)/1048576:.1f} MB")
           PY

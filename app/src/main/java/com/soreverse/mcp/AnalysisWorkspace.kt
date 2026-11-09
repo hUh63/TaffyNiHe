@@ -169,6 +169,7 @@ import androidx.compose.ui.unit.IntSize
 import org.json.JSONObject
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.core.runCatchingCancellable
+import com.soreverse.mcp.core.splitJsonChunks
 
 /**
  * 选择文件的 ActivityResultContract：与 OpenDocument 相同，但额外请求
@@ -5826,14 +5827,15 @@ private fun CfgView(
                         // 两者取并集：agf 有 body 的块用它，没有的用 pdfj 按块区间归并补齐
                         //（只看 agf 时部分块会显示「0 条指令」）。
                         val g = runCatching { parseCfgGraph(tools.cfgJson) }.getOrNull()
-                        val byGraph = parseGraphInsns(
-                            rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; agf json")),
+                        // 一次调用跑完 agf + pdfj：native 每条命令都要重建 RzCore 并全量分析
+                        //（6.7MB 的 SO 要 3~10 秒），合并后 CFG 重建从 2~3 次分析降到 1 次。
+                        val chunks = splitJsonChunks(
+                            rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; agf json; s $target; pdfj")),
                         )
+                        val byGraph = parseGraphInsns(chunks.getOrElse(0) { "{}" })
                         // `pdfj` 只覆盖「已被 af 分析的函数」内的指令；函数没进分析库时它返回空数组，
                         // 这正是节点列表一片「0 条指令」的根因 → 退化为从函数入口线性反汇编（pDj）。
-                        var linear = parsePdfjLinear(
-                            rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; pdfj")),
-                        )
+                        var linear = parsePdfjLinear(chunks.getOrElse(1) { "[]" })
                         if (linear.isEmpty()) {
                             linear = parsePdfjLinear(
                                 rzText(eng.rzCommand(ws, "", "e scr.color=0; s $target; pDj 4000")),
@@ -5856,13 +5858,8 @@ private fun CfgView(
                             // pageSize>8：说明 rizin 把整段当一块，才需要自己切。
                             // memReader 供 AArch64 跳表解析（`adrp`+`add`+`br xN`）读表项：每次读都是一次
                             // rzCommand 全量分析，所以按表地址缓存，一个函数最多读几次。
-                            val memCache = HashMap<Long, ByteArray?>()
-                            val readMem: (Long, Int) -> ByteArray? = { a, n ->
-                                memCache.getOrPut(a) {
-                                    AnalysisCfgRebuild.hexToBytes(
-                                        rzText(eng.rzCommand(ws, "", "p8 $n @ 0x" + java.lang.Long.toHexString(a))),
-                                    )
-                                }
+                            val readMem = AnalysisCfgRebuild.memReaderOf { cmd ->
+                                rzText(eng.rzCommand(ws, "", cmd))
                             }
                             // irj 走 lazy：函数里没有 br 时不必为它跑一次全量分析
                             val relocs by lazy { AnalysisCfgRebuild.parseRelocNames(rzText(eng.rzCommand(ws, "", "irj"))) }

@@ -609,6 +609,19 @@ internal object AnalysisCfgRebuild {
         return out
     }
 
+    /**
+     * 造一个带缓存的内存读取器（跳表解析用）。同一个地址只读一次 ——
+     * native 每次 `rzCommand` 都要重跑全量分析，多读一次就多几秒。
+     */
+    fun memReaderOf(read: (String) -> String): (Long, Int) -> ByteArray? {
+        val cache = HashMap<Long, ByteArray?>()
+        return { addr, len ->
+            cache.getOrPut(addr) {
+                hexToBytes(read("p8 $len @ 0x" + java.lang.Long.toHexString(addr)))
+            }
+        }
+    }
+
     /** 造一个带缓存的槽解析器：同一个槽被多个 `br` 引用时只读一次内存。 */
     fun makeSlotReader(
         readMem: (Long, Int) -> ByteArray?,

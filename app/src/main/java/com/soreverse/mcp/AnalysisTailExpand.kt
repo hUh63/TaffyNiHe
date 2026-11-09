@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.runCatchingCancellable
+import com.soreverse.mcp.core.splitJsonChunks
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.core.EngineProvider
 import kotlinx.coroutines.Dispatchers
@@ -161,13 +162,27 @@ private fun analyze(
     }.getOrDefault(emptyList())
     if (callers.isEmpty()) return emptyList()
 
-    val out = ArrayList<TailCallRow>()
-    callers.take(24).forEach { caller ->
+    val picked = callers.take(24)
+    // 一次调用跑完所有调用点的前置指令：native 每条 rzCommand 都要重建 RzCore + 全量分析，
+    // 24 个调用点各发一次 = 24 次分析（几十秒），合并后只有 2 次（axtj + 这批 pDj）。
+    val cmds = picked.joinToString("; ") {
         // 调用点前 20 条 = 往回 80 字节（AArch64 定长 4 字节）
-        val start = maxOf(0L, caller - 80L)
+        "pDj 20 @ " + java.lang.Long.toHexString(maxOf(0L, it - 80L))
+    }
+    val chunks = runCatching {
+        splitJsonChunks(textOf(eng.rzCommand(ws, "", "e scr.color=0; " + cmds)))
+    }.getOrDefault(emptyList())
+    // 有命令报错会让输出少一段 → 宁可逐个重查，也不让参数值错位
+    val merged = chunks.size == picked.size
+
+    val out = ArrayList<TailCallRow>()
+    picked.forEachIndexed { idx, caller ->
         val ctx = runCatching {
-            val res = eng.rzCommand(ws, "", "e scr.color=0; pDj 20 @ " + java.lang.Long.toHexString(start))
-            parseOps(textOf(res))
+            if (merged) {
+                parseOps(chunks[idx])
+            } else {
+                parseOps(textOf(eng.rzCommand(ws, "", "e scr.color=0; pDj 20 @ " + java.lang.Long.toHexString(maxOf(0L, caller - 80L)))))
+            }
         }.getOrDefault(emptyList())
         jumps.forEach { (_, param) ->
             val v = AnalysisCfgRebuild.evalParamAtCaller(ctx, param)

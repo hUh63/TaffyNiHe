@@ -192,6 +192,13 @@ build_one() {
     echo "error: $name source missing: $src - run 'git submodule update --init --recursive' first" >&2
     exit 1
   fi
+  # CMake 4.x 直接拒绝 cmake_minimum_required(<3.5) 的老项目（keystone 0.9.2 就是
+  # VERSION 2.8.12），报 "Compatibility with CMake < 3.5 has been removed"；
+  # 对这类项目 -DCMAKE_POLICY_VERSION_MINIMUM 不生效，只能把声明本身抬到 3.5。
+  if [[ -d "$src" ]]; then
+    find "$src" -maxdepth 4 -name CMakeLists.txt -print0 2>/dev/null \
+      | xargs -0 -r sed -i -E 's/cmake_minimum_required\([[:space:]]*VERSION[[:space:]]+[0-9.]+/cmake_minimum_required(VERSION 3.5/I' || true
+  fi
   local build="$BUILD_ROOT/$name"
   rm -rf "$build"
   mkdir -p "$build"

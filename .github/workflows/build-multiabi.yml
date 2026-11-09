@@ -295,6 +295,14 @@ jobs:
           path: app/src/main/jniLibs/${{ matrix.abi }}/
           if-no-files-found: error
 
+      # 单独上传 librz_native.so：它是唯一会随代码改动重编的 native 库，
+      # 本地/沙箱没有 NDK 时要靠这个 artifact 回填仓库 jniLibs。
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rz-native-${{ matrix.abi }}
+          path: app/src/main/jniLibs/${{ matrix.abi }}/librz_native.so
+          if-no-files-found: error
+
   package:
     name: package-multiabi-apk
     needs: prep

@@ -42,6 +42,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
+#include <ctime>
+#include <time.h>
 
 #define RZ_NATIVE_LOG(...) __android_log_print(ANDROID_LOG_INFO, "RzNative", __VA_ARGS__)
 #include <sys/stat.h>
@@ -161,6 +163,81 @@ namespace {
         if (!ok) { rz_core_free(core); unlink(path.c_str()); return nullptr; }
         rz_core_analysis_all(core);
         // Keep the temp file — the core needs it for I/O. Caller must unlink after.
+        return core;
+    }
+
+    // ── 共享 RzCore ────────────────────────────────────────────────────────────
+    // 全 App 最热的开销是「每条命令都 rz_core_new + rz_core_analysis_all」：
+    // 一个 6.7MB 的 SO 要 3~10 秒，而打开一个函数的控制流要连发 3~6 条只读命令。
+    // 这里对**只读命令**复用同一个 core（同一份字节只 load + 分析一次）；
+    // 写命令（unsafe）仍走独立 core —— 它要读回临时文件算 patch，不能和共享态混。
+    struct SharedCore {
+        RzCore* core = nullptr;
+        std::string tmpPath;
+        size_t bytes = 0;
+        uint64_t fp = 0;
+        uint64_t lastUseMs = 0;
+        uint32_t uses = 0;
+    };
+    std::mutex g_coreMutex;
+    SharedCore g_shared;
+
+    uint64_t nowMs() {
+        struct timespec ts {};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
+    }
+
+    // 内容指纹：长度 + 首尾各 4KB。编辑会改长度或尾部（节区头/符号表在末尾），能识别出来。
+    uint64_t coreFingerprint(const uint8_t* d, size_t n) {
+        uint64_t h = 1469598103934665603ULL;
+        const size_t k = n < 4096 ? n : 4096;
+        for (size_t i = 0; i < k; i++) { h ^= d[i]; h *= 1099511628211ULL; }
+        if (n > k) {
+            const uint8_t* tail = d + n - k;
+            for (size_t i = 0; i < k; i++) { h ^= tail[i]; h *= 1099511628211ULL; }
+        }
+        h ^= static_cast<uint64_t>(n);
+        h *= 1099511628211ULL;
+        return h;
+    }
+
+    // 调用方必须持 g_coreMutex
+    void dropSharedLocked() {
+        if (g_shared.core) { rz_core_free(g_shared.core); g_shared.core = nullptr; }
+        if (!g_shared.tmpPath.empty()) { unlink(g_shared.tmpPath.c_str()); g_shared.tmpPath.clear(); }
+        g_shared.bytes = 0;
+        g_shared.fp = 0;
+        g_shared.uses = 0;
+    }
+
+    // 返回到已加载并分析完的共享 core；调用方必须持 g_coreMutex
+    RzCore* acquireSharedLocked(const uint8_t* d, size_t n) {
+        const uint64_t fp = coreFingerprint(d, n);
+        if (g_shared.core && g_shared.bytes == n && g_shared.fp == fp) {
+            g_shared.lastUseMs = nowMs();
+            g_shared.uses++;
+            return g_shared.core;
+        }
+        dropSharedLocked();
+        std::string path = writeTempSo(d, n, "shared");
+        if (path.empty()) return nullptr;
+        RzCore* core = rz_core_new();
+        if (!core) { unlink(path.c_str()); return nullptr; }
+        applyGhidraConfig(core);
+        if (!rz_core_file_open_load(core, path.c_str(), 0, RZ_PERM_RX, false)) {
+            rz_core_free(core);
+            unlink(path.c_str());
+            return nullptr;
+        }
+        rz_core_analysis_all(core);
+        g_shared.core = core;
+        g_shared.tmpPath = path;
+        g_shared.bytes = n;
+        g_shared.fp = fp;
+        g_shared.lastUseMs = nowMs();
+        g_shared.uses = 1;
+        RZ_NATIVE_LOG("shared core ready: bytes=%zu", n);
         return core;
     }
 
@@ -1257,6 +1334,17 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommand(
     std::vector<uint8_t> buf(len);
     env->GetByteArrayRegion(jbytes, 0, len, reinterpret_cast<jbyte*>(buf.data()));
 
+    // 只读命令走共享 core：同一份字节只 load + analysis_all 一次，
+    // 之后每条命令都是毫秒级（原来每条都要重跑一次全量分析）。
+    if (!unsafe) {
+        std::lock_guard<std::mutex> lock(g_coreMutex);
+        RzCore* sc = acquireSharedLocked(buf.data(), buf.size());
+        if (!sc) return env->NewStringUTF("{\"error\":\"open\"}");
+        char* r = rz_core_cmd_str(sc, cmd.c_str());
+        std::string out = "{\"command\":\"" + escJson(cmd) + "\",\"text\":\"" + escJson(r ? r : "") + "\"}";
+        if (r) free(r);
+        return env->NewStringUTF(out.c_str());
+    }
     std::string path = writeTempSo(buf.data(), buf.size(), "cmd");
     if (path.empty()) return env->NewStringUTF("{\"error\":\"tempfile\"}");
     RzCore* core = rz_core_new();
@@ -1292,7 +1380,21 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommand(
     out += "}";
     if (result) free(result);
     unlink(path.c_str());
+    {
+        // 写操作后字节可能已变，共享 core 必须重建，否则后续只读会看到旧内容
+        std::lock_guard<std::mutex> lock(g_coreMutex);
+        dropSharedLocked();
+    }
     return env->NewStringUTF(out.c_str());
+}
+
+// 释放共享 RzCore（关闭工作区 / 内存紧张时调用）。分析结果会丢弃，
+// 下次只读命令会重新 load + 分析一次。
+JNIEXPORT void JNICALL
+Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzReleaseShared(JNIEnv*, jobject) {
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    dropSharedLocked();
+    RZ_NATIVE_LOG("shared core released");
 }
 
 JNIEXPORT jstring JNICALL

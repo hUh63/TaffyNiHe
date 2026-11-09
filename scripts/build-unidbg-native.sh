@@ -201,6 +201,7 @@ build_one() {
     -DANDROID_ABI="$ABI" \
     -DANDROID_PLATFORM=android-26 \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     "$@"
   echo "[unidbg-native] building $name ..."
   "$CMAKE_BIN" --build "$build" --parallel 4

@@ -196,8 +196,14 @@ build_one() {
   # VERSION 2.8.12），报 "Compatibility with CMake < 3.5 has been removed"；
   # 对这类项目 -DCMAKE_POLICY_VERSION_MINIMUM 不生效，只能把声明本身抬到 3.5。
   if [[ -d "$src" ]]; then
-    find "$src" -maxdepth 4 -name CMakeLists.txt -print0 2>/dev/null \
-      | xargs -0 -r sed -i -E 's/cmake_minimum_required\([[:space:]]*VERSION[[:space:]]+[0-9.]+/cmake_minimum_required(VERSION 3.5/I' || true
+    # 两条老 CMake 写法在 4.x 上都是硬错误：
+    #   1) cmake_minimum_required(VERSION 2.8.x) —— "Compatibility with CMake < 3.5 removed"
+    #   2) cmake_policy(SET CMP0051 OLD)        —— "may not be set to OLD ... no longer supports"
+    # 对这类上游（keystone 0.9.2 内嵌 LLVM 3.9）只能就地改源码，改完再 configure。
+    find "$src" -maxdepth 5 \( -name CMakeLists.txt -o -name '*.cmake' \) -print0 2>/dev/null \
+      | xargs -0 -r sed -i -E \
+          -e 's/cmake_minimum_required\([[:space:]]*VERSION[[:space:]]+[0-9.]+/cmake_minimum_required(VERSION 3.5/I' \
+          -e 's/(cmake_policy\(SET CMP[0-9]+)[[:space:]]+OLD\)/\1 NEW)/g' || true
   fi
   local build="$BUILD_ROOT/$name"
   rm -rf "$build"

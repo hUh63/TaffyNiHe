@@ -8,7 +8,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+/** 清掉只读命令缓存（重新分析后调用，否则查询会返回分析前的旧结果）。 */
+internal fun rzInvalidateCommandCache() = RzCmdCache.clear()
+
 internal fun EngineRuntime.rzAnalyze(workspaceId: String, editSessionId: String = ""): JSONObject = guarded {
+    RzCmdCache.clear()
     val bytes = dataFor(workspaceId, editSessionId)
     val elf = elfFor(workspaceId, editSessionId)
     if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")
@@ -380,7 +384,85 @@ internal fun EngineRuntime.rzDiff(workspaceIdA: String, editSessionIdA: String, 
     ok(JSONObject(result).put("workspaceIdA", workspaceIdA).put("workspaceIdB", workspaceIdB).put("diffBackend", "rizin"))
 }
 
-internal fun EngineRuntime.rzCommand(workspaceId: String, editSessionId: String = "", command: String, unsafe: Boolean = false): JSONObject = guarded {
+/**
+ * 只读命令结果缓存。
+ *
+ * 切页签、重进页面、点刷新都会重发同样的命令，而 native 每次 `rzCommand` 都要
+ * 新建 RzCore 并跑一遍 `rz_core_analysis_all`（6.7MB 的 SO 要 3~10 秒）。
+ * 命中缓存 = 0 成本。
+ *
+ * 失效靠两件事：① key 里带内容指纹（编辑后字节变 → 自动换 key）
+ * ② 执行会改变分析状态的命令（aa/af/aac/ax…）时整个清空。
+ */
+private object RzCmdCache {
+    private val map = object : LinkedHashMap<String, String>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 16
+    }
+
+    fun get(key: String): String? = synchronized(map) { map[key] }
+
+    fun put(key: String, value: String) {
+        if (value.length > 1_500_000) return   // 单条超 1.5MB 不缓存，别吃内存
+        synchronized(map) { map[key] = value }
+    }
+
+    fun clear() = synchronized(map) { map.clear() }
+}
+
+/** 内容指纹：长度 + 首尾各 2KB。编辑后字节变化会换 key，无需手动失效。 */
+private fun quickHash(b: ByteArray): Long {
+    var h = -3750763034362895579L
+    val n = b.size
+    val k = if (n < 2048) n else 2048
+    var i = 0
+    while (i < k) { h = h xor (b[i].toLong() and 0xFF); h *= 1099511628211L; i++ }
+    if (n > k) {
+        i = n - k
+        while (i < n) { h = h xor (b[i].toLong() and 0xFF); h *= 1099511628211L; i++ }
+    }
+    return h xor n.toLong()
+}
+
+/** 会改动分析数据库的命令：结果不能缓存，执行后也要把旧缓存清掉。 */
+private fun mutatesAnalysis(cmd: String): Boolean {
+    val first = cmd.substringBefore(';').trim()
+    if (first.isEmpty()) return false
+    val head = first.substringBefore(' ')
+    return head == "aa" || head == "af" || head == "aac" || head == "aar" || head == "ax" ||
+        head == "ab" || head == "ah" || head == "an" || head == "ap" ||
+        head.startsWith("af+") || head.startsWith("aa+") ||
+        first.startsWith("e analysis") || first.startsWith("e asm.arch")
+}
+
+internal fun EngineRuntime.rzCommand(
+    workspaceId: String,
+    editSessionId: String = "",
+    command: String,
+    unsafe: Boolean = false,
+): JSONObject = guarded {
+    val mutating = unsafe || mutatesAnalysis(command)
+    val key = if (mutating || command.length > 512) {
+        ""
+    } else {
+        runCatching { "rzc|" + quickHash(dataFor(workspaceId, editSessionId)) + "|" + editSessionId + "|" + command }
+            .getOrDefault("")
+    }
+    if (key.isNotEmpty()) {
+        val cached = RzCmdCache.get(key)
+        if (cached != null) {
+            val hit = runCatching { JSONObject(cached) }.getOrNull()
+            if (hit != null) return@guarded hit
+        }
+    }
+    val res = rzCommandCore(workspaceId, editSessionId, command, unsafe)
+    if (mutating) RzCmdCache.clear()
+    else if (key.isNotEmpty() && res.optBoolean("ok", true) && !res.has("error")) {
+        runCatching { RzCmdCache.put(key, res.toString()) }
+    }
+    res
+}
+
+private fun EngineRuntime.rzCommandCore(workspaceId: String, editSessionId: String = "", command: String, unsafe: Boolean = false): JSONObject = guarded {
     val bytes = dataFor(workspaceId, editSessionId)
     val elf = elfFor(workspaceId, editSessionId)
     if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")

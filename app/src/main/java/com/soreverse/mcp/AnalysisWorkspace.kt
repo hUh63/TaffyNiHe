@@ -12309,16 +12309,15 @@ private fun AnalyzeModeView(tools: ToolPagesState, zh: Boolean, context: android
         scope.safeLaunch {
             val s = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
-                    val eng = EngineProvider.get(context)
-                    val fns = rzArray(eng.rzCommand(ws, "", "aflj")).size
-                    val strs = rzArray(eng.rzCommand(ws, "", "izj")).size
-                    val syms = rzArray(eng.rzCommand(ws, "", "isj")).size
-                    val xrs = rzArray(eng.rzCommand(ws, "", "axtj @ entry0")).size
+                    // 一次调用跑完 4 条统计：native 每条命令都要重建 RzCore + 全量分析
+                    val c = splitJsonChunks(
+                        rzText(EngineProvider.get(context).rzCommand(ws, "", "aflj; izj; isj; axtj @ entry0")),
+                    )
                     listOf(
-                        (if (zh) "函数" else "functions") to "$fns",
-                        (if (zh) "字符串" else "strings") to "$strs",
-                        (if (zh) "符号" else "symbols") to "$syms",
-                        ("entry0 xrefs") to "$xrs",
+                        (if (zh) "函数" else "functions") to "${rzArrayText(c.getOrElse(0) { "[]" }).size}",
+                        (if (zh) "字符串" else "strings") to "${rzArrayText(c.getOrElse(1) { "[]" }).size}",
+                        (if (zh) "符号" else "symbols") to "${rzArrayText(c.getOrElse(2) { "[]" }).size}",
+                        ("entry0 xrefs") to "${rzArrayText(c.getOrElse(3) { "[]" }).size}",
                     )
                 }.getOrNull() ?: emptyList()
             }

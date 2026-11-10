@@ -1,10 +1,10 @@
 [versions]
 koin = "4.2.2"
-ktorServer = "3.6.0"
-androidxWebkit = "1.17.1"
-agp = "9.4.1"
+ktorServer = "3.6.1"
+androidxWebkit = "1.18.0"
+agp = "9.5.1"
 kotlin = "2.4.21"
-ksp = "2.3.11"
+ksp = "2.3.13"
 composeBom = "2026.09.00"
 # BOM 2026.09.00 钉的是 material3 稳定版 1.4.0，拿不到 LoadingIndicator / 波浪进度 /
 # ButtonGroup / MaterialShapes 等 M3 Expressive 组件，这里显式抬版（直接版本优先于 BOM 约束）
@@ -14,22 +14,22 @@ materialColorUtilities = "6.0.0"
 activityCompose = "1.13.0"
 leakcanaryAndroid = "2.14"
 lifecycle = "2.11.0"
-navigation3 = "1.2.0"
+navigation3 = "1.2.1"
 # miuix Navigation3 UI：androidx.navigation3.ui.NavDisplay 的 MIUI/HyperOS 风格替换，
 # 默认转场即侧滑动画（视差滑动+圆角裁切+遮罩+转场期输入阻断），无需自定义 transitionSpec
 miuix = "0.9.3"
 room = "2.8.5"
-datastore = "1.2.1"
-okhttp = "5.5.0"
-ktor = "3.6.0"
-kotlinxSerializationJson = "1.11.0"
+datastore = "1.3.0"
+okhttp = "5.5.1"
+ktor = "3.6.1"
+kotlinxSerializationJson = "1.12.0"
 coroutines = "1.11.0"
 coreKtx = "1.19.1"
-annotationExperimental = "1.5.1"
+annotationExperimental = "1.6.0"
 appcompat = "1.8.0"
 junit = "4.13.2"
 xz = "1.12"
-zstd = "1.5.7-23"
+zstd = "1.5.7-26"
 shizuku = "13.1.5"
 hiddenApiBypass = "6.2"
 kadb = "2.1.4"
@@ -41,7 +41,7 @@ coreSplashscreen = "1.2.0"
 # Baseline Profile：启动时预编译热点方法，治首次冷启动 JIT 现场编译慢
 baselineprofile = "1.5.0"
 profileinstaller = "1.4.1"
-uiautomator = "2.4.0"
+uiautomator = "2.4.1"
 # JGit（MGit 同源技术栈）：宿主侧直接管理工作区 Git 仓库，无需沙箱 git
 jgit = "6.10.1.202505221210-r"
 # A2UI（Agent-to-UI）：智能体以 JSON Lines 描述界面、客户端渲染原生 Compose 组件的官方协议实现
@@ -52,9 +52,9 @@ termux = "0.118.0"
 # WorkManager：工作流定时计划的到点触发（进程被杀也能拉起）；周期最小 15 分钟、Doze 下允许分钟级延迟
 work = "2.12.0"
 mlkitTranslate = "17.0.3"
-asm = "9.11"
+asm = "9.11.1"
 # Rhino：codemode 脚本引擎（MPL-2.0，与 GPL-3.0 兼容）；Android 上必须用解释模式
-rhino = "1.9.1"
+rhino = "1.9.2"
 
 [libraries]
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }

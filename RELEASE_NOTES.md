@@ -1,3 +1,44 @@
+## 塔菲逆核 v1.5.60 —— JGit 升到 7.8.1；Capstone 6.0 查清了为什么不能直接升
+
+### JGit 6.10 → 7.8.1 ✅
+
+跨了一个大版本（6 → 7），编译、单测、R8、打包全过。
+
+### Capstone 6.0.0-Alpha11 ❌ 不是版本号能解决的
+
+按你说的试了（改 clone 分支 + 适配 CMake 选项名），四个 ABI 全部在
+`编译 unidbg 原生库` 这一步挂掉。翻 6.0 的头文件确认了原因：
+
+```c
+// capstone 6.0: include/capstone/arm64.h
+typedef cs_aarch64       cs_arm64;   // 5.x 的 cs_arm64 结构整个换掉了
+typedef cs_aarch64_op    cs_arm64_op;
+#define NUM_ARM64_OPS 16
+```
+
+而且 `op_count` 这个字段在 6.0 的 arm64 头里**一次都搜不到** —— 说明 6.0 是
+**API 重写**（`cs_arm64` 只是 `cs_aarch64` 的别名，操作数结构、detail 布局全变）。
+
+我们自己的 JNI 胶水 `third_party/capstone-java/native/disassembler.c`（342 行）是按 5.x
+写的：
+
+```c
+cs_detail *detail = insn->detail;
+jobjectArray operands = (*env)->NewObjectArray(env, arm64.op_count, cArm64Operand, NULL);
+for (uint8_t m = 0; m < arm64.op_count; m++) { ... arm64.operands[m].type ... }
+```
+
+这套字段在 6.0 下不存在，必须**整份重写**（还要重编 Java 侧的 `Capstone` 绑定），
+不是"换个 branch + 改几个 CMake 变量"能完成的。硬塞进这次升级只会让 4 个 ABI
+的 native 流水线全红。
+
+所以这版把 Capstone 退回 5.0.9（保持可用），6.0 单独作为一项任务：
+重写胶水 → 用新结构体（`cs_aarch64`）→ 再切分支。那需要一轮专门的改动 + 验证。
+
+> 补充：`scripts/build-unidbg-native.sh` 里顺手加的 CMake 6.x 兼容（`-Werror` 摘除、
+> `CAPSTONE_BUILD_SHARED_LIBS` / `LEGACY_TESTS` 新选项名）都留着 —— 对 5.0.9 无害，
+> 将来切 6.0 时能直接用。
+
 ## 塔菲逆核 v1.5.59 —— 依赖升级到当前最新
 
 把版本目录里每一项都对了一遍远端仓库（Maven Central / Google Maven），能升的都升了。

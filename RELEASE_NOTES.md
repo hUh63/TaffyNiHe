@@ -1,3 +1,50 @@
+## 塔菲逆核 v1.5.58 —— 性能二段：native 侧共享 RzCore
+
+上一版把「命令条数」压到了最少（串联 + 缓存），但每次 `rzCommand` 在 native 里还是：
+
+```
+写临时文件（整个 SO）→ rz_core_new → open_load → rz_core_analysis_all（3~10 秒）→ free
+```
+
+这版直接把这一步也砍掉：**只读命令复用同一个 RzCore**。
+
+### 怎么做的
+
+```
+struct SharedCore { RzCore* core; std::string tmpPath; size_t bytes; uint64_t fp; ... }
+```
+
+- 按「字节长度 + 首尾各 4KB 的内容指纹」判定是不是同一个文件：命中就复用，不命中就重建
+- 写命令（`unsafe`，含 `wx`）**仍走独立的临时 core** —— 它要读回文件算 patch，不能和共享态混
+- 写命令执行完会主动丢掉共享 core，保证编辑后立刻能看到新内容
+- 共享 core 拿不到（open 失败）时**自动回落**到原来的独立 core 路径，功能不受影响
+- 单独导出了 `rzReleaseShared()`，可用于关工作区时释放内存（当前还没挂到 UI）
+
+具体指令环：`rzCommand` 的只读分支在 `writeTempSo` **之前**就返回，
+所以命中时连「写 6.7MB 临时文件」这一步也省了。
+
+### 收益
+
+| 操作 | v1.5.57 | v1.5.58 |
+|---|---|---|
+| 首次打开某个 SO 的第一条命令 | 3~10 秒 | 3~10 秒（无法避免） |
+| 同一 SO 的**后续每条**只读命令 | 3~10 秒 | **毫秒** |
+| 切页签、点函数、翻 xref | 每次几秒 | 毫秒 |
+
+配合上一版的命令串联与结果缓存，典型流程从「每个动作等几秒」变成「只有第一次分析慢」。
+
+### 风险与边界
+
+- 共享 core 只在**只读**命令上用；`rz_core_cmd_str` 在长驻 core 上反复调用是 rizin REPL 的标准用法
+- 换文件（字节变了）会自动重建，不会串数据
+- 内存：一个 SO 的 RzCore 常驻（几十 MB 量级）；换文件时旧的会被释放
+- 这个改动在 native 层，**发布用的多 ABI APK 会重新编译** `librz_native.so`；
+  单 ABI 的 CI 验证包用的是仓库里预编译的 so，不受影响
+
+> 说明：CI 环境这轮踩了两个坑（CMake 4.x 拒绝 keystone 内嵌 LLVM 3.9 的两处老写法），
+> 已在 `scripts/build-unidbg-native.sh` 里就地修正（抬 `cmake_minimum_required` 到 3.5、
+> `CMP0051` 由 OLD 改 NEW），否则 native 流水线出不了包。
+
 ## 塔菲逆核 v1.5.57 —— 性能：分析次数砍掉一个数量级
 
 ### 根因

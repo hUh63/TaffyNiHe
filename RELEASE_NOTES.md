@@ -1,3 +1,46 @@
+## 塔菲逆核 v1.5.59 —— 依赖升级到当前最新
+
+把版本目录里每一项都对了一遍远端仓库（Maven Central / Google Maven），能升的都升了。
+
+### 升了什么
+
+| 依赖 | 旧 | 新 |
+|---|---|---|
+| Gradle | 9.8.0 | **9.9.0** |
+| AGP | 9.4.1 | **9.5.1** |
+| KSP | 2.3.11 | 2.3.13 |
+| Ktor（server / client） | 3.6.0 | 3.6.1 |
+| OkHttp | 5.5.0 | 5.5.1 |
+| kotlinx-serialization-json | 1.11.0 | 1.12.0 |
+| AndroidX Navigation3 | 1.2.0 | 1.2.1 |
+| AndroidX DataStore | 1.2.1 | 1.3.0 |
+| AndroidX WebKit | 1.17.1 | 1.18.0 |
+| annotation-experimental | 1.5.1 | 1.6.0 |
+| androidx.test.uiautomator | 2.4.0 | 2.4.1 |
+| ASM | 9.11 | 9.11.1 |
+| Rhino | 1.9.1 | 1.9.2 |
+| zstd-jni | 1.5.7-23 | 1.5.7-26 |
+
+### 已经是新的（没动）
+
+Kotlin 2.4.21、Compose BOM 2026.09.00、Room 2.8.5、Lifecycle 2.11.0、
+WorkManager 2.12.0、Media3 1.11.1、Coil 3.6.3、ML Kit translate 17.0.3、
+Coroutines 1.11.0、Koin 4.2.2、Robolectric 4.17、core-ktx 1.19.1 —— 都是当前最新稳定版。
+
+### 特意没升
+
+- **JGit 6.10 → 7.8**：跨大版本，7.x 调整了不少 Repository/FileRepositoryBuilder 相关 API。
+  仓库里 JGit 只被 Git 相关页面用到，本地没法编译验证，等单独一轮带上具体用例再动。
+- **material3 1.5.0-beta01 → 1.4.0**：不升。1.4.0 虽是「最新稳定」，但拿不到 LoadingIndicator /
+  波浪进度 / ButtonGroup 这些 M3 Expressive 组件，现在钉的是比它更新的 beta。
+- **Capstone 5.0.9 → 6.0.0-Alpha11**：还是 alpha，native 引擎不动。
+- **Rizin v0.9.1 / LIEF 1.0.0 / Keystone 0.9.2 / unidbg v0.9.9**：都是当前最新 release。
+
+### 验证
+
+Gradle 9.9.0 + AGP 9.5.1 这一组合跑通了完整链路：Gradle 配置、Kotlin 编译、
+单元测试（含 `RzOutputTest` / `AnalysisCfgRebuildTest` 等）、R8、APK 打包。
+
 ## 塔菲逆核 v1.5.58 —— 性能二段：native 侧共享 RzCore
 
 上一版把「命令条数」压到了最少（串联 + 缓存），但每次 `rzCommand` 在 native 里还是：

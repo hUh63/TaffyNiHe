@@ -221,7 +221,7 @@ build_one() {
 }
 
 if [[ $SKIP_CAPSTONE -eq 0 ]]; then
-  # 逆核 fork: capstone 4.0 -> 5.0.9（官方 capstone-engine/capstone tag 5.0.9）。
+  # 逆核 fork: capstone 4.0 -> 6.0.0-Alpha11（官方 capstone-engine/capstone tag）。
   #  - CMake 选项改名：CAPSTONE_BUILD_SHARED -> BUILD_SHARED_LIBS、
   #    CAPSTONE_BUILD_STATIC -> BUILD_STATIC_LIBS（5.x 起用标准名）。
   #  - 去掉 shared 库的 SOVERSION：Android 只打包 libcapstone.so（无版本后缀），
@@ -246,8 +246,11 @@ if [[ $SKIP_CAPSTONE -eq 0 ]]; then
 
   # libdisassembler.so：capstone Java 绑定的 JNI 胶水（capstone.jni.FastDisassembler）。
   # 逆核 fork 版源码在 third_party/capstone-java/native/（含已生成的 JNI 头）。
-  # 它直接 #include <capstone/capstone.h>，结构体布局由编译器按 5.0.9 保证 —— 这是
-  # app/libs/capstone-5.0.9-android-patched.jar 里 Capstone 唯一走通的路径。
+  # 它直接 #include <capstone/capstone.h>；capstone 6.0 把 ARM64 那套名字
+  # （CS_ARCH_ARM64 / cs_arm64 / cs_arm64_op / arm64_reg / ARM64_REG_*）移到了兼容
+  # 头里，必须用 -DCAPSTONE_AARCH64_COMPAT_HEADER 打开，否则胶水整份编译不过。
+  # 这是 app/libs/capstone-5.0.9-android-patched.jar 里 Capstone 唯一走通的路径（JNI
+  # 方法签名与 Java 侧 5.x 一致，升级只换 C 引擎，不动 jar）。
   CAPJNI="$PROJECT/third_party/capstone-java/native"
   if [[ -f "$CAPJNI/disassembler.c" ]]; then
     HOST_TAG="$(ls -d "$NDK/toolchains/llvm/prebuilt"/* 2>/dev/null | head -1)"
@@ -260,6 +263,7 @@ if [[ $SKIP_CAPSTONE -eq 0 ]]; then
     CC_BIN="$HOST_TAG/bin/${TARGET}26-clang"
     [[ -x "$CC_BIN" ]] || { echo "error: NDK clang not found: $CC_BIN" >&2; exit 1; }
     "$CC_BIN" -shared -fPIC -O2 -Wl,-soname,libdisassembler.so \
+      -DCAPSTONE_AARCH64_COMPAT_HEADER \
       -I"$cap/include" -I"$CAPJNI" \
       "$CAPJNI/disassembler.c" "$CAPJNI/reg_mapping.c" \
       -o "$JNI_LIBS/libdisassembler.so" \

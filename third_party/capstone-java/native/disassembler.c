@@ -126,7 +126,11 @@ JNIEXPORT jobject JNICALL Java_capstone_jni_FastDisassembler_getOpInfo
         cs_arm64_op arm64_op = arm64.operands[m];
         jobject shift = (*env)->NewObject(env, cArmOpShift, mArmOpShiftConstructor, arm64_op.shift.type, arm64_op.shift.value);
         jobject mem = (*env)->NewObject(env, cArm64MemType, mArm64MemTypeConstructor, arm64_op.mem.base, arm64_op.mem.index, arm64_op.mem.disp);
-        jobject value = (*env)->NewObject(env, cArm64OpValue, mArm64OpValueConstructor, arm64_op.reg, arm64_op.imm, arm64_op.fp, mem, arm64_op.pstate, arm64_op.sys, arm64_op.prefetch, arm64_op.barrier);
+        /* capstone 6：cs_aarch64_op 移除了 pstate/sys/prefetch/barrier 四个旧字段，
+         * 改由 sysop = { reg / imm / alias / sub_type } 承载。Java 侧构造签名保持
+         * capstone 5.x 不变，这里补 0；mrs/msr/isb/dmb/prfm 的操作数文本仍由
+         * capstone 输出的 op_str 给出，不影响反汇编结果与 CFG/寄存器分析。 */
+        jobject value = (*env)->NewObject(env, cArm64OpValue, mArm64OpValueConstructor, arm64_op.reg, arm64_op.imm, arm64_op.fp, mem, 0, 0, 0, 0);
         jobject op = (*env)->NewObject(env, cArm64Operand, mArm64OperandConstructor, arm64_op.vector_index, arm64_op.vas, 0, shift, arm64_op.ext, arm64_op.type, value, arm64_op.access);
         (*env)->SetObjectArrayElement(env, operands, m, op);
         (*env)->DeleteLocalRef(env, op);
@@ -134,7 +138,8 @@ JNIEXPORT jobject JNICALL Java_capstone_jni_FastDisassembler_getOpInfo
         (*env)->DeleteLocalRef(env, mem);
         (*env)->DeleteLocalRef(env, shift);
       }
-      jobject opInfo = (*env)->NewObject(env, cArm64OpInfo, mArm64OpInfoConstructor, arm64.cc, arm64.update_flags, arm64.writeback, operands);
+      /* capstone 6：writeback 从 cs_aarch64 移到 cs_detail（指令级）。 */
+      jobject opInfo = (*env)->NewObject(env, cArm64OpInfo, mArm64OpInfoConstructor, arm64.cc, arm64.update_flags, detail->writeback, operands);
       (*env)->DeleteLocalRef(env, operands);
       return opInfo;
     } else {
@@ -143,7 +148,8 @@ JNIEXPORT jobject JNICALL Java_capstone_jni_FastDisassembler_getOpInfo
       for(uint8_t m = 0; m < arm.op_count; m++) {
         cs_arm_op arm_op = arm.operands[m];
         jobject shift = (*env)->NewObject(env, cArmOpShift, mArmOpShiftConstructor, arm_op.shift.type, arm_op.shift.value);
-        jobject mem = (*env)->NewObject(env, cArmMemType, mArmMemTypeConstructor, arm_op.mem.base, arm_op.mem.index, arm_op.mem.scale, arm_op.mem.disp, arm_op.mem.lshift);
+        /* capstone 6：arm_op_mem 去掉了 lshift（多了 align），签名保持 5.x，补 0。 */
+        jobject mem = (*env)->NewObject(env, cArmMemType, mArmMemTypeConstructor, arm_op.mem.base, arm_op.mem.index, arm_op.mem.scale, arm_op.mem.disp, 0);
         jobject value = (*env)->NewObject(env, cArmOpValue, mArmOpValueConstructor, arm_op.reg, arm_op.imm, arm_op.fp, mem, arm_op.setend);
         jobject op = (*env)->NewObject(env, cArmOperand, mArmOperandConstructor, arm_op.vector_index, shift, arm_op.type, value, arm_op.subtracted);
         (*env)->SetObjectArrayElement(env, operands, m, op);
@@ -152,7 +158,7 @@ JNIEXPORT jobject JNICALL Java_capstone_jni_FastDisassembler_getOpInfo
         (*env)->DeleteLocalRef(env, mem);
         (*env)->DeleteLocalRef(env, shift);
       }
-      jobject opInfo = (*env)->NewObject(env, cArmOpInfo, mArmOpInfoConstructor, arm.usermode, arm.vector_size, arm.vector_data, arm.cps_mode, arm.cps_flag, arm.cc, arm.update_flags, arm.writeback, arm.mem_barrier, operands);
+      jobject opInfo = (*env)->NewObject(env, cArmOpInfo, mArmOpInfoConstructor, arm.usermode, arm.vector_size, arm.vector_data, arm.cps_mode, arm.cps_flag, arm.cc, arm.update_flags, detail->writeback, arm.mem_barrier, operands);
       (*env)->DeleteLocalRef(env, operands);
       return opInfo;
     }

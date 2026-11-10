@@ -1,3 +1,66 @@
+## 塔菲逆核 v1.5.61 —— Capstone 真升到 6.0.0-Alpha11 了
+
+v1.5.60 时我判断「6.0 是 API 重写，自研胶水得整份重写」。这次把它做完了，结论是
+**不用重写：一个兼容宏 + 7 处字段迁移就够**。
+
+### 根因（从 CI 日志里捞出来的）
+
+四个 ABI 全挂在「编译 unidbg 原生库 → libdisassembler.so」，报错集中在 7 行：
+
+```
+disassembler.c:23:   error: use of undeclared identifier 'CS_ARCH_ARM64'
+disassembler.c:123:  error: unknown type name 'cs_arm64'
+reg_mapping.h:465:   error: unknown type name 'arm64_reg'
+```
+
+capstone 6.0 没删 ARM64 这套名字，而是把它们从公共头挪进了**兼容头**，
+要 `-DCAPSTONE_AARCH64_COMPAT_HEADER` 才展开：
+
+```c
+#ifdef CAPSTONE_AARCH64_COMPAT_HEADER
+    CS_ARCH_ARM64 = 1,
+#else
+    CS_ARCH_AARCH64 = 1,
+#endif
+```
+
+打开这个宏，编译错误从 40+ 条掉到 7 条。
+
+### 剩下 7 条的字段迁移
+
+| 5.0.9 | 6.0 | 处理 |
+|---|---|---|
+| `arm64.writeback` / `arm.writeback` | 提到 `cs_detail.writeback`（指令级） | 改读 `detail->writeback`，语义不变 |
+| `arm64_op.pstate/sys/prefetch/barrier` | 收进 `sysop = {reg/imm/alias/sub_type}` | 补 0 |
+| `arm_op.mem.lshift` | 删除（新增 `align`） | 补 0 |
+
+补 0 的影响面：只有 `mrs/msr/isb/dmb/prfm` 这类系统操作数的**枚举值**拿不到，
+这些指令的文本（`mrs x0, TPIDR_EL0`）仍由 capstone 自己输出的 `op_str` 给出，
+反汇编、CFG、寄存器分析都不受影响。
+
+### 验证：没等 CI，先在本地把整条 Java 绑定链路跑通了
+
+沙箱里用 host 编译 capstone 6 + 胶水，把仓库里的 `capstone.jni.*` / `capstone.api.*`
+全量 javac，用真 JNI 反汇编：
+
+```
+0x1000  stp   x29, x30, [sp, #-0x10]!   wb=true   ops=3  [x29][x30][mem sp,-16]
+0x1004  ldr   w1, [x2, #4]              ops=2    [w1][mem x2,+4]
+0x1008  br    x8                        ops=1
+0x100c  mrs   x0, TPIDR_EL0             ops=2
+0x1010  bl    0x2244                    0x1014  adrp x0, 0x1000
+```
+
+`stp …, [sp,#-16]!` 的 `writeback = true`（迁移后语义正确）；ARM32 路径
+（`mvnsmi`/`mov`/`bx`）同样正常。
+
+### 其它
+
+- Java 侧 `capstone-5.0.9-android-patched.jar` 一行没动：JNI 方法签名与 5.x 完全
+  一致，这轮只换 C 引擎。
+- CMake 沿用 v1.5.60 适配好的选项名（`CAPSTONE_BUILD_SHARED_LIBS` 等）并摘掉
+  上游硬编码的 `-Werror`；SOVERSION 仍然去掉（Android 只打包 `libcapstone.so`）。
+
 ## 塔菲逆核 v1.5.60 —— JGit 升到 7.8.1；Capstone 6.0 查清了为什么不能直接升
 
 ### JGit 6.10 → 7.8.1 ✅

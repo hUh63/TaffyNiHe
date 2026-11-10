@@ -43,7 +43,7 @@ baselineprofile = "1.5.0"
 profileinstaller = "1.4.1"
 uiautomator = "2.4.1"
 # JGit（MGit 同源技术栈）：宿主侧直接管理工作区 Git 仓库，无需沙箱 git
-jgit = "6.10.1.202505221210-r"
+jgit = "7.8.1.202611041320-r"
 # A2UI（Agent-to-UI）：智能体以 JSON Lines 描述界面、客户端渲染原生 Compose 组件的官方协议实现
 a2ui = "1.0.0-alpha01"
 # Media3：A2UI Video / AudioPlayer 的原生播放器（控件与拖动进度）

@@ -228,12 +228,17 @@ if [[ $SKIP_CAPSTONE -eq 0 ]]; then
   #    若 SONAME 变成 libcapstone.so.5，libdisassembler.so 的 DT_NEEDED 会解析不到。
   cap="$PROJECT/third_party/capstone-src"
   [[ -d "$cap" ]] || { echo "error: capstone source missing: $cap" >&2; exit 1; }
-  sed -i '/set_target_properties(capstone_shared PROPERTIES$/,/^    )$/d' "$cap/CMakeLists.txt"
+  # capstone 6.x 的 CMake 选项改名：shared 用 CAPSTONE_BUILD_SHARED_LIBS，
+  # 测试拆成 LEGACY_TESTS / CSTEST；且 CMakeLists 里硬编码了 -Werror，
+  # 交叉编译只要有一条警告就整包失败 —— 构建前先摘掉。
+  sed -i 's/ -Werror//g' "$cap/CMakeLists.txt"
+  sed -i '/set_target_properties(capstone_shared PROPERTIES$/,/^    )$/d' "$cap/CMakeLists.txt" || true
   build_one capstone "$cap" \
+    -DCAPSTONE_BUILD_SHARED_LIBS=ON -DCAPSTONE_BUILD_STATIC_LIBS=OFF \
+    -DCAPSTONE_BUILD_LEGACY_TESTS=OFF -DCAPSTONE_BUILD_CSTEST=OFF -DCAPSTONE_BUILD_CSTOOL=OFF \
     -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF \
-    -DCAPSTONE_BUILD_TESTS=OFF -DCAPSTONE_BUILD_CSTOOL=OFF \
     -DCAPSTONE_ARCHITECTURE_DEFAULT=OFF \
-    -DCAPSTONE_ARM_SUPPORT=ON -DCAPSTONE_ARM64_SUPPORT=ON
+    -DCAPSTONE_ARM_SUPPORT=ON -DCAPSTONE_ARM64_SUPPORT=ON -DCAPSTONE_AARCH64_SUPPORT=ON
   RZ_SO="$(find "$BUILD_ROOT/capstone" -name 'libcapstone.so' -print -quit)"
   [ -n "$RZ_SO" ] || { echo "error: libcapstone.so not produced"; exit 1; }
   cp "$RZ_SO" "$JNI_LIBS/"

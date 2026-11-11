@@ -58,6 +58,13 @@ interface NativeEngine {
 
     fun decompile(bytes: ByteArray, arch: String, funcVa: Long): String
 
+    /**
+     * 丢掉后端为了加速而缓存的「已分析二进制」状态（rizin 的共享 RzCore）。
+     * 字节内容变了（补丁 / 撤销 / 回滚 / 追加）之后必须调用，否则后续只读查询会
+     * 走缓存里的旧字节。默认空实现：后端没有缓存时无需处理。
+     */
+    fun releaseSharedAnalysis() {}
+
     companion object {
         @Volatile
         private var instance: NativeEngine = resolveDefault()
@@ -143,6 +150,7 @@ object RizinNativeEngine : NativeEngine {
     external fun rzCommand(bytes: ByteArray, arch: String, command: String, unsafe: Boolean): String
     external fun rzDecompile(bytes: ByteArray, arch: String, funcVa: Long): String
     external fun rzConfigureGhidra(pluginDir: String, sleighHome: String): Boolean
+    external fun rzReleaseShared() // 丢弃共享 RzCore（字节变了以后必须调用）
 
     fun configureGhidra(context: Context): Boolean {
         if (!available()) return false
@@ -161,6 +169,15 @@ object RizinNativeEngine : NativeEngine {
     }
 
     override fun available(): Boolean = loaded
+
+    /**
+     * 丢弃共享 RzCore。用 [serial] 串行化，避免与在飞的 rzCommand 抢同一个 core。
+     * 旧版 librz_native.so 没有这个导出 → UnsatisfiedLinkError（Error），runCatching 能兜住。
+     */
+    override fun releaseSharedAnalysis() {
+        if (!available()) return
+        serial { runCatching { rzReleaseShared() } }
+    }
 
     override fun loadStatus(): String = if (loaded) "loaded" else "failed: $loadError"
 

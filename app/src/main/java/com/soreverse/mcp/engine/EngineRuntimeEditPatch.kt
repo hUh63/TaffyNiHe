@@ -91,6 +91,7 @@ internal fun EngineRuntime.editHex(workspaceId: String, editSessionId: String, l
         if (nextPatches.isNotEmpty()) maybeAutoSnapshot(session, "hex", settings)
         // copy-on-write：替换引用而不是就地 arraycopy，避免读线程看到写了一半的 ELF 头/节表
         session.data = nextData
+        invalidateRizinAfterEdit()
         if (nextPatches.isNotEmpty()) session.undone.clear()
         session.patches += nextPatches
         if (nextPatches.isNotEmpty()) {
@@ -157,6 +158,7 @@ internal fun EngineRuntime.editHexAt(workspaceId: String, editSessionId: String,
         if (nextPatches.isNotEmpty()) maybeAutoSnapshot(session, "hexAt", settings)
         // copy-on-write：替换引用而不是就地 arraycopy，避免读线程看到写了一半的 ELF 头/节表
         session.data = nextData
+        invalidateRizinAfterEdit()
         if (nextPatches.isNotEmpty()) session.undone.clear()
         session.patches += nextPatches
         if (nextPatches.isNotEmpty()) { session.revision++; pageStore.clear(); searchCache.clear() }
@@ -199,6 +201,7 @@ internal fun EngineRuntime.editHexVa(workspaceId: String, editSessionId: String,
         val patchedData = session.data.copyOf()
         System.arraycopy(patch, 0, patchedData, off, patch.size)
         session.data = patchedData
+        invalidateRizinAfterEdit()
         session.revision++
         pageStore.clear()
         searchCache.clear()
@@ -290,6 +293,7 @@ internal fun EngineRuntime.editAsm(workspaceId: String, editSessionId: String, l
             maybeAutoSnapshot(session, "asm", settings)
             session.undone.clear()
             session.data = nextData
+            invalidateRizinAfterEdit()
             session.patches += nextPatches
             session.revision++
             pageStore.clear()
@@ -382,6 +386,7 @@ internal fun EngineRuntime.editSymbol(workspaceId: String, editSessionId: String
             maybeAutoSnapshot(session, "symbol", settings)
             session.undone.clear()
             session.data = nextData
+            invalidateRizinAfterEdit()
             session.patches += nextPatches
             session.revision++
             pageStore.clear()

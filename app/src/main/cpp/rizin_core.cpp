@@ -188,15 +188,13 @@ namespace {
         return static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
     }
 
-    // 内容指纹：长度 + 首尾各 4KB。编辑会改长度或尾部（节区头/符号表在末尾），能识别出来。
+    // 内容指纹：**全文件** FNV-1a。
+    // 旧实现只取首尾各 4KB，而编辑内核是「等长原位写入」——节区头/符号表都不搬，
+    // 中间改几个字节既不改长度也不动首尾，指纹不变 → 共享 core 不重建 → 打完补丁
+    // 反汇编还是补丁前的内容。全量 hash 对 6.7MB 约几毫秒，且只在真正走 native 时付一次。
     uint64_t coreFingerprint(const uint8_t* d, size_t n) {
         uint64_t h = 1469598103934665603ULL;
-        const size_t k = n < 4096 ? n : 4096;
-        for (size_t i = 0; i < k; i++) { h ^= d[i]; h *= 1099511628211ULL; }
-        if (n > k) {
-            const uint8_t* tail = d + n - k;
-            for (size_t i = 0; i < k; i++) { h ^= tail[i]; h *= 1099511628211ULL; }
-        }
+        for (size_t i = 0; i < n; i++) { h ^= d[i]; h *= 1099511628211ULL; }
         h ^= static_cast<uint64_t>(n);
         h *= 1099511628211ULL;
         return h;
@@ -1323,11 +1321,29 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommand(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring, jstring jcmd, jboolean unsafe) {
     std::string cmd = jStr(env, jcmd);
     if (cmd.empty()) return env->NewStringUTF("{\"error\":\"empty_command\"}");
-    const char* blocked[] = { "!", "!!", "o ", "oo", "w", "wx", "wa", "wc", "rm", "mv", "cp", "cat ", "ls " };
-    if (!unsafe) {
-        for (const char* b : blocked) {
-            if (cmd.rfind(b, 0) == 0) return env->NewStringUTF("{\"error\":\"unsafe_required\",\"message\":\"set unsafe=true for mutating, file, shell, debugger, or external commands\"}");
+    // 命令链要**逐段**检查：`s 0x100; wx 9090 @ 0x100` 的第一段是 s，只查开头会直接放行，
+    // 于是写命令落在共享只读 core 上（既不会重建，还会被 Kotlin 侧当成只读结果缓存），
+    // 后续所有只读查询都被污染。
+    auto segmentBlocked = [](const std::string& c) -> bool {
+        static const char* blockedList[] = { "!", "o ", "oo", "w", "rm", "mv", "cp", "cat ", "ls " };
+        size_t start = 0;
+        while (start <= c.size()) {
+            const size_t end = c.find(';', start);
+            const std::string seg = c.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            const size_t b = seg.find_first_not_of(" \t");
+            if (b != std::string::npos) {
+                const std::string t = seg.substr(b);
+                for (const char* bl : blockedList) {
+                    if (t.rfind(bl, 0) == 0) return true;
+                }
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
         }
+        return false;
+    };
+    if (!unsafe && segmentBlocked(cmd)) {
+        return env->NewStringUTF("{\"error\":\"unsafe_required\",\"message\":\"set unsafe=true for mutating, file, shell, debugger, or external commands\"}");
     }
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"error\":\"empty\"}");

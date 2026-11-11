@@ -53,6 +53,7 @@ internal fun EngineRuntime.editRollback(workspaceId: String, editSessionId: Stri
         val keptPatches = session.patches.take(snap.patchCount)
         // 变长支持: 快照长度可能与当前不同, 直接替换引用。
         session.data = snap.dataCopy.copyOf()
+        invalidateRizinAfterEdit()
         session.revision = snap.revision
         session.patches.clear()
         session.patches += keptPatches
@@ -107,6 +108,7 @@ internal fun EngineRuntime.editUndo(workspaceId: String, editSessionId: String, 
             if (p.kind == "append") {
                 if (p.fileOffset == session.data.size) {
                     session.data = session.data.copyOf(p.fileOffset)
+                    invalidateRizinAfterEdit()
                     session.undone += p
                     undone.put(PatchByteUtils.patchJson(p))
                 } else {
@@ -154,6 +156,7 @@ internal fun EngineRuntime.editRedo(workspaceId: String, editSessionId: String, 
                 if (session.data.size == p.fileOffset) {
                     val add = p.newHex.split(' ').filter { it.isNotBlank() }.map { it.toInt(16).toByte() }.toByteArray()
                     session.data = session.data + add
+                    invalidateRizinAfterEdit()
                     session.patches += p
                     redone.put(PatchByteUtils.patchJson(p))
                 } else {
@@ -223,6 +226,7 @@ internal fun EngineRuntime.editAppend(
         }
         maybeAutoSnapshot(session, "append", settings)
         session.data = session.data + payload
+        invalidateRizinAfterEdit()
         session.patches += PatchRecord(
             System.currentTimeMillis(), "append",
             "append:0x${java.lang.Long.toHexString(before)}",
@@ -263,6 +267,7 @@ internal fun EngineRuntime.editReset(workspaceId: String, editSessionId: String)
         val beforeSnapshots = session.snapshots.size
         // 变长支持: 原文件长度可能小于当前会话(append 过), 直接替换引用。
         session.data = ws.data.copyOf()
+        invalidateRizinAfterEdit()
         session.patches.clear()
         session.undone.clear()
         session.snapshots.clear()

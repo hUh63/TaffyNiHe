@@ -212,6 +212,7 @@ internal fun EngineRuntime.close(workspaceId: String): JSONObject = guarded {
     workspaces.remove(workspaceId)
     pageStore.clear()
     searchCache.clear()
+    releaseRizinSharedAnalysis()
     AppLog.i("Closed $workspaceId")
     ok(JSONObject().put("success", true))
 }
@@ -227,6 +228,7 @@ internal fun EngineRuntime.clearCaches() {
     pageStore.clear()
     searchCache.clear()
     workDir?.clearPersistentCache()
+    releaseRizinSharedAnalysis()
     AppLog.i("Index caches cleared")
 }
 

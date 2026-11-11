@@ -1,6 +1,8 @@
 package com.soreverse.mcp.engine
 
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.RzCmdKind
+import com.soreverse.mcp.core.classifyRzCommand
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.nativecore.NativeEngine
@@ -10,6 +12,27 @@ import java.util.UUID
 
 /** 清掉只读命令缓存（重新分析后调用，否则查询会返回分析前的旧结果）。 */
 internal fun rzInvalidateCommandCache() = RzCmdCache.clear()
+
+/**
+ * 字节内容变了之后必须调用一次（hex / 汇编 / 符号补丁、undo / redo / rollback / append）。
+ *
+ * 两件事都要做，少一件就会看到「补丁打了但反汇编没变」：
+ * ① 清 Kotlin 侧命令缓存 —— key 里的内容指纹只取首尾各 2KB，**中间等长补丁改不动它**；
+ * ② 丢掉 native 侧共享 RzCore —— 它 cache 着从临时文件 load 的旧字节，重建才会重新读。
+ *
+ * 旧 .so 没有 rzReleaseShared 符号时走 runCatching 静默降级（只影响 arm64 快速包）。
+ */
+internal fun invalidateRizinAfterEdit() = releaseRizinSharedAnalysis()
+
+/**
+ * 释放 native 共享 RzCore 与只读缓存（关闭工作区 / 清缓存 / 引擎关闭时调用）。
+ * 共享 core 把整份 SO 的解析结果 + 分析数据库常驻内存（6.7MB 的 SO 可达数十 MB），
+ * 不主动释放就会一直挂到下一个不同文件为止。
+ */
+internal fun releaseRizinSharedAnalysis() {
+    RzCmdCache.clear()
+    runCatching { NativeEngine.active().releaseSharedAnalysis() }
+}
 
 internal fun EngineRuntime.rzAnalyze(workspaceId: String, editSessionId: String = ""): JSONObject = guarded {
     RzCmdCache.clear()
@@ -423,29 +446,24 @@ private fun quickHash(b: ByteArray): Long {
     return h xor n.toLong()
 }
 
-/** 会改动分析数据库的命令：结果不能缓存，执行后也要把旧缓存清掉。 */
-private fun mutatesAnalysis(cmd: String): Boolean {
-    val first = cmd.substringBefore(';').trim()
-    if (first.isEmpty()) return false
-    val head = first.substringBefore(' ')
-    return head == "aa" || head == "af" || head == "aac" || head == "aar" || head == "ax" ||
-        head == "ab" || head == "ah" || head == "an" || head == "ap" ||
-        head.startsWith("af+") || head.startsWith("aa+") ||
-        first.startsWith("e analysis") || first.startsWith("e asm.arch")
-}
-
 internal fun EngineRuntime.rzCommand(
     workspaceId: String,
     editSessionId: String = "",
     command: String,
     unsafe: Boolean = false,
 ): JSONObject = guarded {
-    val mutating = unsafe || mutatesAnalysis(command)
-    val key = if (mutating || command.length > 512) {
+    // 写命令一律不缓存；只读命令按白名单缓存；陌生命令既不缓存也不清空（保守）。
+    val kind = if (unsafe) RzCmdKind.MUTATING else classifyRzCommand(command)
+    val mutating = kind == RzCmdKind.MUTATING
+    val key = if (kind != RzCmdKind.READ_ONLY || command.length > 512) {
         ""
     } else {
-        runCatching { "rzc|" + quickHash(dataFor(workspaceId, editSessionId)) + "|" + editSessionId + "|" + command }
-            .getOrDefault("")
+        // key 必须带 workspaceId：内容指纹只取首尾各 2KB，两个只差中间代码段的同源 SO
+        // （同一库的不同构建）首尾完全一样，不带 ws 会互相命中，B 的反汇编显示成 A 的。
+        runCatching {
+            "rzc|" + workspaceId + "|" + editSessionId + "|" +
+                quickHash(dataFor(workspaceId, editSessionId)) + "|" + command
+        }.getOrDefault("")
     }
     if (key.isNotEmpty()) {
         val cached = RzCmdCache.get(key)

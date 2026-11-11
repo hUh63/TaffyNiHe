@@ -1,3 +1,86 @@
+## 塔菲逆核 v1.5.62 —— 一轮针对性 bug 排查（7 个真实缺陷）
+
+这轮把全仓源码（380 个 kt + 62 个 java + 26 个 cpp，main 4d4b3732）过了一遍反模式扫描，
+再对 v1.5.56~58 新加的三块（尾跳展开、命令缓存、共享 RzCore）逐行核实。
+查出 7 个真实缺陷，全都是「用户能看见的错数据」，不是洁癖式重构。
+
+### 1. 打了补丁，反汇编还是旧的（三处叠加）
+
+v1.5.57 的 Kotlin 命令缓存和 v1.5.58 的 native 共享 RzCore 都靠「内容指纹」判断要不要失效：
+
+```kotlin
+// 旧：只取首尾各 2KB + 长度
+val k = if (n < 2048) n else 2048
+```
+
+```cpp
+// 旧：只取首尾各 4KB
+const size_t k = n < 4096 ? n : 4096;
+```
+
+而编辑内核是**等长原位写入**（`editHex` / `editAsm` / `editSymbol` 都是 `copyOf()` 后
+`arraycopy`，节区头、符号表一概不搬）——中间改几个字节既不改长度也不动首尾，指纹一字不变：
+
+- native 侧：共享 RzCore 不重建，仍用临时文件里的**旧字节**，`pdfj` / `agfj` / `axtj` 全返回补丁前内容；
+- Kotlin 侧：`rzInvalidateCommandCache()` 写好了却**从没被任何地方调用**，缓存直接命中旧结果。
+
+修法：native 指纹改成**全文件** FNV-1a（6.7MB 约几毫秒，且只在真正走 native 时付一次）；
+Kotlin 侧把失效接到 10 处字节变更点（hex / hexAt / hexVa / asm / symbol 补丁，undo / redo /
+rollback / append / reset），统一走 `invalidateRizinAfterEdit()`（清缓存 + `rzReleaseShared()`）。
+
+### 2. 「完整分析」跑完，列表还是空的
+
+判断「这条命令会不会改分析库」时**只看第一段**，而且不认 `aaa` / `aaaa`：
+
+```kotlin
+val head = first.substringBefore(' ')
+return head == "aa" || head == "af" || head == "aac" || head == "aar" || …
+```
+
+`"aaaa" == "aa"` 不成立，于是「完整分析」被当成只读：结果被缓存、**也不清旧缓存**，
+之后的 `aflj` / `agCj` 继续返回分析前的空结果。
+
+修法：新增 `core/RzCommandClass.kt`，按 `;` 逐段分类：
+
+- 任一段属于分析类（`aa*` / `af*` / `ax*` / `ab*` / `ah*` / `an*` / `ap*` / `ar*` / `ae*`，
+  或 `e analysis|asm|graph|bin.`）→ **MUTATING**：不缓存 + 执行后清缓存；
+- 全部段命中只读白名单 → **READ_ONLY**：可缓存；
+- 其余 → **UNKNOWN**：不缓存也不清空（保守）。
+
+白名单偏保守：漏写只会少缓存，不会返回错结果。附 7 条单测（`RzCommandClassTest`）。
+
+### 3. 两个同源 SO 的缓存互相串味
+
+缓存 key 是 `内容指纹|editSessionId|命令`，**没有 workspaceId**。两个只差中间代码段的同源库
+（同一项目的不同构建）首尾 4KB 完全一致、`editSessionId` 大多为空 → B 的反汇编直接显示成 A 的。
+key 里补上 workspaceId。
+
+### 4. `unsafe` 闸门能被命令链绕过
+
+native 侧只在**命令开头**匹配 `w` / `o` / `!` 等危险前缀，于是
+`s 0x100; wx 9090 @ 0x100` 一路放行：写命令落在共享**只读** core 上（不重建、还会被 Kotlin
+当成只读结果缓存），此后所有只读查询都被污染。改成按 `;` 逐段检查。
+
+### 5. 共享 RzCore 永不释放
+
+`rzReleaseShared` 在 native 侧写好了，Kotlin 侧连声明都没有，关工作区 / 清缓存 / 引擎关闭
+都不放。6.7MB 的 SO 连同分析数据库会一直挂在内存里（可达数十 MB）。补上
+`NativeEngine.releaseSharedAnalysis()` 并在三处接线。
+
+> 旧版 `librz_native.so`（arm64 快速包用的那份静态库）没有这个导出，`runCatching` 会兜住
+> `UnsatisfiedLinkError`：只影响释放，不影响功能。
+
+### 6. 尾跳调用点列表会串函数
+
+`TailExpandButton` 的 `rows` 用 `remember { }` 存、没带 `funcVa`：看完 A 函数的调用点，
+切到 B 函数再点开，显示的还是 A 的列表（而且 `rows` 非空不会再查）。改成
+`remember(funcVa, ws)`。
+
+### 验证
+
+- 新增 7 条单测（命令链分类），进两条流水线的单测门；
+- 4 ABI 全量构建 + Dex2C + 打包通过后发布。
+
 ## 塔菲逆核 v1.5.61 —— Capstone 真升到 6.0.0-Alpha11 了
 
 v1.5.60 时我判断「6.0 是 API 重写，自研胶水得整份重写」。这次把它做完了，结论是

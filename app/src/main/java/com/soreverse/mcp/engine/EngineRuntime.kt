@@ -53,6 +53,7 @@ internal class EngineRuntime(internal val context: Context) {
         runCatching { workDir?.close() }
         workDir = null
         workDirUri = null
+        releaseRizinSharedAnalysis()
         AppLog.i("EngineRuntime closed (all sessions and caches released)")
     }
 

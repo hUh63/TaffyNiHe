@@ -1328,7 +1328,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommand(
         static const char* blockedList[] = { "!", "o ", "oo", "w", "rm", "mv", "cp", "cat ", "ls " };
         size_t start = 0;
         while (start <= c.size()) {
-            const size_t end = c.find(';', start);
+            const size_t end = c.find_first_of(";\n\r", start); // rizin 三种分隔符都要认
             const std::string seg = c.substr(start, end == std::string::npos ? std::string::npos : end - start);
             const size_t b = seg.find_first_not_of(" \t");
             if (b != std::string::npos) {

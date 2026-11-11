@@ -64,9 +64,9 @@ internal fun TailExpandButton(
 ) {
     var open by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
-    // 结果按目标函数（+工作区）分桶：换函数后不能把上一个函数的调用点列表继续显示。
-    var rows by remember(funcVa, ws) { mutableStateOf<List<TailCallRow>>(emptyList()) }
-    var message by remember(funcVa, ws) { mutableStateOf("") }
+    // 结果按目标函数（+工作区+指令数）分桶：换函数 / 打了补丁之后不能继续显示旧列表。
+    var rows by remember(funcVa, ws, linear.size) { mutableStateOf<List<TailCallRow>>(emptyList()) }
+    var message by remember(funcVa, ws, linear.size) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
     IconButton(

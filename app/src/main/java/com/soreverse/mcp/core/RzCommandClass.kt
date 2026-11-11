@@ -51,7 +51,8 @@ private val RZ_MUTATING_CONFIG_PREFIXES = listOf("analysis", "asm", "graph", "bi
 internal fun classifyRzCommand(command: String): RzCmdKind {
     var sawAny = false
     var sawUnknown = false
-    for (raw in command.split(';')) {
+    // rizin 的命令链分隔符有 ';'、换行、回车三种，少认一种就等于漏检（`s 0x10\nwx 90 @ 0x10`）。
+    for (raw in command.split(';', '\n', '\r')) {
         val seg = raw.trim()
         if (seg.isEmpty()) continue
         val head = seg.substringBefore(' ').substringBefore('\t').trim()

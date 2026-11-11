@@ -36,6 +36,9 @@ object WorkspacePolicy {
         "inputApk", "outputApk", "apkPath", "apkFile", "dexPath", "dexFile", "outDex",
         // SO 对比这类"两输入"工具的两个路径参数，缺了就整体绕过工作区策略。
         "pathA", "pathB",
+        // 2026-11 补齐：这三个同样是真·文件系统路径，漏登记就是整条工具绕过工作区策略
+        // —— mappingPath 能读任意文件，saveDir / logFile 能往任意目录写。
+        "mappingPath", "saveDir", "logFile",
     )
 
     /** 参数递归预检的最大深度，防止超深嵌套造成的栈/CPU 放大。 */

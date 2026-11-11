@@ -161,12 +161,13 @@ private fun deepError(o: JSONObject?): String =
 @Composable
 internal fun StringCipherView(workspaceId: String, zh: Boolean, context: android.content.Context) {
     val scope = rememberCoroutineScope()
-    var scanJson by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var err by remember { mutableStateOf("") }
-    var picked by remember { mutableStateOf<JSONObject?>(null) }
-    var detailJson by remember { mutableStateOf("") }
-    var detailBusy by remember { mutableStateOf(false) }
+    // 结果按工作区分桶：换 SO 之后不能把上一个文件的扫描结果继续显示出来。
+    var scanJson by remember(workspaceId) { mutableStateOf("") }
+    var busy by remember(workspaceId) { mutableStateOf(false) }
+    var err by remember(workspaceId) { mutableStateOf("") }
+    var picked by remember(workspaceId) { mutableStateOf<JSONObject?>(null) }
+    var detailJson by remember(workspaceId) { mutableStateOf("") }
+    var detailBusy by remember(workspaceId) { mutableStateOf(false) }
 
     val scanObj = remember(scanJson) { runCatching { JSONObject(scanJson) }.getOrNull() }
     val blobs = remember(scanObj) { scanObj?.optJSONArray("blobs") ?: JSONArray() }
@@ -410,9 +411,10 @@ private class ObfRow(
 @Composable
 internal fun ObfuscScanView(workspaceId: String, zh: Boolean, context: android.content.Context) {
     val scope = rememberCoroutineScope()
-    var json by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var err by remember { mutableStateOf("") }
+    // 同上：换工作区必须丢掉上一个 SO 的混淆扫描结果。
+    var json by remember(workspaceId) { mutableStateOf("") }
+    var busy by remember(workspaceId) { mutableStateOf(false) }
+    var err by remember(workspaceId) { mutableStateOf("") }
     var limit by remember { mutableStateOf(40) }
     val obj = remember(json) { runCatching { JSONObject(json) }.getOrNull() }
 

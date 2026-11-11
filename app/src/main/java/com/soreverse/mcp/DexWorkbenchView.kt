@@ -915,10 +915,11 @@ private fun SearchPane(
     // 之前 placeholder 写着"支持 . * 前缀后缀"，但没开 regex 时 . 和 * 只是普通字符，
     // 用户输 *Activity 会搜字面量 —— 现在给一个明确的开关，文案也不再骗人
     var useRegex by rememberSaveable { mutableStateOf(false) }
-    var hits by remember { mutableStateOf<List<DexIndex.Hit>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var searched by remember { mutableStateOf(false) }
+    // 结果按 dex 文件分桶：换文件后不能继续显示上一个 dex 的命中项。
+    var hits by remember(path) { mutableStateOf<List<DexIndex.Hit>>(emptyList()) }
+    var busy by remember(path) { mutableStateOf(false) }
+    var error by remember(path) { mutableStateOf<String?>(null) }
+    var searched by remember(path) { mutableStateOf(false) }
 
     fun run() {
         if (keyword.isBlank()) return
@@ -1090,10 +1091,11 @@ private fun ConstPane(zh: Boolean, path: String, tmpDir: File, onOpenClass: (Str
     val clip = LocalClipboardManager.current
     var kind by rememberSaveable { mutableStateOf("string") }
     var keyword by rememberSaveable { mutableStateOf("") }
-    var hits by remember { mutableStateOf<List<DexIndex.Hit>>(emptyList()) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var searched by remember { mutableStateOf(false) }
+    // 结果按 dex 文件分桶：换文件后不能继续显示上一个 dex 的命中项。
+    var hits by remember(path) { mutableStateOf<List<DexIndex.Hit>>(emptyList()) }
+    var busy by remember(path) { mutableStateOf(false) }
+    var error by remember(path) { mutableStateOf<String?>(null) }
+    var searched by remember(path) { mutableStateOf(false) }
 
     fun run() {
         busy = true

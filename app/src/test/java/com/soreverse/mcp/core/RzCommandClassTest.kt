@@ -53,6 +53,15 @@ class RzCommandClassTest {
     }
 
     @Test
+    fun newlineSeparatedChainsAreSplitToo() {
+        // rizin 的命令链也支持换行/回车分隔：只认 ';' 会把写命令当成只读命令的尾巴。
+        assertEquals(RzCmdKind.MUTATING, classifyRzCommand("aaa\npdfj"))
+        assertEquals(RzCmdKind.MUTATING, classifyRzCommand("s 0x10\r\naf\r\npdfj"))
+        assertEquals(RzCmdKind.READ_ONLY, classifyRzCommand("pdfj\naxtj"))
+        assertEquals(RzCmdKind.UNKNOWN, classifyRzCommand("s 0x10\nwx 90 @ 0x10"))
+    }
+
+    @Test
     fun unknownCommandsAreNeitherCachedNorInvalidating() {
         assertEquals(RzCmdKind.UNKNOWN, classifyRzCommand("wx 9090 @ 0x100"))
         assertEquals(RzCmdKind.UNKNOWN, classifyRzCommand("?v"))

@@ -1,3 +1,58 @@
+## 塔菲逆核 v1.5.63 —— 收掉上轮遗留 + 第二轮排查（策略绕过与串数据）
+
+### 1. 命令链分隔符补全（上轮遗留）
+
+rizin 的命令链分隔符有三种：`;`、换行、回车。上一版只认 `;`，于是
+`s 0x100\nwx 9090 @ 0x100` 这种写法两边都判不出来：
+
+- Kotlin 侧分类器会把整条当成只读 → **写命令的结果被缓存**；
+- native 侧的 `unsafe` 闸门同样只看第一个 `;` 段 → 写命令落到共享只读 core 上。
+
+现在两边都按三种分隔符切段（`core/RzCommandClass.kt` + `rizin_core.cpp`），并补了
+2 条单测（换行链的 MUTATING / READ_ONLY / UNKNOWN 分支）。
+
+### 2. 三个路径参数没登记，等于整条工具绕过工作区策略
+
+`WorkspacePolicy.PATH_KEYS` 是唯一校验「路径必须在工作区内」的地方，漏登记就等于该参数可以
+指向任意路径。这轮对账全部工具的参数，补上三个真·路径键：
+
+| 参数 | 工具 | 漏登记后果 |
+|---|---|---|
+| `mappingPath` | `taffy_dex_rename` | 可读任意文件（ProGuard mapping） |
+| `saveDir` | `taffy_js_assets` | 可往任意目录写解包产物 |
+| `logFile` | `taffy_native_exec` | 可往任意路径写守护进程日志 |
+
+> 默认值（`filesDir/js-assets`、`cacheDir/native-exec-*.log`）本来就在允许根内，行为不变；
+> 显式传 `/sdcard/...` 现在需要先开隧道（与其它路径参数的规则一致）。
+
+新增 2 条回归单测：`WorkspacePolicyPathKeysTest`（防止以后再漏、也防止把 content/hex 这类
+内容键误登记成路径键）。
+
+### 3. 换文件/换工作区后，界面还显示上一个的扫描结果
+
+这轮扫「Composable 里 `remember { mutableStateOf(...) }` 持有与某个 key 绑定的数据、但 key
+没传给 remember」的模式，抓到 4 处（都是上轮尾跳列表那类 bug 的同类）：
+
+| 位置 | 现象 |
+|---|---|
+| 字符串解密扫描（`StringCipherView`） | 换 SO 后仍显示上一个 SO 的 blob 列表与解密详情 |
+| 混淆扫描（`ObfuscScanView`） | 换 SO 后仍显示上一个 SO 的函数评分表 |
+| DEX 类搜索（`SearchPane`） | 换 dex 后仍显示上一个 dex 的命中项 |
+| DEX 常量搜索（`ConstPane`） | 同上 |
+
+修法统一为 `remember(workspaceId)` / `remember(path)`。另外上轮尾跳列表的 key 补了
+`linear.size`：给函数打了补丁（指令变了）之后列表也会重新查，而不是拿着补丁前的结论。
+
+### 4. 顺手核对过、确认没问题的
+
+- 工具 schema 声明 ↔ `args` 读取的全量对账（上一版漏过 `skipImports` 那类）：这轮用
+  「全局声明键集合 − 读取键集合」跑了一遍，剩余差异全部是 `"key".oneOf(...)` 写法造成的
+  正则误报，没有真的漏声明。
+- `Action` 枚举 ↔ `when` 分支对账：差异全部来自网关转发（ToolCatalog 把 action 直接下发给
+  底层工具）与同一文件里的多工具，无实际漏项。
+- 文件句柄（`FileOutputStream` / `RandomAccessFile` / `ZipFile`）扫描：命中均为 `use {}`
+  包裹或短生命周期，无泄漏。
+
 ## 塔菲逆核 v1.5.62 —— 一轮针对性 bug 排查（7 个真实缺陷）
 
 这轮把全仓源码（380 个 kt + 62 个 java + 26 个 cpp，main 4d4b3732）过了一遍反模式扫描，

@@ -79,8 +79,18 @@ jobs:
             sleep 15
           done
           echo "ANDROID_NDK_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends meson ninja-build pkg-config cmake golang-go
+          # runner 的 DNS 会偶发抖动（2026-11-11 实测：四个 ABI 同时挂在
+          # "Temporary failure resolving 'security.ubuntu.com'"）。apt 只用来补
+          # cmake/ninja/meson 这些构建工具，GitHub 镜像本来就预装了大半 —— 所以
+          # 失败只告警、不中断，最后只对 cmake/ninja 做硬校验。
+          sudo apt-get -o Acquire::Retries=5 update || echo "::warning::apt-get update 失败（runner DNS 抖动？）继续"
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends meson ninja-build pkg-config cmake golang-go \
+            || echo "::warning::apt-get install 失败（runner DNS 抖动？）改用镜像预装工具"
+          for t in cmake ninja meson pkg-config go; do
+            command -v "$t" >/dev/null 2>&1 && echo "have $t -> $(command -v "$t")" || echo "missing $t"
+          done
+          command -v cmake >/dev/null 2>&1 || { echo "::error::cmake 不可用，无法继续"; exit 1; }
+          command -v ninja >/dev/null 2>&1 || { echo "::error::ninja 不可用，无法继续"; exit 1; }
 
       - name: 克隆源码 (rizin / LIEF / capstone / keystone / unicorn / unidbg)
         run: |

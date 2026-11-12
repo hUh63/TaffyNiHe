@@ -412,11 +412,12 @@ internal fun SettingsReversePage(
         if (zh) "沙箱" else "Sandbox",
         if (zh) "工作流" else "Workflow",
         "Blutter",
+        "Frida",
     )
     ToolPageScaffold(
         title = if (zh) "逆向分析" else "Reverse engineering",
-        subtitle = if (zh) "反汇编 · 调试 · 抓包 · 沙箱 · 编排 · Flutter"
-        else "Disasm · debug · capture · sandbox · workflow · Flutter",
+        subtitle = if (zh) "反汇编 · 调试 · 抓包 · 沙箱 · 编排 · Flutter · Frida"
+        else "Disasm · debug · capture · sandbox · workflow · Flutter · Frida",
         onBack = onBack,
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -443,7 +444,8 @@ internal fun SettingsReversePage(
                         2 -> CapturePage(t)
                         3 -> SettingsSandboxPage(t)
                         4 -> SettingsWorkflowPage(t, onDest)
-                        else -> SettingsBlutterPage(t, onBack = {}, embedded = true)
+                        5 -> SettingsBlutterPage(t, onBack = {}, embedded = true)
+                        else -> SettingsFridaKitPage(t)
                     }
                 }
             }

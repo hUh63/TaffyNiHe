@@ -244,6 +244,9 @@ dependencies {
     // codemode 脚本引擎: Rhino 纯 JVM 实现(无 native 依赖, Android 可跑; 解释模式 + safe standard objects 沙箱)
     implementation("org.mozilla:rhino:1.7.15")
 
+    // frida-gadget 版本库: 官方只发 .so.xz，需要纯 Java 的 XZ 解压（无 native 依赖）
+    implementation("org.tukaani:xz:1.10")
+
     // 权限管理: Shizuku (adb 级 shell 权限) + Dhizuku (设备所有者权限)
     // provider 模块提供 rikka.shizuku.ShizukuProvider（Manifest 必需，缺了启动闪退）
     implementation("dev.rikka.shizuku:api:13.1.5")

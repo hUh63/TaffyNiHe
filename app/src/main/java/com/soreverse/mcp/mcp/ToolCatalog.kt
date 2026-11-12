@@ -1238,6 +1238,10 @@ object ToolCatalog {
         *DexRenameMappingTool.ALL.toTypedArray(),
         // 塔菲逆核: DEX → Java 反编译（jadx，配套 smali 编辑的「转成 Java」）
         *DexJavaTool.ALL.toTypedArray(),
+        // 反分析扫描 / 注入点扫描 / Frida gadget 版本库（对齐 SysKit 的 guard + inject point + gadget 库能力）
+        *GuardScanTool.ALL.toTypedArray(),
+        *InjectPointTool.ALL.toTypedArray(),
+        *FridaGadgetKitTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

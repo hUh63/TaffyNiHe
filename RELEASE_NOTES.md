@@ -1,3 +1,48 @@
+## 塔菲逆核 v1.5.64 —— 整合 Frida 工具链（gadget 版本库 / 注入点 / 反分析扫描）
+
+### 1. 三个新工具
+
+- **`taffy_frida_gadget_kit`（Gadget 版本库）**
+  `status / versions / download / import / remove / place`。
+  官方只发布 `.so.xz`：下载后自动 XZ 解压，并校验 ELF 魔数 + `e_machine` 是否与目标 ABI 一致，
+  架构不符当场拒绝——下错架构的 gadget 装进包里只会让目标启动即崩，不如提前挡住。
+  本地库按 `<version>/<abi>/libfrida-gadget.so` 存放，`place` 直接落进 decode 目录的 `lib/<abi>/`，
+  之后交给 `taffy_apk_frida_gadget` 配 config + 注入入口 + 重打包重签。
+
+- **`taffy_apk_inject_points`（注入点扫描）**
+  只读地列出一个 APK 能往哪儿塞代码：Application（进程第一个执行的业务类，最稳）、
+  launcher Activity（无自定义 Application 时的退路）、带 `JNI_OnLoad` 的 native 库、
+  可 hook 的 JNI 导出函数。每个点都带「为什么选它」和「用哪个工具落地」，
+  同时报告 packageName / debuggable / extractNativeLibs / ABI 集合。
+
+- **`taffy_guard_scan`（反分析扫描）**
+  签名校验、完整性校验、反调试、模拟器、Hook 框架、Root、VMP、
+  加固厂商（爱加密 / 梆梆 / 百度 / 乐固 / 360 / 阿里 / 易盾 / 顶象 / 娜迦）、
+  资源加密、类名混淆度，每条命中都带处置建议。
+
+「设置 → 逆向分析」新增 **Frida** 页签，gadget 库 / 注入点 / 守卫扫描三块放在一页——
+它们本来就是同一条链上的前后步骤。新增依赖 `org.tukaani:xz:1.10`（纯 Java，无 native）。
+
+### 2. 区分「用了 frida」和「在检测 frida」
+
+拿真实 APK 验证特征库时发现一个设计缺陷：逆向工具/安全 SDK 自己就带 `frida`、`XposedBridge` 字样
+（实测某注入工具 APK 里 `frida` 出现 1533 次），单关键词命中会把「内置 Hook 能力」误报成「检测注入」。
+现在：
+
+- 命中带出现次数；
+- 新增组合规则，必须几个特征同时出现才算检测：
+  `maps + frida`、`dl_iterate_phdr + frida`、`/proc/net/tcp + 27042`、
+  `/proc/self/status + TracerPid`、`goldfish + ro.kernel.qemu`、
+  `XposedBridge + ClassLoader`、`getPackageInfo + signatures`、`DexClassLoader + getDex`；
+- 只有 hook 字样、没有任何组合命中时降级为「内置 Hook 能力」，不当作检测。
+
+### 3. 修复
+
+- **多智能体·加固脱壳角色少一个工具**：PACKER 角色声明的 `taffy_unpack` 并不存在
+  （实际工具名是 `taffy_dex_unpack`），而 `catalogTools` 用 `mapNotNull` 静默丢弃未知名字，
+  于是该角色运行时白少一个工具、AI 也看不到脱壳能力。
+- 新增 13 条单测（特征库 / 组合规则 / 命中计数 / 混淆评分 / ARSC 判定 / 端口识别）。
+
 ## 塔菲逆核 v1.5.63 —— 收掉上轮遗留 + 第二轮排查（策略绕过与串数据）
 
 ### 1. 命令链分隔符补全（上轮遗留）

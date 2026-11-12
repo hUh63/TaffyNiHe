@@ -66,9 +66,10 @@ object GuardScanTool {
         val soSeen = ArrayList<String>()
         val dexSeen = ArrayList<String>()
         val classNames = ArrayList<String>()
+        val textSink = StringBuilder()
 
         when {
-            target.isDirectory -> scanDirectory(target, scope, maxStrings, deep, findings, packers, classNames, stringsScanned, soSeen, dexSeen)
+            target.isDirectory -> scanDirectory(target, scope, maxStrings, deep, findings, packers, classNames, stringsScanned, soSeen, dexSeen, textSink)
             isZip(target) && target.name.lowercase().let { it.endsWith(".apk") || it.endsWith(".zip") } ->
                 ZipFile(target).use { z ->
                     val names = z.entries().asSequence().filter { !it.isDirectory }.map { it.name }.toList()
@@ -77,14 +78,14 @@ object GuardScanTool {
                         arscJson = readArscVerdict(z, names)
                     }
                     if (scope == "all" || scope == "dex") {
-                        scanDexInZip(target, maxStrings, findings, classNames, stringsScanned, dexSeen)
+                        scanDexInZip(target, maxStrings, findings, classNames, stringsScanned, dexSeen, textSink)
                     }
                     if ((scope == "all" || scope == "so") && deep) {
                         scanSoInZip(z, names, findings, soSeen)
                     }
                 }
             target.name.lowercase().endsWith(".dex") -> {
-                scanDexFile(target, maxStrings, findings, classNames, stringsScanned, dexSeen)
+                scanDexFile(target, maxStrings, findings, classNames, stringsScanned, dexSeen, textSink)
             }
             isElf(target) -> {
                 scanSoFile(target, findings, soSeen)
@@ -93,6 +94,31 @@ object GuardScanTool {
         }
 
         if (classNames.isNotEmpty()) obfJson = obfuscationJson(classNames)
+
+        // 组合检测：单个词出现在逆向工具自身里是常态，几个特征同时出现才叫"在检测"
+        if (textSink.isNotEmpty() && scope != "so") {
+            val text = textSink.toString()
+            val combos = GuardSignatures.scanCombos(text)
+            for (h in combos) {
+                findings.add(JSONObject()
+                    .put("category", "detect")
+                    .put("label", h.label)
+                    .put("evidence", h.evidence)
+                    .put("where", "dex 字符串池（组合特征）")
+                    .put("advice", h.advice))
+            }
+            if (combos.isEmpty()) {
+                // 只有 hook 相关字样、没有任何检测组合 → 目标大概是自带 Hook 能力，而不是在抓你
+                for (f in findings) {
+                    if (f.optString("category") == "hook") {
+                        f.put("category", "hook_builtin")
+                        f.put("label", "内置 Hook 能力")
+                        f.put("advice", "目标自己带 Frida/Xposed 相关实现（逆向工具或安全 SDK 常见），不等于它在检测注入；" +
+                            "要判断检测行为，看 detect 类命中")
+                    }
+                }
+            }
+        }
 
         val byCategory = LinkedHashMap<String, Int>()
         for (f in findings) {
@@ -130,7 +156,7 @@ object GuardScanTool {
         dir: File, scope: String, maxStrings: Int, deep: Boolean,
         findings: MutableList<JSONObject>, packers: MutableList<JSONObject>,
         classNames: MutableList<String>, stringsScanned: IntArray,
-        soSeen: MutableList<String>, dexSeen: MutableList<String>,
+        soSeen: MutableList<String>, dexSeen: MutableList<String>, textSink: StringBuilder,
     ) {
         val all = ArrayList<File>()
         dir.walkTopDown().maxDepth(6).forEach { if (it.isFile) all.add(it) }
@@ -157,7 +183,7 @@ object GuardScanTool {
             val name = f.name.lowercase()
             when {
                 (scope == "all" || scope == "dex") && name.endsWith(".dex") ->
-                    runCatching { scanDexFile(f, maxStrings, findings, classNames, stringsScanned, dexSeen) }
+                    runCatching { scanDexFile(f, maxStrings, findings, classNames, stringsScanned, dexSeen, textSink) }
                 (scope == "all" || scope == "so") && deep && isElf(f) ->
                     runCatching { scanSoFile(f, findings, soSeen) }
             }
@@ -188,29 +214,32 @@ object GuardScanTool {
     private fun scanDexInZip(
         apk: File, maxStrings: Int, findings: MutableList<JSONObject>,
         classNames: MutableList<String>, stringsScanned: IntArray, dexSeen: MutableList<String>,
+        textSink: StringBuilder,
     ) {
         val container = runCatching { DexFileFactory.loadDexContainer(apk, Opcodes.getDefault()) }.getOrNull() ?: return
         for (dexName in container.dexEntryNames) {
             val dexFile = runCatching { container.getEntry(dexName)?.dexFile }.getOrNull() ?: continue
             dexSeen.add(dexName)
-            collectFromDex(dexFile, maxStrings, findings, classNames, stringsScanned, dexName)
+            collectFromDex(dexFile, maxStrings, findings, classNames, stringsScanned, dexName, textSink)
         }
     }
 
     private fun scanDexFile(
         dex: File, maxStrings: Int, findings: MutableList<JSONObject>,
         classNames: MutableList<String>, stringsScanned: IntArray, dexSeen: MutableList<String>,
+        textSink: StringBuilder,
     ) {
         if (dex.length() > MAX_DEX_BYTES) return
         val dexFile = runCatching { DexFileFactory.loadDexFile(dex, Opcodes.getDefault()) }.getOrNull() ?: return
         dexSeen.add(dex.name)
-        collectFromDex(dexFile, maxStrings, findings, classNames, stringsScanned, dex.name)
+        collectFromDex(dexFile, maxStrings, findings, classNames, stringsScanned, dex.name, textSink)
     }
 
     private fun collectFromDex(
         dexFile: com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile,
         maxStrings: Int, findings: MutableList<JSONObject>,
         classNames: MutableList<String>, stringsScanned: IntArray, where: String,
+        textSink: StringBuilder,
     ) {
         runCatching {
             for (cls in dexFile.classes) {
@@ -226,6 +255,9 @@ object GuardScanTool {
                 if (n >= maxStrings) break
                 val s = runCatching { ref.string }.getOrNull() ?: continue
                 n++
+                if (textSink.length < 6_000_000) {
+                    textSink.append(s).append('\n')
+                }
                 for (hit in GuardSignatures.scanText(s, hitLimit = 6)) {
                     val key = hit.category + "|" + hit.evidence
                     if (!matched.containsKey(key)) {

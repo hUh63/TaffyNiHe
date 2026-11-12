@@ -17,11 +17,23 @@ object GuardSignatures {
         val needles: List<String>,
     )
 
-    /** 一条命中。 */
+    /** 一条命中。[count] 是该特征在输入里出现的次数（用于区分"用了"和"检测"）。 */
     data class Hit(
         val category: String,
         val label: String,
         val evidence: String,
+        val advice: String,
+        val count: Int = 1,
+    )
+
+    /**
+     * 组合规则：单个关键词几乎必然误报（逆向工具自己就带 frida 字样），
+     * 必须几个特征同时出现才算"目标在检测"。
+     */
+    data class Combo(
+        val id: String,
+        val label: String,
+        val all: List<String>,
         val advice: String,
     )
 
@@ -111,6 +123,53 @@ object GuardSignatures {
         "娜迦" to listOf("assets/libchaosvmp.so", "assets/libchaos.so"),
     )
 
+    /**
+     * 检测型组合特征。这是和上面 CATEGORIES 的关键区别：
+     * CATEGORIES 回答"出现了什么词"，COMBO 回答"它是不是真的在检测你"。
+     */
+    val COMBOS: List<Combo> = listOf(
+        Combo(
+            "frida_detect_maps", "Frida 检测（扫 maps）",
+            listOf("/proc/self/maps", "frida"),
+            "目标会读 /proc/self/maps 找 frida 关键字：注入前先 hook open/read 或改名 gadget",
+        ),
+        Combo(
+            "frida_detect_phdr", "Frida 检测（dl_iterate_phdr）",
+            listOf("dl_iterate_phdr", "frida"),
+            "目标遍历已加载模块找 frida：gadget 需改名并去掉特征串",
+        ),
+        Combo(
+            "frida_detect_port", "Frida 检测（端口扫描）",
+            listOf("/proc/net/tcp", "27042"),
+            "目标扫 27042/27043 端口：改用非默认端口（gadget config 里 listen 改成别的）",
+        ),
+        Combo(
+            "debugger_detect", "调试器检测（TracerPid）",
+            listOf("/proc/self/status", "TracerPid"),
+            "目标读 TracerPid 判断被调试：附加前先 patch 读取处或 hook open",
+        ),
+        Combo(
+            "emulator_detect", "模拟器检测（组合）",
+            listOf("goldfish", "ro.kernel.qemu"),
+            "目标组合多个特征判断模拟器：真机验证，或 hook 属性返回",
+        ),
+        Combo(
+            "xposed_detect", "Xposed 检测",
+            listOf("XposedBridge", "ClassLoader"),
+            "目标用 ClassLoader 找 XposedBridge：改用非 Xposed 方案（gadget）",
+        ),
+        Combo(
+            "signature_check", "签名校验（取签名+比对）",
+            listOf("getPackageInfo", "signatures"),
+            "目标会取签名做比对：改包必须用同证书重签，或 patch 比对逻辑",
+        ),
+        Combo(
+            "packer_loaded", "壳已加载（内存 dex）",
+            listOf("DexClassLoader", "getDex"),
+            "目标运行时动态加载 dex（壳）：静态改 dex 无效，需要 dump 内存 dex",
+        ),
+    )
+
     /** Frida 默认监听端口（frida-server / gadget 的默认值，目标常拿它做检测）。 */
     val FRIDA_PORTS: List<String> = listOf("27042", "27043")
 
@@ -132,8 +191,9 @@ object GuardSignatures {
             var found = 0
             for (n in c.needles) {
                 if (found >= 3) break
-                if (text.contains(n, ignoreCase = false)) {
-                    out.add(Hit(c.id, c.label, n, c.advice))
+                val cnt = countOf(text, n)
+                if (cnt > 0) {
+                    out.add(Hit(c.id, c.label, n, c.advice, cnt))
                     found++
                 }
                 if (out.size >= hitLimit) return out
@@ -239,6 +299,38 @@ object GuardSignatures {
             }
         }
         return distinct >= 48
+    }
+
+    /** 统计出现次数（有上限，避免超长文本里数数本身成为开销）。 */
+    fun countOf(text: String, needle: String, cap: Int = 999): Int {
+        if (needle.isEmpty()) return 0
+        var idx = text.indexOf(needle)
+        if (idx < 0) return 0
+        var n = 0
+        while (idx >= 0 && n < cap) {
+            n++
+            idx = text.indexOf(needle, idx + needle.length)
+        }
+        return n
+    }
+
+    /** 只返回"好几个特征同时出现"的组合命中。 */
+    fun scanCombos(text: String, combos: List<Combo> = COMBOS): List<Hit> {
+        val out = ArrayList<Hit>()
+        for (c in combos) {
+            var minCount = Int.MAX_VALUE
+            var all = true
+            for (k in c.all) {
+                val n = countOf(text, k, 999)
+                if (n == 0) {
+                    all = false
+                    break
+                }
+                if (n < minCount) minCount = n
+            }
+            if (all) out.add(Hit("detect", c.label, c.all.joinToString(" + "), c.advice, minCount))
+        }
+        return out
     }
 
     /** 从 /proc/net/tcp 这类文本里找 27042/27043 的十六进制形式（0x69A2 / 0x69A3 小端）。 */

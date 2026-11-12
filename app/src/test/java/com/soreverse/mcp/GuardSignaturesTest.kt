@@ -107,6 +107,30 @@ class GuardSignaturesTest {
     }
 
     @Test
+    fun countOf_countsOccurrencesWithCap() {
+        assertEquals(3, GuardSignatures.countOf("frida frida frida", "frida"))
+        assertEquals(0, GuardSignatures.countOf("nothing", "frida"))
+        assertEquals(5, GuardSignatures.countOf("aaaaaaaaaa", "a", cap = 5))
+    }
+
+    @Test
+    fun scanCombos_requiresAllFeaturesPresent() {
+        // 只出现一个词：不算检测（逆向工具自己就带这个字样）
+        assertTrue(GuardSignatures.scanCombos("这里有 frida 字样，但没有 maps 或端口检测").isEmpty())
+        // 两个特征同时出现：判定为 Frida 检测
+        val hits = GuardSignatures.scanCombos("先读 /proc/self/maps，再在里面搜 frida")
+        assertEquals(1, hits.size)
+        assertEquals("detect", hits[0].category)
+        assertTrue(hits[0].label.contains("Frida"))
+    }
+
+    @Test
+    fun scanCombos_detectsSignatureCheck() {
+        val hits = GuardSignatures.scanCombos("pm.getPackageInfo(pkg, GET_SIGNATURES) 后取 signatures 比对")
+        assertTrue(hits.any { it.label.contains("签名") })
+    }
+
+    @Test
     fun fridaPortHits_matchesHexForm() {
         val net = " 0: 0100007F:69A2 00000000:0000 0A ...\n 1: 0100007F:69A3 00000000:0000 0A ..."
         val ports = GuardSignatures.fridaPortHits(net)

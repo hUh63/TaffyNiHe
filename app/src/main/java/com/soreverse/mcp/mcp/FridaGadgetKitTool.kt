@@ -188,11 +188,14 @@ object FridaGadgetKitTool {
     // ──────────────── download ────────────────
 
     private fun doDownload(root: File, args: JSONObject): JSONObject {
+        // abis 既接受数组，也接受 "arm64-v8a,x86_64" 这种逗号串——客户端传错类型时别静默忽略
         val wantedAbis = runCatching {
             val a = args.optJSONArray("abis")
-            if (a != null) (0 until a.length()).map { a.getString(it) } else {
-                val single = args.str("abi")
-                if (single.isNotBlank()) listOf(single) else listOf("arm64-v8a")
+            if (a != null) {
+                (0 until a.length()).map { a.getString(it) }
+            } else {
+                val raw = args.optString("abis").ifBlank { args.str("abi") }
+                if (raw.isBlank()) listOf("arm64-v8a") else raw.split(',', ' ', '|', ';').filter { it.isNotBlank() }
             }
         }.getOrDefault(listOf("arm64-v8a"))
         val abis = wantedAbis.map { normalizeAbi(it) }.filter { ABI_INFO.containsKey(it) }.distinct()

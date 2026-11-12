@@ -20,7 +20,7 @@ import java.util.zip.ZipFile
  *  1. manifest_application —— Application 子类，进程起来第一个执行的业务代码，
  *     在它的 attachBaseContext/onCreate 里 loadLibrary 最不容易被时序问题打掉；
  *  2. launcher_activity —— 没有自定义 Application 时的退路；
- *  3. native_lib —— lib/&lt;abi&gt;/*.so，含 JNI_OnLoad 的库适合 gadget 同目录落地或 so 级注入。
+ *  3. native_lib —— lib/<abi>/ 目录下的 .so，含 JNI_OnLoad 的库适合 gadget 同目录落地或 so 级注入。
  *
  * 扫描只读、不改任何东西；真正的落地交给 taffy_apk_frida_gadget / taffy_so_inject_code。
  */

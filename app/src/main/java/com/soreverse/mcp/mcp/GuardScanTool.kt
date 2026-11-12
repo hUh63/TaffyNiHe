@@ -95,13 +95,13 @@ object GuardScanTool {
         if (classNames.isNotEmpty()) obfJson = obfuscationJson(classNames)
 
         val byCategory = LinkedHashMap<String, Int>()
-        for (i in 0 until findings.length()) {
-            val cat = findings.getJSONObject(i).optString("category")
+        for (f in findings) {
+            val cat = f.optString("category")
             byCategory[cat] = (byCategory[cat] ?: 0) + 1
         }
         val advice = LinkedHashSet<String>()
-        for (i in 0 until findings.length()) advice.add(findings.getJSONObject(i).optString("advice"))
-        if (packers.length() > 0) advice.add("目标被加固过：直接改包会踩壳的完整性校验，先考虑壳内注入（Frida gadget）或脱壳")
+        for (f in findings) advice.add(f.optString("advice"))
+        if (packers.isNotEmpty()) advice.add("目标被加固过：直接改包会踩壳的完整性校验，先考虑壳内注入（Frida gadget）或脱壳")
         if (obfJson != null && obfJson!!.optInt("score") >= 70) advice.add("类名高度混淆：按类名/字符串定位逻辑几乎不可行，优先按调用点或运行时 hook")
 
         val result = JSONObject()

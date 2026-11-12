@@ -1,6 +1,11 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -131,7 +136,7 @@ internal fun SettingsFridaKitPage(t: UiText) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ToolChip(
                         label = if (zh) "刷新版本列表" else "Refresh versions",
-                        icon = androidx.compose.material.icons.Icons.Filled.Refresh,
+                        icon = Icons.Filled.Refresh,
                         enabled = busy.isEmpty(),
                         onClick = {
                             scope.safeLaunch {
@@ -149,7 +154,7 @@ internal fun SettingsFridaKitPage(t: UiText) {
                     )
                     ToolChip(
                         label = if (zh) "下载 arm64-v8a" else "Download arm64-v8a",
-                        icon = androidx.compose.material.icons.Icons.Filled.Download,
+                        icon = Icons.Filled.Download,
                         accent = true,
                         enabled = busy.isEmpty(),
                         onClick = {
@@ -280,7 +285,7 @@ internal fun SettingsFridaKitPage(t: UiText) {
                 )
                 ToolChip(
                     label = if (zh) "扫描注入点" else "Scan points",
-                    icon = androidx.compose.material.icons.Icons.Filled.Search,
+                    icon = Icons.Filled.Search,
                     enabled = busy.isEmpty() && targetPath.isNotBlank(),
                     onClick = {
                         scope.safeLaunch {
@@ -351,7 +356,7 @@ internal fun SettingsFridaKitPage(t: UiText) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 ToolChip(
                     label = if (zh) "用上面的路径扫描" else "Scan the path above",
-                    icon = androidx.compose.material.icons.Icons.Filled.Security,
+                    icon = Icons.Filled.Security,
                     enabled = busy.isEmpty() && targetPath.isNotBlank(),
                     onClick = {
                         scope.safeLaunch {

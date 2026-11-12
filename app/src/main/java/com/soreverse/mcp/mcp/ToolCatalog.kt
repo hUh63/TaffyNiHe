@@ -1242,6 +1242,9 @@ object ToolCatalog {
         *GuardScanTool.ALL.toTypedArray(),
         *InjectPointTool.ALL.toTypedArray(),
         *FridaGadgetKitTool.ALL.toTypedArray(),
+        // 加密 DEX 扫描/还原 + 外部 MCP 客户端（对齐 SysKit 的 TosksRestorer / mcp-client）
+        *DexXorScanTool.ALL.toTypedArray(),
+        *McpClientTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

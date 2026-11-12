@@ -110,6 +110,8 @@ internal fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) 
     SettingsDest.Search -> if (t.zh) "搜索设置" else "Search settings"
     SettingsDest.DevEnv -> if (t.zh) "开发环境" else "Dev environment"
     SettingsDest.Reverse -> if (t.zh) "逆向分析" else "Reverse analysis"
+    SettingsDest.DexScan -> if (t.zh) "加密 DEX 扫描" else "Encrypted DEX scan"
+    SettingsDest.McpClient -> if (t.zh) "MCP 客户端" else "MCP client"
     SettingsDest.SelfCheck -> if (t.zh) "自检" else "Self check"
 }
 
@@ -212,6 +214,12 @@ internal fun SettingsHub(
             SettingsDest.SelfCheck -> SettingsSelfCheckPage(t, onBack)
             SettingsDest.DevEnv -> SettingsDevEnvPage(t, onDest, onOpenEditor, onBack)
             SettingsDest.Reverse -> SettingsReversePage(t, onDest, onBack)
+            SettingsDest.DexScan -> SettingsScaffold(title = settingsTitle(t, SettingsDest.DexScan), onBack = onBack) {
+                item("content") { SettingsDexScanPage(t) }
+            }
+            SettingsDest.McpClient -> SettingsScaffold(title = settingsTitle(t, SettingsDest.McpClient), onBack = onBack) {
+                item("content") { SettingsMcpClientPage(t) }
+            }
             SettingsDest.BackupRestore -> SettingsBackupRestorePage(t, settings, onBack)
             SettingsDest.ToolStats -> SettingsScaffold(
                 title = if (t.zh) "运行统计" else "Runtime stats",

@@ -110,7 +110,7 @@ internal object AgentRoles {
             "taffy_so_packer_fingerprint",
             "taffy_so_anti_debug",
             "taffy_apk_shell_check",
-            "taffy_unpack",
+            "taffy_dex_unpack",
             "taffy_so_import_trace",
         ),
         suggestedSteps = 10,

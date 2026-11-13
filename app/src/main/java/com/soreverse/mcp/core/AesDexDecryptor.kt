@@ -114,10 +114,19 @@ object AesDexDecryptor {
      */
     fun keyCandidates(data: ByteArray, limit: Int = 48): List<Candidate> {
         if (data.size < 16) return emptyList()
+        // 先一趟统计"前 4MB 里 16 字节块"的重复情况（O(n)），
+        // 原来对每个候选都全文件搜一遍是 O(n²)，512MB 的 dump 会跑到几十分钟。
+        val scanLimit = minOf(data.size, 4 * 1024 * 1024)
+        val freq = HashMap<Long, Int>()
+        var p = 0
+        while (p + 16 <= scanLimit) {
+            val h = blockHash(data, p, 16)
+            freq[h] = (freq[h] ?: 0) + 1
+            p += 16
+        }
         val out = ArrayList<Candidate>()
         val seen = HashSet<String>()
         var offset = 0
-        // 4 字节步进：key 未必对齐 16，4 字节粒度足够覆盖绝大多数情形
         while (offset + 16 <= data.size && out.size < limit * 4) {
             for (len in intArrayOf(16, 32, 24)) {
                 if (offset + len > data.size) continue
@@ -126,7 +135,7 @@ object AesDexDecryptor {
                 val block = data.copyOfRange(offset, offset + len)
                 val h = XorDexScanner.hex(block)
                 if (!seen.add(h)) continue
-                val repeated = countOccurrences(data, block) > 1
+                val repeated = len == 16 && (freq[blockHash(data, offset, 16)] ?: 1) > 1
                 out.add(Candidate(offset, len, h, distinct, repeated))
                 break
             }
@@ -145,6 +154,16 @@ object AesDexDecryptor {
                 .thenBy { it.offset }
                 .thenByDescending { it.distinctBytes }
         ).take(limit)
+    }
+
+    /** 16 字节块的轻量 hash（FNV-1a），只用于重复度统计。 */
+    private fun blockHash(data: ByteArray, offset: Int, len: Int): Long {
+        var h = -0x340d631b7bdddcdbL // FNV offset basis
+        for (i in offset until minOf(offset + len, data.size)) {
+            h = h xor (data[i].toLong() and 0xFF)
+            h *= 0x100000001b3L
+        }
+        return h
     }
 
     // ──────────────── 解密 ────────────────
@@ -247,18 +266,6 @@ object AesDexDecryptor {
             }
         }
         return n
-    }
-
-    private fun countOccurrences(data: ByteArray, needle: ByteArray): Int {
-        var count = 0
-        var from = 0
-        while (count < 4) {
-            val idx = indexOf(data, needle, from)
-            if (idx < 0) break
-            count++
-            from = idx + 1
-        }
-        return count
     }
 
     private fun padToBlock(data: ByteArray, block: Int): ByteArray {

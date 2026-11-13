@@ -74,7 +74,7 @@ object AesDexDecryptor {
     )
 
     /** 自动穷举时先只解前 1MB 做判断（dex 头通常在开头附近），命中后再解全量。 */
-    private const val PROBE_BYTES = 1024 * 1024
+    private const val PROBE_BYTES = 128 * 1024
 
     // ──────────────── 表识别 ────────────────
 
@@ -132,12 +132,18 @@ object AesDexDecryptor {
             }
             offset += 4
         }
-        // 不重复的优先，字节种类多的优先，16/32 长度的优先
+        // 排序策略（按重要性）：
+        //  1. 不重复的优先——重复出现的块多半是表/常量，不是 key；
+        //  2. 16 字节优先（AES-128 最常见），再 32，最后 24；
+        //  3. 靠前的偏移优先——key 通常在常量区/开头，密文在中间；
+        //  4. 字节种类多的优先。
+        // 注意别把 distinctBytes 放前面：加密数据区的任意 16 字节也都是满熵，
+        // 会把它自己顶到前面，把真正的 key 挤出候选窗口。
         return out.sortedWith(
             compareBy<Candidate> { it.repeated }
-                .thenByDescending { it.distinctBytes }
-                .thenBy { if (it.length == 16 || it.length == 32) 0 else 1 }
+                .thenBy { when (it.length) { 16 -> 0; 32 -> 1; else -> 2 } }
                 .thenBy { it.offset }
+                .thenByDescending { it.distinctBytes }
         ).take(limit)
     }
 
@@ -165,33 +171,45 @@ object AesDexDecryptor {
     fun autoDecrypt(data: ByteArray, limit: Int = 12): List<Hit> {
         val cands = keyCandidates(data, limit)
         if (cands.isEmpty()) return emptyList()
-        val head = if (data.size > PROBE_BYTES) data.copyOfRange(0, PROBE_BYTES) else data
+        val probe = if (data.size > PROBE_BYTES) data.copyOfRange(0, PROBE_BYTES) else data
         val hits = ArrayList<Hit>()
         for (c in cands) {
             val key = XorDexScanner.hexToBytes(c.hex)
             if (key.size !in intArrayOf(16, 24, 32)) continue
-            val ivs = ArrayList<Pair<String, ByteArray>>()
-            ivs.add("00000000000000000000000000000000" to ByteArray(16))
-            ivs.add(XorDexScanner.hex(key) to key)
-            if (c.offset + key.size + 16 <= head.size) {
-                val after = head.copyOfRange(c.offset + key.size, c.offset + key.size + 16)
-                ivs.add(XorDexScanner.hex(after) to after)
+            // 密文起点不确定：key 后面可能紧跟密文，也可能隔着一小段 header/填充。
+            // 前 256 字节按 16 字节步进全试一遍（探测段只有 128KB，17 个起点 × 6 种组合
+            // 每个候选约 13MB 解密量，秒级可接受），命中后再解全量。
+            val starts = LinkedHashSet<Int>()
+            var st = 0
+            val maxStart = minOf(256, probe.size - 16)
+            while (st <= maxStart) {
+                if (st + 16 <= probe.size) starts.add(st)
+                st += 16
             }
-            for ((ivHex, iv) in ivs) {
-                for (mode in listOf("cbc", "ecb")) {
-                    val maybe: ByteArray? = if (mode == "cbc") decryptCbc(head, key, iv, false)
-                    else decryptEcb(head, key, false)
-                    // 注意：`if/else` 与 `?:` 的优先级，写成一行时 ?: 只绑定 else 分支
-                    val plain: ByteArray = maybe ?: continue
-                    val found = XorDexScanner.scan(plain, setOf("plain"), 1).firstOrNull() ?: continue
-                    // 命中后再解全量，保证写出的 dex 完整
-                    val full = if (head.size == data.size) plain
-                    else (if (mode == "cbc") decryptCbc(data, key, iv, false) else decryptEcb(data, key, false)) ?: plain
-                    val fullFound = if (full === plain) found
-                    else XorDexScanner.scan(full, setOf("plain"), 1).firstOrNull() ?: found
-                    val dexBytes = XorDexScanner.extract(full, fullFound) ?: continue
-                    hits.add(Hit(c.hex, ivHex, mode, fullFound, dexBytes))
-                    if (hits.size >= 8) return hits
+            if (starts.isEmpty()) starts.add(0)
+            for (start in starts) {
+                val region = if (start == 0) probe else probe.copyOfRange(start, probe.size)
+                val ivs = ArrayList<Pair<String, ByteArray>>()
+                ivs.add("00000000000000000000000000000000" to ByteArray(16))
+                if (key.size >= 16) ivs.add(XorDexScanner.hex(key.copyOfRange(0, 16)) to key.copyOfRange(0, 16))
+                for ((ivHex, iv) in ivs) {
+                    for (mode in listOf("cbc", "ecb")) {
+                        val maybe: ByteArray? = if (mode == "cbc") decryptCbc(region, key, iv, false)
+                        else decryptEcb(region, key, false)
+                        // 注意：`if/else` 与 `?:` 的优先级，写成一行时 ?: 只绑定 else 分支
+                        val plain: ByteArray = maybe ?: continue
+                        val found = XorDexScanner.scan(plain, setOf("plain"), 1).firstOrNull() ?: continue
+                        // 命中后再解全量，保证写出的 dex 完整
+                        val fullRegion = if (start == 0) data else data.copyOfRange(start, data.size)
+                        val full: ByteArray = if (fullRegion.size == region.size) plain
+                        else (if (mode == "cbc") decryptCbc(fullRegion, key, iv, false)
+                        else decryptEcb(fullRegion, key, false)) ?: plain
+                        val fullFound = if (full === plain) found
+                        else XorDexScanner.scan(full, setOf("plain"), 1).firstOrNull() ?: found
+                        val dexBytes = XorDexScanner.extract(full, fullFound) ?: continue
+                        hits.add(Hit(c.hex, ivHex, mode + (if (start > 0) "@$start" else ""), fullFound, dexBytes))
+                        if (hits.size >= 8) return hits
+                    }
                 }
             }
         }

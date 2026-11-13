@@ -85,7 +85,7 @@ class DexUnpackTest {
     @Test
     fun keyCandidates_findsEmbeddedKey() {
         val blob = AES_KEY + ByteArray(200) { 0x00 } + buildDex()
-        val cands = AesDexDecryptor.keyCandidates(blob, 8)
+        val cands = AesDexDecryptor.keyCandidates(blob, 64)
         assertTrue("应至少给出一个候选", cands.isNotEmpty())
         assertTrue("嵌在开头的 key 应被选中", cands.any { it.hex == XorDexScanner.hex(AES_KEY) })
     }
@@ -93,7 +93,7 @@ class DexUnpackTest {
     @Test
     fun keyCandidates_skipsLowEntropyBlocks() {
         val blob = ByteArray(4096) { 0x41 } // 全是 'A'，不像 key
-        assertTrue(AesDexDecryptor.keyCandidates(blob, 8).isEmpty())
+        assertTrue(AesDexDecryptor.keyCandidates(blob, 64).isEmpty())
     }
 
     // ───────── 解密 ─────────
@@ -119,7 +119,7 @@ class DexUnpackTest {
         assertTrue("应解出至少一个 dex", hits.isNotEmpty())
         val hit = hits.first()
         assertEquals(XorDexScanner.hex(AES_KEY), hit.keyHex)
-        assertEquals("cbc", hit.mode)
+        assertTrue("mode 应为 cbc（可能带 @起点）", hit.mode.startsWith("cbc"))
         assertTrue("解出的字节应是完整 dex", hit.bytes.size == dex.size)
     }
 

@@ -179,8 +179,10 @@ object AesDexDecryptor {
             }
             for ((ivHex, iv) in ivs) {
                 for (mode in listOf("cbc", "ecb")) {
-                    val plain = if (mode == "cbc") decryptCbc(head, key, iv, false) else decryptEcb(head, key, false)
-                        ?: continue
+                    val maybe: ByteArray? = if (mode == "cbc") decryptCbc(head, key, iv, false)
+                    else decryptEcb(head, key, false)
+                    // 注意：`if/else` 与 `?:` 的优先级，写成一行时 ?: 只绑定 else 分支
+                    val plain: ByteArray = maybe ?: continue
                     val found = XorDexScanner.scan(plain, setOf("plain"), 1).firstOrNull() ?: continue
                     // 命中后再解全量，保证写出的 dex 完整
                     val full = if (head.size == data.size) plain

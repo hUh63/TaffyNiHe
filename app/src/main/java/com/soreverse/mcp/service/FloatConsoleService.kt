@@ -313,9 +313,17 @@ class FloatConsoleService : Service() {
         var running: Boolean = false
             private set
 
-        fun start(ctx: Context) {
+        /**
+         * 启动悬浮窗。返回是否成功：Android 12+ 在后台调 startForegroundService 会抛
+         * ForegroundServiceStartNotAllowedException（这是「应用在后台」的正常限制，不该崩）。
+         */
+        fun start(ctx: Context): Boolean = runCatching {
             val i = Intent(ctx, FloatConsoleService::class.java).setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
+            true
+        }.getOrElse { e ->
+            AppLog.e("悬浮控制台", "启动失败（可能应用在后台被限制）: ${e.message}")
+            false
         }
 
         fun stop(ctx: Context) {

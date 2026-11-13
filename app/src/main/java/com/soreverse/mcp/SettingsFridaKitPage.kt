@@ -549,8 +549,12 @@ internal fun SettingsFridaKitPage(t: UiText) {
                                 FloatConsoleService.stop(context)
                                 message = if (zh) "已请求关闭悬浮窗" else "Overlay stop requested"
                             } else {
-                                FloatConsoleService.start(context)
-                                message = if (zh) "已启动（若没出现，检查悬浮窗权限）" else "Started (check overlay permission if invisible)"
+                                val started = FloatConsoleService.start(context)
+                                message = when {
+                                    started -> if (zh) "已启动（若没出现，检查悬浮窗权限）" else "Started (check overlay permission if invisible)"
+                                    zh -> "启动失败：应用在后台时系统会拦前台服务，回到应用前台再试"
+                                    else -> "Failed to start: the system blocks foreground services from background"
+                                }
                             }
                         },
                     )

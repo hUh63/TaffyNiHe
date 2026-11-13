@@ -28,7 +28,8 @@ import java.io.InputStream
  */
 object DexAesDecryptTool {
 
-    private const val MAX_READ = 512L * 1024 * 1024
+    /** decrypt 会整段 AES 解密（峰值约 2~3 倍），上限比扫描类工具低一档。 */
+    private const val MAX_READ = 128L * 1024 * 1024
 
     val dexAes: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(

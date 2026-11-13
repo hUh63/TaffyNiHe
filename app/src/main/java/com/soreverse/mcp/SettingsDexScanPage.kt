@@ -58,9 +58,9 @@ internal fun SettingsDexScanPage(t: UiText) {
     var aesIv by rememberSaveable { mutableStateOf("") }
     var aesResult by remember { mutableStateOf<JSONObject?>(null) }
 
-    suspend fun callTool(args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
+    suspend fun callTool(name: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         runCatching {
-            val h = ToolCatalog.byName["taffy_dex_xor_scan"] ?: return@runCatching null
+            val h = ToolCatalog.byName[name] ?: return@runCatching null
             h.handle(ToolContext(context, SettingsStore(context), EngineProvider.get(context), null), args)
         }.getOrNull()
     }
@@ -117,7 +117,7 @@ internal fun SettingsDexScanPage(t: UiText) {
                         onClick = {
                             scope.safeLaunch {
                                 busy = true
-                                result = callTool(JSONObject().put("action", "scan").put("path", path.trim()).put("modes", modes))
+                                result = callTool("taffy_dex_xor_scan", JSONObject().put("action", "scan").put("path", path.trim()).put("modes", modes))
                                 busy = false
                                 message = ""
                             }
@@ -131,7 +131,7 @@ internal fun SettingsDexScanPage(t: UiText) {
                         onClick = {
                             scope.safeLaunch {
                                 busy = true
-                                result = callTool(JSONObject().put("action", "extract").put("path", path.trim()).put("modes", modes))
+                                result = callTool("taffy_dex_xor_scan", JSONObject().put("action", "extract").put("path", path.trim()).put("modes", modes))
                                 busy = false
                                 message = ""
                             }

@@ -3,6 +3,7 @@ package com.soreverse.mcp.core
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -17,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 默认关闭：外部工具是用户自己配的网络端点，混进工具清单会放大模型的行动面，
  * 所以要求显式打开（「MCP 客户端」页里的开关）。
  */
-object McpAiBridge {
+internal object McpAiBridge {
 
     private const val PREFS = "taffy_mcp_client"
     private const val KEY_AI = "ai_expose"
@@ -45,6 +46,12 @@ object McpAiBridge {
      * 但要写日志，方便用户排查"为什么模型没看到我的工具"。
      */
     suspend fun buildTools(ctx: Context): List<RikkaTool> = withContext(Dispatchers.IO) {
+        // 整体 8s 上限：远端掉线/握手慢时不能让 AI 会话卡住（buildToolsBlocking 会把它变成阻塞，
+        // 而 catalogTools 是同步函数，等太久会把整个编排拖死）
+        withTimeoutOrNull(8_000) { buildToolsInner(ctx) } ?: emptyList()
+    }
+
+    private suspend fun buildToolsInner(ctx: Context): List<RikkaTool> = withContext(Dispatchers.IO) {
         if (!isEnabled(ctx)) return@withContext emptyList()
         val endpoints = runCatching { McpClientStore.load(ctx) }.getOrDefault(emptyList())
             .filter { it.enabled }

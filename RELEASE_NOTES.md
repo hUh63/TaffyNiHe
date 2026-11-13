@@ -1,3 +1,78 @@
+## 塔菲逆核 v1.5.66 —— AES 加密 DEX 定向解密 / dex 头修复 / 远端 MCP 工具接入 AI
+
+这一版把 SysKit 里最后一块硬骨头（AES + 自定义 AES 表）啃了，同时把上一版留的两处收紧。
+
+### 1. `taffy_dex_aes` —— AES 加密 DEX 的定向解密
+
+对的是加固壳里最难缠的一类：dex 不是简单 XOR，而是 AES 加密，甚至把 S-box 一起搬走/换成自定义表。
+四个动作分开给，也可以直接 `auto`：
+
+- **`sbox`**：在数据里找 AES 表（标准 S-box / 逆 S-box / Rcon 的 32 字节特征）。
+  找到 → 说明是标准 AES，key 就藏在附近；只找到一部分 → 可能是自定义表或被切分存放，
+  标准 AES 解不开，得先从运行时 dump 表。
+- **`keys`**：从数据里挑"像 key"的 16/24/32 字节块。
+- **`decrypt`**：给定 key(+iv/mode/unpad) 直接解，解完自动扫 dex、可选再 XOR 一层。
+- **`auto`**：候选 key × 多种 IV × CBC/ECB × **密文起点偏移** 穷举，
+  命中直接报 key/iv/mode，并把 dex 落盘。
+
+两个实现细节值得说明，都是踩过坑才定下来的：
+
+- **key 候选的排序不能按熵**：加密数据区里任意 16 字节都是满熵，按熵排会把它自己顶到前面，
+  把真正的 key 挤出候选窗口。改成「不重复 → 16 字节优先 → 靠前偏移优先」，因为 key 通常在常量区/开头。
+- **密文起点不确定**：key 后面可能紧跟密文，也可能隔着一小段 header/填充。
+  所以对前 256 字节按 16 字节步进全试一遍起点，探测段只解 128KB（17 个起点 × 6 种组合，
+  每个候选约 13MB 解密量，秒级），命中后再解全量。
+
+### 2. `taffy_dex_fix`（并入 `taffy_dex_xor_scan` 的 `fix` / `find`）
+
+脱壳出来的 dex 常常"内容对、头不对"：file_size 还是原始大小、adler32/signature 对不上、
+endian_tag 被清零。修复策略是"以内容为准重算头"：
+
+1. magic 不对 → 直接拒绝（不是 dex，别硬修）；
+2. file_size 与实际不符 → 取较小值写回（多出来的当填充丢掉）；
+3. header_size/endian_tag 非法 → 写成标准值；
+4. **先重算 SHA-1(signature) 再重算 adler32(checksum)**（顺序不能反，checksum 覆盖 signature）。
+
+另加 `find`：扫出数据里所有 dex 头偏移（magic + header_size + endian_tag 三条同时成立），
+用来处理"带一截前缀 / 多个 dex 拼在一起 / 偏移错位"的 dump。
+`taffy_dex_xor_scan(extract)` 和 `taffy_dex_aes` 落盘前都会自动修一遍头。
+
+### 3. 远端 MCP 工具接入 AI（AI 直连）
+
+上一版只能"人来调"远端工具。这一版把它们接进 AI 的工具清单：
+已启用端点的工具会以 `mcp_<端点>_<工具>` 的名字出现在模型看到列表里，模型可以自己选、
+按远端 `inputSchema` 填参数，塔菲负责转发。
+
+- 接线两处：`AgentKernel.catalogTools`（多智能体各角色）与 `DeepAnalysisService.buildRikkaTools`（AI 深度分析）
+- **默认关闭**（「MCP 客户端」页里的开关）：外部端点由用户自己配，混进工具清单会放大模型的行动面
+- 每端点最多 20 个工具、总计 40 个；工具清单 60 秒缓存
+- 整体 8 秒超时：`catalogTools` 是同步函数，远端握手慢不能把整个编排拖死
+- 失败静默降级并写日志（远端掉线不该让 AI 会话失败）
+
+### 4. SysKit 剩余项的处置
+
+| SysKit 的东西 | 处置 |
+|---|---|
+| `aesCbc` / `KeyTables(SBox/InvSBox/Rcon)` | ✅ `AesDexDecryptor`（表识别 + CBC/ECB） |
+| `keyCandidates` / `extractTables` | ✅ `keyCandidates` + `findTables` |
+| `xorScan` 的"候选穷举 + 校验" | ✅ `autoDecrypt` |
+| `quickCheck` / `finalCheck` 的 dex 校验 | ✅ `XorDexScanner` 的 magic+结构+adler32+SHA-1 |
+| `fixDex` | ✅ `DexFixer` |
+| `findHeaderOffsets` | ✅ `DexFixer.findDexHeaders` |
+| `unpad` | ✅ 内置 PKCS7 |
+| `payloadOffset` / `parsePayload` | ❌ 绑定它自己的资产格式，没有通用价值 |
+| `axmlStrings` / `parseManifest` | ❌ 塔菲用 ARSCLib 更准 |
+| `score` / `score3`（字符串可读性打分） | ❌ 只用于它自己的报告排序 |
+
+### 5. 修复
+
+- **`taffy_gadget_one_shot` 的 APK 路径参数改用 `apkPath`**：`apk` 没登记在
+  `WorkspacePolicy.PATH_KEYS` 里，等于整条工具绕过工作区路径校验（这一项上一版的发布物里没有，本版补上）
+- `FloatConsoleService.start` 返回 Boolean：Android 12+ 在后台调 `startForegroundService`
+  会抛 `ForegroundServiceStartNotAllowedException`，以前会崩，现在给明确提示
+- `taffy_dex_aes` 的读取上限收到 128MB（整段 AES 解密峰值是输入 2~3 倍）
+- 新增 12 条单测（AES 表识别 / key 候选 / CBC 往返 / auto 端到端 / 修头 / 截断 / 找头）
+
 ## 塔菲逆核 v1.5.65 —— 加密 DEX 扫描 / MCP 客户端 / 一键注入闭环 / 悬浮控制台
 
 延续上一版对 SysKit 的整合，把剩下三块补齐，并把 gadget 注入串成一条链。

@@ -137,7 +137,9 @@ object DexUnpackChain {
             scanned++
 
             var hits: List<XorDexScanner.Found> = emptyList()
-            runCatching { hits = XorDexScanner.scan(bytes, opts.modes, opts.maxHitsPerFile) }
+            // 同一偏移只保留一条：同一段数据被多种模式命中时解出来是同一份 dex，
+            // 不去重会重复落盘（并且把「命中数」报大）。
+            runCatching { hits = XorDexScanner.scan(bytes, opts.modes, opts.maxHitsPerFile).distinctBy { it.offset } }
                 .onFailure { fail(file.name, "scan", it.message ?: "扫描异常") }
             totalHits += hits.size
             xorHits += hits.size
@@ -225,13 +227,17 @@ object DexUnpackChain {
             }
             verified = strong
             stage("verify", if (structural == 0) "ok" else "partial", "强校验通过 $strong 个，仅结构合法 $structural 个")
+        } else {
+            // 没做复核时 verifiedCount 不该等于写入数（那会把「没检查」报成「全过」）
+            verified = 0
+            stage("verify", "skipped", "按要求跳过复核")
         }
 
         // ── 结论 ────────────────────────────────────────────────
         val next = when {
             saveSeq == 0 && !opts.doAes -> "本地没有任何 dex 特征：先 taffy_dex_unpack 从运行中的进程 dump 内存（需 root），或打开 aes=true 再跑一遍"
             saveSeq == 0 -> "解不开：若 sbox 报非标准表说明 S-box 被换过，只能 dump 运行时内存（壳解密后的 dex 在内存里是标准表）；若表是标准的，试 taffy_dex_aes action=keys 手工挑 key"
-            verified == 0 -> "解出来了但校验全不过：多半是被截断的 dump，检查 dump 的读取上限或换更完整的内存区间"
+            opts.verify && verified == 0 -> "解出来了但校验全不过：多半是被截断的 dump，检查 dump 的读取上限或换更完整的内存区间"
             else -> "可直接喂给 taffy_jadx_decompile / taffy_baksmali_decode 分析"
         }
         return buildResult(stages, failures, recovered, outDir, scanned, totalHits, saveSeq, verified, opts).put("next", next)
@@ -338,6 +344,7 @@ object DexUnpackChain {
         o.put("hitCount", hits)
         o.put("writtenCount", written)
         o.put("verifiedCount", verified)
+        o.put("verifyRan", opts.verify)
         o.put("stages", stages)
         o.put("recovered", recovered)
         o.put("failures", failures)

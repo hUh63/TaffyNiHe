@@ -64,7 +64,9 @@ object XorDexScanner {
             while (i <= data.size - HEADER_SIZE) {
                 // 由 magic 反推 key：第 0 字节决定单字节 key
                 val k0 = (data[i].toInt() xor MAGIC[0].toInt()) and 0xFF
-                if (modes.contains("xor1")) {
+                // key=0 等价于明文，plain 模式已经报过；不跳过会让同一段数据重复出一条
+                // "xor1 key=00" 的伪候选（扫描工具里多一条噪音，链路里会重复落盘同一个 dex）。
+                if (modes.contains("xor1") && k0 != 0) {
                     // 单字节 key 直接内联判断，避免每字节分配一个 key 数组（要扫的是几十 MB 的 dump）
                     if (matchesAtOneByte(data, i, k0)) {
                         val f = evaluate(data, i, "xor1", HEX_DIGITS[(k0 ushr 4) and 0xF].toString() + HEX_DIGITS[k0 and 0xF])

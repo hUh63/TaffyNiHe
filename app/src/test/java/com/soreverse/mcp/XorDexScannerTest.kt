@@ -56,6 +56,16 @@ class XorDexScannerTest {
     }
 
     @Test
+    fun scan_allModes_doesNotDoubleReportKeyZero() {
+        // 全模式扫明文 dex 时，xor1 的 k0 会是 0 —— 那是「key=00 异或」等价于没加密，
+        // 必须由 plain 独占，否则同一段数据报两次、链路里也落两份产物。
+        val dex = buildDex()
+        val hits = XorDexScanner.scan(dex, setOf("plain", "xor1", "xorn"))
+        assertEquals(1, hits.size)
+        assertEquals("plain", hits[0].mode)
+    }
+
+    @Test
     fun scan_findsSingleByteXor() {
         val dex = buildDex()
         val enc = xorWith(dex, byteArrayOf(0x5A))

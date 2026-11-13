@@ -179,7 +179,8 @@ internal fun SettingsDexScanPage(t: UiText) {
                             )
                             for (i in 0 until minOf(recoveredArr.length(), 12)) {
                                 val it2 = recoveredArr.optJSONObject(i) ?: continue
-                                val v = if (it2.optBoolean("verified")) "✓" else "!"
+                                val verifyRan = cr.optBoolean("verifyRan", true)
+                                val v = if (!verifyRan) "·" else if (it2.optBoolean("verified")) "✓" else "!"
                                 Text(
                                     "$v ${it2.optString("name")}  ${it2.optInt("size")} B  ${it2.optString("mode")}",
                                     style = MaterialTheme.typography.bodySmall,

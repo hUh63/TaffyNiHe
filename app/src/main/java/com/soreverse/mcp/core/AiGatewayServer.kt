@@ -89,8 +89,8 @@ internal object AiGatewayServer {
                         call.respondText(healthJson(settings).toString(), ContentType.Application.Json)
                     }
                     get("/v1/models") {
-                        if (!authorized(settings, call.request.header("Authorization"))) {
-                            call.respondText(authError().toString(), ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                        if (!authorized(settings.aiGatewayToken, call.request.header("Authorization"))) {
+                            call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
                             return@get
                         }
                         call.respondText(modelsJson(settings).toString(), ContentType.Application.Json)
@@ -147,17 +147,17 @@ internal object AiGatewayServer {
 
     private suspend fun handleChat(call: ApplicationCall, context: Context, settings: SettingsStore) {
         if (!authorized(settings.aiGatewayToken, call.request.header("Authorization"))) {
-            call.respondText(authError().toString(), ContentType.Application.Json, HttpStatusCode.Unauthorized)
+            call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
             return
         }
         val raw = runCatching { call.receiveText() }.getOrNull()
         if (raw == null || raw.length > MAX_BODY_BYTES) {
-            call.respondText(errorJson("请求体为空或过大"), ContentType.Application.Json, HttpStatusCode.BadRequest)
+            call.respondText(errorJson("请求体为空或过大"), ContentType.Application.Json, status = HttpStatusCode.BadRequest)
             return
         }
         val req = runCatching { JSONObject(raw) }.getOrNull()
         if (req == null) {
-            call.respondText(errorJson("请求体不是合法 JSON"), ContentType.Application.Json, HttpStatusCode.BadRequest)
+            call.respondText(errorJson("请求体不是合法 JSON"), ContentType.Application.Json, status = HttpStatusCode.BadRequest)
             return
         }
         val wantsStream = req.optBoolean("stream", false)
@@ -167,14 +167,14 @@ internal object AiGatewayServer {
 
         val conn = runCatching { openPost(target, headers, body) }.getOrNull()
         if (conn == null) {
-            call.respondText(errorJson("无法连接上游渠道：$target"), ContentType.Application.Json, HttpStatusCode.BadGateway)
+            call.respondText(errorJson("无法连接上游渠道：$target"), ContentType.Application.Json, status = HttpStatusCode.BadGateway)
             return
         }
         val code = runCatching { conn.responseCode }.getOrDefault(0)
         val input: InputStream? = runCatching { if (code in 200..299) conn.inputStream else conn.errorStream }.getOrNull()
         if (input == null || code == 0) {
             runCatching { conn.disconnect() }
-            call.respondText(errorJson("上游无响应"), ContentType.Application.Json, HttpStatusCode.BadGateway)
+            call.respondText(errorJson("上游无响应"), ContentType.Application.Json, status = HttpStatusCode.BadGateway)
             return
         }
         synchronized(stats) { requests++ }
@@ -187,7 +187,7 @@ internal object AiGatewayServer {
             runCatching { input.close() }
             runCatching { conn.disconnect() }
             if (bytes == null) {
-                call.respondText(errorJson("读取上游响应失败"), ContentType.Application.Json, HttpStatusCode.BadGateway)
+                call.respondText(errorJson("读取上游响应失败"), ContentType.Application.Json, status = HttpStatusCode.BadGateway)
                 return
             }
             recordUsage(String(bytes, Charsets.UTF_8))

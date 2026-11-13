@@ -67,9 +67,11 @@ class FloatConsoleService : Service() {
             return
         }
         attachWindow()
-        listener = { line ->
+        val cb: (String) -> Unit = { line: String ->
             main.post { appendLog(line) }
-        }.also { AppLog.addListener(it) }
+        }
+        listener = cb
+        AppLog.addListener(cb)
         appendLog("[taffy] 悬浮控制台已启动 · 输入命令后回车执行（走 root/Shizuku 通道）")
     }
 
@@ -191,7 +193,7 @@ class FloatConsoleService : Service() {
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
         }
-        scroll.addView(tv, ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT))
+        scroll.addView(tv, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
         body.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(220)))
         logView = tv
 

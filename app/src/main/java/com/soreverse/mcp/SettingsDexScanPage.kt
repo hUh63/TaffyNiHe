@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -65,7 +66,157 @@ internal fun SettingsDexScanPage(t: UiText) {
         }.getOrNull()
     }
 
+    // ── 一键脱壳链 ──
+    var chainPkg by rememberSaveable { mutableStateOf("") }
+    var chainDir by rememberSaveable { mutableStateOf("") }
+    var chainAes by rememberSaveable { mutableStateOf(false) }
+    var chainBusy by remember { mutableStateOf(false) }
+    var chainResult by remember { mutableStateOf<JSONObject?>(null) }
+
     PageScroll {
+        // ───────── 一键脱壳链：dump → 扫描 → 解密 → 修头 → 落盘 → 复核 ─────────
+        GlassGroup(
+            title = if (zh) "一键脱壳链" else "One-shot unpack chain",
+            footer = if (zh) "给了包名会先从运行中的进程 dump 内存（需 root，且要先把目标 App 打开）；也可以直接指一个已有 dump 目录。结果里的每一段都标了状态，脱不出来时看 failures 就知道断在哪一段。"
+            else "With a package it dumps memory from the running process first (root, app must be open); or point at an existing dump directory. Every stage reports its status, so failures tell you exactly where the chain broke.",
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = chainPkg,
+                    onValueChange = { chainPkg = it },
+                    label = { Text(if (zh) "包名（可选，从内存 dump）" else "Package (optional, memory dump)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = chainDir,
+                    onValueChange = { chainDir = it },
+                    label = { Text(if (zh) "已有 dump 目录（可选）" else "Existing dump dir (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ToolChip(
+                        label = if (zh) "再试 AES" else "Try AES",
+                        selected = chainAes,
+                        enabled = !chainBusy,
+                        onClick = { chainAes = !chainAes },
+                    )
+                    ToolChip(
+                        label = if (zh) "跑完整链" else "Run chain",
+                        icon = Icons.Filled.PlayArrow,
+                        accent = true,
+                        enabled = !chainBusy && (chainPkg.isNotBlank() || chainDir.isNotBlank()),
+                        onClick = {
+                            scope.safeLaunch {
+                                chainBusy = true
+                                chainResult = callTool(
+                                    "taffy_dex_unpack_chain",
+                                    JSONObject()
+                                        .put("action", "run")
+                                        .put("package", chainPkg.trim())
+                                        .put("dir", chainDir.trim())
+                                        .put("aes", chainAes.toString())
+                                        .put("modes", modes),
+                                )
+                                chainBusy = false
+                            }
+                        },
+                    )
+                    if (chainBusy) CircularProgressIndicator(modifier = Modifier.width(20.dp), strokeWidth = 2.dp)
+                }
+                val cr = chainResult
+                if (cr != null) {
+                    if (cr.optBoolean("ok") != true) {
+                        Text(
+                            cr.optJSONObject("error")?.optString("message") ?: (if (zh) "脱壳链失败" else "Chain failed"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        Text(
+                            if (zh) "写出 ${cr.optInt("writtenCount")} 个 dex（复核通过 ${cr.optInt("verifiedCount")}）· 扫描 ${cr.optInt("scannedFiles")} 个文件 · 命中 ${cr.optInt("hitCount")} 处"
+                            else "${cr.optInt("writtenCount")} dex written (${cr.optInt("verifiedCount")} verified) · ${cr.optInt("scannedFiles")} files · ${cr.optInt("hitCount")} hits",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        val stages = cr.optJSONArray("stages") ?: JSONArray()
+                        for (i in 0 until stages.length()) {
+                            val st = stages.optJSONObject(i) ?: continue
+                            val status = st.optString("status")
+                            val statusColor = when (status) {
+                                "ok" -> MaterialTheme.colorScheme.primary
+                                "failed" -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            val stageName = when (st.optString("name")) {
+                                "dump" -> if (zh) "① 内存 dump" else "1 dump"
+                                "list" -> if (zh) "② 枚举文件" else "2 list"
+                                "scan" -> if (zh) "③ 扫描 dex" else "3 scan"
+                                "recover" -> if (zh) "④ 解密落盘" else "4 recover"
+                                "fix" -> if (zh) "⑤ 修头" else "5 fix"
+                                "verify" -> if (zh) "⑥ 复核" else "6 verify"
+                                else -> st.optString("name")
+                            }
+                            Text(
+                                "$stageName · $status",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = statusColor,
+                            )
+                            if (st.optString("detail").isNotBlank()) {
+                                Text(
+                                    st.optString("detail"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        val recoveredArr = cr.optJSONArray("recovered") ?: JSONArray()
+                        if (recoveredArr.length() > 0) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                if (zh) "产物（${recoveredArr.length()}）" else "Outputs (${recoveredArr.length()})",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                            for (i in 0 until minOf(recoveredArr.length(), 12)) {
+                                val it2 = recoveredArr.optJSONObject(i) ?: continue
+                                val v = if (it2.optBoolean("verified")) "✓" else "!"
+                                Text(
+                                    "$v ${it2.optString("name")}  ${it2.optInt("size")} B  ${it2.optString("mode")}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (recoveredArr.length() > 12) {
+                                Text("…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        val fails = cr.optJSONArray("failures") ?: JSONArray()
+                        if (fails.length() > 0) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                if (zh) "卡点（${fails.length()}）" else "Failures (${fails.length()})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            for (i in 0 until minOf(fails.length(), 6)) {
+                                val f = fails.optJSONObject(i) ?: continue
+                                Text(
+                                    "${f.optString("stage")} · ${f.optString("source")}：${f.optString("reason")}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        val next = cr.optString("next")
+                        if (next.isNotBlank()) {
+                            Text("→ $next", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+
         GlassGroup(
             title = if (zh) "扫描目标" else "Target",
             footer = if (zh) "被 XOR 加密的 dex 靠 dex 结构 + adler32 校验和 + SHA-1 签名三重判定，误报极少；校验和/签名不符但结构合法的会单独标出（脱壳后未修复的典型形态）。"

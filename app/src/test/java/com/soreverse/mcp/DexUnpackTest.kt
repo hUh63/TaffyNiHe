@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import com.soreverse.mcp.core.AesDexDecryptor
 import com.soreverse.mcp.core.DexFixer
+import com.soreverse.mcp.core.DexUnpackChain
 import com.soreverse.mcp.core.XorDexScanner
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -177,5 +178,87 @@ class DexUnpackTest {
         assertEquals(2, offsets.size)
         assertEquals(37, offsets[0])
         assertEquals(37 + d1.size, offsets[1])
+    }
+    // ───────── 一键脱壳链 ─────────
+
+    private fun tempDir(): java.io.File =
+        java.nio.file.Files.createTempDirectory("chain-test").toFile()
+
+    private fun xor(data: ByteArray, key: Int): ByteArray =
+        ByteArray(data.size) { (data[it].toInt() xor key).toByte() }
+
+    @Test
+    fun chain_recoversPlainAndXorFromDumpDir() {
+        val dir = tempDir()
+        val plain = buildDex(128)
+        val hidden = xor(buildDex(200), 0x5A)
+        java.io.File(dir, "mem_0.bin").writeBytes(ByteArray(40) { 0x7 } + plain)
+        java.io.File(dir, "mem_1.bin").writeBytes(ByteArray(16) { 0x3 } + hidden)
+        java.io.File(dir, "junk.bin").writeBytes(ByteArray(4096) { ((it * 31 + 5) % 256).toByte() })
+
+        val out = java.io.File(dir, "dex-recovered")
+        val r = DexUnpackChain.run(dir, out, DexUnpackChain.Options())
+        assertEquals(2, r.getInt("writtenCount"))
+        assertEquals(2, r.getInt("verifiedCount"))
+        assertEquals(3, r.getInt("scannedFiles"))
+        assertEquals(2, r.getJSONArray("recovered").length())
+        // 产物真的在盘上，且能被解析器接受
+        for (i in 0 until r.getJSONArray("recovered").length()) {
+            val f = java.io.File(r.getJSONArray("recovered").getJSONObject(i).getString("file"))
+            assertTrue("产物应存在: $f", f.isFile)
+            assertTrue(f.length() >= 112)
+        }
+        val stages = r.getJSONArray("stages")
+        val names = (0 until stages.length()).map { stages.getJSONObject(it).getString("name") }
+        assertTrue(names.contains("scan"))
+        assertTrue(names.contains("verify"))
+    }
+
+    @Test
+    fun chain_skipsItsOwnOutputDirOnRerun() {
+        val dir = tempDir()
+        java.io.File(dir, "dump.bin").writeBytes(buildDex(128))
+        val out = java.io.File(dir, "dex-recovered")
+        val first = DexUnpackChain.run(dir, out, DexUnpackChain.Options())
+        assertEquals(1, first.getInt("writtenCount"))
+        // 第二次跑：产物在输入目录里，但必须被跳过（否则每跑一次翻一倍）
+        val second = DexUnpackChain.run(dir, out, DexUnpackChain.Options())
+        assertEquals(0, second.getInt("writtenCount"))
+    }
+
+    @Test
+    fun chain_reportsStageWhereItBroke() {
+        val dir = tempDir()
+        java.io.File(dir, "noise.bin").writeBytes(ByteArray(8192) { ((it * 17 + 3) % 256).toByte() })
+        val r = DexUnpackChain.run(dir, java.io.File(dir, "out"), DexUnpackChain.Options())
+        assertEquals(0, r.getInt("writtenCount"))
+        val stages = r.getJSONArray("stages")
+        var scanStatus = ""
+        for (i in 0 until stages.length()) {
+            if (stages.getJSONObject(i).getString("name") == "scan") scanStatus = stages.getJSONObject(i).getString("status")
+        }
+        assertEquals("failed", scanStatus)
+        assertTrue("应给出下一步建议", r.getString("next").contains("taffy_dex_unpack"))
+    }
+
+    @Test
+    fun chain_repairsTruncatedDexViaFallback() {
+        val dir = tempDir()
+        // file_size 被写成比实际数据大 → XorDexScanner.extract 会返回 null，链要走退化路径 + 修头
+        val dex = buildDex(96)
+        putU32(dex, 32, (dex.size + 4096).toLong())
+        java.io.File(dir, "truncated.bin").writeBytes(dex)
+        val r = DexUnpackChain.run(dir, java.io.File(dir, "out"), DexUnpackChain.Options())
+        assertEquals(1, r.getInt("writtenCount"))
+        val item = r.getJSONArray("recovered").getJSONObject(0)
+        assertTrue("应被修过头", item.getBoolean("fixed"))
+        assertEquals(0, item.getInt("offset"))
+    }
+
+    @Test
+    fun sanitize_keepsSafeName() {
+        assertEquals("mem_0", DexUnpackChain.sanitize("mem_0.bin"))
+        assertEquals("a_b", DexUnpackChain.sanitize("a/b.dex"))
+        assertEquals("dump", DexUnpackChain.sanitize(""))
     }
 }

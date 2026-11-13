@@ -1249,6 +1249,8 @@ object ToolCatalog {
         *GadgetOneShotTool.ALL.toTypedArray(),
         // AES 加密 DEX 的定向解密（AES 表识别 + key 候选 + 穷举试解）
         *DexAesDecryptTool.ALL.toTypedArray(),
+        // 一键脱壳链：dump → 扫描 → 解密 → 修头 → 落盘 → 复核，带分段落点报告
+        *DexUnpackChainTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

@@ -77,9 +77,12 @@ object XorDexScanner {
                     }
                 }
                 if (modes.contains("xorn")) {
-                    // key 长度 2..8：用 magic 前 n 字节反推，验证余下字节（keyBuf 复用，不分配）
-                    val keyBuf = ByteArray(8)
-                    for (n in 2..8) {
+                    // key 长度 2..4：**上限就是 magic 的长度**。反推 key 的第 j 字节靠的是
+                    // magic[j]，n>4 时 MAGIC[j] 直接数组越界（真机上表现为整个扫描抛
+                    // ArrayIndexOutOfBounds，被上层 catch 成「扫描失败」，等于 xorN 完全不可用）。
+                    // 长度 5..8 的 key 无法用 "dex\n" 反推，只能靠 body 结构暴力验证，代价不值得。
+                    val keyBuf = ByteArray(MAGIC.size)
+                    for (n in 2..MAGIC.size) {
                         var ok = true
                         for (j in 0 until n) {
                             keyBuf[j] = (data[i + j].toInt() xor MAGIC[j].toInt()).toByte()

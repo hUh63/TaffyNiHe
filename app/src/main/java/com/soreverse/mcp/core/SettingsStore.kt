@@ -799,6 +799,33 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("aiCustomBodyJson", "{}") ?: "{}"
         set(value) = prefs.edit().putString("aiCustomBodyJson", value.ifBlank { "{}" }).apply()
 
+    /**
+     * 本地 AI 网关端口：0 = 关闭。
+     *
+     * 网关把这里配好的 OpenAI 兼容渠道暴露成 `/v1/chat/completions`，只监听 127.0.0.1，
+     * 所以端口是否对外开放由隧道/端口转发决定，而不是由这里决定。
+     */
+    var aiGatewayPort: Int
+        get() = prefs.getInt("aiGatewayPort", 0)
+        set(value) = prefs.edit().putInt("aiGatewayPort", if (value in 0..65535) value else 0).apply()
+
+    /** 网关访问 token（可空 = 不校验）。与 aiApiKey 一样进 SecretStore，不落明文 prefs。 */
+    var aiGatewayToken: String
+        get() {
+            SecretStore.get(appContext, "aiGatewayToken")?.let { return it }
+            val legacy = prefs.getString("aiGatewayToken", "").orEmpty()
+            if (legacy.isNotBlank()) {
+                SecretStore.put(appContext, "aiGatewayToken", legacy)
+                prefs.edit().remove("aiGatewayToken").apply()
+                return legacy
+            }
+            return ""
+        }
+        set(value) {
+            SecretStore.put(appContext, "aiGatewayToken", value.trim())
+            prefs.edit().remove("aiGatewayToken").apply()
+        }
+
     var aiSystemPrompt: String
         get() = prefs.getString("aiSystemPrompt", DEFAULT_AI_SYSTEM_PROMPT) ?: DEFAULT_AI_SYSTEM_PROMPT
         set(value) = prefs.edit().putString(

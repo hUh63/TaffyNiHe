@@ -80,19 +80,26 @@ object DexUnpackChain {
         val allFiles = ArrayList<File>()
         var tooLarge = 0
         var listed = 0
+        // 枚举上限：dir 有可能被指到 /sdcard 这种几万文件的目录，无上限会让「一键脱壳」
+        // 变成「一键卡死」。上限只决定「看多少」，不影响已找到的文件。
+        val enumCap = (opts.maxFiles * 128).coerceIn(512, 200_000)
+        var capHit = false
         runCatching {
-            inputDir.walkTopDown()
+            for (f in inputDir.walkTopDown()
                 .onEnter { dir ->
                     // 不进入输出目录（它通常就在输入目录里）
                     val cp = runCatching { dir.canonicalPath }.getOrNull()
                     outPath == null || cp != outPath
                 }
-                .filter { it.isFile }
-                .forEach { f ->
-                    listed++
-                    if (f.length() > opts.maxReadBytes) tooLarge++
-                    else allFiles.add(f)
+                .filter { it.isFile }) {
+                if (listed >= enumCap) {
+                    capHit = true
+                    break
                 }
+                listed++
+                if (f.length() > opts.maxReadBytes) tooLarge++
+                else allFiles.add(f)
+            }
         }.onFailure { fail(inputDir.absolutePath, "list", it.message ?: "枚举失败") }
 
         val files = allFiles.take(opts.maxFiles.coerceAtLeast(1))
@@ -101,13 +108,14 @@ object DexUnpackChain {
             "list",
             when {
                 listed == 0 -> "failed"
-                truncated > 0 || tooLarge > 0 -> "partial"
+                truncated > 0 || tooLarge > 0 || capHit -> "partial"
                 else -> "ok"
             },
             buildString {
                 append("$listed 个文件")
                 if (tooLarge > 0) append("，跳过 $tooLarge 个超大文件")
                 if (truncated > 0) append("，超出上限只处理 ${files.size} 个")
+                if (capHit) append("，枚举触到 $enumCap 上限（目录过大，建议直接指向 dump 目录）")
             }.ifBlank { "0 个文件" },
         )
 

@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.DeepAnalysisService
+import com.soreverse.mcp.core.AiGatewayServer
 import com.soreverse.mcp.core.SettingsStore
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -152,6 +153,14 @@ internal fun SettingsAiDeepPage(
     var status by remember { mutableStateOf("") }
     var loadingModels by remember { mutableStateOf(false) }
     var toolSchemaMode by rememberSaveable { mutableStateOf(settings.aiToolSchemaMode) }
+    // 本地 AI 网关
+    var gatewayPort by rememberSaveable {
+        mutableStateOf(if (settings.aiGatewayPort == 0) "8787" else settings.aiGatewayPort.toString())
+    }
+    var gatewayToken by rememberSaveable { mutableStateOf(settings.aiGatewayToken) }
+    var gatewayRunning by remember { mutableStateOf(AiGatewayServer.isRunning()) }
+    var gatewayMessage by remember { mutableStateOf("") }
+    var gatewayStats by remember { mutableStateOf(AiGatewayServer.snapshot()) }
 
     SettingsScaffold(
         title = if (t.zh) "AI 深度分析" else "AI deep analysis",
@@ -401,6 +410,82 @@ internal fun SettingsAiDeepPage(
             }, Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp))
         }
     
+        GlassGroup(
+            title = if (t.zh) "本地 AI 网关" else "Local AI gateway",
+            footer = if (t.zh) "把这里配好的渠道暴露成 OpenAI 兼容的 /v1/chat/completions，电脑上的 ChatBox / Cherry Studio / Cline 直接当 OpenAI 用，key 不用再填一遍。只监听 127.0.0.1——要给电脑用请先 adb forward tcp:端口 tcp:端口，或开隧道。只支持 OpenAI 兼容渠道；anthropic/gemini 会明确拒绝而不是猜着转协议。"
+            else "Exposes this channel as an OpenAI-compatible /v1/chat/completions so desktop clients can use it without a second copy of the key. Binds 127.0.0.1 only - use adb forward or a tunnel. OpenAI-compatible channels only.",
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = gatewayPort,
+                        onValueChange = { v -> gatewayPort = v.filter { c -> c.isDigit() }.take(5) },
+                        label = { Text(if (t.zh) "端口" else "Port") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        if (gatewayRunning) (if (t.zh) "运行中" else "running") else (if (t.zh) "已停止" else "stopped"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (gatewayRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedTextField(
+                    value = gatewayToken,
+                    onValueChange = { gatewayToken = it },
+                    label = { Text(if (t.zh) "访问 token（可空 = 不校验）" else "Access token (blank = none)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                SecondaryActionButton(
+                    if (gatewayRunning) (if (t.zh) "停止网关" else "Stop gateway") else (if (t.zh) "启动网关" else "Start gateway"),
+                    {
+                        if (gatewayRunning) {
+                            AiGatewayServer.stop()
+                            gatewayRunning = false
+                            gatewayMessage = if (t.zh) "网关已停止" else "Gateway stopped"
+                        } else {
+                            settings.aiGatewayPort = gatewayPort.toIntOrNull() ?: 0
+                            settings.aiGatewayToken = gatewayToken
+                            val outcome = AiGatewayServer.start(context)
+                            gatewayRunning = AiGatewayServer.isRunning()
+                            gatewayMessage = if (outcome.first) {
+                                if (t.zh) "已监听 127.0.0.1:${settings.aiGatewayPort}" else "Listening on 127.0.0.1:${settings.aiGatewayPort}"
+                            } else {
+                                outcome.second
+                            }
+                        }
+                        gatewayStats = AiGatewayServer.snapshot()
+                    },
+                    Modifier.fillMaxWidth(),
+                )
+                if (gatewayMessage.isNotBlank()) {
+                    Text(
+                        gatewayMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (gatewayRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (t.zh) "请求 ${gatewayStats.optLong("requests")} · tokens ${gatewayStats.optLong("totalTokens")}（prompt ${gatewayStats.optLong("promptTokens")} / completion ${gatewayStats.optLong("completionTokens")}）"
+                        else "${gatewayStats.optLong("requests")} requests · ${gatewayStats.optLong("totalTokens")} tokens",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { gatewayStats = AiGatewayServer.snapshot() }) {
+                        Text(if (t.zh) "刷新" else "Refresh")
+                    }
+                    TextButton(onClick = {
+                        AiGatewayServer.resetStats()
+                        gatewayStats = AiGatewayServer.snapshot()
+                    }) { Text(if (t.zh) "清零" else "Reset") }
+                }
+            }
+        }
+
+
             }
         }
     }

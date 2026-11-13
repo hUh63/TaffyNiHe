@@ -1,0 +1,105 @@
+package com.soreverse.mcp
+
+import com.soreverse.mcp.core.AiGatewayServer
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.json.JSONObject
+
+/**
+ * 本地 AI 网关的纯逻辑测试（不启服务、不联网）。
+ *
+ * 覆盖的都是「网关悄悄改错客户端行为」的风险点：model 是否被换掉、认证头是否按 provider 正确、
+ * 自定义头是否被解析、token 是否真的生效、以及 usage 能不能从非流式 JSON 和流式 SSE 里都捞到。
+ */
+class AiGatewayTest {
+
+    // ───────── 请求体改写 ─────────
+
+    @Test
+    fun prepareBody_replacesModelAndKeepsEverythingElse() {
+        val raw = """{"model":"gpt-4","messages":[{"role":"user","content":"hi"}],"temperature":0.3,"stream":true}"""
+        val out = JSONObject(AiGatewayServer.prepareBody(raw, "deepseek-v3"))
+        assertEquals("deepseek-v3", out.getString("model"))
+        assertEquals(0.3, out.getDouble("temperature"), 0.0001)
+        assertTrue(out.getBoolean("stream"))
+        assertEquals("hi", out.getJSONArray("messages").getJSONObject(0).getString("content"))
+    }
+
+    @Test
+    fun prepareBody_invalidJsonFallsBackToRaw() {
+        val raw = "not json at all"
+        assertEquals(raw, AiGatewayServer.prepareBody(raw, "m"))
+    }
+
+    // ───────── 认证头 ─────────
+
+    @Test
+    fun authHeaders_followProvider() {
+        assertEquals("Bearer k", AiGatewayServer.authHeaders("openai", "k").first().second)
+        val anthropic = AiGatewayServer.authHeaders("anthropic", "k").toMap()
+        assertEquals("k", anthropic["x-api-key"])
+        assertTrue(anthropic.containsKey("anthropic-version"))
+        assertEquals("k", AiGatewayServer.authHeaders("gemini", "k").toMap()["x-goog-api-key"])
+    }
+
+    @Test
+    fun headerPairs_parsesAndSkipsBlankValues() {
+        val pairs = AiGatewayServer.headerPairs("""{"x-a":"1","x-b":"","x-c":"3"}""").toMap()
+        assertEquals("1", pairs["x-a"])
+        assertEquals("3", pairs["x-c"])
+        assertFalse(pairs.containsKey("x-b"))
+        assertTrue(AiGatewayServer.headerPairs("{}").isEmpty())
+        assertTrue(AiGatewayServer.headerPairs("oops").isEmpty())
+    }
+
+    // ───────── 鉴权 ─────────
+
+    @Test
+    fun authorized_blankTokenMeansOpen() {
+        assertTrue(AiGatewayServer.authorized("", null))
+        assertTrue(AiGatewayServer.authorized("", "Bearer whatever"))
+    }
+
+    @Test
+    fun authorized_matchesBearerCaseInsensitively() {
+        assertTrue(AiGatewayServer.authorized("t0ken", "Bearer t0ken"))
+        assertTrue(AiGatewayServer.authorized("t0ken", "bearer t0ken"))
+        assertTrue(AiGatewayServer.authorized("t0ken", "t0ken"))
+        assertFalse(AiGatewayServer.authorized("t0ken", "Bearer other"))
+        assertFalse(AiGatewayServer.authorized("t0ken", null))
+    }
+
+    // ───────── 用量 ─────────
+
+    @Test
+    fun usageOf_readsNonStreamJson() {
+        val body = """{"id":"x","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"""
+        val u = AiGatewayServer.usageOf(body)
+        assertEquals(11L, u!!.first)
+        assertEquals(7L, u.second)
+        assertEquals(18L, u.third)
+    }
+
+    @Test
+    fun usageOf_readsStreamSseTail() {
+        val sse = buildString {
+            append("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n")
+            append("data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n")
+            append("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4,\"total_tokens\":7}}\n\n")
+            append("data: [DONE]\n\n")
+        }
+        val u = AiGatewayServer.usageOf(sse)
+        assertEquals(3L, u!!.first)
+        assertEquals(4L, u.second)
+    }
+
+    @Test
+    fun usageOf_returnsNullWhenAbsent() {
+        assertNull(AiGatewayServer.usageOf(""))
+        assertNull(AiGatewayServer.usageOf("""{"choices":[{"message":{"content":"hi"}}]}"""))
+        assertNull(AiGatewayServer.usageOf("data: [DONE]"))
+    }
+}

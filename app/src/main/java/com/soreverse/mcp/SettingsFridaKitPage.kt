@@ -485,7 +485,7 @@ internal fun SettingsFridaKitPage(t: UiText) {
                     onClick = {
                         scope.safeLaunch {
                             busy = "oneshot"
-                            val a = JSONObject().put("apk", apkPath.trim()).put("abi", injectAbi)
+                            val a = JSONObject().put("apkPath", apkPath.trim()).put("abi", injectAbi)
                             if (injectScript.isNotBlank()) a.put("script", injectScript.trim())
                             oneShot = callTool("taffy_gadget_one_shot", a)
                             busy = ""

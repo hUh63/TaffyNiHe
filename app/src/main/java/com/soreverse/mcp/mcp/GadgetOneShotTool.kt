@@ -27,7 +27,7 @@ object GadgetOneShotTool {
             "build", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
-                "apk" str "目标 APK 路径（必填，工作区内）"
+                "apkPath" str "目标 APK 路径（必填，工作区内）"
                 "abi" str "目标 ABI（默认 arm64-v8a）"
                 "version" str "gadget 版本（默认用本地库里该 ABI 的最新版本；可填 latest 或具体版本号）"
                 "script" str "hook 脚本 .js 路径（可选）"
@@ -39,8 +39,9 @@ object GadgetOneShotTool {
         }
 
         override fun handle(ctx: ToolContext, args: JSONObject): JSONObject {
-            val apkPath = args.str("apk").ifBlank { args.str("path") }
-            if (apkPath.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 apk", "apk", "")
+            // 声明用 apkPath（WorkspacePolicy.PATH_KEYS 里已登记）；apk / path 作为旧别名兼容
+            val apkPath = args.str("apkPath").ifBlank { args.str("apk") }.ifBlank { args.str("path") }
+            if (apkPath.isBlank()) return err("INVALID_ARGUMENT", "缺少参数 apkPath", "apkPath", "")
             val apk = File(apkPath)
             if (!apk.isFile) return err("FILE_NOT_FOUND", "APK 不存在: $apkPath", "apk", apkPath)
             val abi = args.str("abi", "arm64-v8a").ifBlank { "arm64-v8a" }

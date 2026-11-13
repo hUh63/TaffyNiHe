@@ -221,9 +221,11 @@ class DexUnpackTest {
         val out = java.io.File(dir, "dex-recovered")
         val first = DexUnpackChain.run(dir, out, DexUnpackChain.Options())
         assertEquals(1, first.getInt("writtenCount"))
-        // 第二次跑：产物在输入目录里，但必须被跳过（否则每跑一次翻一倍）
+        // 第二次跑：产物目录在输入目录里，必须被跳过。原文件仍会被重新处理并覆盖同名产物，
+        // 但绝不能「把上一轮产物当输入」导致产物数翻倍。
         val second = DexUnpackChain.run(dir, out, DexUnpackChain.Options())
-        assertEquals(0, second.getInt("writtenCount"))
+        assertEquals(1, second.getInt("writtenCount"))
+        assertEquals("产物数不应翻倍", 1, out.listFiles()?.size ?: 0)
     }
 
     @Test

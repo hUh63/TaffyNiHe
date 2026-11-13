@@ -1,3 +1,64 @@
+## 塔菲逆核 v1.5.65 —— 加密 DEX 扫描 / MCP 客户端 / 一键注入闭环 / 悬浮控制台
+
+延续上一版对 SysKit 的整合，把剩下三块补齐，并把 gadget 注入串成一条链。
+
+### 1. `taffy_dex_xor_scan` —— 加密 DEX 扫描与还原
+
+壳把 dex 藏起来时常见的三种形态一次扫全：
+
+- `plain`：明文嵌在 so / assets / 内存 dump 里；
+- `xor1`：单字节 XOR，256 种 key 全覆盖；
+- `xorN`：2..8 字节重复 key，用 `dex\n035\0` 前 8 字节**反推** key 再验证。
+
+判定不靠"看起来像"：magic → 版本号 → header_size=0x70 → endian_tag=0x12345678 →
+file_size 区间 → 最后 **adler32 校验和 + SHA-1 签名**双校验。
+双校验都过的标 ✓；结构合法但校验不过的单独标 △（脱壳后未修复的典型形态）。
+`action=extract` 会把命中的 dex 落盘（按 file_size 截断、去掉填充）。
+path 也支持 APK/zip，逐条目扫。
+
+和 `taffy_dex_unpack` 的关系：那个负责"从运行中的进程 dump 内存"，
+这个负责"拿到 blob 之后怎么把 dex 从里面认出来并还原"——两步串起来才是完整脱壳链。
+
+### 2. `taffy_mcp_client` —— 塔菲也能当 MCP 客户端
+
+塔菲本来就是 MCP 服务端（`/mcp` + `/sse`），这一版补反方向：
+把 PC / 另一台设备 / 局域网里的 MCP 服务接进来。
+
+- `endpoints` 列已存端点、`save` 保存（含 `K: V` 自定义 header，可放 Bearer token）
+- `test` 测连通与延迟、`tools` 列远端工具（含参数名）、`call` 调远端工具
+- 协议走 MCP 规范：`initialize` 拿 `Mcp-Session-Id` → `notifications/initialized`
+  → `tools/list` / `tools/call`；session 过期自动重连一次
+- 响应兼容纯 JSON 与 SSE（`data:` 多行、分块累积）
+
+### 3. `taffy_gadget_one_shot` —— gadget 一键注入闭环
+
+原来这条链要手动跑 5 步（decode → 放 gadget → 配 config/脚本 → 注入入口 → 回编 → 重签），
+参数记错一步就得重来。现在一条调用跑完，并且**每一步都留痕**：
+失败时返回已完成到哪一步、卡在哪一步、为何失败，可以只补那一步。
+
+复用现成工具（不重复实现）：`taffy_apk_rebuild(decode/build)` +
+`taffy_apk_frida_gadget(place/patch_entry)` + `taffy_apk_sign`；
+gadget 从版本库里挑（按数字段比较版本，`17.10.0` 不会被 `17.9.10` 比下去）。
+
+### 4. 悬浮控制台
+
+在其他应用之上开一个可拖动小窗：实时日志流 + 一行命令（走 root/Shizuku/Dhizuku 通道）。
+调壳、调注入时不用切回塔菲就能看输出——目标应用一被切走状态就变，这个窗口解决的就是这件事。
+
+- `TYPE_APPLICATION_OVERLAY` + `specialUse` 前台服务（`dataSync` 有 24h 内 6h 上限）
+- 折叠 / 关闭 / 标题栏拖动；日志订阅 `AppLog`，保留最近 300 行
+- 刻意用原生 View 而不是 Compose：Service 里挂 ComposeView 要自己搭
+  LifecycleOwner/SavedState 提供者，宿主 lifecycle 一变就容易崩
+
+入口：「设置 → 逆向分析 → Frida」页签，带悬浮窗权限引导。
+
+### 5. 其它
+
+- 「设置 → 逆向分析」页签补到 9 项（Rizin / eDBG / 抓包 / 沙箱 / 工作流 / Blutter / Frida / DEX 扫描 / MCP）
+- 新增两页：加密 DEX 扫描、MCP 客户端
+- 新增 11 条单测（XOR 扫描的明文/单字节/多字节/误报/校验失败/偏移/key 编解码）
+- 修：`SettingsDest` 新增两项后 `settingsIcon` 的 `when` 不再穷尽（编译期即被拦下）
+
 ## 塔菲逆核 v1.5.64 —— 整合 Frida 工具链（gadget 版本库 / 注入点 / 反分析扫描）
 
 ### 1. 三个新工具

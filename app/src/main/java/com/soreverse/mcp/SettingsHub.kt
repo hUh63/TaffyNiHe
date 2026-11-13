@@ -350,6 +350,8 @@ internal fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
     SettingsDest.DevEnv -> Icons.Default.Build
     SettingsDest.Reverse -> Icons.Default.BugReport
     SettingsDest.SelfCheck -> Icons.Default.Security
+    SettingsDest.DexScan -> Icons.Default.Code
+    SettingsDest.McpClient -> Icons.Default.Link
     SettingsDest.ServiceConfig -> Icons.Default.Settings
     SettingsDest.ApkBridge -> Icons.Default.Link
     SettingsDest.Tunnel -> Icons.Default.Cloud

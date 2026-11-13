@@ -90,6 +90,16 @@
         </service>
 
         <service
+            android:name=".service.FloatConsoleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <!-- 悬浮控制台：在其他应用之上显示日志与命令输入，必须用 specialUse（dataSync 有 24h 内 6h 上限） -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating debug console overlay: live log view and shell command input while analyzing another app" />
+        </service>
+
+        <service
             android:name=".blutter.BlutterRunnerService"
             android:exported="false"
             android:isolatedProcess="true"

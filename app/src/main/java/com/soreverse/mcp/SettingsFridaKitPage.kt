@@ -1,8 +1,13 @@
 package com.soreverse.mcp
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
@@ -35,6 +40,7 @@ import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.mcp.ToolCatalog
 import com.soreverse.mcp.mcp.ToolContext
+import com.soreverse.mcp.service.FloatConsoleService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -59,6 +65,10 @@ internal fun SettingsFridaKitPage(t: UiText) {
     var pointResult by remember { mutableStateOf<JSONObject?>(null) }
     var guardResult by remember { mutableStateOf<JSONObject?>(null) }
     var targetPath by rememberSaveable { mutableStateOf("") }
+    var apkPath by rememberSaveable { mutableStateOf("") }
+    var injectAbi by rememberSaveable { mutableStateOf("arm64-v8a") }
+    var injectScript by rememberSaveable { mutableStateOf("") }
+    var oneShot by remember { mutableStateOf<JSONObject?>(null) }
     var importPath by rememberSaveable { mutableStateOf("") }
     var decodeDir by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf("") }
@@ -433,6 +443,139 @@ internal fun SettingsFridaKitPage(t: UiText) {
                         }
                     }
                 }
+            }
+        }
+
+        // ───────── ④ 一键注入（gadget 闭环） ─────────
+        GlassGroup(
+            title = if (zh) "一键注入（gadget 闭环）" else "One-shot injection",
+            footer = if (zh) "一条调用跑完：解包(dex→smali) → 从版本库挑 gadget → 放 gadget/config/脚本 → 改 extractNativeLibs → 入口注入 loadLibrary → 回编 → 重签。失败会指出卡在哪一步。"
+            else "decode → pick gadget → place → patch manifest → patch entry → rebuild → sign. Failures report the exact step.",
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = apkPath,
+                    onValueChange = { apkPath = it },
+                    label = { Text(if (zh) "目标 APK 路径" else "Target APK path") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (a in listOf("arm64-v8a", "armeabi-v7a", "x86_64")) {
+                        ToolChip(
+                            label = a,
+                            selected = injectAbi == a,
+                            enabled = busy.isEmpty(),
+                            onClick = { injectAbi = a },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = injectScript,
+                    onValueChange = { injectScript = it },
+                    label = { Text(if (zh) "hook 脚本 .js 路径（可空=内置演示脚本）" else "hook script path (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ToolChip(
+                    label = if (zh) "开始注入" else "Inject",
+                    icon = Icons.Filled.Build,
+                    accent = true,
+                    enabled = busy.isEmpty() && apkPath.isNotBlank(),
+                    onClick = {
+                        scope.safeLaunch {
+                            busy = "oneshot"
+                            val a = JSONObject().put("apk", apkPath.trim()).put("abi", injectAbi)
+                            if (injectScript.isNotBlank()) a.put("script", injectScript.trim())
+                            oneShot = callTool("taffy_gadget_one_shot", a)
+                            busy = ""
+                        }
+                    },
+                )
+                val os = oneShot
+                if (os != null) {
+                    if (os.optBoolean("ok") != true) {
+                        Text(
+                            os.optJSONObject("error")?.optString("message") ?: (if (zh) "注入失败" else "Injection failed"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        MonoRow(if (zh) "输出 APK" else "Output", os.optString("outApk"))
+                        MonoRow("gadget", os.optString("gadget"))
+                        Text(
+                            if (zh) "步骤" else "Steps",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val steps = os.optJSONArray("steps") ?: JSONArray()
+                    for (i in 0 until steps.length()) {
+                        val st = steps.optJSONObject(i) ?: continue
+                        Text(
+                            (if (st.optBoolean("ok")) "✓ " else "✕ ") + st.optString("step") +
+                                (if (st.optString("note").isNotBlank()) "  · " + st.optString("note") else "") +
+                                (if (st.optString("error").isNotBlank()) "  · " + st.optString("error") else ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (st.optBoolean("ok")) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    val next = os.optString("next")
+                    if (next.isNotBlank()) {
+                        Text("→ $next", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+
+        // ───────── ⑤ 悬浮控制台 ─────────
+        GlassGroup(
+            title = if (zh) "悬浮控制台" else "Floating console",
+            footer = if (zh) "在其他应用之上显示实时日志 + 一行命令（走 root/Shizuku/Dhizuku 通道）。调壳、调注入时不用切回塔菲就能看输出。"
+            else "Live log + command line above other apps (root/Shizuku channel). Keeps you on the target while watching output.",
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val canOverlay = runCatching { Settings.canDrawOverlays(context) }.getOrDefault(false)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolChip(
+                        label = if (FloatConsoleService.running) (if (zh) "关闭悬浮窗" else "Stop overlay")
+                        else (if (zh) "启动悬浮窗" else "Start overlay"),
+                        icon = Icons.Filled.Terminal,
+                        accent = !FloatConsoleService.running,
+                        enabled = canOverlay || FloatConsoleService.running,
+                        onClick = {
+                            if (FloatConsoleService.running) {
+                                FloatConsoleService.stop(context)
+                                message = if (zh) "已请求关闭悬浮窗" else "Overlay stop requested"
+                            } else {
+                                FloatConsoleService.start(context)
+                                message = if (zh) "已启动（若没出现，检查悬浮窗权限）" else "Started (check overlay permission if invisible)"
+                            }
+                        },
+                    )
+                    if (!canOverlay) {
+                        ToolChip(
+                            label = if (zh) "授予悬浮窗权限" else "Grant overlay permission",
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            Uri.parse("package:" + context.packageName),
+                                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+                Text(
+                    if (canOverlay) (if (zh) "权限已就绪。" else "Permission ready.")
+                    else (if (zh) "需要「显示在其他应用上层」权限才能显示。" else "Requires draw-over-other-apps permission."),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

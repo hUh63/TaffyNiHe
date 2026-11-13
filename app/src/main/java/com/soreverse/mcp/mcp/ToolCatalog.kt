@@ -1245,6 +1245,8 @@ object ToolCatalog {
         // 加密 DEX 扫描/还原 + 外部 MCP 客户端（对齐 SysKit 的 TosksRestorer / mcp-client）
         *DexXorScanTool.ALL.toTypedArray(),
         *McpClientTool.ALL.toTypedArray(),
+        // Frida gadget 一键注入闭环（decode → 放 gadget → 注入入口 → 回编 → 重签）
+        *GadgetOneShotTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

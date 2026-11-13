@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.EngineProvider
+import com.soreverse.mcp.core.McpAiBridge
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.mcp.ToolCatalog
@@ -59,6 +60,7 @@ internal fun SettingsMcpClientPage(t: UiText) {
     var target by rememberSaveable { mutableStateOf("") }
     var toolName by rememberSaveable { mutableStateOf("") }
     var toolArgs by rememberSaveable { mutableStateOf("{}") }
+    var aiExpose by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
 
@@ -78,6 +80,7 @@ internal fun SettingsMcpClientPage(t: UiText) {
     }
 
     remember(Unit) {
+        aiExpose = McpAiBridge.isEnabled(context)
         refresh()
         true
     }
@@ -132,6 +135,43 @@ internal fun SettingsMcpClientPage(t: UiText) {
                         )
                     }
                 }
+            }
+        }
+
+        // ───────── 让 AI 直接调用远端工具 ─────────
+        GlassGroup(
+            title = if (zh) "让 AI 直接调用远端工具" else "Expose remote tools to AI",
+            footer = if (zh) "打开后，已启用端点的工具会以 mcp_<端点>_<工具> 的名字出现在 AI 的工具清单里，模型可自己选、按远端 inputSchema 填参数。默认关闭：外部端点由你自己配，混进工具清单会放大模型的行动面。"
+            else "When on, tools from enabled endpoints appear to the model as mcp_<endpoint>_<tool>. Off by default: external endpoints widen the model's action surface.",
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (aiExpose) (if (zh) "已开启" else "Enabled") else (if (zh) "已关闭" else "Disabled"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ToolChip(
+                        label = if (aiExpose) (if (zh) "关闭" else "Turn off") else (if (zh) "开启" else "Turn on"),
+                        accent = !aiExpose,
+                        enabled = busy.isEmpty(),
+                        onClick = {
+                            aiExpose = !aiExpose
+                            McpAiBridge.setEnabled(context, aiExpose)
+                            message = if (aiExpose) {
+                                if (zh) "已开启：下次 AI 会话会带上远端工具（最多 40 个）" else "Enabled: remote tools will appear in the next AI session"
+                            } else {
+                                if (zh) "已关闭" else "Disabled"
+                            }
+                        },
+                    )
+                }
+                Text(
+                    if (zh) "端点增删改后无需手动刷新，工具清单有 60 秒缓存；要立即生效可关掉再打开一次。"
+                    else "Tool list is cached for 60s; toggle off/on to refresh immediately.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

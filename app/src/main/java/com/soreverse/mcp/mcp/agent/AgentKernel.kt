@@ -197,7 +197,9 @@ internal object AgentKernel {
                 }
             }
         }
-        return AgentToolSet(tools, unresolved)
+        // 外部 MCP 工具（「MCP 客户端」页里打开 AI 直连后，远端工具会作为 mcp_<endpoint>_<tool> 出现）
+        val external = com.soreverse.mcp.core.McpAiBridge.buildToolsBlocking(ctx.context)
+        return AgentToolSet(tools + external, unresolved)
     }
 
     /** 子代理不必重复打开目标：缺 workspaceId 时自动补上编排器的工作区。 */

@@ -54,6 +54,9 @@ internal fun SettingsDexScanPage(t: UiText) {
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
+    var aesKey by rememberSaveable { mutableStateOf("") }
+    var aesIv by rememberSaveable { mutableStateOf("") }
+    var aesResult by remember { mutableStateOf<JSONObject?>(null) }
 
     suspend fun callTool(args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         runCatching {
@@ -192,6 +195,156 @@ internal fun SettingsDexScanPage(t: UiText) {
                         val next = r.optString("next")
                         if (next.isNotBlank()) {
                             Text("→ $next", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ───────── AES 加密 dex 的定向解密 ─────────
+        GlassGroup(
+            title = if (zh) "AES 加密解密" else "AES decrypt",
+            footer = if (zh) "对付用 AES 加密 dex 的壳：先 sbox 看数据里有没有 AES 表（判断标准/自定义表），再 keys 挑候选 key，或直接 auto 穷举。解出的 dex 会自动重算头部校验和与签名。"
+            else "For AES-encrypted dex: sbox detects AES tables, keys lists candidates, auto brute-forces key×IV×mode. Extracted dex gets header checksums recomputed.",
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolChip(
+                        label = "SBOX",
+                        enabled = !busy && path.isNotBlank(),
+                        onClick = {
+                            scope.safeLaunch {
+                                busy = true
+                                aesResult = callTool("taffy_dex_aes", JSONObject().put("action", "sbox").put("path", path.trim()))
+                                busy = false
+                            }
+                        },
+                    )
+                    ToolChip(
+                        label = if (zh) "候选 key" else "Keys",
+                        enabled = !busy && path.isNotBlank(),
+                        onClick = {
+                            scope.safeLaunch {
+                                busy = true
+                                aesResult = callTool("taffy_dex_aes", JSONObject().put("action", "keys").put("path", path.trim()))
+                                busy = false
+                            }
+                        },
+                    )
+                    ToolChip(
+                        label = if (zh) "自动穷举" else "Auto",
+                        accent = true,
+                        enabled = !busy && path.isNotBlank(),
+                        onClick = {
+                            scope.safeLaunch {
+                                busy = true
+                                aesResult = callTool("taffy_dex_aes", JSONObject().put("action", "auto").put("path", path.trim()))
+                                busy = false
+                            }
+                        },
+                    )
+                    ToolChip(
+                        label = if (zh) "修头" else "Fix header",
+                        enabled = !busy && path.isNotBlank(),
+                        onClick = {
+                            scope.safeLaunch {
+                                busy = true
+                                aesResult = callTool("taffy_dex_xor_scan", JSONObject().put("action", "fix").put("path", path.trim()))
+                                busy = false
+                            }
+                        },
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = aesKey,
+                        onValueChange = { aesKey = it },
+                        label = { Text(if (zh) "key（hex 16/24/32 字节）" else "key (hex)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = aesIv,
+                        onValueChange = { aesIv = it },
+                        label = { Text("IV") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                ToolChip(
+                    label = if (zh) "用这对 key/iv 解密" else "Decrypt with key/iv",
+                    accent = true,
+                    enabled = !busy && path.isNotBlank() && aesKey.isNotBlank(),
+                    onClick = {
+                        scope.safeLaunch {
+                            busy = true
+                            aesResult = callTool("taffy_dex_aes", JSONObject().put("action", "decrypt")
+                                .put("path", path.trim()).put("key", aesKey.trim()).put("iv", aesIv.trim()))
+                            busy = false
+                        }
+                    },
+                )
+                val ar = aesResult
+                if (ar != null) {
+                    if (ar.optBoolean("ok") != true) {
+                        Text(
+                            ar.optJSONObject("error")?.optString("message") ?: (if (zh) "操作失败" else "Failed"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        val note = ar.optString("note")
+                        if (note.isNotBlank()) {
+                            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        val table = ar.optJSONObject("aesTable")
+                        if (table != null) {
+                            Text(
+                                "S-box=${table.optBoolean("hasSbox")}  Inv=${table.optBoolean("hasInvSbox")}  Rcon=${table.optBoolean("hasRcon")}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        val cands = ar.optJSONArray("candidates")
+                        if (cands != null) {
+                            for (i in 0 until minOf(cands.length(), 10)) {
+                                val c = cands.optJSONObject(i) ?: continue
+                                Text(
+                                    "${c.optString("key")}  (${c.optInt("length")}B @${c.optString("offsetHex")})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
+                        val hits = ar.optJSONArray("hits") ?: ar.optJSONArray("written")
+                        if (hits != null && hits.length() > 0) {
+                            Text(
+                                if (zh) "命中 ${hits.length()} 个" else "${hits.length()} hit(s)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            for (i in 0 until minOf(hits.length(), 8)) {
+                                val h = hits.optJSONObject(i) ?: continue
+                                Text(
+                                    (h.optString("mode") + "  key=" + h.optString("key").take(16) + "  " +
+                                        h.optString("iv").take(12) + "  " + h.optString("outPath")).trim(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
+                        val changes = ar.optJSONArray("changes")
+                        if (changes != null && changes.length() > 0) {
+                            val sb = StringBuilder()
+                            for (i in 0 until changes.length()) {
+                                if (sb.isNotEmpty()) sb.append("；")
+                                sb.append(changes.optString(i))
+                            }
+                            Text((if (zh) "修头：" else "Header fix: ") + sb, style = MaterialTheme.typography.labelMedium)
+                        }
+                        val outPath = ar.optString("outPath")
+                        if (outPath.isNotBlank()) {
+                            MonoRow(if (zh) "输出" else "Output", outPath)
                         }
                     }
                 }

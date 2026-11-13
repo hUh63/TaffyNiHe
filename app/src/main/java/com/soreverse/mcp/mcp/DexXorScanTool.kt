@@ -1,5 +1,6 @@
 package com.soreverse.mcp.mcp
 
+import com.soreverse.mcp.core.DexFixer
 import com.soreverse.mcp.core.XorDexScanner
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
@@ -30,14 +31,15 @@ object DexXorScanTool {
     val dexXorScan: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "taffy_dex_xor_scan",
-            "【加密 DEX 扫描/还原】从 so / assets / 内存 dump / 任意二进制里扫出被 XOR 或直接嵌入的 dex：action=scan 只报告候选（offset/模式/key/版本/大小/双校验结果）；action=extract 顺带把命中的 dex 落盘。modes 支持 plain / xor1（单字节 256 种）/ xorN（2..8 字节重复 key，用 dex 魔数反推）。path 也支持 APK/zip（逐个条目扫）。",
+            "【加密 DEX 扫描/还原】从 so / assets / 内存 dump / 任意二进制里扫出被 XOR 或直接嵌入的 dex：action=scan 只报告候选（offset/模式/key/版本/大小/双校验结果）；extract 顺带把 dex 落盘并自动修头；find 列出数据里所有 dex 头偏移；fix 对指定 dex 单独修头（重算 adler32+SHA-1）。modes 支持 plain / xor1（单字节 256 种）/ xorN（2..8 字节重复 key，用 dex 魔数反推）。path 也支持 APK/zip（逐个条目扫）。",
             "Scan/extract XOR-encrypted or embedded DEX from any binary (so/assets/memory dump/apk): action=scan|extract, modes=plain,xor1,xorN. Validated by dex structure + adler32 checksum + SHA-1 signature.",
             "analyze", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
-                "action".oneOf("scan (default) | extract", "scan", "extract")
+                "action".oneOf("scan (default) | extract | find | fix", "scan", "extract", "find", "fix")
                 "path" str "输入文件：so / bin / dex / 内存 dump / apk（必填）"
                 "modes" str "扫描模式，逗号分隔：plain,xor1,xorn（默认全开）"
+                "outPath" str "action=fix 用：修好的 dex 输出路径（默认 原名.fixed.dex）"
                 "maxHits" int "最多返回多少个候选（默认 32）"
                 "outDir" str "action=extract 的输出目录（默认与输入同级的 dex-recovered/）"
             })
@@ -49,6 +51,46 @@ object DexXorScanTool {
             val file = File(path)
             if (!file.isFile) return err("FILE_NOT_FOUND", "文件不存在: $path", "path", path)
             val action = args.str("action", "scan").ifBlank { "scan" }
+            if (action == "find") {
+                val bytes = runCatching { file.inputStream().use { readUpTo(it, MAX_READ) } }.getOrNull()
+                    ?: return err("READ_FAILED", "读取失败: $path", "path", path)
+                val offsets = DexFixer.findDexHeaders(bytes)
+                return ok(JSONObject()
+                    .put("action", "find")
+                    .put("path", file.absolutePath)
+                    .put("count", offsets.size)
+                    .put("offsets", JSONArray().apply {
+                        for (o in offsets) put(JSONObject()
+                            .put("offset", o)
+                            .put("offsetHex", "0x" + Integer.toHexString(o)))
+                    })
+                    .put("next", "带前缀/多 dex 拼接的 dump：用 taffy_dex_xor_scan(action=fix) 逐个修头，或直接从偏移处截取"))
+            }
+            if (action == "fix") {
+                val bytes = runCatching { file.inputStream().use { readUpTo(it, MAX_READ) } }.getOrNull()
+                    ?: return err("READ_FAILED", "读取失败: $path", "path", path)
+                val (fixedBytes, report) = DexFixer.fix(bytes)
+                if (!report.fixed) {
+                    return err("NOT_DEX", report.note, "path", path,
+                        "changes" to JSONArray().apply { for (c in report.changes) put(c) })
+                }
+                val outPath = args.str("outPath").ifBlank {
+                    File(file.absoluteFile.parentFile, file.nameWithoutExtension + ".fixed.dex").absolutePath
+                }
+                val out = File(outPath)
+                out.parentFile?.mkdirs()
+                FileOutputStream(out).use { it.write(fixedBytes) }
+                return ok(JSONObject()
+                    .put("action", "fix")
+                    .put("path", file.absolutePath)
+                    .put("outPath", out.absolutePath)
+                    .put("sizeBefore", report.sizeBefore)
+                    .put("sizeAfter", report.sizeAfter)
+                    .put("checksumOkBefore", report.checksumOkBefore)
+                    .put("signatureOkBefore", report.signatureOkBefore)
+                    .put("changes", JSONArray().apply { for (c in report.changes) put(c) })
+                    .put("note", report.note))
+            }
             val modes = parseModes(args.str("modes", "plain,xor1,xorn"))
             if (modes.isEmpty()) return err("INVALID_ARGUMENT", "modes 至少要有一个：plain / xor1 / xorn", "modes", args.str("modes"))
             val maxHits = args.intValue("maxHits", 32).coerceIn(1, 500)
@@ -102,8 +144,14 @@ object DexXorScanTool {
                             outDir.mkdirs()
                             val safe = where.replace(Regex("[^A-Za-z0-9._-]"), "_")
                             val out = File(outDir, "$safe.off${Integer.toHexString(f.offset)}.dex")
-                            FileOutputStream(out).use { it.write(bytes) }
-                            written.put(out.absolutePath)
+                            // 脱壳出来的 dex 常见"内容对、头不对"，落盘前统一修一遍
+                            val (fixedBytes, report) = DexFixer.fix(bytes)
+                            FileOutputStream(out).use { it.write(fixedBytes) }
+                            written.put(JSONObject()
+                                .put("path", out.absolutePath)
+                                .put("size", fixedBytes.size)
+                                .put("headerFixed", report.fixed)
+                                .put("changes", JSONArray().apply { for (c in report.changes) put(c) }))
                         }
                     }
                 }

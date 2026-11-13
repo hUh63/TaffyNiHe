@@ -1247,6 +1247,8 @@ object ToolCatalog {
         *McpClientTool.ALL.toTypedArray(),
         // Frida gadget 一键注入闭环（decode → 放 gadget → 注入入口 → 回编 → 重签）
         *GadgetOneShotTool.ALL.toTypedArray(),
+        // AES 加密 DEX 的定向解密（AES 表识别 + key 候选 + 穷举试解）
+        *DexAesDecryptTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

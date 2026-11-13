@@ -329,7 +329,7 @@ Only after gathering the necessary evidence, return the final Markdown report. D
         val engine = EngineProvider.get(appContext)
         val binaryEngine = runCatching { EngineProvider.getBinaryEngine(appContext) }.getOrNull()
         val ctx = ToolContext(appContext, settings, engine, binaryEngine)
-        return DEEP_TOOL_NAMES.mapNotNull { name ->
+        val baseTools = DEEP_TOOL_NAMES.mapNotNull { name ->
             val handler = ToolCatalog.byName[name] ?: return@mapNotNull null
             val schema = handler.meta.schemaBuilder.invoke(SchemaBuilder)
             RikkaTool(
@@ -372,6 +372,10 @@ Only after gathering the necessary evidence, return the final Markdown report. D
                     }
             }
         }
+
+        // 外部 MCP 工具（用户打开 AI 直连后生效；失败静默降级，不影响本地工具）
+        val external = McpAiBridge.buildToolsBlocking(appContext)
+        return baseTools + external
     }
 
     private fun parseStringMap(raw: String): Map<String, String> {

@@ -24,7 +24,7 @@ object VipEntryTool {
     val vipEntry: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
             "taffy_vip_entry_scan",
-            "【VIP/会员入口分析】带着明确问题扫 dex：会员标记 / 购买支付 / 期限试用 / 凭证 / 权限判断 / 免费限制 六组关键词，token 化匹配（payload 不会误命中 pay，isVip 会命中 vip），按可信度打分排序。action=scan 返回候选（类型/所在类/签名/命中词/分数）；hook 生成 Frida hook 脚本并落盘（自带重载解析，直接 frida -U -f <pkg> -l 脚本）；report 导出 markdown 报告。适合"不知道从哪下手"的会员功能逆向。",
+            "【VIP/会员入口分析】带着明确问题扫 dex：会员标记 / 购买支付 / 期限试用 / 凭证 / 权限判断 / 免费限制 六组关键词，token 化匹配（payload 不会误命中 pay，isVip 会命中 vip），按可信度打分排序。action=scan 返回候选（类型/所在类/签名/命中词/分数）；hook 生成 Frida hook 脚本并落盘（自带重载解析，直接 frida -U -f <pkg> -l 脚本）；report 导出 markdown 报告。适合「不知道从哪下手」的会员功能逆向。",
             "VIP/membership entry analysis: scans dex for six weighted keyword groups (membership flags, purchase, expiry/trial, receipts, privilege checks, free-tier limits) with token-aware matching and scoring. action=scan returns ranked candidates; hook writes a Frida hook script (with overload resolution); report writes a markdown report.",
             "analyze", ToolClass.EXTRA, heavy = true,
         ) {

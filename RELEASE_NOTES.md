@@ -1,3 +1,55 @@
+## 塔菲逆核 v1.5.71 —— 会员/VIP 入口分析 / 网关分通道记账 / 通道连通性测试
+
+### 1. 会员 / VIP 入口分析（新工具 `taffy_vip_entry_scan`）
+
+解决的是"知道该看会员判断，但不知道从哪下手"：不用自己想关键词，按六组会员业务词扫 dex。
+
+| 组 | 例子 | 权重 |
+|---|---|---|
+| 会员标记 | vip / isVip / premium / membership / entitlement | 3 |
+| 购买支付 | purchase / billing / paywall / inapp / sku | 3 |
+| 期限试用 | expire / deadline / validUntil / daysLeft / trial | 2 |
+| 凭证 | receipt / license / serial / redeem / coupon | 3 |
+| 权限判断 | privilege / checkVip / canUse / quota / upgrade | 2 |
+| 免费限制 | adfree / noAds / limit / free / guest | 1 |
+
+三条实现要点：
+
+- **token 化而不是裸 contains**：`payload` 不会命中 `pay`，`displayMode` 不会命中任何词，
+  而 `isVipExpired` 会同时命中 `vip` 与 `expired`（camelCase / 下划线 / 美元符都拆）。
+- **跨组命中加权**：一条名字同时蹭到"会员标记"和"期限"，通常就是真实入口，分数比单组高。
+  `is/has/can/check/get` 前缀再加 2（判断入口的典型命名），`native` 加 1。
+- **系统/库包跳过**：`android/**`、`java/**`、`kotlin/**`、`com/google/**` 里的 `isFree`/`limit`
+  与业务无关，不跳会淹没真命中。
+
+三种输出：
+
+- `scan`：候选列表（类型 / 所在类 / smali 签名 / Java 签名 / 命中词 / 分数）；
+- `hook`：把方法类命中生成 Frida 脚本并落盘，自带重载解析（`C[name].overload(...)`），
+  直接 `frida -U -f <pkg> -l <脚本> --no-pause`；
+- `report`：markdown 报告，按类别分组带分数，末尾固定写明"分数只是候选排序"。
+
+UI 在「设置 → 逆向分析 → 会员入口」页签：路径 + 包名 + 扫描/生成 hook/导出报告，结果按分数排序展示。
+
+**分数不是结论**：真伪要靠交叉引用与运行时 hook 验证，页面和报告里都写死了这句。
+
+### 2. 网关按通道分桶记账
+
+分流之后只有一个总量说明不了什么。现在 `stats` 增加 `channels`：每条通道的请求数、prompt/completion/total tokens，
+`/health` 能直接看出"中转站 A 用了多少"。清零同时清空分桶。
+
+### 3. 通道连通性测试
+
+AI 设置页通道卡片新增「测试当前通道」：发一条 `max_tokens = 1` 的真实对话请求，回报延迟与错误。
+
+为什么不用 `/models` 测：很多中转站的模型列表接口免鉴权或有缓存，测出来"通"，但实际对话仍会
+401（key 错）/ 404（模型名错）/ 429（欠费限流）。错误信息会带上 HTTP 码与上游 message，并按码给一句人话提示。
+
+### 4. 验证
+
+新增 11 条单测：token 拆分、`payload` 不误命中 `pay`、跨组命中、smali 类型转换（对象/原始类型/数组/多维）、
+hook 脚本（含目标、无模板残留、只取方法、遵守上限）、报告（分组、免责声明）。测试总数 536。
+
 ## 塔菲逆核 v1.5.70 —— 网关按通道分流 / 通道级模型探测 / 闸门状态可见
 
 ### 1. 网关按通道分流

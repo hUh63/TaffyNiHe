@@ -1251,6 +1251,8 @@ object ToolCatalog {
         *DexAesDecryptTool.ALL.toTypedArray(),
         // 一键脱壳链：dump → 扫描 → 解密 → 修头 → 落盘 → 复核，带分段落点报告
         *DexUnpackChainTool.ALL.toTypedArray(),
+        // 会员/VIP 入口主题扫描：六组关键词打分 + 生成 Frida hook 脚本 + markdown 报告
+        *VipEntryTool.ALL.toTypedArray(),
     )
 
     internal val registry = ToolCatalogRegistry(ALL)

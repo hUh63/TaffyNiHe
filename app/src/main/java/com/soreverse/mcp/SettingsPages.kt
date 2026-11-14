@@ -415,6 +415,7 @@ internal fun SettingsReversePage(
         "Frida",
         if (zh) "DEX 扫描" else "DEX scan",
         "MCP",
+        if (zh) "会员入口" else "VIP entry",
     )
     ToolPageScaffold(
         title = if (zh) "逆向分析" else "Reverse engineering",
@@ -449,7 +450,8 @@ internal fun SettingsReversePage(
                         5 -> SettingsBlutterPage(t, onBack = {}, embedded = true)
                         6 -> SettingsFridaKitPage(t)
                         7 -> SettingsDexScanPage(t)
-                        else -> SettingsMcpClientPage(t)
+                        8 -> SettingsMcpClientPage(t)
+                        else -> SettingsVipScanPage(t)
                     }
                 }
             }

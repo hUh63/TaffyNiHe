@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.DeepAnalysisService
 import com.soreverse.mcp.core.AiGatewayServer
+import com.soreverse.mcp.core.AiProbe
 import com.soreverse.mcp.core.SettingsStore
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -167,6 +168,8 @@ internal fun SettingsAiDeepPage(
     var channelName by rememberSaveable { mutableStateOf("") }
     // 每条通道各自的模型列表（探测一次后缓存，切通道立即可以用，不用再等一轮网络）
     var channelModels by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    var probing by remember { mutableStateOf(false) }
+    var probeStatus by remember { mutableStateOf("") }
 
     fun reloadChannelState() {
         provider = settings.aiProvider
@@ -254,6 +257,44 @@ internal fun SettingsAiDeepPage(
                         },
                         Modifier.weight(1f),
                     )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                ) {
+                    SecondaryActionButton(
+                        if (probing) (if (t.zh) "测试中…" else "Testing…") else (if (t.zh) "测试当前通道" else "Test channel"),
+                        {
+                            if (!probing) {
+                                probing = true
+                                probeStatus = if (t.zh) "正在发一条 1 token 的测试请求…" else "Sending a 1-token test request…"
+                                scope.safeLaunch {
+                                    val ch = settings.aiChannels().firstOrNull { it.id == activeChannel }
+                                    if (ch == null) {
+                                        probeStatus = if (t.zh) "找不到当前通道" else "Channel not found"
+                                    } else {
+                                        val r = AiProbe.probe(ch, settings.aiApiKey)
+                                        probeStatus = if (r.ok) {
+                                            "OK · ${r.latencyMs} ms · ${ch.provider}/${ch.model}"
+                                        } else {
+                                            "${r.message} · ${r.latencyMs} ms"
+                                        }
+                                    }
+                                    probing = false
+                                }
+                            }
+                        },
+                        Modifier.weight(1f),
+                    )
+                    if (probeStatus.isNotBlank()) {
+                        Text(
+                            probeStatus,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (probeStatus.startsWith("OK")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(2f),
+                        )
+                    }
                 }
                 Text(
                     if (t.zh) "当前：${channels.firstOrNull { it.id == activeChannel }?.name ?: "-"} · 共 ${channels.size} 条（至少保留一条）"

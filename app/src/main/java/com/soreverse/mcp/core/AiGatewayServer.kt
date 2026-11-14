@@ -68,6 +68,8 @@ internal object AiGatewayServer {
     private var requests = 0L
     private var promptTokens = 0L
     private var completionTokens = 0L
+    /** 按通道分桶：[0]=请求数 [1]=prompt tokens [2]=completion tokens。key 用通道名（展示友好）。 */
+    private val perChannel = java.util.concurrent.ConcurrentHashMap<String, LongArray>()
 
     fun isRunning(): Boolean = running
 
@@ -141,6 +143,18 @@ internal object AiGatewayServer {
         stats.put("promptTokens", promptTokens)
         stats.put("completionTokens", completionTokens)
         stats.put("totalTokens", promptTokens + completionTokens)
+        val byChannel = JSONObject()
+        perChannel.forEach { (name, v) ->
+            byChannel.put(
+                name,
+                JSONObject()
+                    .put("requests", v[0])
+                    .put("promptTokens", v[1])
+                    .put("completionTokens", v[2])
+                    .put("totalTokens", v[1] + v[2]),
+            )
+        }
+        stats.put("channels", byChannel)
         JSONObject(stats.toString())
     }
 
@@ -149,6 +163,7 @@ internal object AiGatewayServer {
             requests = 0
             promptTokens = 0
             completionTokens = 0
+            perChannel.clear()
         }
     }
 
@@ -226,7 +241,10 @@ internal object AiGatewayServer {
             call.respondText(errorJson("上游无响应").toString(), ContentType.Application.Json, status = HttpStatusCode.BadGateway)
             return
         }
-        synchronized(stats) { requests++ }
+        synchronized(stats) {
+            requests++
+            perChannel.getOrPut(channel.name) { LongArray(3) }[0]++
+        }
         val contentType = runCatching { conn.contentType }.getOrNull()
 
         if (!wantsStream) {
@@ -239,7 +257,7 @@ internal object AiGatewayServer {
                 call.respondText(errorJson("读取上游响应失败").toString(), ContentType.Application.Json, status = HttpStatusCode.BadGateway)
                 return
             }
-            recordUsage(String(bytes, Charsets.UTF_8))
+            recordUsage(channel.name, String(bytes, Charsets.UTF_8))
             call.respondBytes(bytes, contentType = parseContentType(contentType), status = HttpStatusCode.fromValue(code.coerceIn(100, 599)))
             return
         }
@@ -264,7 +282,7 @@ internal object AiGatewayServer {
             } finally {
                 runCatching { input.close() }
                 runCatching { conn.disconnect() }
-                recordUsage(tail.toString())
+                recordUsage(channel.name, tail.toString())
             }
         }
     }
@@ -386,11 +404,14 @@ internal object AiGatewayServer {
 
     // ───────────────────────── 内部 ─────────────────────────
 
-    private fun recordUsage(text: String) {
+    private fun recordUsage(channelName: String, text: String) {
         val u = usageOf(text) ?: return
         synchronized(stats) {
             promptTokens += u.first
             completionTokens += u.second
+            val slot = perChannel.getOrPut(channelName) { LongArray(3) }
+            slot[1] += u.first
+            slot[2] += u.second
         }
     }
 

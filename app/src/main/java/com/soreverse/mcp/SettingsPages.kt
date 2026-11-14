@@ -109,6 +109,7 @@ internal fun settingsIndex(zh: Boolean): List<SettingsEntry> {
         e(SettingsDest.BackupRestore, if (zh) "备份与恢复" else "Backup & restore", if (zh) "设置快照导入导出（密钥脱敏）" else "Settings snapshot import/export", "backup restore 备份 恢复 导入 导出", if (zh) "权限与应用" else "App"),
         // 诊断与关于
         e(SettingsDest.SelfCheck, if (zh) "自检" else "Self check", if (zh) "签名完整性结论与运行环境探针（只报告）" else "Integrity verdict and runtime probes", "selfcheck 自检 完整性 签名 威胁 调试器 hook", if (zh) "诊断与关于" else "Diagnostics"),
+        e(SettingsDest.Surface, if (zh) "暴露面" else "Exposure", if (zh) "谁连得上、需要什么条件（只读汇总）" else "Who can reach this device and what it takes", "surface exposure 暴露面 端口 绑定 鉴权 隧道 公网", if (zh) "诊断与关于" else "Diagnostics"),
         e(SettingsDest.ToolStats, if (zh) "运行统计" else "Runtime stats", if (zh) "工具调用次数、耗时与失败率" else "Tool calls, latency, failures", "stats 统计 调用 耗时 失败", if (zh) "诊断与关于" else "Diagnostics"),
         e(SettingsDest.LogcatViewer, "Logcat", if (zh) "日志抓取与过滤" else "Log capture and filter", "logcat 日志 log 过滤 抓取", if (zh) "诊断与关于" else "Diagnostics"),
         e(SettingsDest.Updates, if (zh) "版本更新" else "Update", if (zh) "检查更新、通道与校验和" else "Update check, channel, checksum", "update 更新 版本 通道 校验", if (zh) "诊断与关于" else "Diagnostics"),
@@ -346,6 +347,9 @@ internal fun SettingsRootPage(
         item("diagnostics") {
             SettingsSection(if (t.zh) "诊断" else "Diagnostics") {
                 PreferenceSurface(first = true, last = false) {
+                    CategoryEntry(t, SettingsDest.Surface, if (t.zh) "端口/绑定/鉴权/隧道的只读汇总" else "Read-only view of ports, bind, auth, tunnel", null, onDest)
+                }
+                PreferenceSurface(first = false, last = false) {
                     CategoryEntry(t, SettingsDest.SelfCheck, if (t.zh) "完整性结论与运行环境探针" else "Integrity verdict and runtime probes", null, onDest)
                 }
                 PreferenceSurface(first = false, last = false) {

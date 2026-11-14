@@ -5,6 +5,8 @@ import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile
 import com.android.tools.smali.dexlib2.iface.ClassDef
+import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import java.io.File
 
 /**
@@ -41,6 +43,13 @@ internal object VipEntryScanner {
         /** 命中的词 */
         val hits: List<String>,
         val score: Int,
+        /**
+         * 谁调用了它（smali 签名，最多 [MAX_CALLERS] 个）。
+         *
+         * 静态命名只能说明「这个名字像会员判断」，调用者才能说明「谁在用这个判断决定 UI」——
+         * `MainActivity.onCreate` 里调的 `isVip()` 基本就是真入口，而只在单元测试里出现的不是。
+         */
+        val callers: List<String> = emptyList(),
     )
 
     data class ScanResult(
@@ -103,7 +112,10 @@ internal object VipEntryScanner {
     /** 字符串池里只在"短串"上匹配：长段落里的 vip 大概率是文案而不是标记。 */
     private const val MAX_STRING_EVIDENCE_LEN = 80
 
-    fun scan(file: File, maxFindings: Int = 300): ScanResult {
+    /** 每个命中最多记多少个调用者。 */
+    internal const val MAX_CALLERS = 4
+
+    fun scan(file: File, maxFindings: Int = 300, withCallers: Boolean = true): ScanResult {
         val started = System.currentTimeMillis()
         val opcodes = Opcodes.getDefault()
         val dexFiles = loadDexFiles(file, opcodes)
@@ -114,6 +126,8 @@ internal object VipEntryScanner {
         var truncated = false
 
         for ((_, dex) in dexFiles) {
+            // 已达上限就整体收工：只 break 内层会让后面的 dex 白跑一遍（大 APK 多 dex 时几百毫秒）
+            if (findings.size >= maxFindings) { truncated = true; break }
             runCatching {
                 for (cls in dex.classes) {
                     if (findings.size >= maxFindings) { truncated = true; break }
@@ -150,6 +164,7 @@ internal object VipEntryScanner {
             }
         }
 
+        if (withCallers) runCatching { attachCallers(dexFiles, findings) }
         val sorted = findings.sortedWith(compareByDescending<Finding> { it.score }.thenBy { it.category })
         return ScanResult(
             findings = sorted,
@@ -178,6 +193,11 @@ internal object VipEntryScanner {
             appendLine("// 塔菲逆核 · VIP 入口 hook（由静态命中生成）")
             appendLine("// 目标: " + pkg.ifBlank { "<unknown>" })
             appendLine("// 命中: " + targets.size + " 个方法")
+            targets.take(8).forEach { f ->
+                if (f.callers.isNotEmpty()) {
+                    appendLine("//   " + f.javaSig + "  ←  " + f.callers.first())
+                }
+            }
             appendLine("// 用法: frida -U -f " + pkg.ifBlank { "<pkg>" } + " -l vip_hook.js --no-pause")
             appendLine(JS_TEMPLATE_PREFIX)
             if (targets.isEmpty()) {
@@ -207,13 +227,14 @@ internal object VipEntryScanner {
         for ((cat, list) in byCat) {
             appendLine("## " + cat + "（" + list.size + "）")
             appendLine()
-            appendLine("| 分数 | 类型 | 所在类/内容 | 名称 | 签名 | 命中词 |")
-            appendLine("|---|---|---|---|---|---|")
+            appendLine("| 分数 | 类型 | 所在类/内容 | 名称 | 签名 | 命中词 | 被谁调用 |")
+            appendLine("|---|---|---|---|---|---|---|")
             for (f in list.take(80)) {
                 appendLine(
                     "| " + f.score + " | " + f.kind + " | `" + f.owner.ifBlank { "-" } + "` | `" +
                         escapeCell(f.name) + "` | `" + escapeCell(f.javaSig.ifBlank { "-" }) + "` | " +
-                        f.hits.joinToString(" ") + " |"
+                        f.hits.joinToString(" ") + " | " +
+                        (if (f.callers.isEmpty()) "-" else f.callers.joinToString("<br>") { "`" + escapeCell(it) + "`" }) + " |"
                 )
             }
             appendLine()
@@ -234,6 +255,56 @@ internal object VipEntryScanner {
         } else {
             listOf(file.name to DexFileFactory.loadDexFile(file, opcodes))
         }
+    }
+
+    /**
+     * 给方法类命中补「调用者」。
+     *
+     * 需要再遍历一遍全量指令：dexlib2 没有反向索引，只能把所有方法体过一遍、看哪些指令引用了目标签名。
+     * 因此这一步是可选的（`withCallers`），且在结果里明确只保留前几个调用者——目的是给出
+     * 「谁在用它」的方向感，不是做完整调用图（那该用 [com.soreverse.mcp.core.VipEntryScanner] 之外的引擎）。
+     */
+    private fun attachCallers(
+        dexFiles: List<Pair<String, DexBackedDexFile>>,
+        findings: MutableList<Finding>,
+    ) {
+        val index = HashMap<String, Int>()
+        findings.forEachIndexed { i, f ->
+            if (f.kind == "METHOD" && f.smaliSig.isNotBlank()) index[f.smaliSig] = i
+        }
+        if (index.isEmpty()) return
+        val callers = HashMap<Int, LinkedHashSet<String>>()
+        for ((_, dex) in dexFiles) {
+            runCatching {
+                for (cls in dex.classes) {
+                    if (isSkipped(cls.type)) continue
+                    for (m in cls.methods) {
+                        val impl = runCatching { m.implementation }.getOrNull() ?: continue
+                        val callerSig = runCatching {
+                            methodSmaliSig(
+                                m.definingClass, m.name,
+                                m.parameterTypes.map { it.toString() }, m.returnType.toString(),
+                            )
+                        }.getOrNull() ?: continue
+                        for (ins in impl.instructions) {
+                            if (ins !is ReferenceInstruction) continue
+                            val ref = runCatching { ins.reference }.getOrNull() as? MethodReference ?: continue
+                            val sig = runCatching {
+                                methodSmaliSig(
+                                    ref.definingClass, ref.name,
+                                    ref.parameterTypes.map { it.toString() }, ref.returnType.toString(),
+                                )
+                            }.getOrNull() ?: continue
+                            val i = index[sig] ?: continue
+                            val set = callers.getOrPut(i) { LinkedHashSet() }
+                            if (set.size < MAX_CALLERS) set.add(callerSig)
+                        }
+                    }
+                }
+            }
+        }
+        if (callers.isEmpty()) return
+        for ((i, set) in callers) findings[i] = findings[i].copy(callers = set.toList())
     }
 
     private fun scanClass(cls: ClassDef, out: MutableList<Finding>, seen: MutableSet<String>) {

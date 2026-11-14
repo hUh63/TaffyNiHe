@@ -113,6 +113,7 @@ internal fun settingsTitle(t: UiText, dest: SettingsDest): String = when (dest) 
     SettingsDest.DexScan -> if (t.zh) "加密 DEX 扫描" else "Encrypted DEX scan"
     SettingsDest.McpClient -> if (t.zh) "MCP 客户端" else "MCP client"
     SettingsDest.SelfCheck -> if (t.zh) "自检" else "Self check"
+    SettingsDest.Surface -> if (t.zh) "暴露面" else "Exposure"
 }
 
 @Composable
@@ -212,6 +213,7 @@ internal fun SettingsHub(
             SettingsDest.Python -> LaunchedEffect(Unit) { onOpenEditor() }
             SettingsDest.Search -> SettingsSearchPage(t, onDest, onBack)
             SettingsDest.SelfCheck -> SettingsSelfCheckPage(t, onBack)
+            SettingsDest.Surface -> SettingsSurfacePage(t, settings, onBack)
             SettingsDest.DevEnv -> SettingsDevEnvPage(t, onDest, onOpenEditor, onBack)
             SettingsDest.Reverse -> SettingsReversePage(t, onDest, onBack)
             SettingsDest.DexScan -> SettingsScaffold(title = settingsTitle(t, SettingsDest.DexScan), onBack = onBack) {
@@ -350,6 +352,7 @@ internal fun settingsIcon(dest: SettingsDest): ImageVector = when (dest) {
     SettingsDest.DevEnv -> Icons.Default.Build
     SettingsDest.Reverse -> Icons.Default.BugReport
     SettingsDest.SelfCheck -> Icons.Default.Security
+    SettingsDest.Surface -> Icons.Default.Link
     SettingsDest.DexScan -> Icons.Default.Code
     SettingsDest.McpClient -> Icons.Default.Link
     SettingsDest.ServiceConfig -> Icons.Default.Settings

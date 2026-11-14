@@ -1,5 +1,6 @@
 package com.soreverse.mcp.mcp
 
+import com.reandroid.apk.ApkModule
 import com.soreverse.mcp.core.VipEntryScanner
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
@@ -33,6 +34,7 @@ object VipEntryTool {
                 "path" str "目标文件：apk / dex（必填）"
                 "pkg" str "包名（hook 脚本里生成 frida 命令用；可空）"
                 "maxFindings" int "最多返回多少条候选（默认 300）"
+                "callers" bool "是否为方法命中补「被谁调用」（默认开；关了省一次全量指令遍历）"
                 "outPath" str "hook/report 的输出路径（默认与输入同目录：<name>.vip_hook.js / <name>.vip_report.md）"
             })
         }
@@ -44,9 +46,10 @@ object VipEntryTool {
             if (!file.isFile) return err("FILE_NOT_FOUND", "文件不存在: $path", "path", path)
             val action = args.str("action", "scan").ifBlank { "scan" }
             val maxFindings = args.intValue("maxFindings", 300).coerceIn(20, 2000)
+            val withCallers = args.optBoolean("callers", true)
 
             return runCatching {
-                val result = VipEntryScanner.scan(file, maxFindings)
+                val result = VipEntryScanner.scan(file, maxFindings, withCallers)
                 when (action) {
                     "hook" -> {
                         val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
@@ -61,6 +64,7 @@ object VipEntryTool {
                                 .put("targets", result.findings.count { it.kind == "METHOD" })
                                 .put("bytes", script.length)
                                 .put("command", "frida -U -f " + pkg.ifBlank { "<pkg>" } + " -l " + out.name + " --no-pause")
+                                .put("withCallers", withCallers)
                                 .put("findings", findingsJson(result.findings, 40))
                                 .put("next", "把脚本与 frida-server 推到设备后执行上面的命令；命中不理想时先看 report 里的分数分布"),
                         )
@@ -99,8 +103,18 @@ object VipEntryTool {
         }
     }
 
-    /** 从 APK 文件名/包结构猜包名：只用于生成 frida 命令，猜不到就留空让调用方填。 */
-    private fun guessPackage(file: File): String = ""
+    /**
+     * 从 APK 的 AndroidManifest 读包名（ARSCLib 解 AXML，不是正则）。
+     *
+     * 只用于生成 `frida -U -f <pkg>` 命令：dex 输入或解析失败时返回空串，让调用方自己传 pkg。
+     */
+    private fun guessPackage(file: File): String {
+        val name = file.name.lowercase()
+        if (!name.endsWith(".apk") && !name.endsWith(".zip")) return ""
+        return runCatching {
+            ApkModule.loadApkFile(file).androidManifest?.packageName?.trim() ?: ""
+        }.getOrDefault("")
+    }
 
     private fun outputFile(input: File, custom: String, suffix: String): File {
         if (custom.isNotBlank()) return File(custom)
@@ -118,6 +132,7 @@ object VipEntryTool {
             o.put("name", f.name)
             if (f.smaliSig.isNotBlank()) o.put("smaliSig", f.smaliSig)
             if (f.javaSig.isNotBlank()) o.put("javaSig", f.javaSig)
+            if (f.callers.isNotEmpty()) o.put("callers", JSONArray(f.callers))
             o.put("hits", JSONArray(f.hits))
             o.put("score", f.score)
             arr.put(o)

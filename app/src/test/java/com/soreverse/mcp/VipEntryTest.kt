@@ -99,6 +99,28 @@ class VipEntryTest {
     }
 
     @Test
+    fun buildReport_showsCallersWhenPresent() {
+        val withCaller = methodFinding("Lcom/x/VipManager;->isVip()Z", "boolean isVip()", 6)
+            .copy(callers = listOf("Lcom/x/MainActivity;->onCreate()V"))
+        val result = VipEntryScanner.ScanResult(
+            findings = listOf(withCaller),
+            dexCount = 1, classCount = 1, stringCount = 1, elapsedMs = 1, truncated = false,
+        )
+        val md = VipEntryScanner.buildReport("com.example.app", result)
+        assertTrue("报告要写明谁在调用，否则只有命名证据", md.contains("MainActivity;->onCreate()V"))
+        assertTrue(md.contains("被谁调用"))
+    }
+
+    @Test
+    fun buildHookScript_annotatesCallers() {
+        val withCaller = methodFinding("Lcom/x/VipManager;->isVip()Z", "boolean isVip()", 6)
+            .copy(callers = listOf("Lcom/x/PayActivity;->check()V", "Lcom/x/Settings;->onResume()V"))
+        val script = VipEntryScanner.buildHookScript("com.example.app", listOf(withCaller))
+        assertTrue(script.contains("←"))
+        assertTrue(script.contains("Lcom/x/PayActivity;->check()V"))
+    }
+
+    @Test
     fun buildReport_groupsByCategoryAndCarriesDisclaimer() {
         val result = VipEntryScanner.ScanResult(
             findings = listOf(methodFinding("Lcom/x/VipManager;->isVip()Z", "boolean isVip()", 6)),

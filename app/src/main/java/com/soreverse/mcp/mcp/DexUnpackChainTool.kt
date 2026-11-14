@@ -28,7 +28,7 @@ object DexUnpackChainTool {
             "dynamic", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
-                "action".oneOf("run (default) | plan（只枚举目录不处理）", "run", "plan")
+                "action".oneOf("run (default) | auto（XOR 无命中自动补一轮 AES） | plan（只枚举目录不处理）", "run", "auto", "plan")
                 "package" str "目标包名：给了就先从该进程内存 dump dex（需 root，且要先把 App 打开）"
                 "pkg" str "package 的别名"
                 "dir" str "已有 dump 目录（不给 package 时必填；给了 package 则默认 filesDir/dexdump/<pkg>）"
@@ -117,7 +117,16 @@ object DexUnpackChainTool {
                 )
             }
 
-            val result = DexUnpackChain.run(inputDir, File(outDirPath), opts)
+            var result = DexUnpackChain.run(inputDir, File(outDirPath), opts)
+            // auto：一轮没解出来就地补一轮 AES（只对没命中且不大的文件跑，见 Options 里的上限）。
+            // 这样「一键」是真的点一下就拿到结果，而不是先看 next 再回来点第二次。
+            var passes = 1
+            if (action == "auto" && result.optInt("writtenCount") == 0 && !opts.doAes) {
+                val second = DexUnpackChain.run(inputDir, File(outDirPath), opts.copy(doAes = true))
+                result = mergePasses(result, second)
+                passes = 2
+            }
+            result.put("passes", passes)
             // dump 段在前，避免看到的 stages 从 list 开始好像没有 dump
             if (dumpStage.length() > 0) {
                 val merged = JSONArray().put(dumpStage)
@@ -129,6 +138,37 @@ object DexUnpackChainTool {
             if (pkg.isNotBlank()) result.put("package", pkg)
             return ok(result)
         }
+    }
+
+    /**
+     * 合并两轮的结果：第一轮（明文/XOR）的失败信息保留，第二轮（AES）的产物与结论为主。
+     * stages 用后缀区分轮次，避免两轮都叫 "scan" 时看不出是第几轮的结论。
+     */
+    private fun mergePasses(first: JSONObject, second: JSONObject): JSONObject {
+        val merged = second
+        val stages = JSONArray()
+        fun append(src: JSONObject, suffix: String) {
+            val arr = src.optJSONArray("stages") ?: return
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                stages.put(
+                    JSONObject()
+                        .put("name", o.optString("name") + suffix)
+                        .put("status", o.optString("status"))
+                        .put("detail", o.optString("detail")),
+                )
+            }
+        }
+        append(first, "")
+        append(second, "(aes)")
+        merged.put("stages", stages)
+        val failures = JSONArray()
+        for (src in listOf(first, second)) {
+            val arr = src.optJSONArray("failures") ?: continue
+            for (i in 0 until arr.length()) arr.opt(i).let { if (it != null) failures.put(it) }
+        }
+        merged.put("failures", failures)
+        return merged
     }
 
     val ALL = listOf(unpackChain)

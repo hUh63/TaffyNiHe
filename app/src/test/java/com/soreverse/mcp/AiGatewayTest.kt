@@ -1,5 +1,6 @@
 package com.soreverse.mcp
 
+import com.soreverse.mcp.core.AiChannel
 import com.soreverse.mcp.core.AiGatewayServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -101,5 +102,42 @@ class AiGatewayTest {
         assertNull(AiGatewayServer.usageOf(""))
         assertNull(AiGatewayServer.usageOf("""{"choices":[{"message":{"content":"hi"}}]}"""))
         assertNull(AiGatewayServer.usageOf("data: [DONE]"))
+    }
+    // ───────── 多通道数据结构 ─────────
+
+    @Test
+    fun aiChannel_roundTripsThroughJson() {
+        val ch = AiChannel(
+            id = "ch_1",
+            name = "中转站",
+            provider = "openai",
+            endpoint = "https://relay.example/v1",
+            model = "deepseek-v3",
+            temperature = 0.6f,
+            headersJson = """{"x-a":"1"}""",
+            bodyJson = """{"top_p":0.9}""",
+        )
+        val back = AiChannel.fromJson(ch.toJson())!!
+        assertEquals(ch.id, back.id)
+        assertEquals("中转站", back.name)
+        assertEquals("https://relay.example/v1", back.endpoint)
+        assertEquals("deepseek-v3", back.model)
+        assertEquals(0.6f, back.temperature, 0.0001f)
+        assertEquals("""{"x-a":"1"}""", back.headersJson)
+        assertEquals("""{"top_p":0.9}""", back.bodyJson)
+    }
+
+    @Test
+    fun aiChannel_repairsInvalidProviderAndBlankFields() {
+        val o = JSONObject().put("id", "x").put("provider", "mistral").put("name", "").put("headersJson", "")
+        val ch = AiChannel.fromJson(o)!!
+        assertEquals("openai", ch.provider)
+        assertEquals("x", ch.name) // 名字空时回落到 id
+        assertEquals("{}", ch.headersJson)
+    }
+
+    @Test
+    fun aiChannel_missingIdIsRejected() {
+        assertNull(AiChannel.fromJson(JSONObject().put("name", "no id")))
     }
 }

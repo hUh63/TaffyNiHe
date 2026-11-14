@@ -161,6 +161,26 @@ internal fun SettingsAiDeepPage(
     var gatewayRunning by remember { mutableStateOf(AiGatewayServer.isRunning()) }
     var gatewayMessage by remember { mutableStateOf("") }
     var gatewayStats by remember { mutableStateOf(AiGatewayServer.snapshot()) }
+    // 多通道
+    var channels by remember { mutableStateOf(settings.aiChannels()) }
+    var activeChannel by remember { mutableStateOf(settings.aiActiveChannelId()) }
+    var channelName by rememberSaveable { mutableStateOf("") }
+
+    fun reloadChannelState() {
+        provider = settings.aiProvider
+        endpoint = settings.aiEndpoint
+        apiKey = settings.aiApiKey
+        model = settings.aiModel
+        temperature = settings.aiTemperature.toString()
+        headerFields = parseRequestFields(settings.aiCustomHeadersJson)
+        bodyFields = parseRequestFields(settings.aiCustomBodyJson)
+    }
+
+    fun refreshChannels() {
+        channels = settings.aiChannels()
+        activeChannel = settings.aiActiveChannelId()
+        reloadChannelState()
+    }
 
     SettingsScaffold(
         title = if (t.zh) "AI 深度分析" else "AI deep analysis",
@@ -171,6 +191,75 @@ internal fun SettingsAiDeepPage(
                 Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+        GlassGroup(
+            title = if (t.zh) "AI 通道" else "AI channels",
+            footer = if (t.zh) "每条通道有自己的协议 / 端点 / key / 模型 / 采样参数；系统提示词与工具策略是全局的。换中转站时切一条通道即可，不会出现「换了 key 忘了换端点」的错配。老配置已自动迁成「默认通道」。"
+            else "Each channel carries its own provider / endpoint / key / model / sampling. System prompt and tool policy stay global. Your previous single-channel setup was migrated into \"默认通道\".",
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChipRow(
+                    items = channels.map { it.id to it.name },
+                    selected = activeChannel,
+                    onSelected = { id ->
+                        settings.aiSetActiveChannel(id)
+                        activeChannel = settings.aiActiveChannelId()
+                        reloadChannelState()
+                        status = ""
+                    },
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                ) {
+                    OutlinedTextField(
+                        value = channelName,
+                        onValueChange = { channelName = it },
+                        label = { Text(if (t.zh) "通道名称（新建 / 重命名用）" else "Channel name (new / rename)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+                ) {
+                    SecondaryActionButton(
+                        if (t.zh) "新建" else "New",
+                        {
+                            settings.aiCreateChannel(channelName)
+                            channelName = ""
+                            refreshChannels()
+                        },
+                        Modifier.weight(1f),
+                    )
+                    SecondaryActionButton(
+                        if (t.zh) "重命名" else "Rename",
+                        {
+                            settings.aiRenameChannel(activeChannel, channelName)
+                            channelName = ""
+                            refreshChannels()
+                        },
+                        Modifier.weight(1f),
+                    )
+                    SecondaryActionButton(
+                        if (t.zh) "删除" else "Delete",
+                        {
+                            if (settings.aiRemoveChannel(activeChannel)) refreshChannels()
+                        },
+                        Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    if (t.zh) "当前：${channels.firstOrNull { it.id == activeChannel }?.name ?: "-"} · 共 ${channels.size} 条（至少保留一条）"
+                    else "Current: ${channels.firstOrNull { it.id == activeChannel }?.name ?: "-"} · ${channels.size} total (at least one kept)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            }
+        }
+
         GlassGroup(title = if (t.zh) "协议兼容" else "Provider") {
             // openrouter / xai 是 OpenAI 协议的预设端点（存储层面 provider 仍为 openai）
             val selectedChip = when {

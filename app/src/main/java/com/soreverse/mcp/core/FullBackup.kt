@@ -125,6 +125,9 @@ object FullBackup {
                 // 中断时目标目录也会停在"新旧混合"状态。
                 stagedDirs = stageTargetDirs(context, roots)
                 val result = restoreFrom(context, working, roots, onProgress)
+                // 恢复覆盖了 prefs（含 aiChannelsJson）：进程内缓存的通道列表必须作废，
+                // 否则恢复完仍按旧通道/旧 key 发请求
+                AiChannelStore.invalidate()
                 // 成功：旧目录整体丢弃
                 stagedDirs.forEach { (_, old) -> runCatching { old.deleteRecursively() } }
                 Summary(

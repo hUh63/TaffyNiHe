@@ -40,6 +40,14 @@ object DexUnpackChain {
         val maxFiles: Int = DEFAULT_MAX_FILES,
         /** AES 穷举时最多试多少个候选 key。 */
         val maxAesKeys: Int = 12,
+        /**
+         * AES 穷举最多对几个文件跑、单个文件最大多少字节。
+         *
+         * AES 一轮是「候选 key × 起点 × IV × 模式」全组合，单文件几 MB 的探测段就要解近百 MB；
+         * 一个 64 文件的 dump 目录无脑全跑会变成几十分钟。所以只挑小文件试，够用且可控。
+         */
+        val maxAesFiles: Int = 6,
+        val maxAesFileBytes: Long = 8L * 1024 * 1024,
         /** 写出后是否重新扫一遍做复核（几乎不花时间，换来可信的 verdict）。 */
         val verify: Boolean = true,
     ) {
@@ -121,6 +129,8 @@ object DexUnpackChain {
 
         if (files.isEmpty()) {
             return buildResult(stages, failures, recovered, outDir, 0, 0, 0, 0, opts)
+                .put("next", "目录里没有可用文件：检查路径是否正确，或先 taffy_dex_unpack 生成 dump")
+                .put("aesFilesTried", 0)
         }
 
         // ── 2. 扫描 + 3. 解密 + 4. 修头 + 5. 落盘 ────────────────
@@ -133,6 +143,7 @@ object DexUnpackChain {
         var fixedCount = 0
         var verified = 0
         var writeFails = 0
+        var aesFiles = 0
 
         for (file in files) {
             val bytes = runCatching {
@@ -168,7 +179,10 @@ object DexUnpackChain {
             }
 
             // XOR 一个都没命中时才试 AES：AES 穷举贵，不该无脑对每个文件跑
-            if (opts.doAes && hits.isEmpty()) {
+            if (opts.doAes && hits.isEmpty() &&
+                aesFiles < opts.maxAesFiles && bytes.size <= opts.maxAesFileBytes
+            ) {
+                aesFiles++
                 val aes = runCatching { AesDexDecryptor.autoDecrypt(bytes, opts.maxAesKeys) }
                     .onFailure { fail(file.name, "aes", it.message ?: "AES 穷举异常") }
                     .getOrDefault(emptyList())
@@ -248,7 +262,9 @@ object DexUnpackChain {
             opts.verify && verified == 0 -> "解出来了但校验全不过：多半是被截断的 dump，检查 dump 的读取上限或换更完整的内存区间"
             else -> "可直接喂给 taffy_jadx_decompile / taffy_baksmali_decode 分析"
         }
-        return buildResult(stages, failures, recovered, outDir, scanned, totalHits, saveSeq, verified, opts).put("next", next)
+        return buildResult(stages, failures, recovered, outDir, scanned, totalHits, saveSeq, verified, opts)
+            .put("next", next)
+            .put("aesFilesTried", aesFiles)
     }
 
     /**

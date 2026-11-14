@@ -113,7 +113,7 @@ internal fun SettingsDexScanPage(t: UiText) {
                                 chainResult = callTool(
                                     "taffy_dex_unpack_chain",
                                     JSONObject()
-                                        .put("action", "run")
+                                        .put("action", "auto")
                                         .put("package", chainPkg.trim())
                                         .put("dir", chainDir.trim())
                                         .put("aes", chainAes.toString())

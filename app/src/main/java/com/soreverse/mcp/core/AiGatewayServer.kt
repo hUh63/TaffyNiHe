@@ -58,6 +58,11 @@ internal object AiGatewayServer {
 
     @Volatile private var boundPort = 0
 
+    /** 并发上限：超过就回 429，而不是把请求排到线程池外（那种表现是「没响应」，最难查）。 */
+    private const val MAX_CONCURRENT = 8
+
+    private val slots = java.util.concurrent.Semaphore(MAX_CONCURRENT)
+
     /** 网关自身的累计用量（进程内累计，重启清零；跨设备统计意义不大）。 */
     private val stats = JSONObject()
     private var requests = 0L
@@ -146,6 +151,25 @@ internal object AiGatewayServer {
     // ───────────────────────── 请求处理 ─────────────────────────
 
     private suspend fun handleChat(call: ApplicationCall, context: Context, settings: SettingsStore) {
+        // 转发本身是阻塞 IO，而 ktor CIO 的 worker 只有 CPU 核数那么多：
+        // 并发一多请求就排在线程池外，客户端看到的是「没响应」而不是错误。
+        // 超过上限直接回 429，让客户端立刻知道该退避。
+        if (!slots.tryAcquire()) {
+            call.respondText(
+                errorJson("网关同时处理中的请求已达 $MAX_CONCURRENT，请稍后重试").toString(),
+                ContentType.Application.Json,
+                status = HttpStatusCode.TooManyRequests,
+            )
+            return
+        }
+        try {
+            handleChatInner(call, context, settings)
+        } finally {
+            slots.release()
+        }
+    }
+
+    private suspend fun handleChatInner(call: ApplicationCall, context: Context, settings: SettingsStore) {
         if (!authorized(settings.aiGatewayToken, call.request.header("Authorization"))) {
             call.respondText(authError().toString(), ContentType.Application.Json, status = HttpStatusCode.Unauthorized)
             return

@@ -732,37 +732,44 @@ class SettingsStore(context: Context) {
 
     // ---- UX / combo ----
     // ---- AI deep analysis ----
+    /**
+     * AI 通道级属性（provider/endpoint/key/model/temperature/自定义头体）现在都存在
+     * [AiChannelStore] 的「激活通道」里，这里是转发。
+     *
+     * 老版本把这几项直接摊在 prefs 上；第一次读通道列表时会自动把老配置无损迁成 `default` 通道，
+     * 所以升级后不需要用户重新填一遍。
+     */
     var aiProvider: String
-        get() = prefs.getString("aiProvider", "openai") ?: "openai"
-        set(value) = prefs.edit().putString("aiProvider", if (value in setOf("openai", "anthropic", "gemini")) value else "openai").apply()
+        get() = AiChannelStore.active(appContext, prefs).provider
+        set(value) = AiChannelStore.updateActive(appContext, prefs) {
+            it.copy(provider = if (value in setOf("openai", "anthropic", "gemini")) value else "openai")
+        }
 
     var aiEndpoint: String
-        get() = prefs.getString("aiEndpoint", "https://api.openai.com/v1") ?: "https://api.openai.com/v1"
-        set(value) = prefs.edit().putString("aiEndpoint", value.trim().trimEnd('/')).apply()
+        get() = AiChannelStore.active(appContext, prefs).endpoint
+        set(value) = AiChannelStore.updateActive(appContext, prefs) {
+            it.copy(endpoint = value.trim().trimEnd('/'))
+        }
 
     var aiApiKey: String
         get() {
-            SecretStore.get(appContext, "aiApiKey")?.takeIf { it.isNotBlank() }?.let { return it }
-            val legacy = sanitizeCredential(prefs.getString("aiApiKey", "").orEmpty())
-            if (legacy.isNotBlank()) {
-                SecretStore.put(appContext, "aiApiKey", legacy)
-                prefs.edit().remove("aiApiKey").apply()
-                return legacy
-            }
-            return ""
+            val ch = AiChannelStore.active(appContext, prefs)
+            return AiChannelStore.apiKey(appContext, ch.id)
         }
         set(value) {
-            SecretStore.put(appContext, "aiApiKey", sanitizeCredential(value))
-            prefs.edit().remove("aiApiKey").apply()
+            val ch = AiChannelStore.active(appContext, prefs)
+            AiChannelStore.setApiKey(appContext, ch.id, sanitizeCredential(value))
         }
 
     var aiModel: String
-        get() = prefs.getString("aiModel", "gpt-4.1-mini") ?: "gpt-4.1-mini"
-        set(value) = prefs.edit().putString("aiModel", value.trim()).apply()
+        get() = AiChannelStore.active(appContext, prefs).model
+        set(value) = AiChannelStore.updateActive(appContext, prefs) { it.copy(model = value.trim()) }
 
     var aiTemperature: Float
-        get() = prefs.getFloat("aiTemperature", 0.2f)
-        set(value) = prefs.edit().putFloat("aiTemperature", value.coerceIn(0f, 2f)).apply()
+        get() = AiChannelStore.active(appContext, prefs).temperature
+        set(value) = AiChannelStore.updateActive(appContext, prefs) {
+            it.copy(temperature = value.coerceIn(0f, 2f))
+        }
 
     /**
      * AI 工具调用模式（对齐 AstrBot 的 `tool_schema_mode`）：
@@ -792,12 +799,32 @@ class SettingsStore(context: Context) {
         set(value) = prefs.edit().putInt("aiHistorySoftLimit", value.coerceIn(8, 120)).apply()
 
     var aiCustomHeadersJson: String
-        get() = prefs.getString("aiCustomHeadersJson", "{}") ?: "{}"
-        set(value) = prefs.edit().putString("aiCustomHeadersJson", value.ifBlank { "{}" }).apply()
+        get() = AiChannelStore.active(appContext, prefs).headersJson
+        set(value) = AiChannelStore.updateActive(appContext, prefs) {
+            it.copy(headersJson = value.ifBlank { "{}" })
+        }
 
     var aiCustomBodyJson: String
-        get() = prefs.getString("aiCustomBodyJson", "{}") ?: "{}"
-        set(value) = prefs.edit().putString("aiCustomBodyJson", value.ifBlank { "{}" }).apply()
+        get() = AiChannelStore.active(appContext, prefs).bodyJson
+        set(value) = AiChannelStore.updateActive(appContext, prefs) {
+            it.copy(bodyJson = value.ifBlank { "{}" })
+        }
+
+    /** 通道管理入口：UI 需要列通道/切换/增删，但不能直接拿到私有 prefs。 */
+    internal fun aiChannels(): List<AiChannel> = AiChannelStore.channels(appContext, prefs)
+
+    internal fun aiActiveChannelId(): String = AiChannelStore.activeId(appContext, prefs)
+
+    internal fun aiSetActiveChannel(id: String) = AiChannelStore.setActive(appContext, prefs, id)
+
+    internal fun aiCreateChannel(name: String): AiChannel = AiChannelStore.create(appContext, prefs, name)
+
+    internal fun aiRenameChannel(id: String, name: String) {
+        val ch = AiChannelStore.channels(appContext, prefs).firstOrNull { it.id == id } ?: return
+        AiChannelStore.upsert(appContext, prefs, ch.copy(name = name.trim().ifBlank { ch.name }))
+    }
+
+    internal fun aiRemoveChannel(id: String): Boolean = AiChannelStore.remove(appContext, prefs, id)
 
     /**
      * 本地 AI 网关端口：0 = 关闭。

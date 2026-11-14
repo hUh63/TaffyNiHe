@@ -70,7 +70,7 @@ class DeepAnalysisService(private val appContext: Context) {
      *
      * key 从通道自己的 SecretStore 槽位取，所以不必切激活通道，也不会把请求打到错的中转站。
      */
-    suspend fun listModelsFor(channel: AiChannel): Result<List<String>> = withContext(Dispatchers.IO) {
+    internal suspend fun listModelsFor(channel: AiChannel): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
             require(channel.endpoint.isNotBlank()) { "通道「${channel.name}」还没配端点" }
             val key = AiChannelStore.apiKey(appContext, channel.id)

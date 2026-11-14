@@ -3,6 +3,7 @@ package com.soreverse.mcp.mcp
 import android.content.Context
 import com.soreverse.mcp.core.SelfArtifactGuard
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.WorkspacePolicy
 import com.soreverse.mcp.core.err
 import org.json.JSONObject
 import java.util.ArrayDeque
@@ -79,6 +80,10 @@ internal object ToolPolicy {
         }
         // 自身 artifact 守卫：任何来源都不允许引用塔菲自己的 APK / 内置 SO
         SelfArtifactGuard.findSelfArg(context, args)?.let { return SelfArtifactGuard.forbidden(it, name) }
+        // 工作区策略：MCP 服务端在 callToolPayload 里做同一套校验，而脚本是第二条入口——
+        // 不在这里拦住，远程调用者就能用 `taffy_script` + tool('taffy_file_write', {path:...})
+        // 绕过「路径必须在工作区内」的限制，读写工作区外的任意文件。
+        WorkspacePolicy.validateArgs(context, args)?.let { return it }
         return null
     }
 }

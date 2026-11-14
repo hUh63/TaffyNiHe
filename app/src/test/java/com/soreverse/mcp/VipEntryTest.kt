@@ -21,7 +21,8 @@ class VipEntryTest {
         assertEquals(listOf("is", "vip"), VipEntryScanner.tokens("isVip"))
         assertEquals(listOf("is", "vip", "expired"), VipEntryScanner.tokens("is_vip_expired"))
         assertEquals(listOf("get", "vip", "expire", "time"), VipEntryScanner.tokens("getVipExpireTime"))
-        assertEquals(listOf("lc", "com", "x", "vip", "manager"), VipEntryScanner.tokens("Lcom/x/VipManager;"))
+        // smali 的 L 前缀与大写首字母连在一起，拆出来是 "lcom" 而不是 "lc"+"com"
+        assertEquals(listOf("lcom", "x", "vip", "manager"), VipEntryScanner.tokens("Lcom/x/VipManager;"))
     }
 
     // ───────── 关键词匹配 ─────────

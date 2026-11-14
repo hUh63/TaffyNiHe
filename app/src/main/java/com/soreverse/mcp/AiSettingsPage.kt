@@ -182,7 +182,8 @@ internal fun SettingsAiDeepPage(
         channels = settings.aiChannels()
         activeChannel = settings.aiActiveChannelId()
         reloadChannelState()
-        channelModels[activeChannel]?.let { models = it }
+        // 没探测过的通道要清空列表：留着上一条通道的模型会让人点选到不属于这条通道的模型名
+        models = channelModels[activeChannel].orEmpty()
     }
 
     SettingsScaffold(
@@ -207,7 +208,7 @@ internal fun SettingsAiDeepPage(
                         settings.aiSetActiveChannel(id)
                         activeChannel = settings.aiActiveChannelId()
                         reloadChannelState()
-                        channelModels[activeChannel]?.let { models = it }
+                        models = channelModels[activeChannel].orEmpty()
                         status = ""
                     },
                 )

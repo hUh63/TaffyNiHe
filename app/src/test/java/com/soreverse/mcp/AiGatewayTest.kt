@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import com.soreverse.mcp.core.AiChannel
 import com.soreverse.mcp.core.AiGatewayServer
+import com.soreverse.mcp.core.HeavyGate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -139,5 +140,61 @@ class AiGatewayTest {
     @Test
     fun aiChannel_missingIdIsRejected() {
         assertNull(AiChannel.fromJson(JSONObject().put("name", "no id")))
+    }
+    // ───────── 网关按通道分流 ─────────
+
+    private fun ch(id: String, name: String, model: String, provider: String = "openai") =
+        AiChannel(id = id, name = name, provider = provider, model = model)
+
+    @Test
+    fun pickRoute_withoutPrefixUsesActiveChannel() {
+        val a = ch("a", "主力", "gpt-4o")
+        val b = ch("b", "备用", "deepseek-v3")
+        val r = AiGatewayServer.pickRoute("whatever-model", listOf(a, b), a)
+        assertEquals("a", r.channel.id)
+        // 没写通道前缀时保留客户端指定的模型（网关只选通道，不改模型选择）
+        assertEquals("whatever-model", r.model)
+        assertFalse(r.viaPrefix)
+        assertNull(r.unknownPrefix)
+    }
+
+    @Test
+    fun pickRoute_matchesChannelByNameOrId() {
+        val a = ch("a", "主力", "gpt-4o")
+        val b = ch("b", "relay-b", "deepseek-v3")
+        val byName = AiGatewayServer.pickRoute("relay-b/deepseek-r1", listOf(a, b), a)
+        assertEquals("b", byName.channel.id)
+        assertEquals("deepseek-r1", byName.model)
+        assertTrue(byName.viaPrefix)
+        val byId = AiGatewayServer.pickRoute("B/kimi-k2", listOf(a, b), a)
+        assertEquals("b", byId.channel.id)
+        assertEquals("kimi-k2", byId.model)
+    }
+
+    @Test
+    fun pickRoute_emptyRestUsesChannelModel() {
+        val a = ch("a", "主力", "gpt-4o")
+        val b = ch("b", "备用", "deepseek-v3")
+        val r = AiGatewayServer.pickRoute("备用/", listOf(a, b), a)
+        assertEquals("b", r.channel.id)
+        assertEquals("deepseek-v3", r.model)
+    }
+
+    @Test
+    fun pickRoute_unknownPrefixFallsBackToActive() {
+        val a = ch("a", "主力", "gpt-4o")
+        val r = AiGatewayServer.pickRoute("typo/gpt-4o", listOf(a), a)
+        assertEquals("a", r.channel.id)
+        // 前缀没命中时原样透传：model 里的 `/` 可能是真实模型名（OpenRouter 的 vendor/model）
+        assertEquals("typo/gpt-4o", r.model)
+        assertEquals("typo", r.unknownPrefix)
+        assertFalse(r.viaPrefix)
+    }
+
+    @Test
+    fun heavyGate_statsExposeLeaseWindow() {
+        val st = HeavyGate.stats()
+        assertTrue(st.has("oldestLeaseSec"))
+        assertTrue(st.has("nearestExpirySec"))
     }
 }

@@ -34,6 +34,14 @@ data class DeepAnalysisEvent(
     enum class Kind { STATUS, THINKING, TOOL, FINALIZING, TEXT, ERROR, DONE }
 }
 
+/** 拉模型目录需要的四项：不同通道之间只有这四项不同。 */
+internal data class AiCatalogTarget(
+    val provider: String,
+    val endpoint: String,
+    val apiKey: String,
+    val headersJson: String,
+)
+
 class DeepAnalysisService(private val appContext: Context) {
     private val _events = MutableSharedFlow<DeepAnalysisEvent>(extraBufferCapacity = 256)
     val events: SharedFlow<DeepAnalysisEvent> = _events
@@ -53,33 +61,61 @@ class DeepAnalysisService(private val appContext: Context) {
     suspend fun listModels(settings: SettingsStore): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
             requireModelCatalogConfigured(settings)
-            fetchModelCatalog(settings)
+            fetchModelCatalog(catalogTarget(settings))
         }.onFailure { AppLog.e("SOMCP-DeepAnalysis", "Model listing failed", it) }
     }
 
-    private fun fetchModelCatalog(settings: SettingsStore): List<String> {
-        if (settings.aiProvider == "gemini") return fetchGeminiModels(settings)
+    /**
+     * 按**指定通道**拉模型列表（多通道下不能只探激活通道：用户切过去之前就想知道某条通道有哪些模型）。
+     *
+     * key 从通道自己的 SecretStore 槽位取，所以不必切激活通道，也不会把请求打到错的中转站。
+     */
+    suspend fun listModelsFor(channel: AiChannel): Result<List<String>> = withContext(Dispatchers.IO) {
+        runCatchingCancellable {
+            require(channel.endpoint.isNotBlank()) { "通道「${channel.name}」还没配端点" }
+            val key = AiChannelStore.apiKey(appContext, channel.id)
+            require(key.isNotBlank()) { "通道「${channel.name}」还没配 API key" }
+            fetchModelCatalog(
+                AiCatalogTarget(
+                    provider = channel.provider,
+                    endpoint = channel.endpoint,
+                    apiKey = key,
+                    headersJson = channel.headersJson,
+                )
+            )
+        }.onFailure { AppLog.e("SOMCP-DeepAnalysis", "Model listing failed (${channel.name})", it) }
+    }
+
+    private fun catalogTarget(settings: SettingsStore) = AiCatalogTarget(
+        provider = settings.aiProvider,
+        endpoint = settings.aiEndpoint,
+        apiKey = settings.aiApiKey,
+        headersJson = settings.aiCustomHeadersJson,
+    )
+
+    private fun fetchModelCatalog(t: AiCatalogTarget): List<String> {
+        if (t.provider == "gemini") return fetchGeminiModels(t)
         val client = OkHttpClient.Builder().withCompromisedCaBlocklist()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
-        val customHeaders = parseStringMap(settings.aiCustomHeadersJson)
+        val customHeaders = parseStringMap(t.headersJson)
         val models = linkedSetOf<String>()
         val seenCursors = mutableSetOf<String>()
         var cursor: String? = null
         var nextUrl: String? = null
 
         repeat(50) {
-            val baseUrl = nextUrl ?: modelCatalogUrl(settings, cursor)
+            val baseUrl = nextUrl ?: modelCatalogUrl(t.provider, t.endpoint, cursor)
             val request = Request.Builder()
                 .url(baseUrl)
                 .header("Accept", "application/json")
                 .apply {
-                    if (settings.aiProvider == "anthropic") {
-                        safeHeader("x-api-key", settings.aiApiKey)
+                    if (t.provider == "anthropic") {
+                        safeHeader("x-api-key", t.apiKey)
                         header("anthropic-version", "2023-06-01")
                     } else {
-                        safeHeader("Authorization", "Bearer ${settings.aiApiKey}")
+                        safeHeader("Authorization", "Bearer ${t.apiKey}")
                     }
                     customHeaders.forEach { (name, value) -> safeHeader(name, value) }
                 }
@@ -103,16 +139,16 @@ class DeepAnalysisService(private val appContext: Context) {
     }
 
     // Gemini 模型目录：GET /v1beta/models?pageSize=200（header x-goog-api-key）
-    private fun fetchGeminiModels(settings: SettingsStore): List<String> {
+    private fun fetchGeminiModels(t: AiCatalogTarget): List<String> {
         val client = OkHttpClient.Builder().withCompromisedCaBlocklist()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
-        val base = settings.aiEndpoint.trimEnd('/').let { if (it.contains("/v1beta")) it else "$it/v1beta" }
-        val customHeaders = parseStringMap(settings.aiCustomHeadersJson)
+        val base = t.endpoint.trimEnd('/').let { if (it.contains("/v1beta")) it else "$it/v1beta" }
+        val customHeaders = parseStringMap(t.headersJson)
         val request = Request.Builder()
             .url("$base/models?pageSize=200")
-            .header("x-goog-api-key", settings.aiApiKey)
+            .header("x-goog-api-key", t.apiKey)
             .apply { customHeaders.forEach { (name, value) -> safeHeader(name, value) } }
             .build()
         val body = client.newCall(request).execute().use { response ->
@@ -133,15 +169,15 @@ class DeepAnalysisService(private val appContext: Context) {
         return models.sorted()
     }
 
-    private fun modelCatalogUrl(settings: SettingsStore, cursor: String?): String {        val endpoint = settings.aiEndpoint.trimEnd('/')
+    private fun modelCatalogUrl(provider: String, endpoint: String, cursor: String?): String {        val endpoint = endpoint.trimEnd('/')
         val path = when {
             endpoint.endsWith("/models") -> endpoint
-            settings.aiProvider == "anthropic" && endpoint.endsWith("/v1") -> "$endpoint/models"
-            settings.aiProvider == "anthropic" -> "$endpoint/v1/models"
+            provider == "anthropic" && endpoint.endsWith("/v1") -> "$endpoint/models"
+            provider == "anthropic" -> "$endpoint/v1/models"
             else -> "$endpoint/models"
         }
         return path.toHttpUrl().newBuilder().apply {
-            if (settings.aiProvider == "anthropic") {
+            if (provider == "anthropic") {
                 addQueryParameter("limit", "100")
                 cursor?.let { addQueryParameter("after_id", it) }
             } else {

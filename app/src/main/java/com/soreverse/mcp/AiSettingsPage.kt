@@ -165,6 +165,8 @@ internal fun SettingsAiDeepPage(
     var channels by remember { mutableStateOf(settings.aiChannels()) }
     var activeChannel by remember { mutableStateOf(settings.aiActiveChannelId()) }
     var channelName by rememberSaveable { mutableStateOf("") }
+    // 每条通道各自的模型列表（探测一次后缓存，切通道立即可以用，不用再等一轮网络）
+    var channelModels by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
 
     fun reloadChannelState() {
         provider = settings.aiProvider
@@ -180,6 +182,7 @@ internal fun SettingsAiDeepPage(
         channels = settings.aiChannels()
         activeChannel = settings.aiActiveChannelId()
         reloadChannelState()
+        channelModels[activeChannel]?.let { models = it }
     }
 
     SettingsScaffold(
@@ -204,6 +207,7 @@ internal fun SettingsAiDeepPage(
                         settings.aiSetActiveChannel(id)
                         activeChannel = settings.aiActiveChannelId()
                         reloadChannelState()
+                        channelModels[activeChannel]?.let { models = it }
                         status = ""
                     },
                 )
@@ -363,19 +367,28 @@ internal fun SettingsAiDeepPage(
                 modifier = Modifier.padding(14.dp),
             ) {
                 PrimaryActionButton(
-                    if (loadingModels) (if (t.zh) "获取中…" else "Loading…") else (if (t.zh) "自动获取模型" else "Fetch models"),
+                    if (loadingModels) (if (t.zh) "探测中…" else "Probing…") else (if (t.zh) "探测全部通道的模型" else "Probe models (all channels)"),
                     {
                         if (!loadingModels) {
                             loadingModels = true
-                            status = if (t.zh) "正在拉取模型列表…" else "Fetching models…"
+                            val all = settings.aiChannels()
+                            status = if (t.zh) "正在探测 ${all.size} 条通道…" else "Probing ${all.size} channel(s)…"
                             scope.safeLaunch {
-                                val result = deepService.listModels(settings)
+                                val collected = LinkedHashMap<String, List<String>>()
+                                val failed = ArrayList<String>()
+                                for (ch in all) {
+                                    val result = deepService.listModelsFor(ch)
+                                    val got = result.getOrNull()
+                                    if (got != null) collected[ch.id] = got
+                                    else failed += "${ch.name}: ${result.exceptionOrNull()?.message ?: (if (t.zh) "失败" else "failed")}"
+                                }
                                 loadingModels = false
-                                result.onSuccess {
-                                    models = it
-                                    status = if (t.zh) "已获取 ${it.size} 个模型" else "Fetched ${it.size} models"
-                                }.onFailure {
-                                    status = it.message ?: (if (t.zh) "获取模型失败" else "Failed to fetch models")
+                                channelModels = channelModels + collected
+                                models = collected.values.flatten().distinct().sorted()
+                                status = when {
+                                    collected.isEmpty() -> (if (t.zh) "探测失败：${failed.firstOrNull().orEmpty()}" else "Probe failed: ${failed.firstOrNull().orEmpty()}")
+                                    failed.isEmpty() -> if (t.zh) "已获取 ${models.size} 个模型（${collected.size} 条通道）" else "Fetched ${models.size} models from ${collected.size} channel(s)"
+                                    else -> (if (t.zh) "已获取 ${models.size} 个模型（${collected.size} 条通道），${failed.size} 条失败：${failed.first()}" else "Fetched ${models.size} from ${collected.size} channel(s); ${failed.size} failed: ${failed.first()}")
                                 }
                             }
                         }

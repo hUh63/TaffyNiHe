@@ -79,12 +79,16 @@ internal object AiGatewayServer {
         val settings = SettingsStore(context)
         val port = settings.aiGatewayPort
         if (port !in 1024..65535) return false to "端口需在 1024-65535（当前 $port）"
-        val provider = settings.aiProvider
-        if (provider != "openai") {
+        // 多通道下不再是「激活通道必须 openai」，而是「至少要有一条 openai 兼容通道」：
+        // 客户端用 `通道名/模型` 就能路由到指定通道，不必先把激活通道切过去。
+        val channels = settings.aiChannels()
+        if (channels.none { it.provider == "openai" }) {
             // 明确拒绝比"猜着转协议"好：转换半对时客户端只会看到莫名其妙的内容。
-            return false to "网关只支持 OpenAI 兼容渠道（当前 $provider）：请在 AI 设置里切换协议"
+            return false to "网关只转发 OpenAI 兼容通道，而当前一条都没有"
         }
-        if (settings.aiApiKey.isBlank()) return false to "还没配 API key"
+        if (channels.none { AiChannelStore.apiKey(context, it.id).isNotBlank() }) {
+            return false to "还没有任一通道配了 API key"
+        }
         if (isPortBusy(port)) return false to "端口 $port 已被占用"
 
         return runCatching {
@@ -185,9 +189,30 @@ internal object AiGatewayServer {
             return
         }
         val wantsStream = req.optBoolean("stream", false)
-        val body = prepareBody(raw, settings.aiModel)
-        val target = settings.aiEndpoint.trimEnd('/') + "/chat/completions"
-        val headers = authHeaders(settings.aiProvider, settings.aiApiKey) + headerPairs(settings.aiCustomHeadersJson)
+        val channels = settings.aiChannels()
+        val active = channels.firstOrNull { it.id == settings.aiActiveChannelId() } ?: channels.firstOrNull()
+        if (active == null) {
+            call.respondText(errorJson("还没有配置任何 AI 通道").toString(), ContentType.Application.Json, status = HttpStatusCode.BadRequest)
+            return
+        }
+        val route = pickRoute(req.optString("model"), channels, active)
+        val channel = route.channel
+        if (channel.provider != "openai") {
+            call.respondText(
+                errorJson("通道「${channel.name}」用的是 ${channel.provider}，网关只转发 OpenAI 兼容协议").toString(),
+                ContentType.Application.Json,
+                status = HttpStatusCode.BadRequest,
+            )
+            return
+        }
+        val channelKey = AiChannelStore.apiKey(context, channel.id)
+        if (channelKey.isBlank()) {
+            call.respondText(errorJson("通道「${channel.name}」没有配 API key").toString(), ContentType.Application.Json, status = HttpStatusCode.BadRequest)
+            return
+        }
+        val body = prepareBody(raw, route.model)
+        val target = channel.endpoint.trimEnd('/') + "/chat/completions"
+        val headers = authHeaders(channel.provider, channelKey) + headerPairs(channel.headersJson)
 
         val conn = runCatching { openPost(target, headers, body) }.getOrNull()
         if (conn == null) {
@@ -259,6 +284,46 @@ internal object AiGatewayServer {
 
     // ───────────────────────── 纯逻辑（可单测） ─────────────────────────
 
+    /** 一次请求的路由结果。 */
+    internal data class GatewayRoute(
+        val channel: AiChannel,
+        val model: String,
+        /** true 表示客户端写了 `通道名/模型` 前缀且命中了。 */
+        val viaPrefix: Boolean,
+        /** 写了前缀但没匹配到任何通道时，把前缀带回来便于在错误信息里指出来。 */
+        val unknownPrefix: String?,
+    )
+
+    /**
+     * 选通道：请求里的 `model` 可以写成 `通道名/模型` 来指定通道（也接受通道 id）。
+     *
+     * 规则刻意保守：**不写前缀就用激活通道**，写了前缀但匹配不上也回落到激活通道
+     * （并把 unknownPrefix 带出去），绝不因为一个拼错的前缀就把请求打失败——
+     * 客户端大多只认 200/错误码，回落到"能正常回答"比"看不懂的 404"有用。
+     */
+    internal fun pickRoute(rawModel: String, channels: List<AiChannel>, active: AiChannel): GatewayRoute {
+        val raw = rawModel.trim()
+        if (raw.isEmpty()) return GatewayRoute(active, active.model, false, null)
+        val slash = raw.indexOf('/')
+        if (slash <= 0) {
+            // 没有前缀：**保留客户端指定的模型**。网关是透传，不该悄悄把 model 换成我们配的那个
+            // （客户端可能就是在选模型，换掉它等于让客户端的模型选择失效）。
+            return GatewayRoute(active, raw, false, null)
+        }
+        val prefix = raw.substring(0, slash).trim()
+        val rest = raw.substring(slash + 1).trim()
+        val hit = channels.firstOrNull {
+            it.name.equals(prefix, ignoreCase = true) || it.id.equals(prefix, ignoreCase = true)
+        }
+        return if (hit != null) {
+            GatewayRoute(hit, rest.ifBlank { hit.model }, true, null)
+        } else {
+            // 前缀没匹配到通道 —— 但 model 里带 `/` 是很常见的真实模型名
+            // （OpenRouter 全系是 `vendor/model`），所以要原样透传，不能覆盖成激活模型。
+            GatewayRoute(active, raw, false, prefix)
+        }
+    }
+
     /**
      * 把客户端请求体的 `model` 换成实际配置的模型，其余字段原样保留。
      *
@@ -329,15 +394,35 @@ internal object AiGatewayServer {
         }
     }
 
-    private fun healthJson(settings: SettingsStore): JSONObject = JSONObject()
-        .put("ok", true)
-        .put("provider", settings.aiProvider)
-        .put("model", settings.aiModel)
-        .put("stats", snapshot())
+    private fun healthJson(settings: SettingsStore): JSONObject {
+        val channels = settings.aiChannels()
+        return JSONObject()
+            .put("ok", true)
+            .put("provider", settings.aiProvider)
+            .put("model", settings.aiModel)
+            .put("channels", channels.size)
+            .put("channelNames", org.json.JSONArray(channels.map { it.name }))
+            .put("stats", snapshot())
+    }
 
+    /**
+     * 列出所有可路由的模型名。
+     *
+     * 每条 OpenAI 兼容通道给一个 `<通道名>/<模型>` 别名（客户端据此分流），
+     * 另外给一条裸的激活模型名，方便"只想用当前通道"的客户端不必写前缀。
+     */
     private fun modelsJson(settings: SettingsStore): JSONObject {
         val data = org.json.JSONArray()
-        data.put(JSONObject().put("id", settings.aiModel).put("object", "model").put("owned_by", settings.aiProvider))
+        val channels = settings.aiChannels()
+        val activeId = settings.aiActiveChannelId()
+        channels.filter { it.provider == "openai" }.forEach { ch ->
+            val id = if (channels.size == 1) ch.model else ch.name + "/" + ch.model
+            data.put(JSONObject().put("id", id).put("object", "model").put("owned_by", ch.name))
+        }
+        val active = channels.firstOrNull { it.id == activeId } ?: channels.firstOrNull()
+        if (active != null) {
+            data.put(JSONObject().put("id", active.model).put("object", "model").put("owned_by", active.name))
+        }
         return JSONObject().put("object", "list").put("data", data)
     }
 

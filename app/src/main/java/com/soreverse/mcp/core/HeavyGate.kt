@@ -19,6 +19,11 @@ import java.util.concurrent.atomic.AtomicLong
  *    `leaked`；任务之后若真的返回，[release] 不会重复释放（否则许可凭空变多）。
  */
 internal object HeavyGate {
+    /**
+     * 兜底租约：调用方会按工具自身超时给更精确的值（McpHttpServer 用 timeoutSec+120s），
+     * 这里只覆盖没传的场景。租约到期由看门狗回收并置 poisoned —— 因为 cancel 打不断 native，
+     * 回收意味着「那个任务可能还在跑」，所以要留痕而不是静默。
+     */
     private const val DEFAULT_LEASE_MS = 30L * 60L * 1000L
 
     private val lock = Any()
@@ -76,12 +81,29 @@ internal object HeavyGate {
         leaked = 0
     }
 
-    fun stats(): JSONObject = JSONObject()
-        .put("permits", appliedPermits)
-        .put("pendingPermits", permitTarget)
-        .put("inFlight", leases.size)
-        .put("leaked", leaked)
-        .put("poisoned", poisoned)
+    /**
+     * 状态里带「最老在飞租约」：只看 inFlight 分不清「有一个刚跑起来的任务」和
+     * 「有一个卡了 25 分钟、再过 5 分钟就要被回收的任务」，而后者才是需要用户介入的情况。
+     */
+    fun stats(): JSONObject {
+        val now = System.currentTimeMillis()
+        var oldestSec = 0L
+        var nearestExpirySec = -1L
+        for (lease in leases.values) {
+            val age = now - lease.startedAt
+            if (age > oldestSec) oldestSec = age
+            val remain = (lease.leaseMs - age) / 1000
+            if (nearestExpirySec < 0 || remain < nearestExpirySec) nearestExpirySec = remain
+        }
+        return JSONObject()
+            .put("permits", appliedPermits)
+            .put("pendingPermits", permitTarget)
+            .put("inFlight", leases.size)
+            .put("leaked", leaked)
+            .put("poisoned", poisoned)
+            .put("oldestLeaseSec", oldestSec / 1000)
+            .put("nearestExpirySec", nearestExpirySec)
+    }
 
     private fun register(leaseMs: Long): Long {
         val id = seq.incrementAndGet()

@@ -159,7 +159,9 @@ object ScriptTool {
         // 与服务端共用同一个 heavy 闸门：脚本里连调重工具必须排队，
         // 不能绕过限制和外部调用并发操作同一份引擎状态。
         val heavy = name in ToolCatalog.heavyNames
-        val lease = if (heavy) HeavyGate.acquire(60_000) else 0L
+        // 脚本里常串多个重活（jadx + blutter + 伪C），30 分钟的兜底租约偏紧：
+        // 放宽到 60 分钟。真卡死时看门狗仍会回收并置 poisoned，所以放宽不会让闸门永久锁死。
+        val lease = if (heavy) HeavyGate.acquire(60_000, 60L * 60L * 1000L) else 0L
         if (heavy && lease == 0L) {
             return failureJson("SERVER_BUSY", "另一个分析任务正在运行，脚本内重工具调用排队超时: $name")
         }

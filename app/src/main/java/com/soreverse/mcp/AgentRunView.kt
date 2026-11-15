@@ -83,8 +83,10 @@ internal fun AgentRunView(
 
     // runId/status 用 rememberSaveable：编排是后台 run，离开页面回来不该显示成"还没开始"，
     // 更不该丢掉「中止」入口（旧实现切一次 tab 就无法中止，run 变成孤儿继续烧 token）。
-    var runId by rememberSaveable { mutableStateOf("") }
-    var statusJson by rememberSaveable { mutableStateOf("") }
+    // 这两个状态必须按 workspaceId 分桶：编排是「针对某个工作区」跑的，切到另一个工作区
+    // 还显示上一个 run 的状态与「中止」入口，就是在对着错误的 run 操作。
+    var runId by rememberSaveable(workspaceId) { mutableStateOf("") }
+    var statusJson by rememberSaveable(workspaceId) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var showHistory by remember { mutableStateOf(false) }

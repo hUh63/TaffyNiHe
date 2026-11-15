@@ -196,7 +196,7 @@ internal fun SettingsHub(
             SettingsDest.Permissions -> SettingsPermissionsPage(t, onBack)
             SettingsDest.LogcatViewer -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { LogcatViewerPage(t) }
             SettingsDest.Edbg -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { EdbgPage(t) }
-            SettingsDest.DexExplorer -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsDexExplorerPage(t) }
+            SettingsDest.DexExplorer -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsDexExplorerPage(t, onDest) }
             SettingsDest.ApkEdit -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsApkEditPage(t) }
             SettingsDest.Snapshots -> SettingsSnapshotsPage(t, onBack)
             SettingsDest.Workflow -> ToolPageScaffold(settingsTitle(t, dest), onBack = onBack) { SettingsWorkflowPage(t, onDest) }

@@ -57,7 +57,7 @@ import com.soreverse.mcp.core.runCatchingCancellable
  * 现改为先落地到 cacheDir 再解析。列表用卡片行 + 实时搜索 + 稳定 key。
  */
 @Composable
-internal fun SettingsDexExplorerPage(t: UiText) {
+internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit = {}) {
     val zh = t.zh
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -80,6 +80,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
     // 从会员入口 / 字符串引用跳转过来时的目标方法（定位后清空，避免下次打开又跳）
     var jumpMember by remember { mutableStateOf("") }
     var jumpNote by remember { mutableStateOf("") }
+    var backDest by remember { mutableStateOf<SettingsDest?>(null) }
     val memberListState = rememberLazyListState()
 
     fun dexFilesOf(p: String): List<File> {
@@ -182,6 +183,7 @@ internal fun SettingsDexExplorerPage(t: UiText) {
         path = tgt.path
         displayName = File(tgt.path).name
         jumpMember = tgt.member
+        backDest = tgt.origin
         jumpNote = (if (zh) "从会员入口跳转：" else "Jumped from VIP page: ") +
             tgt.classType.removePrefix("L").removeSuffix(";").replace('/', '.') +
             (if (tgt.member.isNotBlank()) "#" + tgt.member else "")
@@ -219,7 +221,17 @@ internal fun SettingsDexExplorerPage(t: UiText) {
         }
 
         if (jumpNote.isNotBlank()) {
-            GlassGroup { InlineHint(jumpNote, tone = HintTone.Ok) }
+            GlassGroup {
+                Column(Modifier.fillMaxWidth()) {
+                    InlineHint(jumpNote, tone = HintTone.Ok)
+                    val back = backDest
+                    if (back != null) {
+                        TextButton(onClick = { onDest(back) }) {
+                            Text(if (zh) "回会员入口" else "Back to VIP page")
+                        }
+                    }
+                }
+            }
         }
 
         val sel = selected

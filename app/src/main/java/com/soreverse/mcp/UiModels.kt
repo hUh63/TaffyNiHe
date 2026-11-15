@@ -36,7 +36,13 @@ internal object EditorBridge {
  * 而不是只把类打开让人自己翻。
  */
 internal object DexJumpBridge {
-    data class Target(val path: String, val classType: String, val member: String = "")
+    data class Target(
+        val path: String,
+        val classType: String,
+        val member: String = "",
+        /** 来源页：跳到 DEX 浏览器之后要能一键回去，否则用户的扫描结果会在切页后丢失。 */
+        val origin: SettingsDest? = null,
+    )
     val pending = androidx.compose.runtime.mutableStateOf<Target?>(null)
 }
 

@@ -172,7 +172,7 @@ internal fun SettingsSurfacePage(t: UiText, settings: SettingsStore, onBack: () 
                 )
                 SurfaceRow(
                     if (zh) "并发上限" else "Concurrency",
-                    "8",
+                    runCatching { AiGatewayServer.concurrencyLimit() }.getOrDefault(0).toString(),
                     0,
                 )
                 SurfaceNote(

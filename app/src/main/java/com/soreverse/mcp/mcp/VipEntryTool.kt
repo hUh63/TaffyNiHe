@@ -94,6 +94,7 @@ object VipEntryTool {
                             .put("elapsedMs", result.elapsedMs)
                             .put("count", result.findings.size)
                             .put("truncated", result.truncated)
+                            .put("callersPartial", result.callersPartial)
                             .put("categories", categoryCounts(result.findings))
                             .put("findings", findingsJson(result.findings, maxFindings))
                             .put("next", nextHint(result.findings)),

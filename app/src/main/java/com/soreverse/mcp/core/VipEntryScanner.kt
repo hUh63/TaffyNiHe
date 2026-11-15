@@ -59,6 +59,8 @@ internal object VipEntryScanner {
         val stringCount: Int,
         val elapsedMs: Long,
         val truncated: Boolean,
+        /** 调用者分析是否因为时间预算用完而提前结束（true = 部分命中没有调用者信息）。 */
+        val callersPartial: Boolean = false,
     )
 
     /** 关键词组：[weight] 越大表示这个词本身越"像"会员判断。 */
@@ -115,6 +117,9 @@ internal object VipEntryScanner {
     /** 每个命中最多记多少个调用者。 */
     internal const val MAX_CALLERS = 4
 
+    /** 调用者分析的时间预算（默认 15s，超时保留已找到的部分）。 */
+    internal const val CALLER_BUDGET_MS = 15_000L
+
     fun scan(file: File, maxFindings: Int = 300, withCallers: Boolean = true): ScanResult {
         val started = System.currentTimeMillis()
         val opcodes = Opcodes.getDefault()
@@ -164,7 +169,11 @@ internal object VipEntryScanner {
             }
         }
 
-        if (withCallers) runCatching { attachCallers(dexFiles, findings) }
+        var callersPartial = false
+        if (withCallers) {
+            val complete = runCatching { attachCallers(dexFiles, findings) }.getOrDefault(false)
+            callersPartial = !complete
+        }
         val sorted = findings.sortedWith(compareByDescending<Finding> { it.score }.thenBy { it.category })
         return ScanResult(
             findings = sorted,
@@ -172,6 +181,7 @@ internal object VipEntryScanner {
             classCount = classCount,
             stringCount = stringCount,
             elapsedMs = System.currentTimeMillis() - started,
+            callersPartial = callersPartial,
             truncated = truncated,
         )
     }
@@ -267,16 +277,21 @@ internal object VipEntryScanner {
     private fun attachCallers(
         dexFiles: List<Pair<String, DexBackedDexFile>>,
         findings: MutableList<Finding>,
-    ) {
+        budgetMs: Long = CALLER_BUDGET_MS,
+    ): Boolean {
         val index = HashMap<String, Int>()
         findings.forEachIndexed { i, f ->
             if (f.kind == "METHOD" && f.smaliSig.isNotBlank()) index[f.smaliSig] = i
         }
-        if (index.isEmpty()) return
+        if (index.isEmpty()) return true
         val callers = HashMap<Int, LinkedHashSet<String>>()
+        val deadline = System.currentTimeMillis() + budgetMs.coerceAtLeast(1_000L)
         for ((_, dex) in dexFiles) {
             runCatching {
                 for (cls in dex.classes) {
+                    // 大 APK 全量指令遍历是分钟级的：给个预算，超了就带着已找到的部分返回，
+                    // 而不是让工具调用一直挂着（MCP 客户端那侧只会看到一个不返回的请求）。
+                    if (System.currentTimeMillis() > deadline) return false
                     if (isSkipped(cls.type)) continue
                     for (m in cls.methods) {
                         val impl = runCatching { m.implementation }.getOrNull() ?: continue
@@ -303,8 +318,9 @@ internal object VipEntryScanner {
                 }
             }
         }
-        if (callers.isEmpty()) return
+        if (callers.isEmpty()) return true
         for ((i, set) in callers) findings[i] = findings[i].copy(callers = set.toList())
+        return true
     }
 
     private fun scanClass(cls: ClassDef, out: MutableList<Finding>, seen: MutableSet<String>) {

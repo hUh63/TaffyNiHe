@@ -1943,15 +1943,13 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
                     // v1.3.18: 原独立 hexdump 工具已收敛删除，这里直接用内置纯 Java HexDump。
                     // content:// 文档 URI（SAF 选文件带进来的路径）不能当文件路径打开，需走 ContentResolver。
                     val isUri = p.startsWith("content://")
-                    val data: ByteArray? = if (isUri) {
-                        runCatching { ctx.contentResolver.openInputStream(android.net.Uri.parse(p))?.use { it.readBytes() } }.getOrNull()
-                    } else {
-                        val file = java.io.File(p)
-                        if (file.isFile) runCatching { file.readBytes() }.getOrNull() else null
-                    }
+                    // 先看大小再读（HexSourceReader）：原来的 readBytes 之后再判 128MiB，
+                    // 大文件会先 OOM，那条错误提示永远走不到。
+                    val src = com.soreverse.mcp.core.HexSourceReader.read(ctx, p)
+                    val data: ByteArray? = src.data
                     val displayName = if (isUri) (android.net.Uri.parse(p).lastPathSegment ?: p) else java.io.File(p).name
                     if (data == null) {
-                        JSONObject().put("error", if (isUri) "无法读取 URI：$p（无权限或文件不存在）" else "file not found: $p")
+                        JSONObject().put("error", src.error.ifBlank { "file not found: $p" })
                     } else if (data.size > 128L * 1024 * 1024) {
                         JSONObject().put("error", "file too large for hex view: " + data.size + " bytes (max 128MiB)")
                     } else {

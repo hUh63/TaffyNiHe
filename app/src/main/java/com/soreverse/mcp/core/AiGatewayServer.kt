@@ -75,6 +75,9 @@ internal object AiGatewayServer {
 
     fun isRunning(): Boolean = running
 
+    /** 并发上限（供 UI 如实显示，避免文案与实现脱节）。 */
+    fun concurrencyLimit(): Int = MAX_CONCURRENT
+
     fun boundPort(): Int = boundPort
 
     /** 启动网关，返回（是否成功, 失败原因）。端口非法或已被占用时给出可直接展示的文案。 */
@@ -418,13 +421,14 @@ internal object AiGatewayServer {
     }
 
     private fun recordUsage(channel: AiChannel, text: String) {
-        val channelName = channel.id
-        perChannelName[channelName] = channel.name
+        // 分桶 key 是通道 id（重名通道要分开计），展示名另存一份
+        val bucket = channel.id
+        perChannelName[bucket] = channel.name
         val u = usageOf(text) ?: return
         synchronized(stats) {
             promptTokens += u.first
             completionTokens += u.second
-            val slot = perChannel.getOrPut(channelName) { LongArray(3) }
+            val slot = perChannel.getOrPut(bucket) { LongArray(3) }
             slot[1] += u.first
             slot[2] += u.second
         }

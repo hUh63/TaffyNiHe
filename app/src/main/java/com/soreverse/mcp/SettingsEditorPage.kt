@@ -553,7 +553,10 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val now = System.currentTimeMillis()
         if (now - lastEditAt > 600L) {
             undoStack.add(prev)
-            if (undoStack.size > 400) undoStack.removeAt(0)
+            // 撤销栈存的是整篇文本副本，只按 400 条限制并不安全：
+            // 400 × 1MB 的文本就是 400MB，中端机直接 OOM。大文件时把条数压到 20。
+            val limit = if (prev.length > 200_000) 20 else 400
+            while (undoStack.size > limit) undoStack.removeAt(0)
             redoStack.clear()
         }
         lastEditAt = now

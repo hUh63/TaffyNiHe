@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -1811,13 +1812,17 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             val lineH = with(density) { contentLineHeight.toPx() }
                             val guideColor = edDim.copy(alpha = 0.35f)
                             Canvas(Modifier.matchParentSize()) {
-                                guideLines.forEachIndexed { idx, line ->
+                                // 总量上限：极端文件（2000 行、每行 20 层缩进）会画几万条短线，
+                                // 那种情况下列表本身也没法看，画到 4000 条就够表达"有缩进结构"。
+                                var drawn = 0
+                                for ((idx, line) in guideLines.withIndex()) {
+                                    if (drawn >= 4000) break
                                     var indent = 0
                                     for (ch in line) {
                                         if (ch == ' ') indent++ else if (ch == '\t') indent += 4 else break
                                     }
                                     val levels = indent / 4
-                                    if (levels <= 0) return@forEachIndexed
+                                    if (levels <= 0) continue
                                     val top = idx * lineH
                                     for (j in 1..levels.coerceAtMost(24)) {
                                         val x = j * step
@@ -1827,6 +1832,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                                             end = androidx.compose.ui.geometry.Offset(x, top + lineH * 0.85f),
                                             strokeWidth = 1f,
                                         )
+                                        drawn++
                                     }
                                 }
                             }

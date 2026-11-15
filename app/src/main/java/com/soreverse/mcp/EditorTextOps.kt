@@ -265,9 +265,30 @@ internal object EditorTextOps {
         return -1
     }
 
-    /** 标签内部多余空白压成单空格；`<a b="1" >` → `<a b="1">`、`<d />` → `<d/>`。 */
-    private fun normalizeTag(tag: String): String =
-        tag.replace(Regex("\\s+"), " ").replace(" />", "/>").replace(" >", ">")
+    /**
+     * 规整标签：属性之间压成一个空格、`<d />` → `<d/>`、`<a b="1" >` → `<a b="1">`。
+     *
+     * 不能用「对整串做 replace」——那样 `b="x > y"` 里的空格会被当成结构空白压掉
+     * （`.replace(" >", ">")` 会把它变成 `x> y`）。所以先拆出属性，只规整属性名与分隔，
+     * 属性值原样保留（引号、内部空白都不碰）。
+     */
+    private fun normalizeTag(tag: String): String {
+        val parsed = splitTag(tag)
+        if (parsed == null) return tag
+        val (name, attrs) = parsed
+        val selfClose = tag.trimEnd().endsWith("/>")
+        val sb = StringBuilder("<").append(name)
+        for (a in attrs) {
+            val eq = a.indexOf('=')
+            if (eq > 0) {
+                sb.append(' ').append(a.substring(0, eq).trim()).append('=').append(a.substring(eq + 1))
+            } else {
+                sb.append(' ').append(a)
+            }
+        }
+        if (selfClose) sb.append("/>") else sb.append(">")
+        return sb.toString()
+    }
 
     /**
      * 拆出标签名与属性列表（引号内的空白不拆）。

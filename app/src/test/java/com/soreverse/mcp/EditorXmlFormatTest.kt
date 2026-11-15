@@ -92,6 +92,13 @@ class EditorXmlFormatTest {
     }
 
     @Test
+    fun keepsInnerSpacingOfAttributeValue() {
+        // 属性值里的多个空格也是内容，不能被结构空白规整压掉
+        val out = EditorTextOps.formatXml("<a   b=\"x  y\"   c=\"1\"/>")
+        assertEquals("<a b=\"x  y\" c=\"1\"/>", out)
+    }
+
+    @Test
     fun keepsGreaterThanInsideAttribute() {
         // 属性值里出现 '>' 是合法的；按 indexOf('>') 切标签会把它切成半截
         val out = EditorTextOps.formatXml("<a b=\"x > y\"><c/></a>")

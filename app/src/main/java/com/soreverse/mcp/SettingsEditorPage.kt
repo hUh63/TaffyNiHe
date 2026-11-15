@@ -71,6 +71,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -518,6 +520,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var autoPair by remember { mutableStateOf(edPrefs.getBoolean("editor_auto_pair", true)) }
     var autoIndent by remember { mutableStateOf(edPrefs.getBoolean("editor_auto_indent", true)) }
     var editorFontSize by remember { mutableStateOf(edPrefs.getInt("editor_font_size", 0)) }
+    // 自动换行默认关：软换行会让一条长语句占多个可视行，而行号 gutter 只能按逻辑行画，
+    // 折行后两者必然错位（长 smali 字符串一行就能差出十几行）。关掉即不折行 + 横向滚动。
+    var softWrap by remember { mutableStateOf(edPrefs.getBoolean("editor_soft_wrap", false)) }
     fun persistBool(key: String, v: Boolean) = runCatching { edPrefs.edit().putBoolean(key, v).apply() }
     fun persistInt(key: String, v: Int) = runCatching { edPrefs.edit().putInt(key, v).apply() }
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -791,6 +796,25 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     val indentUnit = if (mode == CodeHighlighter.Lang.SHELL || mode == CodeHighlighter.Lang.SMALI) "\t" else "    "
     val contentFontSize = if (editorFontSize in 10..24) editorFontSize.sp else AppText.bodyStrong
     val contentLineHeight = (contentFontSize.value * 1.5f).sp
+
+    // 不折行模式需要两样东西：自己的横向滚动、以及「按最长行量出来的内容宽度」。
+    // 等宽字体下量一个字符的宽就够了，整篇只量一次（remember 在 code/字号变化时才重算）。
+    val editorHScroll = rememberScrollState()
+    val textMeasurer = rememberTextMeasurer()
+    val monoMeasureStyle = MaterialTheme.typography.bodySmall.copy(
+        fontFamily = FontFamily.Monospace,
+        fontSize = contentFontSize,
+    )
+    val editorContentWidth: Dp = remember(code, contentFontSize, softWrap, density) {
+        if (softWrap) Dp.Unspecified else {
+            val unitPx = runCatching {
+                textMeasurer.measure("0", monoMeasureStyle, maxLines = 1).size.width
+            }.getOrDefault(0)
+            val longest = code.lineSequence().take(20_000).maxOfOrNull { it.length } ?: 0
+            if (unitPx <= 0) 2400.dp
+            else ((longest.coerceAtLeast(40) + 4) * unitPx / density.density).dp
+        }
+    }
 
     // 诊断只覆盖「结构性」问题；>200k 字符的文本跳过——那种体量下每次按键全篇扫描会让光标发涩，
     // 而用户在这种文件里本来也是在找字符串而不是看括号。
@@ -1442,6 +1466,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             "keys" -> showExtraKeys
             "pairs" -> autoPair
             "autoindent" -> autoIndent
+            "wrap" -> softWrap
             else -> false
         }
 
@@ -1468,6 +1493,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     autoPair = !autoPair
                     persistBool("editor_auto_pair", autoPair)
                     appendOut(if (autoPair) "\n[自动配对括号: 开]\n" else "\n[自动配对括号: 关]\n")
+                }
+                "toggle:wrap" -> {
+                    softWrap = !softWrap
+                    persistBool("editor_soft_wrap", softWrap)
+                    appendOut(if (softWrap) "\n[自动换行: 开]\n" else "\n[自动换行: 关（横向滚动）]\n")
                 }
                 "toggle:autoindent" -> {
                     autoIndent = !autoIndent
@@ -1756,6 +1786,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         if (showLineNumbers) {
                             EditorGutter(editorLineCount, curLn, marks, edDim, editorFontSize) { n -> jumpToLine(n) }
                         }
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .then(if (softWrap) Modifier else Modifier.horizontalScroll(editorHScroll)),
+                        ) {
                         BasicTextField(
                             value = tf,
                             onValueChange = { nv ->
@@ -1782,7 +1817,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                                 }
                                 lastInputAt = System.currentTimeMillis()
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = if (softWrap) Modifier.fillMaxWidth() else Modifier.width(editorContentWidth),
+                            softWrap = softWrap,
                             readOnly = readOnly,
                             textStyle = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = FontFamily.Monospace,
@@ -1833,6 +1869,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                                 }
                             },
                         )
+                        }
                     }
                 }
 

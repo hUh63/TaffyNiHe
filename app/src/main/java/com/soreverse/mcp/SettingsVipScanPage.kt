@@ -6,11 +6,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -23,8 +29,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.SettingsStore
@@ -163,77 +173,163 @@ internal fun SettingsVipScanPage(t: UiText) {
 
         val r = result
         if (r != null) {
-            GlassGroup(title = if (zh) "候选（按分数排序）" else "Candidates (ranked)") {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val cats = r.optJSONObject("categories")
-                    if (cats != null) {
-                        val names = cats.keys()
-                        val parts = ArrayList<String>()
-                        while (names.hasNext()) {
-                            val k = names.next()
-                            parts.add("$k ${cats.optInt(k)}")
-                        }
-                        if (parts.isNotEmpty()) {
-                            Text(
-                                parts.joinToString(" · "),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    if (r.optBoolean("truncated")) {
-                        Text(
-                            if (zh) "命中已达上限，结果被截断" else "Truncated at the limit",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    val arr = r.optJSONArray("findings") ?: JSONArray()
-                    if (arr.length() == 0) {
-                        Text(
-                            if (zh) "没有命中：可能没有会员体系，或方法名被混淆（看 STRING 组是否还有线索）"
-                            else "No hits: no membership system, or names are obfuscated",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    for (i in 0 until minOf(arr.length(), 80)) {
-                        val f = arr.optJSONObject(i) ?: continue
-                        val owner = f.optString("owner")
-                        val name = f.optString("name")
-                        val kind = f.optString("kind")
-                        val score = f.optInt("score")
-                        Text(
-                            "$score · $kind · ${if (owner.isNotBlank()) owner else name}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        val sub = f.optString("javaSig").ifBlank { f.optString("smaliSig") }
-                        if (sub.isNotBlank()) {
-                            Text(
-                                sub,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    if (arr.length() > 80) {
-                        Text(
-                            if (zh) "仅显示前 80 条（导出报告看全部）" else "Showing first 80 — export the report for all",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        if (zh) "分数由「关键词组权重 + 跨组命中 + is/has/check 前缀 + native」累加，只是候选排序。"
-                        else "Score = keyword weight + cross-group hits + is/has/check prefix + native. Ranking only.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+            VipCandidates(t, r)
+        }
+    }
+}
+
+/**
+ * 候选列表：类别筛选 + 调用者 + 点击复制签名。
+ *
+ * 之前的实现是「一坨 Text 逐行打印」，三条真实需求都满足不了：
+ * 想知道哪一类命中最多（要能按类别筛）、想看清「谁在调用它」（这是命名之外唯一的硬证据）、
+ * 想把签名拿去搜/贴到别处（要能一键复制）。
+ */
+@Composable
+private fun VipCandidates(t: UiText, r: JSONObject) {
+    val zh = t.zh
+    val clipboard = LocalClipboardManager.current
+    val arr = r.optJSONArray("findings") ?: JSONArray()
+    val all = remember(r) { (0 until arr.length()).mapNotNull { arr.optJSONObject(it) } }
+    var cat by rememberSaveable { mutableStateOf("") }
+    val cats = remember(all) {
+        all.map { it.optString("category") }.filter { it.isNotBlank() }.distinct()
+    }
+    val shown = remember(all, cat) {
+        if (cat.isBlank()) all else all.filter { it.optString("category") == cat }
+    }
+
+    GlassGroup(title = if (zh) "候选（按分数排序）" else "Candidates (ranked)") {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FilterChip(
+                    selected = cat.isBlank(),
+                    onClick = { cat = "" },
+                    label = { Text(if (zh) "全部 " + all.size else "All " + all.size) },
+                )
+                cats.forEach { c ->
+                    val n = all.count { it.optString("category") == c }
+                    FilterChip(
+                        selected = cat == c,
+                        onClick = { cat = if (cat == c) "" else c },
+                        label = { Text(c + " " + n) },
                     )
                 }
             }
+            if (r.optBoolean("truncated")) {
+                Text(
+                    if (zh) "命中已达上限，结果被截断" else "Truncated at the limit",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (r.optBoolean("callersPartial")) {
+                Text(
+                    if (zh) "调用者分析超出时间预算，部分命中没有调用者信息" else "Caller analysis timed out; some hits have no callers",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+            if (shown.isEmpty()) {
+                Text(
+                    if (zh) "没有命中：可能没有会员体系，或方法名被混淆（看 STRING 组是否还有线索）"
+                    else "No hits: no membership system, or names are obfuscated",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            for (f in shown.take(80)) {
+                VipCandidateRow(f, zh, clipboard)
+            }
+            if (shown.size > 80) {
+                Text(
+                    if (zh) "仅显示前 80 条（导出报告看全部）" else "Showing first 80 — export the report for all",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                if (zh) "点任意一条复制其签名；分数由「关键词组权重 + 跨组命中 + is/has/check 前缀 + native」累加，只是候选排序。"
+                else "Tap a row to copy its signature. Score = keyword weight + cross-group hits + is/has/check prefix + native. Ranking only.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
+}
+
+@Composable
+private fun VipCandidateRow(
+    f: JSONObject,
+    zh: Boolean,
+    clipboard: androidx.compose.ui.platform.ClipboardManager,
+) {
+    val kind = f.optString("kind")
+    val score = f.optInt("score")
+    val owner = f.optString("owner")
+    val name = f.optString("name")
+    val smaliSig = f.optString("smaliSig")
+    val javaSig = f.optString("javaSig")
+    val hits = f.optJSONArray("hits")
+    val callers = f.optJSONArray("callers")
+    val copyText = smaliSig.ifBlank { if (owner.isNotBlank()) owner else name }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppShape.sm))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(enabled = copyText.isNotBlank()) { clipboard.setText(AnnotatedString(copyText)) }
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                score.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                kind,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                javaSig.ifBlank { if (owner.isNotBlank()) owner else name },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (hits != null && hits.length() > 0) {
+            Text(
+                (0 until hits.length()).joinToString(" ") { hits.optString(it) },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (callers != null && callers.length() > 0) {
+            Text(
+                if (zh) "← " + (0 until callers.length()).joinToString(", ") { shortMember(callers.optString(it)) }
+                else "← " + (0 until callers.length()).joinToString(", ") { shortMember(callers.optString(it)) },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** `Lcom/x/Y;->z(I)V` → `com.x.Y.z`，只用于列表副标题，完整签名点一下复制即可。 */
+private fun shortMember(sig: String): String {
+    if (sig.isBlank()) return ""
+    val cls = sig.substringBefore(";->").trimStart('L').replace('/', '.')
+    val rest = sig.substringAfter(";->", "")
+    if (rest.isBlank()) return cls
+    return cls + "." + rest.substringBefore("(")
 }

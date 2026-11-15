@@ -241,6 +241,85 @@ internal object EditorTextOps {
 
     /** 清理行尾空白。 */
     fun trimTrailing(text: String): String = text.split('\n').joinToString("\n") { it.trimEnd() }
+
+    /**
+     * XML / HTML 缩进格式化（纯 Kotlin，零依赖，可单测）。
+     *
+     * 只做「缩进 + 换行」这一件事：不动属性顺序、不合并自闭合、不补全缺失标签。
+     * 结构与 [diagnose][EditorCodeIntel.diagnose] 的 XML 检查对齐——返回 null 表示结构不完整
+     * （标签未闭合、注释/CDATA 未闭合），此时不该把半截结果写回文件。
+     *
+     * @param unit 缩进单位
+     * @param keepBlankLines 是否保留原有空行（默认丢弃，格式化后更紧凑）
+     */
+    fun formatXml(text: String, unit: String = "  ", keepBlankLines: Boolean = false): String? {
+        val out = StringBuilder()
+        var depth = 0
+        var i = 0
+        val n = text.length
+
+        fun emit(s: String, d: Int) {
+            if (s.isEmpty()) return
+            if (out.isNotEmpty()) {
+                if (!keepBlankLines) {
+                    // 压缩连续换行
+                    while (out.isNotEmpty() && out[out.length - 1] == '\n') out.setLength(out.length - 1)
+                }
+                if (out.isNotEmpty()) out.append('\n')
+            }
+            out.append(unit.repeat(d.coerceAtLeast(0))).append(s)
+        }
+
+        while (i < n) {
+            if (text[i] != '<') {
+                val end = text.indexOf('<', i).let { if (it < 0) n else it }
+                val t = text.substring(i, end).trim()
+                if (t.isNotEmpty()) emit(t, depth)
+                i = end
+                continue
+            }
+            // 注释 / CDATA / 处理指令 / DOCTYPE：整体保留
+            if (text.startsWith("<!--", i)) {
+                val e = text.indexOf("-->", i)
+                if (e < 0) return null
+                emit(text.substring(i, e + 3), depth)
+                i = e + 3
+                continue
+            }
+            if (text.startsWith("<![CDATA[", i)) {
+                val e = text.indexOf("]]>", i)
+                if (e < 0) return null
+                emit(text.substring(i, e + 3), depth)
+                i = e + 3
+                continue
+            }
+            if (text.startsWith("<?", i) || text.startsWith("<!", i)) {
+                val e = text.indexOf('>', i)
+                if (e < 0) return null
+                emit(text.substring(i, e + 1), depth)
+                i = e + 1
+                continue
+            }
+            val gt = text.indexOf('>', i)
+            if (gt < 0) return null
+            val tag = text.substring(i, gt + 1)
+            val closing = tag.startsWith("</")
+            val selfClose = tag.endsWith("/>")
+            // 标签内部的多余空白压成单空格；`<a b="1" >` → `<a b="1">`、`<d />` → `<d/>`
+            val normalized = tag.replace(Regex("\\s+"), " ").replace(" />", "/>").replace(" >", ">")
+            if (closing) {
+                depth = (depth - 1).coerceAtLeast(0)
+                emit(normalized, depth)
+            } else {
+                emit(normalized, depth)
+                if (!selfClose) depth++
+            }
+            i = gt + 1
+        }
+        // 结构性不平衡（未闭合）时不写回
+        if (depth != 0) return null
+        return out.toString()
+    }
 }
 
 /** 轻量 JSON 校验 + 美化（纯 Kotlin，零依赖，可单测）。 */

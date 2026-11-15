@@ -197,15 +197,30 @@ internal object EditorCommands {
             writeText(h, EditorTextOps.changeCase(h.text, h.selStart, h.selEnd, false))
         },
         EditorCommand("case.format", "格式化", "Format", G_CASE, icon = Icons.Filled.AutoFixHigh) { h ->
-            val json = if (h.lang == CodeHighlighter.Lang.JSON) EditorTextOps.formatJson(h.text) else null
-            if (json != null) {
-                writeText(h, json to 0)
-                h.say("[已格式化 JSON]")
-            } else if (h.lang == CodeHighlighter.Lang.JSON) {
-                h.say("[JSON 无效，无法格式化]")
-            } else {
-                writeText(h, EditorTextOps.trimTrailing(h.text) to h.selStart)
-                h.say("[已清理行尾空白]")
+            when (h.lang) {
+                CodeHighlighter.Lang.JSON -> {
+                    val pretty = EditorTextOps.formatJson(h.text)
+                    if (pretty != null) {
+                        writeText(h, pretty to 0)
+                        h.say("[已格式化 JSON]")
+                    } else {
+                        h.say("[JSON 无效，无法格式化]")
+                    }
+                }
+                CodeHighlighter.Lang.XML -> {
+                    val pretty = EditorTextOps.formatXml(h.text)
+                    if (pretty != null) {
+                        writeText(h, pretty to 0)
+                        h.say("[已格式化 XML]")
+                    } else {
+                        // 不写回半截结果：结构不完整时缩进可能把标签错位，比不格式化更糟
+                        h.say("[XML 结构不完整（标签/注释未闭合），无法格式化]")
+                    }
+                }
+                else -> {
+                    writeText(h, EditorTextOps.trimTrailing(h.text) to h.selStart)
+                    h.say("[已清理行尾空白]")
+                }
             }
         },
         // ── 文件 ──
@@ -225,6 +240,7 @@ internal object EditorCommands {
         // 打字手感与结构导航（吸收自 sora-editor demo 的行为，不引入它的渲染层）
         EditorCommand("view.pairs", "自动配对括号", "Auto pairs", G_VIEW, icon = Icons.Filled.Code, isOn = { it.flag("pairs") }) { it.act("toggle:pairs") },
         EditorCommand("view.autoindent", "自动缩进", "Auto indent", G_VIEW, icon = Icons.Filled.FormatIndentIncrease, isOn = { it.flag("autoindent") }) { it.act("toggle:autoindent") },
+        EditorCommand("view.wrap", "自动换行", "Word wrap", G_VIEW, icon = Icons.Filled.AspectRatio, isOn = { it.flag("wrap") }) { it.act("toggle:wrap") },
         EditorCommand("nav.bracket", "跳到配对括号", "Jump to match", G_NAV, icon = Icons.Filled.MyLocation) { it.act("nav:bracket") },
         EditorCommand("nav.block", "选中所在块", "Select block", G_NAV, icon = Icons.Filled.SelectAll) { it.act("nav:block") },
         // ── 代码智能 ──

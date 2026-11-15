@@ -158,6 +158,7 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
             status = when (action) {
                 "scan" -> if (zh) "正在扫描 dex…" else "Scanning dex…"
                 "hook" -> if (zh) "正在生成 hook 脚本…" else "Generating hook script…"
+                "minimal" -> if (zh) "正在生成最小验证脚本…" else "Generating minimal hook…"
                 else -> if (zh) "正在导出报告…" else "Exporting report…"
             }
             val args = JSONObject().put("action", action).put("path", path.trim()).put("pkg", pkg.trim())
@@ -168,6 +169,12 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
                 return@safeLaunch
             }
             when (action) {
+                "minimal" -> {
+                    hookPath = r.optString("scriptPath")
+                    val top = r.optString("targetJava").ifBlank { r.optString("target") }
+                    status = if (zh) "已生成最小验证脚本（只挂 1 个方法）：$top → $hookPath"
+                    else "Minimal hook for $top → $hookPath"
+                }
                 "hook" -> {
                     hookPath = r.optString("scriptPath")
                     status = if (zh) "已生成 ${r.optInt("targets")} 个 hook 目标：$hookPath" else "Generated ${r.optInt("targets")} targets: $hookPath"
@@ -206,7 +213,11 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     ToolChip(
                         label = if (zh) "选择文件" else "Pick file",
                         icon = Icons.Filled.FolderOpen,
@@ -225,6 +236,13 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
                         icon = Icons.Filled.Terminal,
                         enabled = !busy && path.isNotBlank(),
                         onClick = { runAction("hook") },
+                    )
+                    // 先验一个方法：日志不会被 40 个 hook 淹没，是「这个判断到底是不是会员入口」最快的取证
+                    ToolChip(
+                        label = if (zh) "最小验证" else "Minimal hook",
+                        icon = Icons.Filled.Terminal,
+                        enabled = !busy && path.isNotBlank(),
+                        onClick = { runAction("minimal") },
                     )
                     ToolChip(
                         label = if (zh) "导出报告" else "Report",

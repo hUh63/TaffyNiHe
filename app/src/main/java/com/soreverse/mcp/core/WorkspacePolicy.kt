@@ -39,6 +39,13 @@ object WorkspacePolicy {
         // 2026-11 补齐：这三个同样是真·文件系统路径，漏登记就是整条工具绕过工作区策略
         // —— mappingPath 能读任意文件，saveDir / logFile 能往任意目录写。
         "mappingPath", "saveDir", "logFile",
+        // 2026-11 第二轮：按「工具 schema 声明的键 vs PATH_KEYS」对账扫出来的漏网。
+        // 下面这些键在各自工具里都是真·文件系统路径（含旧名兼容回退用的短名），
+        // 漏一个就等于那个工具整体绕过工作区策略：
+        //   apk / file / so     —— GadgetOneShot 的旧别名、sign_kill 的单文件、apk_edit 的 so
+        //   output / outDir     —— 编译产物、解密/脱壳输出目录
+        //   path2 / signOutput  —— apk_diff 的第二个输入、smali 批量重打包后的签名产物
+        "apk", "file", "so", "output", "outDir", "path2", "signOutput",
     )
 
     /** 参数递归预检的最大深度，防止超深嵌套造成的栈/CPU 放大。 */

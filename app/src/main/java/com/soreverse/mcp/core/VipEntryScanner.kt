@@ -224,6 +224,38 @@ internal object VipEntryScanner {
         }
     }
 
+    /**
+     * 生成「最小验证脚本」：只 hook 分数最高的 1 个方法，打印参数、返回值与调用栈。
+     *
+     * 为什么需要它：40 个目标的全量脚本适合「已经确定方向、要看全貌」，但多数时候第一步只是
+     * 验证「这个判断到底是不是会员入口」——一个方法、一次调用栈，答案就出来了，日志也不会被淹没。
+     */
+    fun buildMinimalHookScript(pkg: String, findings: List<Finding>): String {
+        val top = findings
+            .filter { it.kind == "METHOD" && it.smaliSig.isNotBlank() && it.owner.isNotBlank() }
+            .sortedByDescending { it.score }
+            .firstOrNull()
+        val className = top?.let { smaliToJavaType(it.owner) }.orEmpty()
+        val methodName = top?.name.orEmpty()
+        return buildString {
+            appendLine("// 塔菲逆核 · VIP 最小验证脚本（只 hook 1 个方法，打印参数/返回值/调用栈）")
+            appendLine("// 目标: " + pkg.ifBlank { "<unknown>" })
+            if (top == null) {
+                appendLine("// 没有方法类命中：先跑 action=scan 看看有没有候选")
+            } else {
+                appendLine("// 方法: " + top.javaSig + "（" + top.score + " 分）")
+                if (top.callers.isNotEmpty()) {
+                    appendLine("// 调用者: " + top.callers.joinToString(", "))
+                }
+            }
+            appendLine("// 用法: frida -U -f " + pkg.ifBlank { "<pkg>" } + " -l vip_min.js --no-pause")
+            appendLine(JS_MIN_PREFIX)
+            appendLine("  var CLASS_NAME = \"" + className + "\";")
+            appendLine("  var METHOD_NAME = \"" + methodName + "\";")
+            appendLine(JS_MIN_SUFFIX)
+        }
+    }
+
     /** 生成 markdown 报告：按类别分组，每条带分数与签名。 */
     fun buildReport(pkg: String, result: ScanResult): String = buildString {
         appendLine("# VIP / 会员入口分析报告")
@@ -475,6 +507,40 @@ internal object VipEntryScanner {
     private fun escapeCell(s: String): String = s.replace("|", "\\|")
 
     /** JS 模板前半段：解析 smali 签名 + 重载定位。刻意不用 `$`，避免与 Kotlin 字符串模板冲突。 */
+    private val JS_MIN_PREFIX = """
+Java.perform(function () {
+  function show(v) {
+    try { return (v === null || v === undefined) ? String(v) : v.toString(); } catch (e) { return "<unprintable>"; }
+  }
+"""
+    private val JS_MIN_SUFFIX = """
+  if (!CLASS_NAME || !METHOD_NAME) {
+    console.log("[vip] 没有可用的候选方法");
+    return;
+  }
+  try {
+    var cls = Java.use(CLASS_NAME);
+    var overloads = cls[METHOD_NAME].overloads;
+    overloads.forEach(function (m) {
+      var sig = m.argumentTypes.map(function (t) { return t.className; }).join(", ");
+      m.implementation = function () {
+        var args = Array.prototype.slice.call(arguments).map(show).join(", ");
+        var ret = m.apply(this, arguments);
+        console.log("[vip] " + CLASS_NAME + "." + METHOD_NAME + "(" + args + ") = " + show(ret) + "   // (" + sig + ")");
+        try {
+          var Log = Java.use("android.util.Log");
+          var Ex = Java.use("java.lang.Exception");
+          console.log("[vip] stack:\n" + Log.getStackTraceString(Ex.${'$'}new()));
+        } catch (e2) {}
+        return ret;
+      };
+    });
+    console.log("[vip] hooked " + overloads.length + " overload(s) of " + CLASS_NAME + "." + METHOD_NAME);
+  } catch (e) {
+    console.log("[vip] hook failed: " + e);
+  }
+});
+"""
     private val JS_TEMPLATE_PREFIX = """
 Java.perform(function () {
   function parse(sig) {

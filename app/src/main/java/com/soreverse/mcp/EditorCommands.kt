@@ -244,6 +244,7 @@ internal object EditorCommands {
         EditorCommand("view.guides", "缩进参考线", "Indent guides", G_VIEW, icon = Icons.Filled.FormatIndentIncrease, isOn = { it.flag("guides") }) { it.act("toggle:guides") },
         EditorCommand("nav.bracket", "跳到配对括号", "Jump to match", G_NAV, icon = Icons.Filled.MyLocation) { it.act("nav:bracket") },
         EditorCommand("nav.block", "选中所在块", "Select block", G_NAV, icon = Icons.Filled.SelectAll) { it.act("nav:block") },
+        EditorCommand("nav.blockcard", "当前块卡片", "Block card", G_NAV, icon = Icons.Filled.Info) { it.act("nav:blockcard") },
         // ── 代码智能 ──
         EditorCommand("ai.complete", "补全", "Complete", G_AI, icon = Icons.Filled.AutoAwesome, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:complete") },
         EditorCommand("ai.hover", "文档", "Hover doc", G_AI, icon = Icons.Filled.Info, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:hover") },

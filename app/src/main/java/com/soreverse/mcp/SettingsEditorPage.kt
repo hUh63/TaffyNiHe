@@ -826,6 +826,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // 缩进参考线：只在「不折行」时有意义（折行后竖线与文字的相对位置不再逐行对应）。
     // 默认关：它是可读性辅助，会多画几千条短线，不希望默认吃掉帧预算。
     var showIndentGuides by remember { mutableStateOf(edPrefs.getBoolean("editor_indent_guides", false)) }
+    // 当前块卡片：折叠的第三种形态——不改文档内容，只把块的首尾摆出来
+    var blockCardOpen by remember { mutableStateOf(false) }
     val guideLines = remember(code) { code.lineSequence().take(2_000).toList() }
     // 光标所在括号块的行范围：参考线用它把「正在改的那块」画成主色，
     // 大纲用它显示每个符号的块区间（折叠的可用替代——不改文档内容，只做导航）。
@@ -1541,6 +1543,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     val m = editorBracket
                     if (m == null) appendOut("\n[光标不在括号旁]\n") else moveCaretTo(m.close)
                 }
+                "nav:blockcard" -> blockCardOpen = true
                 "nav:block" -> {
                     val blk = EditorCodeIntel.enclosingBlock(tf.text, tf.selection.min)
                     if (blk == null) appendOut("\n[光标不在括号块内]\n")
@@ -2468,6 +2471,69 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     }
                 }
             }
+        }
+    }
+
+    if (blockCardOpen) {
+        val blk = EditorCodeIntel.enclosingBlock(code, tf.selection.min)
+        if (blk != null) {
+            val startLine = EditorTextOps.lineOf(code, blk.first)
+            val endLine = EditorTextOps.lineOf(code, blk.second)
+            val body = code.substring(blk.first, (blk.second + 1).coerceAtMost(code.length))
+            val bodyLines = body.split('\n')
+            val preview = buildString {
+                bodyLines.take(3).forEach { appendLine(it) }
+                if (bodyLines.size > 6) appendLine("⋯ " + (bodyLines.size - 6) + (if (zh) " 行" else " lines"))
+                if (bodyLines.size > 3) bodyLines.takeLast(3).forEach { appendLine(it) }
+            }
+            AlertDialog(
+                onDismissRequest = { blockCardOpen = false },
+                title = {
+                    Text(
+                        (if (zh) "当前块 L" else "Block L") + startLine + "-" + endLine +
+                            " · " + (endLine - startLine + 1) + (if (zh) " 行" else " lines"),
+                        fontSize = AppText.title,
+                    )
+                },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            preview.trimEnd(),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = AppText.label,
+                                lineHeight = 16.sp,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            if (zh) "这是只读预览：折叠不会改动文档内容（改写显示文本会破坏光标映射），所以这里只摆块首尾。"
+                            else "Read-only preview: folding never rewrites the document, so only the head and tail are shown.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        moveCaretTo(blk.first)
+                        blockCardOpen = false
+                    }) { Text(if (zh) "跳到块首" else "Go to start") }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(onClick = {
+                            moveCaretTo(blk.second)
+                            blockCardOpen = false
+                        }) { Text(if (zh) "跳到块尾" else "Go to end") }
+                        TextButton(onClick = {
+                            tf = TextFieldValue(tf.text, TextRange(blk.first, (blk.second + 1).coerceAtMost(tf.text.length)))
+                            blockCardOpen = false
+                            followCursor()
+                        }) { Text(if (zh) "选中整块" else "Select") }
+                    }
+                },
+            )
         }
     }
 

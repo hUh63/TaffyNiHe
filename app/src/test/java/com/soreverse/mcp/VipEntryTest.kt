@@ -121,6 +121,28 @@ class VipEntryTest {
     }
 
     @Test
+    fun buildMinimalHookScript_targetsSingleTopMethod() {
+        val findings = listOf(
+            methodFinding("Lcom/x/VipManager;->isVip()Z", "boolean isVip()", 9),
+            methodFinding("Lcom/x/VipManager;->isTrial()Z", "boolean isTrial()", 3),
+        )
+        val js = VipEntryScanner.buildMinimalHookScript("com.example.app", findings)
+        assertTrue(js.contains("Java.perform"))
+        assertTrue("类名要转成 Java 形式", js.contains("com.x.VipManager"))
+        assertTrue(js.contains("isVip"))
+        assertFalse("不能把次高分的也挂上", js.contains("isTrial"))
+        assertTrue("要打印返回值与调用栈", js.contains("getStackTraceString"))
+    }
+
+    @Test
+    fun buildMinimalHookScript_emptyFindingsIsSafe() {
+        val js = VipEntryScanner.buildMinimalHookScript("com.example.app", emptyList())
+        assertTrue("空结果要在注释里说明", js.contains("没有方法类命中"))
+        // 脚本本身仍要能跑：空目标时走 JS 里的提前返回分支，而不是语法错误
+        assertTrue(js.contains("没有可用的候选方法"))
+    }
+
+    @Test
     fun buildReport_groupsByCategoryAndCarriesDisclaimer() {
         val result = VipEntryScanner.ScanResult(
             findings = listOf(methodFinding("Lcom/x/VipManager;->isVip()Z", "boolean isVip()", 6)),

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -179,6 +181,73 @@ internal fun SettingsSurfacePage(t: UiText, settings: SettingsStore, onBack: () 
                     if (zh) "只监听 127.0.0.1，外部设备连不进来；适合让本机其他 App 或 Termux 里的工具复用通道。"
                     else "Binds 127.0.0.1 only. Meant for other apps or Termux tooling on this device."
                 )
+            }
+        }
+
+        item("usage") {
+            SurfaceCard {
+                Text(
+                    if (zh) "网关按通道用量" else "Gateway usage by channel",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                val ch = gateway.optJSONObject("channels")
+                var keys: List<String> = emptyList()
+                if (ch != null) {
+                    val it = ch.keys()
+                    val acc = ArrayList<String>()
+                    while (it.hasNext()) acc.add(it.next())
+                    keys = acc
+                }
+                if (keys.isEmpty()) {
+                    SurfaceNote(
+                        if (zh) "还没有请求。网关启动并收到请求后，这里按通道分别显示次数与 token（重名通道按 id 分开计）。"
+                        else "No requests yet. Once the gateway receives traffic, each channel is shown separately.",
+                    )
+                } else {
+                    val maxTok = keys.maxOfOrNull { k -> ch?.optJSONObject(k)?.optLong("totalTokens", 0L) ?: 0L }?.coerceAtLeast(1L) ?: 1L
+                    for (k in keys) {
+                        val o = ch?.optJSONObject(k) ?: continue
+                        val name = o.optString("name").ifBlank { k.take(6) }
+                        val tok = o.optLong("totalTokens", 0L)
+                        val req = o.optLong("requests", 0L)
+                        Column(Modifier.fillMaxWidth()) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Text(
+                                    name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.width(96.dp),
+                                    maxLines = 1,
+                                )
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(MaterialTheme.colorScheme.surface),
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth((tok.toFloat() / maxTok.toFloat()).coerceIn(0.02f, 1f))
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    req.toString() + (if (zh) " 次 · " else " req · ") + tok + " tok",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    SurfaceNote(
+                        if (zh) "条形按 token 占比；「次」是请求数。数据来自网关内存计数，重启服务后清零。"
+                        else "Bars are relative token usage; counts reset when the gateway restarts.",
+                    )
+                }
             }
         }
 

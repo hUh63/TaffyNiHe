@@ -30,7 +30,7 @@ object VipEntryTool {
             "analyze", ToolClass.EXTRA, heavy = true,
         ) {
             objectSchema(props {
-                "action".oneOf("scan (default) | hook | report", "scan", "hook", "report")
+                "action".oneOf("scan (default) | hook | minimal | report", "scan", "hook", "minimal", "report")
                 "path" str "目标文件：apk / dex（必填）"
                 "pkg" str "包名（hook 脚本里生成 frida 命令用；可空）"
                 "maxFindings" int "最多返回多少条候选（默认 300）"
@@ -67,6 +67,27 @@ object VipEntryTool {
                                 .put("withCallers", withCallers)
                                 .put("findings", findingsJson(result.findings, 40))
                                 .put("next", "把脚本与 frida-server 推到设备后执行上面的命令；命中不理想时先看 report 里的分数分布"),
+                        )
+                    }
+                    "minimal" -> {
+                        // 只 hook 分数最高的 1 个方法：先验证方向对不对，比一次挂 40 个目标更容易读日志
+                        val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
+                        val script = VipEntryScanner.buildMinimalHookScript(pkg, result.findings)
+                        val out = outputFile(file, args.str("outPath"), ".vip_min.js")
+                        out.writeText(script)
+                        val top = result.findings
+                            .filter { it.kind == "METHOD" && it.smaliSig.isNotBlank() }
+                            .maxByOrNull { it.score }
+                        ok(
+                            JSONObject()
+                                .put("action", "minimal")
+                                .put("package", pkg)
+                                .put("scriptPath", out.absolutePath)
+                                .put("bytes", script.length)
+                                .put("target", top?.smaliSig ?: "")
+                                .put("targetJava", top?.javaSig ?: "")
+                                .put("command", "frida -U -f " + pkg.ifBlank { "<pkg>" } + " -l " + out.name + " --no-pause")
+                                .put("next", if (top == null) "没有方法类命中，先跑 action=scan" else "脚本只 hook 这 1 个方法并打印返回值与调用栈；确认是入口后再用 action=hook 生成全量脚本"),
                         )
                     }
                     "report" -> {

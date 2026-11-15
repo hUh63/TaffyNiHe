@@ -296,6 +296,24 @@ internal object EditorCodeIntel {
         }
     }
 
+    /** 标签结束的 '>'，跳过引号内的 `>`（属性值里写 `>` 是合法的）。 */
+    private fun findTagEnd(text: String, start: Int): Int {
+        var j = start + 1
+        var quote = ' '
+        while (j < text.length) {
+            val ch = text[j]
+            if (quote != ' ') {
+                if (ch == quote) quote = ' '
+            } else if (ch == '"' || ch == '\'') {
+                quote = ch
+            } else if (ch == '>') {
+                return j
+            }
+            j++
+        }
+        return -1
+    }
+
     private fun scanXml(text: String, out: MutableList<Diag>, max: Int) {
         val stack = ArrayList<Pair<String, Int>>()
         var i = 0
@@ -316,12 +334,12 @@ internal object EditorCodeIntel {
                 continue
             }
             if (lt + 1 < n && (text[lt + 1] == '?' || text[lt + 1] == '!')) {
-                val end = text.indexOf('>', lt)
+                val end = findTagEnd(text, lt)
                 if (end < 0) break
                 i = end + 1
                 continue
             }
-            val gt = text.indexOf('>', lt)
+            val gt = findTagEnd(text, lt)
             if (gt < 0) { addDiag(out, text, lt, "标签未闭合（缺少 >）", max); break }
             var inner = text.substring(lt + 1, gt).trim()
             val selfClose = inner.endsWith("/")

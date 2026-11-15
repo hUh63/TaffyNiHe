@@ -242,6 +242,29 @@ internal object EditorTextOps {
     /** 清理行尾空白。 */
     fun trimTrailing(text: String): String = text.split('\n').joinToString("\n") { it.trimEnd() }
 
+    /**
+     * 从 [start] 处的 '<' 往后找标签结束的 '>'，跳过引号内的 '>'。
+     *
+     * 直接用 indexOf('>') 会在 `<a b="x > y">` 这种合法属性值上切错位置，
+     * 把标签截成半截——格式化结果看起来"少了个括号"。
+     */
+    private fun findTagEnd(text: String, start: Int): Int {
+        var j = start + 1
+        var quote = ' '
+        while (j < text.length) {
+            val ch = text[j]
+            if (quote != ' ') {
+                if (ch == quote) quote = ' '
+            } else if (ch == '"' || ch == '\'') {
+                quote = ch
+            } else if (ch == '>') {
+                return j
+            }
+            j++
+        }
+        return -1
+    }
+
     /** 标签内部多余空白压成单空格；`<a b="1" >` → `<a b="1">`、`<d />` → `<d/>`。 */
     private fun normalizeTag(tag: String): String =
         tag.replace(Regex("\\s+"), " ").replace(" />", "/>").replace(" >", ">")
@@ -356,13 +379,13 @@ internal object EditorTextOps {
                 continue
             }
             if (text.startsWith("<?", i) || text.startsWith("<!", i)) {
-                val e = text.indexOf('>', i)
+                val e = findTagEnd(text, i)
                 if (e < 0) return null
                 emit(text.substring(i, e + 1), depth)
                 i = e + 1
                 continue
             }
-            val gt = text.indexOf('>', i)
+            val gt = findTagEnd(text, i)
             if (gt < 0) return null
             val tag = text.substring(i, gt + 1)
             val closing = tag.startsWith("</")

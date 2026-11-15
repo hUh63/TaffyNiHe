@@ -140,6 +140,13 @@ class EditorCodeIntelTest {
     }
 
     @Test
+    fun diagnoseXml_handlesGreaterThanInAttribute() {
+        // `>` 出现在属性值里不该被当成标签结束
+        val diags = EditorCodeIntel.diagnose("<a b=\"x > y\"><c/></a>", "XML")
+        assertEquals(0, diags.size)
+    }
+
+    @Test
     fun diagnoseXml_ignoresCommentsAndSelfClosing() {
         val diags = EditorCodeIntel.diagnose("<a><!-- <b> --><c/></a>", "XML")
         assertEquals(0, diags.size)

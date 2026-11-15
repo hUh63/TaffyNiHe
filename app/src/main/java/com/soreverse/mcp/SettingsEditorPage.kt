@@ -1508,11 +1508,18 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 "toggle:guides" -> {
                     showIndentGuides = !showIndentGuides
                     persistBool("editor_indent_guides", showIndentGuides)
-                    appendOut(if (showIndentGuides) "\n[缩进参考线: 开]\n" else "\n[缩进参考线: 关]\n")
+                    appendOut(
+                        when {
+                            !showIndentGuides -> "\n[缩进参考线: 关]\n"
+                            softWrap -> "\n[缩进参考线: 开（需先关闭自动换行才画得出）]\n"
+                            else -> "\n[缩进参考线: 开]\n"
+                        }
+                    )
                 }
                 "toggle:wrap" -> {
                     softWrap = !softWrap
                     persistBool("editor_soft_wrap", softWrap)
+                    if (softWrap) scope.safeLaunch { editorHScroll.scrollTo(0) }
                     appendOut(if (softWrap) "\n[自动换行: 开]\n" else "\n[自动换行: 关（横向滚动）]\n")
                 }
                 "toggle:autoindent" -> {

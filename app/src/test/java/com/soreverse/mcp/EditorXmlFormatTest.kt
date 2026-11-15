@@ -92,6 +92,13 @@ class EditorXmlFormatTest {
     }
 
     @Test
+    fun keepsGreaterThanInsideAttribute() {
+        // 属性值里出现 '>' 是合法的；按 indexOf('>') 切标签会把它切成半截
+        val out = EditorTextOps.formatXml("<a b=\"x > y\"><c/></a>")
+        assertEquals("<a b=\"x > y\">\n  <c/>\n</a>", out)
+    }
+
+    @Test
     fun alreadyFormattedIsStable() {
         val once = EditorTextOps.formatXml("<a><b/></a>")!!
         assertEquals(once, EditorTextOps.formatXml(once))

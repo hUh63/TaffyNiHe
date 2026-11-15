@@ -83,6 +83,21 @@ internal fun SettingsVipScanPage(t: UiText) {
             val copied = withContext(Dispatchers.IO) {
                 runCatching {
                     val name = (uri.lastPathSegment ?: "picked").substringAfterLast('/').ifBlank { "picked" }
+                    // 先清掉上次导入的副本：APK 动辄几百 MB，反复选文件会把 cache 撑爆
+                    runCatching {
+                        context.cacheDir.listFiles { f -> f.isFile && f.name.startsWith("vip_") }
+                            ?.forEach { it.delete() }
+                    }
+                    // 超过 2GB 的包没必要导进来（dexlib2 也扫不动），先查大小再决定
+                    val size = runCatching {
+                        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+                    }.getOrNull() ?: -1L
+                    if (size > 2L * 1024 * 1024 * 1024) {
+                        throw IllegalStateException(
+                            if (zh) "文件过大（>" + (size / 1048576) + "MB），请先用其他工具裁剪"
+                            else "File too large: " + (size / 1048576) + "MB"
+                        )
+                    }
                     val out = File(context.cacheDir, "vip_" + name)
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         out.outputStream().use { output -> input.copyTo(output) }

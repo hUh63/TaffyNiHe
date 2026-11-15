@@ -52,6 +52,21 @@ class EditorCodeIntelTest {
     }
 
     @Test
+    fun autoPair_doesNotWrapHugeSelection() {
+        // 全选（整篇）后输入 `(` 的本意是替换，不能把整个文件包起来
+        val big = (1..300).joinToString("\n") { "line $it" }
+        assertNull(EditorCodeIntel.applyTyped(big, 0, big.length, "(", unit))
+    }
+
+    @Test
+    fun autoPair_wrapsMultilineButSmallSelection() {
+        val text = "a\nb"
+        val r = EditorCodeIntel.applyTyped(text, 0, text.length, "{", unit)
+        assertNotNull(r)
+        assertEquals("{a\nb}", r!!.text)
+    }
+
+    @Test
     fun enter_keepsIndentAndAddsLevelAfterBrace() {
         val r = EditorCodeIntel.applyTyped("    if (a) {", 12, 12, "\n", unit)
         assertNotNull(r)

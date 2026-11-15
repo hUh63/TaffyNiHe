@@ -810,9 +810,12 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             val unitPx = runCatching {
                 textMeasurer.measure("0", monoMeasureStyle, maxLines = 1).size.width
             }.getOrDefault(0)
-            val longest = code.lineSequence().take(20_000).maxOfOrNull { it.length } ?: 0
+            // Tab 在等宽字体里宽度不定，按 4 空格折算；再留 8 字符余量，
+            // 避免差一个字符就折行（一折行，行号就再次错位）。
+            val longest = code.lineSequence().take(20_000)
+                .maxOfOrNull { it.replace("\t", "    ").length } ?: 0
             if (unitPx <= 0) 2400.dp
-            else ((longest.coerceAtLeast(40) + 4) * unitPx / density.density).dp
+            else ((longest.coerceAtLeast(40) + 8) * unitPx / density.density).dp
         }
     }
 
@@ -1818,7 +1821,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                                 lastInputAt = System.currentTimeMillis()
                             },
                             modifier = if (softWrap) Modifier.fillMaxWidth() else Modifier.width(editorContentWidth),
-                            softWrap = softWrap,
                             readOnly = readOnly,
                             textStyle = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = FontFamily.Monospace,

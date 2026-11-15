@@ -13,6 +13,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
@@ -46,7 +47,9 @@ class ShizukuUserService() : IShizukuService.Stub() {
 
     override fun destroy() {
         serviceScope.cancel()
-        runBlocking { serviceScopeJob.join() }
+        // destroy 跑在 binder 线程上：若有一个 execute 正在跑长命令，无上限 join 会把 binder
+        // 线程整段占住（进程销毁看起来像「点了没反应」）。3 秒兜底，之后直接 destroy 进程。
+        runBlocking { withTimeoutOrNull(3_000) { serviceScopeJob.join() } }
         currentProcesses.values.forEach { runCatching { it.destroy() } }
         exitProcess(0)
     }

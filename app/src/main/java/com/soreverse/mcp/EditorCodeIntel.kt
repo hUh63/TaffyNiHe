@@ -25,6 +25,10 @@ internal object EditorCodeIntel {
     /** 开括号 → 闭括号。 */
     private val PAIR = mapOf('(' to ')', '[' to ']', '{' to '}', '"' to '"', '\'' to '\'')
 
+    /** 选区包裹的上限：字符数与行数。超过就按默认行为（替换选区）处理。 */
+    private const val MAX_SURROUND_LEN = 4_000
+    private const val MAX_SURROUND_LINES = 20
+
     /** 这些字符出现在「下一个字符」位置时，说明自动补右括号不会打断已有结构。 */
     private const val SAFE_NEXT = ")]},;:>"
 
@@ -93,9 +97,13 @@ internal object EditorCodeIntel {
         if (!autoPair) return null
         val close = PAIR[c] ?: return null
 
-        // 有选区：用括号把选区包起来（sora 的 surround 行为），光标留在闭合符之后
+        // 有选区：用括号把选区包起来（surround 行为），光标留在闭合符之后。
+        // 但只对「短选区」这么做——全选后输入一个 `(` 的本意是替换全文，
+        // 若也包裹，整个文件会被一对括号包住，这是最难纠正的一类误操作。
         if (lo != hi) {
             val sel = text.substring(lo, hi)
+            val multiline = sel.count { it == '\n' }
+            if (sel.length > MAX_SURROUND_LEN || multiline > MAX_SURROUND_LINES) return null
             val nt = text.substring(0, lo) + c + sel + close + text.substring(hi)
             val pos = lo + 1 + sel.length + 1
             return ApplyResult(nt, pos, pos)

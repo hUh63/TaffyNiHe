@@ -751,6 +751,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     fun replaceAllMatches() {
         if (findQuery.isEmpty()) return
+        val hits = currentMatches().orEmpty().size
         val text = tf.text
         pushUndo(text)
         val newText = if (findRegex) {
@@ -761,6 +762,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             Regex(Regex.escape(findQuery), RegexOption.IGNORE_CASE).replace(text, replaceQuery)
         }
         setCode(newText)
+        appendOut(if (t.zh) "\n[已替换 $hits 处]\n" else "\n[replaced $hits]\n")
     }
 
     fun followCursor() {
@@ -825,6 +827,14 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // 默认关：它是可读性辅助，会多画几千条短线，不希望默认吃掉帧预算。
     var showIndentGuides by remember { mutableStateOf(edPrefs.getBoolean("editor_indent_guides", false)) }
     val guideLines = remember(code) { code.lineSequence().take(2_000).toList() }
+    // 光标所在括号块的行范围：参考线用它把「正在改的那块」画成主色，
+    // 大纲用它显示每个符号的块区间（折叠的可用替代——不改文档内容，只做导航）。
+    val blockLineRange = remember(code, tf.selection.min) {
+        runCatching {
+            val blk = EditorCodeIntel.enclosingBlock(code, tf.selection.min) ?: return@runCatching null
+            EditorTextOps.lineOf(code, blk.first) to EditorTextOps.lineOf(code, blk.second)
+        }.getOrNull()
+    }
 
     // 诊断只覆盖「结构性」问题；>200k 字符的文本跳过——那种体量下每次按键全篇扫描会让光标发涩，
     // 而用户在这种文件里本来也是在找字符串而不是看括号。
@@ -1767,7 +1777,10 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             label = { Text(if (zh) "替换为" else "Replace with", fontSize = AppText.label) },
                         )
                         MiniAction(if (zh) "替换" else "Replace", matchCount.isNotEmpty()) { replaceCurrentMatch() }
-                        MiniAction(if (zh) "全部" else "All", matchCount.isNotEmpty()) { replaceAllMatches() }
+                        MiniAction(
+                            (if (zh) "全部 " else "All ") + matchCount.size,
+                            matchCount.isNotEmpty(),
+                        ) { replaceAllMatches() }
                     }
                 }
             }
@@ -1818,6 +1831,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             val step = charWidthPx * 4f
                             val lineH = with(density) { contentLineHeight.toPx() }
                             val guideColor = edDim.copy(alpha = 0.35f)
+                            val blockColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                            val blockFrom = blockLineRange?.first ?: -1
+                            val blockTo = blockLineRange?.second ?: -1
                             Canvas(Modifier.matchParentSize()) {
                                 // 总量上限：极端文件（2000 行、每行 20 层缩进）会画几万条短线，
                                 // 那种情况下列表本身也没法看，画到 4000 条就够表达"有缩进结构"。
@@ -1831,10 +1847,12 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                                     val levels = indent / 4
                                     if (levels <= 0) continue
                                     val top = idx * lineH
+                                    val lineNo = idx + 1
+                                    val color = if (blockFrom in 1..lineNo && lineNo <= blockTo) blockColor else guideColor
                                     for (j in 1..levels.coerceAtMost(24)) {
                                         val x = j * step
                                         drawLine(
-                                            color = guideColor,
+                                            color = color,
                                             start = androidx.compose.ui.geometry.Offset(x, top + lineH * 0.15f),
                                             end = androidx.compose.ui.geometry.Offset(x, top + lineH * 0.85f),
                                             strokeWidth = 1f,
@@ -2057,6 +2075,18 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         KeyCap("()", enabled = editorBracket != null) {
                             editorBracket?.let { moveCaretTo(it.close) }
                         }
+                    }
+                    item {
+                        val pct = if (!softWrap && editorHScroll.maxValue > 0) {
+                            (editorHScroll.value * 100 / editorHScroll.maxValue)
+                        } else 0
+                        Text(
+                            "↔$pct%",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = edDim,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.width(48.dp),
+                        )
                     }
                     item {
                         KeyCap("⇤", enabled = !softWrap, repeatOnHold = true) {
@@ -2394,9 +2424,19 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             if (outline.isEmpty()) {
                                 InlineHint(if (zh) "未解析到符号（支持 def/class/fun/func/fn/struct/.method 等）" else "No symbols found")
                             } else {
+                                // 每一项的块区间 = 下一项的行号 - 1（遇到同类结束）；没有区间时显示单行。
+                                // 这就是「折叠」在只读导航上的等价物：知道每块多大、点一下就跳过去，
+                                // 而不是改写文档内容（那会破坏 BasicTextField 的 OffsetMapping）。
+                                val sortedOutline = remember(outline) { outline.sortedBy { it.line } }
+                                val outlineEnd = remember(sortedOutline) {
+                                    sortedOutline.mapIndexed { i, it ->
+                                        val next = sortedOutline.getOrNull(i + 1)
+                                        if (next != null && next.kind == it.kind) next.line - 1 else it.line
+                                    }
+                                }
                                 LazyColumn(Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 430.dp)) {
-                                    items(outline.size) { i ->
-                                        val item = outline[i]
+                                    items(sortedOutline.size) { i ->
+                                        val item = sortedOutline[i]
                                         Row(
                                             Modifier
                                                 .fillMaxWidth()
@@ -2415,7 +2455,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                                                 overflow = TextOverflow.Ellipsis,
                                             )
                                             Text(
-                                                ":${item.line}",
+                                                if (outlineEnd[i] > item.line) "L${item.line}-${outlineEnd[i]}" else "L${item.line}",
                                                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )

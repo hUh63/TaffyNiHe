@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.soreverse.mcp.core.EngineProvider
+import com.soreverse.mcp.core.FridaManager
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.mcp.ToolCatalog
@@ -64,6 +66,7 @@ internal fun SettingsVipScanPage(t: UiText) {
     val zh = t.zh
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
 
     var path by rememberSaveable { mutableStateOf("") }
     var pkg by rememberSaveable { mutableStateOf("") }
@@ -72,6 +75,12 @@ internal fun SettingsVipScanPage(t: UiText) {
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var hookPath by remember { mutableStateOf("") }
     var reportPath by remember { mutableStateOf("") }
+    // frida-server 状态：生成 hook 脚本后最常问的就是「现在能直接跑吗」。
+    // 这里只读状态，不替用户启动（启动涉及 root 授权，应由用户在 Frida 页显式操作）。
+    var frida by remember { mutableStateOf<FridaManager.Status?>(null) }
+    LaunchedEffect(Unit) {
+        frida = runCatching { FridaManager.status(context.applicationContext) }.getOrNull()
+    }
 
     // 目标文件选择：dexlib2 需要真实路径，content:// 不能直接喂给扫描器，
     // 所以选完先复制到 cacheDir 再交给工具（大 APK 会占一份临时空间，扫描完可手动清）。
@@ -213,12 +222,33 @@ internal fun SettingsVipScanPage(t: UiText) {
                     )
                 }
                 if (hookPath.isNotBlank()) {
+                    val cmd = "frida -U -f " + pkg.ifBlank { "<pkg>" } + " -l " + hookPath + " --no-pause"
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            cmd,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ToolChip(
+                            label = if (zh) "复制命令" else "Copy cmd",
+                            icon = Icons.Filled.Description,
+                            onClick = {
+                                clipboard.setText(AnnotatedString(cmd))
+                                status = if (zh) "命令已复制，在电脑上粘贴执行" else "Command copied"
+                            },
+                        )
+                    }
+                    val st = frida
                     Text(
-                        if (zh) "frida -U -f ${pkg.ifBlank { "<pkg>" }} -l $hookPath --no-pause"
-                        else "frida -U -f ${pkg.ifBlank { "<pkg>" }} -l $hookPath --no-pause",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.primary,
+                        when {
+                            st == null -> if (zh) "frida-server 状态未知" else "frida-server state unknown"
+                            !st.rootAvailable -> if (zh) "未检测到 root：请在已 root 的设备上运行 frida-server" else "No root detected"
+                            st.running -> (if (zh) "frida-server 运行中 · 端口 " else "frida-server running · port ") + st.port
+                            else -> if (zh) "frida-server 未运行（到 Frida 页启动后再执行命令）" else "frida-server not running"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (st?.running == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

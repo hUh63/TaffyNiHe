@@ -222,6 +222,11 @@ internal object EditorCommands {
         EditorCommand("view.readonly", "只读", "Read only", G_VIEW, icon = Icons.Filled.Lock, isOn = { it.flag("readonly") }) { it.act("toggle:readonly") },
         EditorCommand("view.windowed", "窗口化查看", "Windowed view", G_VIEW, icon = Icons.Filled.AspectRatio, isOn = { it.flag("windowed") }) { it.act("toggle:windowed") },
         EditorCommand("view.keys", "符号键行", "Keys row", G_VIEW, icon = Icons.Filled.Keyboard, isOn = { it.flag("keys") }) { it.act("toggle:keys") },
+        // 打字手感与结构导航（吸收自 sora-editor demo 的行为，不引入它的渲染层）
+        EditorCommand("view.pairs", "自动配对括号", "Auto pairs", G_VIEW, icon = Icons.Filled.Code, isOn = { it.flag("pairs") }) { it.act("toggle:pairs") },
+        EditorCommand("view.autoindent", "自动缩进", "Auto indent", G_VIEW, icon = Icons.Filled.FormatIndentIncrease, isOn = { it.flag("autoindent") }) { it.act("toggle:autoindent") },
+        EditorCommand("nav.bracket", "跳到配对括号", "Jump to match", G_NAV, icon = Icons.Filled.MyLocation) { it.act("nav:bracket") },
+        EditorCommand("nav.block", "选中所在块", "Select block", G_NAV, icon = Icons.Filled.SelectAll) { it.act("nav:block") },
         // ── 代码智能 ──
         EditorCommand("ai.complete", "补全", "Complete", G_AI, icon = Icons.Filled.AutoAwesome, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:complete") },
         EditorCommand("ai.hover", "文档", "Hover doc", G_AI, icon = Icons.Filled.Info, enabled = { it.lang == CodeHighlighter.Lang.PYTHON }) { it.act("ai:hover") },

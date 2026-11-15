@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,11 +72,16 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -149,6 +155,64 @@ private data class OutlineItem(val kind: String, val name: String, val line: Int
 
 /** 保存前的「外部修改」冲突现场（保存时二次校验不通过就弹出三选一对话框）。 */
 private data class SaveConflict(val path: String, val known: FileStamp?, val current: FileStamp?)
+
+/**
+ * 从「旧文本 → 新文本」判断用户刚输入的那一个字符。
+ *
+ * 只在「恰好插入 1 个字符」时返回；多字符（输入法整段提交、粘贴、删除）一律返回 null，
+ * 让自动缩进 / 自动配对直接跳过——否则粘贴一段代码会被逐字符改写。
+ */
+private fun typedSingleChar(old: String, new: String): String? {
+    if (new.length != old.length + 1) return null
+    var i = 0
+    while (i < old.length && old[i] == new[i]) i++
+    return new.substring(i, i + 1)
+}
+
+/**
+ * 在语法高亮结果上叠加两件事：
+ *  - 括号匹配：光标紧邻的括号与它的配对括号加底色（sora-editor 的 bracket highlight 等价物）；
+ *  - 诊断：出错那一行整行浅红底 + 下划线（sora 是画波浪线，Compose 的 SpanStyle 没有波浪，
+ *    用「底色 + 下划线」这种在等宽代码里同样一眼能看见的组合）。
+ *
+ * 只加样式、不改文本长度，因此 OffsetMapping 仍是 Identity。
+ */
+private fun decorateEditorText(
+    base: AnnotatedString,
+    src: String,
+    diags: List<EditorCodeIntel.Diag>,
+    bracket: EditorCodeIntel.BracketMatch?,
+    currentLine: Pair<Int, Int>?,
+    lineColor: Color,
+    bracketColor: Color,
+    errorColor: Color,
+): AnnotatedString {
+    if (diags.isEmpty() && bracket == null && currentLine == null) return base
+    if (src.length > 400_000) return base
+    val b = AnnotatedString.Builder(base)
+    // 先加当前行底色：后加的样式优先级更高，诊断与括号匹配要盖在它上面
+    if (currentLine != null && currentLine.second > currentLine.first) {
+        b.addStyle(SpanStyle(background = lineColor.copy(alpha = 0.06f)), currentLine.first, currentLine.second)
+    }
+    if (bracket != null && bracket.open < src.length && bracket.close < src.length) {
+        val style = SpanStyle(background = bracketColor.copy(alpha = 0.24f), fontWeight = FontWeight.Bold)
+        b.addStyle(style, bracket.open, bracket.open + 1)
+        b.addStyle(style, bracket.close, bracket.close + 1)
+    }
+    for (d in diags.take(20)) {
+        val off = d.offset.coerceIn(0, src.length)
+        val lineStart = if (off == 0) 0 else src.lastIndexOf('\n', off - 1).let { if (it < 0) 0 else it + 1 }
+        var lineEnd = src.indexOf('\n', off)
+        if (lineEnd < 0) lineEnd = src.length
+        if (lineEnd <= lineStart) continue
+        b.addStyle(
+            SpanStyle(background = errorColor.copy(alpha = 0.14f), textDecoration = TextDecoration.Underline),
+            lineStart,
+            lineEnd,
+        )
+    }
+    return b.toAnnotatedString()
+}
 
 /** 语言显示名。 */
 private fun langLabel(m: CodeHighlighter.Lang, zh: Boolean): String = when (m) {
@@ -311,6 +375,7 @@ private fun EditorGutter(
     currentLine: Int,
     marks: Map<Int, EditorDiffMarks.Mark>,
     dim: Color,
+    fontSize: Int = 0,
     onLineClick: (Int) -> Unit,
 ) {
     if (lineCount <= 0 || lineCount > 3000) return
@@ -344,7 +409,10 @@ private fun EditorGutter(
                     i.toString(),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace, fontSize = AppText.label, lineHeight = 19.sp,
+                        fontFamily = FontFamily.Monospace,
+                        // 行号比正文小一号，行高必须与正文完全同源——否则行号与代码错位
+                        fontSize = (if (fontSize > 0) (fontSize - 1).sp else AppText.label),
+                        lineHeight = (if (fontSize > 0) fontSize * 1.5f else 19f).sp,
                     ),
                     color = if (active) MaterialTheme.colorScheme.primary else dim,
                     textAlign = TextAlign.End,
@@ -444,6 +512,14 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var showLineNumbers by remember { mutableStateOf(true) }
     var readOnly by remember { mutableStateOf(false) }
     var showExtraKeys by remember { mutableStateOf(true) }
+    // 「打字手感」开关与字号：与工具条顺序共用 taffy_editor_prefs，重启后保留。
+    // 字号 0 表示跟随主题默认（AppText.bodyStrong），非 0 则是用户显式选的字号。
+    val edPrefs = remember { context.getSharedPreferences("taffy_editor_prefs", Context.MODE_PRIVATE) }
+    var autoPair by remember { mutableStateOf(edPrefs.getBoolean("editor_auto_pair", true)) }
+    var autoIndent by remember { mutableStateOf(edPrefs.getBoolean("editor_auto_indent", true)) }
+    var editorFontSize by remember { mutableStateOf(edPrefs.getInt("editor_font_size", 0)) }
+    fun persistBool(key: String, v: Boolean) = runCatching { edPrefs.edit().putBoolean(key, v).apply() }
+    fun persistInt(key: String, v: Int) = runCatching { edPrefs.edit().putInt(key, v).apply() }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showLangMenu by remember { mutableStateOf(false) }
     // 面板 / 命令面板
@@ -707,6 +783,38 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         pushUndo(tf.text)
         setCodeAt(res.first, res.second)
     }
+
+    /** 缩进单位：Shell/Smali 习惯用 Tab，其它用 4 空格（与 Tab 键帽、命令系统保持一致）。 */
+    val indentUnit = if (mode == CodeHighlighter.Lang.SHELL || mode == CodeHighlighter.Lang.SMALI) "\t" else "    "
+    val contentFontSize = if (editorFontSize in 10..24) editorFontSize.sp else AppText.bodyStrong
+    val contentLineHeight = (contentFontSize.value * 1.5f).sp
+
+    // 诊断只覆盖「结构性」问题；>200k 字符的文本跳过——那种体量下每次按键全篇扫描会让光标发涩，
+    // 而用户在这种文件里本来也是在找字符串而不是看括号。
+    val diagnoseOn = code.length <= 200_000 && mode != CodeHighlighter.Lang.TEXT
+    val editorDiags = remember(code, mode, diagnoseOn) {
+        if (!diagnoseOn) emptyList()
+        else runCatching { EditorCodeIntel.diagnose(code, mode.name) }.getOrDefault(emptyList())
+    }
+    val editorBracket = remember(code, tf.selection.min, diagnoseOn) {
+        if (!diagnoseOn) null else runCatching { EditorCodeIntel.matchBracket(code, tf.selection.min) }.getOrNull()
+    }
+    // 高亮结果按文本缓存：光标移动会让括号高亮变，但语法高亮不必重算——
+    // 这个 cache 放在 visualTransformation 之外，就是为了跨「光标移动」复用。
+    val highlightCache = remember(mode, editorDark) { HashMap<String, AnnotatedString>() }
+    val errorColor = MaterialTheme.colorScheme.error
+    // 当前行高亮：只在没有选区时画——有选区时用户的注意力在选区上，再叠一层底色只会更花。
+    val caretLineRange = remember(code, tf.selection.min, tf.selection.max) {
+        if (tf.selection.min != tf.selection.max) null
+        else {
+            val off = tf.selection.min.coerceIn(0, code.length)
+            val ls = if (off == 0) 0 else code.lastIndexOf('\n', off - 1).let { if (it < 0) 0 else it + 1 }
+            var le = code.indexOf('\n', off)
+            if (le < 0) le = code.length
+            ls to le
+        }
+    }
+    val lineColor = MaterialTheme.colorScheme.primary
 
     fun insertText(s: String) {
         applyTextOp(EditorTextOps.insert(tf.text, tf.selection.min, tf.selection.max, s))
@@ -1329,6 +1437,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             "readonly" -> readOnly
             "windowed" -> viewerMode
             "keys" -> showExtraKeys
+            "pairs" -> autoPair
+            "autoindent" -> autoIndent
             else -> false
         }
 
@@ -1351,6 +1461,28 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 "toggle:readonly" -> readOnly = !readOnly
                 "toggle:windowed" -> viewerMode = !viewerMode
                 "toggle:keys" -> showExtraKeys = !showExtraKeys
+                "toggle:pairs" -> {
+                    autoPair = !autoPair
+                    persistBool("editor_auto_pair", autoPair)
+                    appendOut(if (autoPair) "\n[自动配对括号: 开]\n" else "\n[自动配对括号: 关]\n")
+                }
+                "toggle:autoindent" -> {
+                    autoIndent = !autoIndent
+                    persistBool("editor_auto_indent", autoIndent)
+                    appendOut(if (autoIndent) "\n[自动缩进: 开]\n" else "\n[自动缩进: 关]\n")
+                }
+                "nav:bracket" -> {
+                    val m = editorBracket
+                    if (m == null) appendOut("\n[光标不在括号旁]\n") else moveCaretTo(m.close)
+                }
+                "nav:block" -> {
+                    val blk = EditorCodeIntel.enclosingBlock(tf.text, tf.selection.min)
+                    if (blk == null) appendOut("\n[光标不在括号块内]\n")
+                    else {
+                        tf = TextFieldValue(tf.text, TextRange(blk.first, (blk.second + 1).coerceAtMost(tf.text.length)))
+                        followCursor()
+                    }
+                }
                 "ai:complete" -> requestCompletion("complete")
                 "ai:hover" -> requestCompletion("hover")
                 "ai:defs" -> requestCompletion("defs")
@@ -1618,26 +1750,61 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     }
                 } else {
                     Row(Modifier.fillMaxWidth().verticalScroll(editorScroll).padding(vertical = 6.dp)) {
-                        if (showLineNumbers) EditorGutter(editorLineCount, curLn, marks, edDim) { n -> jumpToLine(n) }
+                        if (showLineNumbers) {
+                            EditorGutter(editorLineCount, curLn, marks, edDim, editorFontSize) { n -> jumpToLine(n) }
+                        }
                         BasicTextField(
                             value = tf,
-                            onValueChange = {
+                            onValueChange = { nv ->
+                                // 只处理「纯插入一个字符」：多字符（输入法整段提交、粘贴）交回默认行为，
+                                // 否则自动缩进会把整段粘贴改得面目全非。
+                                val typed = typedSingleChar(tf.text, nv.text)
+                                val applied = if (!readOnly && typed != null) {
+                                    EditorCodeIntel.applyTyped(
+                                        tf.text,
+                                        tf.selection.min,
+                                        tf.selection.max,
+                                        typed,
+                                        indentUnit,
+                                        autoPair,
+                                        autoIndent,
+                                    )
+                                } else null
                                 pushUndo(tf.text)
-                                tf = it; code = it.text
+                                if (applied != null) {
+                                    tf = TextFieldValue(applied.text, TextRange(applied.caret, applied.selectionEnd))
+                                    code = applied.text
+                                } else {
+                                    tf = nv; code = nv.text
+                                }
                                 lastInputAt = System.currentTimeMillis()
                             },
                             modifier = Modifier.weight(1f),
                             readOnly = readOnly,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp, color = edFg),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = contentFontSize,
+                                lineHeight = contentLineHeight,
+                                color = edFg,
+                            ),
                             cursorBrush = SolidColor(edCursor),
-                            visualTransformation = remember(mode, editorDark) {
-                                val cache = HashMap<String, androidx.compose.ui.text.AnnotatedString>()
+                            visualTransformation = remember(mode, editorDark, editorDiags, editorBracket, caretLineRange, edCursor, errorColor, lineColor) {
                                 VisualTransformation { text ->
                                     val src = text.text
-                                    val ann = cache[src] ?: CodeHighlighter.highlight(src, mode).also {
-                                        if (cache.size > 32) cache.clear()
-                                        cache[src] = it
+                                    val base = highlightCache[src] ?: CodeHighlighter.highlight(src, mode).also {
+                                        if (highlightCache.size > 32) highlightCache.clear()
+                                        highlightCache[src] = it
                                     }
+                                    val ann = decorateEditorText(
+                                        base,
+                                        src,
+                                        editorDiags,
+                                        editorBracket,
+                                        caretLineRange,
+                                        lineColor,
+                                        edCursor,
+                                        errorColor,
+                                    )
                                     androidx.compose.ui.text.input.TransformedText(
                                         ann,
                                         androidx.compose.ui.text.input.OffsetMapping.Identity,
@@ -1782,6 +1949,28 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     }
                     item { KeyCap("⏎") { insertText("\n") } }
                     item { KeyCap("↶", accent = true, enabled = undoStack.isNotEmpty()) { doUndo() } }
+                    item {
+                        KeyCap("A-") {
+                            editorFontSize = (if (editorFontSize == 0) 13 else editorFontSize - 1).coerceIn(10, 24)
+                            persistInt("editor_font_size", editorFontSize)
+                        }
+                    }
+                    item {
+                        KeyCap("A+") {
+                            editorFontSize = (if (editorFontSize == 0) 13 else editorFontSize + 1).coerceIn(10, 24)
+                            persistInt("editor_font_size", editorFontSize)
+                        }
+                    }
+                    item {
+                        KeyCap("()", enabled = editorBracket != null) {
+                            editorBracket?.let { moveCaretTo(it.close) }
+                        }
+                    }
+                    item {
+                        KeyCap("⚠", accent = editorDiags.isNotEmpty(), enabled = editorDiags.isNotEmpty()) {
+                            editorDiags.firstOrNull()?.let { jumpToLine(it.line) }
+                        }
+                    }
                     item { KeyCap("↷", enabled = redoStack.isNotEmpty()) { doRedo() } }
                     item { KeyCap("💾", accent = true) { saveFile() } }
                 }

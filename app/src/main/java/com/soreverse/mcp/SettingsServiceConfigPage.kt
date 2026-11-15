@@ -145,9 +145,21 @@ internal fun SettingsServiceConfigPage(
                 PrimaryActionButton(if (t.zh) "应用" else "Apply", {
                     val next = portText.toIntOrNull()?.coerceIn(1024, 65535) ?: settings.port
                     if (isPortAvailable(next, McpForegroundService.isRunning() && next == settings.port)) {
+                        val wasRunning = McpForegroundService.isRunning()
+                        val changed = next != settings.port
                         settings.port = next
                         portText = next.toString()
                         refreshKey++
+                        // 改端口只写设置不会重绑 socket：正在跑的服务还在旧端口上监听，
+                        // 而页面（和状态文案）已经显示新端口 —— 必须真正重启一次。
+                        if (wasRunning && changed) {
+                            McpForegroundService.restart(context)
+                            Toast.makeText(
+                                context,
+                                if (t.zh) "端口已改为 $next，正在重启服务" else "Port set to $next, restarting",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
                     } else {
                         Toast.makeText(context, if (t.zh) "端口不可用" else "Port unavailable", Toast.LENGTH_SHORT).show()
                     }

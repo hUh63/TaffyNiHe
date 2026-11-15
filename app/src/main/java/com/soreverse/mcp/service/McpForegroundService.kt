@@ -806,6 +806,21 @@ class McpForegroundService : Service() {
             context.startService(Intent(context, McpForegroundService::class.java).setAction(ACTION_STOP))
         }
 
+        /**
+         * 重启服务（端口变更后必须走这里）。
+         *
+         * stop 是异步拆除：后台线程释放 socket 需要时间，紧接着 start 会撞上「旧 socket 仍在本端口
+         * LISTEN」而启动失败。所以等拆除线程结束（最多 3 秒）再启动。
+         */
+        fun restart(context: Context) {
+            stop(context)
+            Thread {
+                runCatching { teardownThread?.join(3000) }
+                runCatching { Thread.sleep(200) }
+                start(context)
+            }.apply { isDaemon = true; name = "mcp-restart" }.start()
+        }
+
         fun refreshFloating(context: Context) {
             context.startService(Intent(context, McpForegroundService::class.java).setAction(ACTION_REFRESH_FLOATING))
         }

@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -61,13 +62,17 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
     val zh = t.zh
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var path by remember { mutableStateOf("") }
-    var displayName by remember { mutableStateOf("") }
+    // 文件与选中类走 rememberSaveable：从会员入口跳过来看完再切走、回来还能接着看
+    var path by rememberSaveable { mutableStateOf("") }
+    var displayName by rememberSaveable { mutableStateOf("") }
+    // 已经解析过的路径：用来在「路径恢复了但类列表（remember）丢了」时补一次解析。
+    // 这个标记刻意不 saveable —— 它必须随进程内重组一起丢，否则切页回来会以为已解析过。
+    var loadedPath by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var classes by remember { mutableStateOf<List<String>>(emptyList()) }
-    var query by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var members by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var memberLoading by remember { mutableStateOf(false) }
     var memberError by remember { mutableStateOf("") }
@@ -83,15 +88,29 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
     var backDest by remember { mutableStateOf<SettingsDest?>(null) }
     val memberListState = rememberLazyListState()
 
+    /**
+     * APK 里的 dex 解到 cacheDir 才能交给 dexlib2（它只吃文件）。
+     *
+     * 两个坑这里都填了：①以前每次调用都重新解压——打开一个类就会把所有 dex 再解一遍，
+     * 大包要等好几秒；现在按「大小 + 源文件 mtime」判断可复用，直接命中缓存。
+     * ②解出来的 dexx_* 从不清理，多 dex 包每个几十 MB，用几次就能把 cacheDir 堆满。
+     */
     fun dexFilesOf(p: String): List<File> {
         val f = File(p)
         require(f.exists()) { if (zh) "文件不存在: $p" else "file not found: $p" }
         if (f.name.lowercase().endsWith(".dex")) return listOf(f)
+        val srcStamp = f.lastModified()
+        // 缓存名必须带来源指纹：两个不同 APK 的 classes.dex 大小完全可能相同，
+        // 只按 entry 名 + 大小判断复用会把 A 的字节当成 B 的 dex。
+        val srcKey = Integer.toHexString((p + ":" + f.length() + ":" + srcStamp).hashCode())
         val out = mutableListOf<File>()
         ZipFile(f).use { zf ->
             zf.entries().toList().filter { it.name.endsWith(".dex") && !it.isDirectory }.forEach { e ->
-                val o = File(context.cacheDir, "dexx_${e.name.replace('/', '_')}")
-                zf.getInputStream(e).use { i -> o.outputStream().use { i.copyTo(it) } }
+                val o = File(context.cacheDir, "dexx_" + srcKey + "_" + e.name.replace('/', '_'))
+                if (!o.isFile || o.length() != e.size || o.lastModified() < srcStamp) {
+                    zf.getInputStream(e).use { i -> o.outputStream().use { i.copyTo(it) } }
+                    runCatching { o.setLastModified(srcStamp) }
+                }
                 out.add(o)
             }
         }
@@ -100,6 +119,12 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
 
     fun load(p: String) {
         if (p.isBlank()) return
+        loadedPath = p
+        // 换文件先释放上一份 dex 副本：缓存文件不带头信息，无法按来源保留，宁可重建
+        runCatching {
+            context.cacheDir.listFiles { fl -> fl.isFile && fl.name.startsWith("dexx_") }
+                ?.forEach { it.delete() }
+        }
         loading = true
         error = ""
         classes = emptyList()
@@ -174,6 +199,11 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
                 loading = false
             }
         }
+    }
+
+    // 切页回来时路径还在、类列表（remember）已经没了：补一次解析，否则页面看起来像空的
+    LaunchedEffect(path) {
+        if (path.isNotBlank() && path != loadedPath && !loading) load(path)
     }
 
     // 跳转请求必须在 load / openClass 之后声明（Kotlin 局部函数先声明后使用）

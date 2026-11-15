@@ -6,13 +6,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import java.io.File
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.AnnotatedString
@@ -67,6 +72,33 @@ internal fun SettingsVipScanPage(t: UiText) {
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var hookPath by remember { mutableStateOf("") }
     var reportPath by remember { mutableStateOf("") }
+
+    // 目标文件选择：dexlib2 需要真实路径，content:// 不能直接喂给扫描器，
+    // 所以选完先复制到 cacheDir 再交给工具（大 APK 会占一份临时空间，扫描完可手动清）。
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.safeLaunch {
+            busy = true
+            status = if (zh) "正在导入文件…" else "Importing…"
+            val copied = withContext(Dispatchers.IO) {
+                runCatching {
+                    val name = (uri.lastPathSegment ?: "picked").substringAfterLast('/').ifBlank { "picked" }
+                    val out = File(context.cacheDir, "vip_" + name)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        out.outputStream().use { output -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("openInputStream returned null")
+                    out.absolutePath
+                }
+            }
+            busy = false
+            copied.onSuccess {
+                path = it
+                status = if (zh) "已导入：$it" else "Imported: $it"
+            }.onFailure {
+                status = (if (zh) "导入失败：" else "Import failed: ") + (it.message ?: it.javaClass.simpleName)
+            }
+        }
+    }
 
     suspend fun callTool(args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         runCatching {
@@ -131,6 +163,12 @@ internal fun SettingsVipScanPage(t: UiText) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ToolChip(
+                        label = if (zh) "选择文件" else "Pick file",
+                        icon = Icons.Filled.FolderOpen,
+                        enabled = !busy,
+                        onClick = { picker.launch(arrayOf("*/*")) },
+                    )
                     ToolChip(
                         label = if (zh) "扫描" else "Scan",
                         icon = Icons.Filled.Search,
@@ -198,6 +236,12 @@ private fun VipCandidates(t: UiText, r: JSONObject) {
     val shown = remember(all, cat) {
         if (cat.isBlank()) all else all.filter { it.optString("category") == cat }
     }
+    var copied by remember { mutableStateOf("") }
+    fun copy(value: String) {
+        if (value.isBlank()) return
+        clipboard.setText(AnnotatedString(value))
+        copied = value
+    }
 
     GlassGroup(title = if (zh) "候选（按分数排序）" else "Candidates (ranked)") {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -241,8 +285,15 @@ private fun VipCandidates(t: UiText, r: JSONObject) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (copied.isNotBlank()) {
+                Text(
+                    (if (zh) "已复制：" else "Copied: ") + copied,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             for (f in shown.take(80)) {
-                VipCandidateRow(f, zh, clipboard)
+                VipCandidateRow(f, zh) { copy(it) }
             }
             if (shown.size > 80) {
                 Text(
@@ -261,11 +312,12 @@ private fun VipCandidates(t: UiText, r: JSONObject) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun VipCandidateRow(
     f: JSONObject,
     zh: Boolean,
-    clipboard: androidx.compose.ui.platform.ClipboardManager,
+    onCopy: (String) -> Unit,
 ) {
     val kind = f.optString("kind")
     val score = f.optInt("score")
@@ -281,7 +333,10 @@ private fun VipCandidateRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(AppShape.sm))
             .background(MaterialTheme.colorScheme.surface)
-            .clickable(enabled = copyText.isNotBlank()) { clipboard.setText(AnnotatedString(copyText)) }
+            .combinedClickable(
+                onClick = { onCopy(copyText) },
+                onLongClick = { onCopy(owner.ifBlank { copyText }) },
+            )
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

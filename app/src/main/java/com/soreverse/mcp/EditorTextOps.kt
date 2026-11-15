@@ -242,6 +242,46 @@ internal object EditorTextOps {
     /** 清理行尾空白。 */
     fun trimTrailing(text: String): String = text.split('\n').joinToString("\n") { it.trimEnd() }
 
+    /** 标签内部多余空白压成单空格；`<a b="1" >` → `<a b="1">`、`<d />` → `<d/>`。 */
+    private fun normalizeTag(tag: String): String =
+        tag.replace(Regex("\\s+"), " ").replace(" />", "/>").replace(" >", ">")
+
+    /**
+     * 拆出标签名与属性列表（引号内的空白不拆）。
+     *
+     * 返回 null 表示这不是一个可拆的开标签（如 `</a>`、`<?pi?>`），调用方按单行原样输出。
+     */
+    private fun splitTag(tag: String): Pair<String, List<String>>? {
+        if (!tag.startsWith("<") || !tag.endsWith(">")) return null
+        if (tag.startsWith("</") || tag.startsWith("<!") || tag.startsWith("<?")) return null
+        var inner = tag.substring(1, tag.length - 1)
+        if (inner.endsWith("/")) inner = inner.dropLast(1)
+        val name = inner.takeWhile { !it.isWhitespace() }
+        if (name.isEmpty()) return null
+        val rest = inner.drop(name.length)
+        val attrs = ArrayList<String>()
+        val sb = StringBuilder()
+        var quote = ' '
+        for (ch in rest) {
+            if (quote != ' ') {
+                sb.append(ch)
+                if (ch == quote) quote = ' '
+            } else if (ch == '"' || ch == '\'') {
+                quote = ch
+                sb.append(ch)
+            } else if (ch.isWhitespace()) {
+                if (sb.isNotEmpty()) {
+                    attrs.add(sb.toString())
+                    sb.setLength(0)
+                }
+            } else {
+                sb.append(ch)
+            }
+        }
+        if (sb.isNotEmpty()) attrs.add(sb.toString())
+        return name to attrs
+    }
+
     /**
      * XML / HTML 缩进格式化（纯 Kotlin，零依赖，可单测）。
      *
@@ -268,6 +308,28 @@ internal object EditorTextOps {
                 if (out.isNotEmpty()) out.append('\n')
             }
             out.append(unit.repeat(d.coerceAtLeast(0))).append(s)
+        }
+
+        // 多行标签输出：属性多或原本就跨行的标签，每个属性一行（APK 解出来的 manifest 就是这种形态，
+        // 压成一行反而更难读）。
+        fun emitOpenTag(tag: String, depth: Int, selfClose: Boolean) {
+            val parsed = splitTag(tag)
+            if (parsed == null) {
+                emit(normalizeTag(tag), depth)
+                return
+            }
+            val (name, attrs) = parsed
+            val total = name.length + attrs.sumOf { it.length + 1 }
+            val multiline = tag.contains('\n') || total > 60
+            if (attrs.isEmpty() || !multiline) {
+                emit(normalizeTag(tag), depth)
+                return
+            }
+            emit("<" + name, depth)
+            attrs.forEachIndexed { idx, a ->
+                out.append('\n').append(unit.repeat(depth)).append(unit).append(a)
+                if (idx == attrs.lastIndex) out.append(if (selfClose) "/>" else ">")
+            }
         }
 
         while (i < n) {
@@ -305,13 +367,11 @@ internal object EditorTextOps {
             val tag = text.substring(i, gt + 1)
             val closing = tag.startsWith("</")
             val selfClose = tag.endsWith("/>")
-            // 标签内部的多余空白压成单空格；`<a b="1" >` → `<a b="1">`、`<d />` → `<d/>`
-            val normalized = tag.replace(Regex("\\s+"), " ").replace(" />", "/>").replace(" >", ">")
             if (closing) {
                 depth = (depth - 1).coerceAtLeast(0)
-                emit(normalized, depth)
+                emit(normalizeTag(tag), depth)
             } else {
-                emit(normalized, depth)
+                emitOpenTag(tag, depth, selfClose)
                 if (!selfClose) depth++
             }
             i = gt + 1

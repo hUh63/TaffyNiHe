@@ -58,6 +58,40 @@ class EditorXmlFormatTest {
     }
 
     @Test
+    fun splitsLongTagIntoOneAttributePerLine() {
+        // APK 里解出来的 manifest 就是这个形态：属性多，压成一行反而难读
+        val src = "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" " +
+            "package=\"com.x.app\" android:versionCode=\"3\">\n<application/>\n</manifest>"
+        val out = EditorTextOps.formatXml(src)!!
+        assertTrue("长标签要拆行", out.contains("<manifest\n"))
+        assertTrue(out.contains("  xmlns:android="))
+        assertTrue(out.contains("  package=\"com.x.app\""))
+        assertTrue("最后一个属性行要以 > 收尾", out.contains("android:versionCode=\"3\">"))
+        assertTrue(out.contains("\n  <application/>"))
+    }
+
+    @Test
+    fun keepsShortTagOnOneLine() {
+        val out = EditorTextOps.formatXml("<a b=\"1\"><c/></a>")
+        assertEquals("<a b=\"1\">\n  <c/>\n</a>", out)
+    }
+
+    @Test
+    fun selfClosingLongTagEndsWithSlash() {
+        val out = EditorTextOps.formatXml(
+            "<item android:name=\"a.very.long.attribute.value.here\" android:value=\"true\"/>"
+        )!!
+        assertTrue(out.contains("<item\n"))
+        assertTrue("自闭合标签最后一行要是 />", out.trimEnd().endsWith("/>"))
+    }
+
+    @Test
+    fun keepsQuotedSpacesInsideAttribute() {
+        val out = EditorTextOps.formatXml("<a b=\"x y\" c=\"z\"/>")
+        assertEquals("<a b=\"x y\" c=\"z\"/>", out)
+    }
+
+    @Test
     fun alreadyFormattedIsStable() {
         val once = EditorTextOps.formatXml("<a><b/></a>")!!
         assertEquals(once, EditorTextOps.formatXml(once))

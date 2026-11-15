@@ -241,6 +241,7 @@ internal object EditorCommands {
         EditorCommand("view.pairs", "自动配对括号", "Auto pairs", G_VIEW, icon = Icons.Filled.Code, isOn = { it.flag("pairs") }) { it.act("toggle:pairs") },
         EditorCommand("view.autoindent", "自动缩进", "Auto indent", G_VIEW, icon = Icons.Filled.FormatIndentIncrease, isOn = { it.flag("autoindent") }) { it.act("toggle:autoindent") },
         EditorCommand("view.wrap", "自动换行", "Word wrap", G_VIEW, icon = Icons.Filled.AspectRatio, isOn = { it.flag("wrap") }) { it.act("toggle:wrap") },
+        EditorCommand("view.guides", "缩进参考线", "Indent guides", G_VIEW, icon = Icons.Filled.FormatIndentIncrease, isOn = { it.flag("guides") }) { it.act("toggle:guides") },
         EditorCommand("nav.bracket", "跳到配对括号", "Jump to match", G_NAV, icon = Icons.Filled.MyLocation) { it.act("nav:bracket") },
         EditorCommand("nav.block", "选中所在块", "Select block", G_NAV, icon = Icons.Filled.SelectAll) { it.act("nav:block") },
         // ── 代码智能 ──

@@ -3,6 +3,7 @@ package com.soreverse.mcp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Context
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -805,19 +806,24 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         fontFamily = FontFamily.Monospace,
         fontSize = contentFontSize,
     )
-    val editorContentWidth: Dp = remember(code, contentFontSize, softWrap, density) {
+    val charWidthPx = remember(contentFontSize) {
+        runCatching { textMeasurer.measure("0", monoMeasureStyle, maxLines = 1).size.width.toFloat() }
+            .getOrDefault(0f)
+    }
+    val editorContentWidth: Dp = remember(code, contentFontSize, softWrap, density, charWidthPx) {
         if (softWrap) Dp.Unspecified else {
-            val unitPx = runCatching {
-                textMeasurer.measure("0", monoMeasureStyle, maxLines = 1).size.width
-            }.getOrDefault(0)
             // Tab 在等宽字体里宽度不定，按 4 空格折算；再留 8 字符余量，
             // 避免差一个字符就折行（一折行，行号就再次错位）。
             val longest = code.lineSequence().take(20_000)
                 .maxOfOrNull { it.replace("\t", "    ").length } ?: 0
-            if (unitPx <= 0) 2400.dp
-            else ((longest.coerceAtLeast(40) + 8) * unitPx / density.density).dp
+            if (charWidthPx <= 0f) 2400.dp
+            else ((longest.coerceAtLeast(40) + 8) * charWidthPx / density.density).dp
         }
     }
+    // 缩进参考线：只在「不折行」时有意义（折行后竖线与文字的相对位置不再逐行对应）。
+    // 默认关：它是可读性辅助，会多画几千条短线，不希望默认吃掉帧预算。
+    var showIndentGuides by remember { mutableStateOf(edPrefs.getBoolean("editor_indent_guides", false)) }
+    val guideLines = remember(code) { code.lineSequence().take(2_000).toList() }
 
     // 诊断只覆盖「结构性」问题；>200k 字符的文本跳过——那种体量下每次按键全篇扫描会让光标发涩，
     // 而用户在这种文件里本来也是在找字符串而不是看括号。
@@ -1470,6 +1476,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             "pairs" -> autoPair
             "autoindent" -> autoIndent
             "wrap" -> softWrap
+            "guides" -> showIndentGuides
             else -> false
         }
 
@@ -1496,6 +1503,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     autoPair = !autoPair
                     persistBool("editor_auto_pair", autoPair)
                     appendOut(if (autoPair) "\n[自动配对括号: 开]\n" else "\n[自动配对括号: 关]\n")
+                }
+                "toggle:guides" -> {
+                    showIndentGuides = !showIndentGuides
+                    persistBool("editor_indent_guides", showIndentGuides)
+                    appendOut(if (showIndentGuides) "\n[缩进参考线: 开]\n" else "\n[缩进参考线: 关]\n")
                 }
                 "toggle:wrap" -> {
                     softWrap = !softWrap
@@ -1794,6 +1806,31 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                                 .weight(1f)
                                 .then(if (softWrap) Modifier else Modifier.horizontalScroll(editorHScroll)),
                         ) {
+                        if (!softWrap && showIndentGuides && charWidthPx > 0f) {
+                            val step = charWidthPx * 4f
+                            val lineH = with(density) { contentLineHeight.toPx() }
+                            val guideColor = edDim.copy(alpha = 0.35f)
+                            Canvas(Modifier.matchParentSize()) {
+                                guideLines.forEachIndexed { idx, line ->
+                                    var indent = 0
+                                    for (ch in line) {
+                                        if (ch == ' ') indent++ else if (ch == '\t') indent += 4 else break
+                                    }
+                                    val levels = indent / 4
+                                    if (levels <= 0) return@forEachIndexed
+                                    val top = idx * lineH
+                                    for (j in 1..levels.coerceAtMost(24)) {
+                                        val x = j * step
+                                        drawLine(
+                                            color = guideColor,
+                                            start = androidx.compose.ui.geometry.Offset(x, top + lineH * 0.15f),
+                                            end = androidx.compose.ui.geometry.Offset(x, top + lineH * 0.85f),
+                                            strokeWidth = 1f,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         BasicTextField(
                             value = tf,
                             onValueChange = { nv ->
@@ -2006,6 +2043,16 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     item {
                         KeyCap("()", enabled = editorBracket != null) {
                             editorBracket?.let { moveCaretTo(it.close) }
+                        }
+                    }
+                    item {
+                        KeyCap("⇤", enabled = !softWrap, repeatOnHold = true) {
+                            scope.safeLaunch { editorHScroll.scrollBy(-320f) }
+                        }
+                    }
+                    item {
+                        KeyCap("⇥", enabled = !softWrap, repeatOnHold = true) {
+                            scope.safeLaunch { editorHScroll.scrollBy(320f) }
                         }
                     }
                     item {

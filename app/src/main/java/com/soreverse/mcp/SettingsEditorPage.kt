@@ -828,6 +828,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var showIndentGuides by remember { mutableStateOf(edPrefs.getBoolean("editor_indent_guides", false)) }
     // 当前块卡片：折叠的第三种形态——不改文档内容，只把块的首尾摆出来
     var blockCardOpen by remember { mutableStateOf(false) }
+    // 多行同列插入（列编辑）：BasicTextField 只有一个光标，真多光标要自绘布局，
+    // 而「这几行同一位置各插一段同样的东西」才是行编辑里天天遇到的需求。
+    var multiInsertOpen by remember { mutableStateOf(false) }
+    var multiInsertText by remember { mutableStateOf("") }
+    var multiInsertAtEnd by remember { mutableStateOf(false) }
     val guideLines = remember(code) { code.lineSequence().take(2_000).toList() }
     // 光标所在括号块的行范围：参考线用它把「正在改的那块」画成主色，
     // 大纲用它显示每个符号的块区间（折叠的可用替代——不改文档内容，只做导航）。
@@ -1544,6 +1549,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     if (m == null) appendOut("\n[光标不在括号旁]\n") else moveCaretTo(m.close)
                 }
                 "nav:blockcard" -> blockCardOpen = true
+                "line:multiinsert" -> multiInsertOpen = true
                 "nav:block" -> {
                     val blk = EditorCodeIntel.enclosingBlock(tf.text, tf.selection.min)
                     if (blk == null) appendOut("\n[光标不在括号块内]\n")
@@ -2472,6 +2478,65 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 }
             }
         }
+    }
+
+    if (multiInsertOpen) {
+        val (rgFrom, rgTo) = EditorTextOps.selectionLineRange(code, tf.selection.min, tf.selection.max)
+        val lineCount = (rgTo - rgFrom + 1).coerceAtLeast(1)
+        AlertDialog(
+            onDismissRequest = { multiInsertOpen = false },
+            title = { Text(if (zh) "多行同列插入" else "Multi-line insert") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (zh) "对选中的 $lineCount 行，在同一列位插入同一段文本（默认对齐到选区里最浅的缩进，空行跳过）。"
+                        else "Insert the same text at one column across $lineCount selected line(s); blank lines are skipped.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = multiInsertText,
+                        onValueChange = { multiInsertText = it },
+                        label = { Text(if (zh) "插入内容" else "Text") },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = !multiInsertAtEnd,
+                            onClick = { multiInsertAtEnd = false },
+                            label = { Text(if (zh) "对齐缩进后" else "After indent") },
+                        )
+                        FilterChip(
+                            selected = multiInsertAtEnd,
+                            onClick = { multiInsertAtEnd = true },
+                            label = { Text(if (zh) "行尾" else "Line end") },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = multiInsertText.isNotEmpty(),
+                    onClick = {
+                        val res = EditorTextOps.insertAtColumn(
+                            code, tf.selection.min, tf.selection.max, multiInsertText, multiInsertAtEnd,
+                        )
+                        host.recordUndo()
+                        host.setText(res.first, res.second)
+                        multiInsertOpen = false
+                        appendOut(
+                            "\n[" + (if (zh) "已在 $lineCount 行同列插入 " else "inserted into $lineCount lines: ") +
+                                multiInsertText + "]\n"
+                        )
+                    },
+                ) { Text(if (zh) "插入" else "Insert") }
+            },
+            dismissButton = {
+                TextButton(onClick = { multiInsertOpen = false }) { Text(if (zh) "取消" else "Cancel") }
+            },
+        )
     }
 
     if (blockCardOpen) {

@@ -28,6 +28,18 @@ internal object EditorBridge {
     val pendingPath = androidx.compose.runtime.mutableStateOf<String?>(null)
 }
 
+/**
+ * 页面间轻量桥：会员入口 / 字符串引用 → DEX 浏览器（打开指定类，并尽量定位到方法）。
+ *
+ * 与 [EditorBridge] 同理必须用 Compose 状态：DEX 浏览器不在返回栈里常驻，
+ * 普通 var 改了不触发重组。带 member 是为了「点调用者直达那个方法」，
+ * 而不是只把类打开让人自己翻。
+ */
+internal object DexJumpBridge {
+    data class Target(val path: String, val classType: String, val member: String = "")
+    val pending = androidx.compose.runtime.mutableStateOf<Target?>(null)
+}
+
 internal data class WorkspaceUi(
     val id: String,
     val name: String,

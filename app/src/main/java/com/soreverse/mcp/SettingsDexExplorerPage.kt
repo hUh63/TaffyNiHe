@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
@@ -20,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,6 +77,10 @@ internal fun SettingsDexExplorerPage(t: UiText) {
     var renameTo by remember { mutableStateOf("") }
     var renameBusy by remember { mutableStateOf(false) }
     var renameMsg by remember { mutableStateOf("") }
+    // 从会员入口 / 字符串引用跳转过来时的目标方法（定位后清空，避免下次打开又跳）
+    var jumpMember by remember { mutableStateOf("") }
+    var jumpNote by remember { mutableStateOf("") }
+    val memberListState = rememberLazyListState()
 
     fun dexFilesOf(p: String): List<File> {
         val f = File(p)
@@ -169,6 +175,29 @@ internal fun SettingsDexExplorerPage(t: UiText) {
         }
     }
 
+    // 跳转请求必须在 load / openClass 之后声明（Kotlin 局部函数先声明后使用）
+    LaunchedEffect(Unit) {
+        val tgt = DexJumpBridge.pending.value ?: return@LaunchedEffect
+        DexJumpBridge.pending.value = null
+        path = tgt.path
+        displayName = File(tgt.path).name
+        jumpMember = tgt.member
+        jumpNote = (if (zh) "从会员入口跳转：" else "Jumped from VIP page: ") +
+            tgt.classType.removePrefix("L").removeSuffix(";").replace('/', '.') +
+            (if (tgt.member.isNotBlank()) "#" + tgt.member else "")
+        load(tgt.path)
+        openClass(tgt.classType)
+    }
+
+    // 成员到位后再滚动定位：openClass 是异步的，直接 scroll 会滚到空列表
+    LaunchedEffect(members) {
+        val m = jumpMember
+        if (m.isBlank() || members.isEmpty()) return@LaunchedEffect
+        val idx = members.indexOfFirst { it.first == "method" && it.second.substringBefore("(") == m }
+        if (idx >= 0) memberListState.scrollToItem(idx)
+        jumpMember = ""
+    }
+
     Column(
         Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -187,6 +216,10 @@ internal fun SettingsDexExplorerPage(t: UiText) {
 
         if (error.isNotBlank()) {
             GlassGroup { InlineHint(error, tone = HintTone.Error) }
+        }
+
+        if (jumpNote.isNotBlank()) {
+            GlassGroup { InlineHint(jumpNote, tone = HintTone.Ok) }
         }
 
         val sel = selected
@@ -227,7 +260,11 @@ internal fun SettingsDexExplorerPage(t: UiText) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LazyColumn(
+                        Modifier.fillMaxWidth().weight(1f),
+                        state = memberListState,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         items(members) { m ->
                             GlassGroup {
                                 DataRow(

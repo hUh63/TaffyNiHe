@@ -119,6 +119,63 @@ internal object EditorTextOps {
         }
     }
 
+    /**
+     * 多行同列插入 —— 「列选择 / 多光标」在单 BasicTextField 里的可行形态。
+     *
+     * 真正的多光标要自绘布局并每帧重建 OffsetMapping，代价极高；而行编辑里绝大多数需求是
+     * 「这几行同一个位置各插一段同样的东西」（批量加属性、批量加修饰符、批量加前缀）。
+     * 这里做成纯函数：对选区覆盖的每一行，按同一规则插入同一段文本。
+     *
+     * @param atEnd true = 追加到每行行尾（行尾空白之前）
+     * @param column >= 0 时忽略 atEnd，固定插在第 column 个字符处（短行用空格补齐）——
+     *              这才是严格意义的列编辑，需要视觉对齐时用
+     * @param skipBlank 跳过空行（默认 true：空行插入会留下一排孤儿符号）
+     * @return (新文本, 新光标偏移)——光标落在改动区间首行行首
+     */
+    fun insertAtColumn(
+        text: String,
+        selStart: Int,
+        selEnd: Int,
+        ins: String,
+        atEnd: Boolean,
+        column: Int = -1,
+        skipBlank: Boolean = true,
+    ): Pair<String, Int> {
+        if (ins.isEmpty()) return text to selStart
+        val lines = text.split('\n')
+        if (lines.isEmpty()) return text to selStart
+        val (from, to) = selectionLineRange(text, selStart, selEnd)
+        val lo = (minOf(from, to) - 1).coerceIn(0, lines.size - 1)
+        val hi = (maxOf(from, to) - 1).coerceIn(0, lines.size - 1)
+        if (lo > hi) return text to selStart
+
+        val out = lines.toMutableList()
+        for (i in lo..hi) {
+            val ln = out[i]
+            if (skipBlank && ln.isBlank()) continue
+            out[i] = when {
+                column >= 0 -> {
+                    val cut = minOf(column, ln.length)
+                    val pad = if (ln.length < column) " ".repeat(column - ln.length) else ""
+                    ln.substring(0, cut) + pad + ins + ln.substring(cut)
+                }
+                // 行尾：插在原行尾空白之前，保持原来的对齐尾巴
+                atEnd -> {
+                    val body = ln.trimEnd()
+                    body + ins + ln.substring(body.length)
+                }
+                // 缩进之后：不动缩进，批量加注解/修饰符就是这个位置
+                else -> {
+                    var k = 0
+                    while (k < ln.length && (ln[k] == ' ' || ln[k] == '\t')) k++
+                    ln.substring(0, k) + ins + ln.substring(k)
+                }
+            }
+        }
+        val nt = out.joinToString("\n")
+        return nt to lineStartOffset(nt, lo + 1)
+    }
+
     /** 上下移动选中行（dy = -1 上移 / +1 下移）；整段搬移，越界则原样返回。 */
     fun moveLines(text: String, selStart: Int, selEnd: Int, dy: Int): Pair<String, Int> {
         val lines = text.split('\n').toMutableList()

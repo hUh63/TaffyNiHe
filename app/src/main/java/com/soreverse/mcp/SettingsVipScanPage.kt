@@ -62,7 +62,7 @@ import org.json.JSONObject
  * 分数只是排序，不是结论——页面底部固定写这句，避免把"高分"当"结论"。
  */
 @Composable
-internal fun SettingsVipScanPage(t: UiText) {
+internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {}) {
     val zh = t.zh
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -129,6 +129,26 @@ internal fun SettingsVipScanPage(t: UiText) {
             val h = ToolCatalog.byName["taffy_vip_entry_scan"] ?: return@runCatching null
             h.handle(ToolContext(context, SettingsStore(context), EngineProvider.get(context), null), args)
         }.getOrNull()
+    }
+
+    /**
+     * 跳到 DEX 浏览器并定位到某个方法。
+     *
+     * 为什么值得做：扫完看到「这个 isVip() 被 MainActivity.onCreate 调用」之后，
+     * 下一步必然是去看那段代码 —— 之前只能自己记住类名、切页、重新选文件、再搜索。
+     * 桥里带上 path 与 member，过去就能直接停在那个类的成员列表上。
+     */
+    fun jumpTo(smaliSig: String) {
+        val target = if (path.isBlank()) "" else path.trim()
+        if (target.isBlank() || smaliSig.isBlank()) {
+            status = if (zh) "没有可定位的目标（先扫描一次）" else "Nothing to jump to (scan first)"
+            return
+        }
+        val cls = smaliSig.substringBefore(";->").let { if (it.startsWith("L")) it else "L" + it }
+        val member = smaliSig.substringAfter(";->", "").substringBefore("(")
+        if (cls.length < 3) return
+        DexJumpBridge.pending.value = DexJumpBridge.Target(target, cls, member)
+        onDest(SettingsDest.DexExplorer)
     }
 
     fun runAction(action: String) {
@@ -256,7 +276,7 @@ internal fun SettingsVipScanPage(t: UiText) {
 
         val r = result
         if (r != null) {
-            VipCandidates(t, r)
+            VipCandidates(t, r, { jumpTo(it) })
         }
     }
 }
@@ -269,7 +289,7 @@ internal fun SettingsVipScanPage(t: UiText) {
  * 想把签名拿去搜/贴到别处（要能一键复制）。
  */
 @Composable
-private fun VipCandidates(t: UiText, r: JSONObject) {
+private fun VipCandidates(t: UiText, r: JSONObject, onJump: (String) -> Unit) {
     val zh = t.zh
     val clipboard = LocalClipboardManager.current
     val arr = r.optJSONArray("findings") ?: JSONArray()
@@ -281,6 +301,11 @@ private fun VipCandidates(t: UiText, r: JSONObject) {
     val shown = remember(all, cat) {
         if (cat.isBlank()) all else all.filter { it.optString("category") == cat }
     }
+    // 分组视图：报告里最有用的结构是「按业务维度分组的命中清单」，
+    // 平铺一列看不出「支付组 3 条 / 权限组 12 条」的分布。折叠状态存成逗号串，
+    // 比 rememberSaveable 存 Set 稳（Bundle 只保证 ArrayList<String>）。
+    var grouped by rememberSaveable { mutableStateOf(false) }
+    var collapsedCats by rememberSaveable { mutableStateOf("") }
     var copied by remember { mutableStateOf("") }
     fun copy(value: String) {
         if (value.isBlank()) return
@@ -307,6 +332,11 @@ private fun VipCandidates(t: UiText, r: JSONObject) {
                         label = { Text(c + " " + n) },
                     )
                 }
+                FilterChip(
+                    selected = grouped,
+                    onClick = { grouped = !grouped },
+                    label = { Text(if (grouped) (if (zh) "分组" else "Grouped") else (if (zh) "平铺" else "Flat")) },
+                )
             }
             if (r.optBoolean("truncated")) {
                 Text(
@@ -337,8 +367,63 @@ private fun VipCandidates(t: UiText, r: JSONObject) {
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            for (f in shown.take(80)) {
-                VipCandidateRow(f, zh) { copy(it) }
+            if (grouped) {
+                val byCat = remember(shown) { shown.groupBy { it.optString("category") } }
+                val collapsedSet = collapsedCats.split(',').filter { it.isNotBlank() }.toSet()
+                for ((c, list) in byCat) {
+                    val open = c !in collapsedSet
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(AppShape.sm))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                val next = if (open) (collapsedSet + c) else (collapsedSet - c)
+                                collapsedCats = next.joinToString(",")
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                if (open) "▼" else "▶",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                c,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                list.size.toString() + (if (zh) " 条 · 最高 " else " · max ") +
+                                    (list.maxOfOrNull { it.optInt("score") } ?: 0),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (open) {
+                            for (f in list.take(40)) {
+                                VipCandidateRow(f, zh, { copy(it) }, { onJump(it) })
+                            }
+                            if (list.size > 40) {
+                                Text(
+                                    if (zh) "仅显示前 40 条（切到平铺或用导出报告看全部）"
+                                    else "First 40 shown — switch to flat view or export the report",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                for (f in shown.take(80)) {
+                    VipCandidateRow(f, zh, { copy(it) }, { onJump(it) })
+                }
             }
             if (shown.size > 80) {
                 Text(
@@ -363,6 +448,7 @@ private fun VipCandidateRow(
     f: JSONObject,
     zh: Boolean,
     onCopy: (String) -> Unit,
+    onJump: (String) -> Unit,
 ) {
     val kind = f.optString("kind")
     val score = f.optInt("score")
@@ -404,6 +490,16 @@ private fun VipCandidateRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            // 「跳过去看」比「复制签名」更接近下一步动作，所以给它独立的点击区而不是长按
+            Text(
+                if (zh) "打开" else "Open",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(AppShape.sm))
+                    .clickable { onJump(copyText) }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
         if (hits != null && hits.length() > 0) {
             Text(
@@ -413,14 +509,32 @@ private fun VipCandidateRow(
             )
         }
         if (callers != null && callers.length() > 0) {
-            Text(
-                if (zh) "← " + (0 until callers.length()).joinToString(", ") { shortMember(callers.optString(it)) }
-                else "← " + (0 until callers.length()).joinToString(", ") { shortMember(callers.optString(it)) },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.tertiary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // 调用者逐个可点：直接落到那个方法所在类（扫完最想知道的就是「谁在用它」）
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "←",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                for (i in 0 until callers.length()) {
+                    val raw = callers.optString(i)
+                    if (raw.isBlank()) continue
+                    Text(
+                        shortMember(raw),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.tertiary,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(AppShape.sm))
+                            .clickable { onJump(raw) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                }
+            }
         }
     }
 }

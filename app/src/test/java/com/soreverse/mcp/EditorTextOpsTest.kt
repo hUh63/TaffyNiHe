@@ -152,4 +152,33 @@ class EditorTextOpsTest {
     fun trimTrailing_onlyTrimsLineEnds() {
         assertEquals("a\nb", EditorTextOps.trimTrailing("a  \nb\t"))
     }
+
+    // ── 多行同列插入（列编辑在单光标编辑器里的落地形态） ──
+
+    @Test
+    fun insertAtColumn_lineEnd_skipsBlankLines() {
+        val src = "a\n\nb"
+        val (out, _) = EditorTextOps.insertAtColumn(src, 0, src.length, "X", atEnd = true)
+        assertEquals("aX\n\nbX", out)
+    }
+
+    @Test
+    fun insertAtColumn_afterIndent_keepsIndent() {
+        val src = "  a\n    b\nc"
+        val (out, _) = EditorTextOps.insertAtColumn(src, 0, src.length, "@", atEnd = false)
+        assertEquals("  @a\n    @b\n@c", out)
+    }
+
+    @Test
+    fun insertAtColumn_fixedColumn_padsShortLines() {
+        val src = "abcdef\nab"
+        val (out, _) = EditorTextOps.insertAtColumn(src, 0, src.length, "|", atEnd = false, column = 4)
+        assertEquals("abcd|ef\nab  |", out)
+    }
+
+    @Test
+    fun insertAtColumn_emptyInsertIsNoop() {
+        val src = "  a"
+        assertEquals(src to 0, EditorTextOps.insertAtColumn(src, 0, src.length, "", atEnd = false))
+    }
 }

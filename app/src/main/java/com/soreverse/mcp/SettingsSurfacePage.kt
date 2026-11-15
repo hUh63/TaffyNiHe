@@ -18,6 +18,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -49,6 +50,8 @@ internal fun SettingsSurfacePage(t: UiText, settings: SettingsStore, onBack: () 
     // 只在这页刷新：快照类数据（网关计数、租约）随时在变，进页读一次 + 手动刷新就够，
     // 不做定时轮询——那会在设置页后台白烧 CPU。
     var tick by remember { mutableIntStateOf(0) }
+    // 清零后的反馈（这一页别的操作都只读，只有一个写动作要给出结果回执）
+    var clearMsg by remember { mutableStateOf("") }
     val gateway = remember(tick) {
         runCatching { AiGatewayServer.snapshot() }.getOrNull() ?: JSONObject()
     }
@@ -99,8 +102,8 @@ internal fun SettingsSurfacePage(t: UiText, settings: SettingsStore, onBack: () 
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
-                    if (zh) "这一页只读汇总，不会改动任何配置。数据来自当前设置项与服务状态。"
-                    else "Read-only summary, no config is changed. Values come from current settings and service state.",
+                    if (zh) "汇总页：配置只读，唯一能改的是清空网关用量计数。数据来自当前设置项与服务状态。"
+                    else "Summary only: config is read-only; the one action here clears gateway usage counters.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -248,6 +251,33 @@ internal fun SettingsSurfacePage(t: UiText, settings: SettingsStore, onBack: () 
                         if (zh) "条形按 token 占比；「次」是请求数。数据来自网关内存计数，重启服务后清零。"
                         else "Bars are relative token usage; counts reset when the gateway restarts.",
                     )
+                }
+                // 计数只增不减会让「这次改动到底省了多少 token」无法回答，
+                // 所以给一个显式清零入口（内存计数，不写盘）。
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    if (clearMsg.isNotBlank()) {
+                        Text(
+                            clearMsg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    TextButton(onClick = {
+                        runCatching { AiGatewayServer.resetStats() }
+                            .onSuccess {
+                                clearMsg = if (zh) "计数已清零" else "Counters cleared"
+                                tick++
+                            }
+                            .onFailure { clearMsg = it.message ?: "failed" }
+                    }) {
+                        Text(if (zh) "清零计数" else "Clear counters")
+                    }
                 }
             }
         }

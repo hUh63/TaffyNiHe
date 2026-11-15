@@ -455,7 +455,7 @@ internal fun SettingsReversePage(
                         6 -> SettingsFridaKitPage(t)
                         7 -> SettingsDexScanPage(t)
                         8 -> SettingsMcpClientPage(t)
-                        else -> SettingsVipScanPage(t)
+                        else -> SettingsVipScanPage(t, onDest)
                     }
                 }
             }

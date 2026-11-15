@@ -189,6 +189,11 @@ internal object EditorCommands {
         EditorCommand("line.sortDesc", "行排序 ↓", "Sort lines Z→A", G_LINE, icon = Icons.AutoMirrored.Filled.Sort, enabled = { it.text.contains('\n') }) { h ->
             writeText(h, EditorTextOps.sortLines(h.text, h.selStart, h.selEnd, desc = true))
         },
+        // 列编辑的可行形态：选中多行 → 在同一个列位插入同一段文本（对齐到最浅缩进）。
+        // 真多光标要自绘布局，这里是「批量加属性/修饰符/前缀」的 90% 场景。
+        EditorCommand("line.multiinsert", "多行同列插入", "Multi-line insert", G_LINE, icon = Icons.Filled.NoteAdd, enabled = { it.text.contains('\n') }) { h ->
+            h.act("line:multiinsert")
+        },
         // ── 大小写 / 格式化 ──
         EditorCommand("case.upper", "转大写", "UPPER", G_CASE, icon = Icons.Filled.TextFields, enabled = { it.hasSelection }) { h ->
             writeText(h, EditorTextOps.changeCase(h.text, h.selStart, h.selEnd, true))

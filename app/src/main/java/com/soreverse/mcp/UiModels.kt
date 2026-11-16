@@ -35,6 +35,23 @@ internal object EditorBridge {
  * 普通 var 改了不触发重组。带 member 是为了「点调用者直达那个方法」，
  * 而不是只把类打开让人自己翻。
  */
+/**
+ * 跨组合常驻的「浏览上下文」。
+ *
+ * 为什么不用 rememberSaveable：它只在 Activity 重建 / 进程恢复时收集值，而设置页之间是
+ * `when(dest)` 直接切换——旧子树离开组合时状态就没了（没有 SaveableStateHolder 包裹）。
+ * 所以「从 DEX 浏览器切走再回来」看到的是一片空白，只能重新选文件。这里用进程内 object
+ * 持有真正的浏览上下文（文件路径 / 选中类 / 搜索词），切回来直接接着看。
+ */
+internal object BrowseMemory {
+    val apkEditPath = androidx.compose.runtime.mutableStateOf("")
+    val gitRepoPath = androidx.compose.runtime.mutableStateOf("")
+    val dexPath = androidx.compose.runtime.mutableStateOf("")
+    val dexDisplayName = androidx.compose.runtime.mutableStateOf("")
+    val dexQuery = androidx.compose.runtime.mutableStateOf("")
+    val dexSelected = androidx.compose.runtime.mutableStateOf<String?>(null)
+}
+
 internal object DexJumpBridge {
     data class Target(
         val path: String,

@@ -145,7 +145,8 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
             return
         }
         val cls = smaliSig.substringBefore(";->").let { if (it.startsWith("L")) it else "L" + it }
-        val member = smaliSig.substringAfter(";->", "").substringBefore("(")
+        // 传完整成员签名（name(params)ret）：同名重载在 DEX 浏览器里才能精确定位到那一个
+        val member = smaliSig.substringAfter(";->", "")
         if (cls.length < 3) return
         DexJumpBridge.pending.value = DexJumpBridge.Target(target, cls, member, origin = SettingsDest.Reverse)
         onDest(SettingsDest.DexExplorer)

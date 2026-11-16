@@ -6,6 +6,7 @@ import com.soreverse.mcp.core.CrashReporter
 import com.soreverse.mcp.core.IntegrityGuard
 import com.soreverse.mcp.core.PermissionManager
 import com.soreverse.mcp.core.SettingsStore
+import com.soreverse.mcp.core.TempFiles
 import com.soreverse.mcp.core.ToolStats
 import com.soreverse.mcp.nativecore.RizinNativeEngine
 import top.wkbin.taixu.TaiXuApplication
@@ -38,6 +39,17 @@ class SoReverseApplication : TaiXuApplication() {
         runCatching { IntegrityGuard.scheduleDeepRecheck(this) }
         if (!integrity.trusted) AppLog.e("Integrity check failed: ${integrity.reason}; expected=${integrity.expected}; actual=${integrity.actual.joinToString()}")
         AppLog.i("SOMCP initialized (toolStatsPersist=${settings.toolStatsPersist})")
+        // cacheDir 清理：各页面「选文件 → 复制到 cache → 交给引擎」的副本名带时间戳/UUID，
+        // 每选一次就多一份且从不删除，多 dex 包与 APK 里的 .so 很容易把 cache 堆到 GB 级。
+        // 后台线程按前缀清理（每个前缀保留最新 1 份），不阻塞启动。
+        runCatching {
+            Thread {
+                runCatching {
+                    val (n, freed) = TempFiles.sweepCache(applicationContext)
+                    if (n > 0) AppLog.i("cache 清理: $n 份临时副本, ${freed / 1048576} MB")
+                }
+            }.apply { isDaemon = true; name = "cache-sweep" }.start()
+        }
         // 启动信息写入应用日志：无系统权限时 Logcat 查看器显示应用日志兜底，保证有内容可看
         runCatching {
             val ver = packageManager.getPackageInfo(packageName, 0)

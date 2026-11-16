@@ -57,7 +57,8 @@ internal fun SettingsApkEditPage(t: UiText) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
 
-    var path by remember { mutableStateOf("") }
+    // 选中的 APK 挂进程内常驻状态：设置页切换会销毁子树，选一次文件不该丢
+    var path by BrowseMemory.apkEditPath
     var displayName by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }

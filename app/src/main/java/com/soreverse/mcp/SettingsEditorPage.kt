@@ -831,8 +831,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // 多行同列插入（列编辑）：BasicTextField 只有一个光标，真多光标要自绘布局，
     // 而「这几行同一位置各插一段同样的东西」才是行编辑里天天遇到的需求。
     var multiInsertOpen by remember { mutableStateOf(false) }
-    var multiInsertText by remember { mutableStateOf("") }
-    var multiInsertAtEnd by remember { mutableStateOf(false) }
+    // 批量加同一个注解/修饰符往往连做几行几次，记住上次输入与落点能省掉重复打字
+    var multiInsertText by remember { mutableStateOf(edPrefs.getString("editor_multi_insert_text", "") ?: "") }
+    var multiInsertAtEnd by remember { mutableStateOf(edPrefs.getBoolean("editor_multi_insert_at_end", false)) }
     val guideLines = remember(code) { code.lineSequence().take(2_000).toList() }
     // 光标所在括号块的行范围：参考线用它把「正在改的那块」画成主色，
     // 大纲用它显示每个符号的块区间（折叠的可用替代——不改文档内容，只做导航）。
@@ -2525,6 +2526,12 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         )
                         host.recordUndo()
                         host.setText(res.first, res.second)
+                        runCatching {
+                            edPrefs.edit()
+                                .putString("editor_multi_insert_text", multiInsertText)
+                                .putBoolean("editor_multi_insert_at_end", multiInsertAtEnd)
+                                .apply()
+                        }
                         multiInsertOpen = false
                         appendOut(
                             "\n[" + (if (zh) "已在 $lineCount 行同列插入 " else "inserted into $lineCount lines: ") +

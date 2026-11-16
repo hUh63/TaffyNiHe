@@ -65,9 +65,12 @@ internal fun SettingsGitPage(t: UiText) {
 
     val distros = remember { LinuxRootfs.distros(context) }
     var distro by remember { mutableStateOf(distros.firstOrNull()?.name ?: "alpine") }
-    var repoPath by remember {
-        mutableStateOf(WorkspacePolicy.workDirPath(context) ?: (context.filesDir.resolve("workspace").absolutePath))
+    // 仓库路径跨组合保留；第一次进来才用工作目录做默认值
+    val defaultRepo = remember {
+        WorkspacePolicy.workDirPath(context) ?: context.filesDir.resolve("workspace").absolutePath
     }
+    var repoPath by BrowseMemory.gitRepoPath
+    if (repoPath.isBlank()) repoPath = defaultRepo
     var repoInput by remember { mutableStateOf(repoPath) }
     var refreshTick by remember { mutableIntStateOf(0) }
     var remoteUrl by rememberSaveable { mutableStateOf("") }

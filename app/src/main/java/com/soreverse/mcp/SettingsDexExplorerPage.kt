@@ -62,17 +62,18 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
     val zh = t.zh
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // 文件与选中类走 rememberSaveable：从会员入口跳过来看完再切走、回来还能接着看
-    var path by rememberSaveable { mutableStateOf("") }
-    var displayName by rememberSaveable { mutableStateOf("") }
+    // 文件 / 选中类 / 搜索词挂在进程内 object 上：设置页是 when(dest) 直接切换，
+    // rememberSaveable 在离开组合时就丢了（没有 SaveableStateHolder），必须用常驻状态。
+    var path by BrowseMemory.dexPath
+    var displayName by BrowseMemory.dexDisplayName
     // 已经解析过的路径：用来在「路径恢复了但类列表（remember）丢了」时补一次解析。
     // 这个标记刻意不 saveable —— 它必须随进程内重组一起丢，否则切页回来会以为已解析过。
     var loadedPath by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var classes by remember { mutableStateOf<List<String>>(emptyList()) }
-    var query by rememberSaveable { mutableStateOf("") }
-    var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    var query by BrowseMemory.dexQuery
+    var selected by BrowseMemory.dexSelected
     var members by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var memberLoading by remember { mutableStateOf(false) }
     var memberError by remember { mutableStateOf("") }
@@ -225,7 +226,11 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
     LaunchedEffect(members) {
         val m = jumpMember
         if (m.isBlank() || members.isEmpty()) return@LaunchedEffect
-        val idx = members.indexOfFirst { it.first == "method" && it.second.substringBefore("(") == m }
+        // 完整签名优先（同名重载时落到那一个），再退化为按方法名匹配
+        val exact = members.indexOfFirst { it.first == "method" && it.second == m }
+        val idx = if (exact >= 0) exact else members.indexOfFirst {
+            it.first == "method" && it.second.substringBefore("(") == m.substringBefore("(")
+        }
         if (idx >= 0) memberListState.scrollToItem(idx)
         jumpMember = ""
     }

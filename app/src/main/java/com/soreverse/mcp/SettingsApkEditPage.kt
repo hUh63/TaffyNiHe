@@ -73,6 +73,8 @@ internal fun SettingsApkEditPage(t: UiText) {
     var xml by remember { mutableStateOf("") }
     var showXml by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf("") }
+    // 已经成功解析过 Manifest 的路径：用来区分「切页回来信息丢了」和「刚选完正在解析」
+    var loadedForPath by remember { mutableStateOf("") }
 
     var newPackage by rememberSaveable { mutableStateOf("") }
     var permInput by rememberSaveable { mutableStateOf("") }
@@ -114,6 +116,7 @@ internal fun SettingsApkEditPage(t: UiText) {
             res.onSuccess { r ->
                 if (r.optBoolean("ok", true) && !r.has("error")) {
                     parse(r)
+                    loadedForPath = path
                     error = ""
                     if (!silent) log = "✓ ${if (zh) "已读取 Manifest" else "manifest loaded"}\n" + log
                 } else {
@@ -182,6 +185,12 @@ internal fun SettingsApkEditPage(t: UiText) {
     }
 
     val hasManifest = packageName.isNotBlank() || xml.isNotBlank()
+
+    // path 是进程内常驻的，packageName/permissions/xml 却是 remember —— 切页回来会变成
+    // 「选中的 APK 还在，Manifest 信息全空」，页面看起来像没选文件。这里补一次读取。
+    LaunchedEffect(path) {
+        if (path.isNotBlank() && path != loadedForPath && !loading) refresh(silent = true)
+    }
 
     Column(
         Modifier

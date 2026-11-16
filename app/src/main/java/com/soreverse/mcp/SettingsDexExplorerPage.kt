@@ -206,7 +206,13 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
 
     // 切页回来时路径还在、类列表（remember）已经没了：补一次解析，否则页面看起来像空的
     LaunchedEffect(path) {
-        if (path.isNotBlank() && path != loadedPath && !loading) load(path)
+        if (path.isNotBlank() && path != loadedPath && !loading) {
+            // selected 是常驻的、members 是 remember：补解析时要把选中的类一起重开，
+            // 否则会显示「已选中 com.x.Y」+「该类无字段/方法」这种自相矛盾的状态。
+            val keepSelected = selected
+            load(path)
+            if (keepSelected != null) openClass(keepSelected)
+        }
     }
 
     // 常驻路径可能已失效（cacheDir 被系统回收、用户删了文件）：进来先校验，失效就退回空态

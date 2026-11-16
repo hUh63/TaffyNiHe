@@ -2,6 +2,7 @@ package com.soreverse.mcp
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
@@ -37,6 +39,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import com.soreverse.mcp.core.EngineProvider
+import com.soreverse.mcp.core.TempFiles
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.mcp.ToolCatalog
 import com.soreverse.mcp.mcp.ToolContext
@@ -124,11 +127,7 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
         // 换文件先释放上一份 dex 副本：缓存文件不带头信息，无法按来源保留，宁可重建。
         // 必须跳过当前这份 —— 选单个 .dex 时传进来的就是 cacheDir 里的 dexx_input_<ts>_<name>，
         // 无差别删除会把它自己删掉，紧接着 dexFilesOf 就报「文件不存在」。
-        runCatching {
-            val keep = File(p).name
-            context.cacheDir.listFiles { fl -> fl.isFile && fl.name.startsWith("dexx_") && fl.name != keep }
-                ?.forEach { it.delete() }
-        }
+        runCatching { TempFiles.sweepCopies(context.cacheDir, "dexx_", File(p).name) }
         loading = true
         error = ""
         classes = emptyList()
@@ -255,6 +254,29 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
                 trailingText = if (zh) "选择" else "Pick",
                 onClick = { pick.launch("*/*") },
             )
+        }
+
+        if (path.isNotBlank()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 常驻路径跨设置页保留，给一个显式退出方式（否则只能靠「选另一个文件」覆盖）
+                ToolChip(
+                    label = if (zh) "清除当前文件" else "Clear file",
+                    icon = Icons.Default.Close,
+                    onClick = {
+                        path = ""
+                        displayName = ""
+                        selected = null
+                        classes = emptyList()
+                        members = emptyList()
+                        error = ""
+                        jumpNote = ""
+                        loadedPath = ""
+                    },
+                )
+            }
         }
 
         if (error.isNotBlank()) {

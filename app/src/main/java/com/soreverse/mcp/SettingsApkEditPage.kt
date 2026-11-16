@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Save
@@ -200,6 +201,29 @@ internal fun SettingsApkEditPage(t: UiText) {
                 trailingText = if (zh) "选择" else "Pick",
                 onClick = { picker.launch(arrayOf("application/vnd.android.package-archive", "*/*")) },
             )
+            if (path.isNotBlank()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // 常驻路径跨设置页保留：给一个显式退出方式，否则只能靠「选另一个 APK」覆盖
+                    ToolChip(
+                        label = if (zh) "清除当前文件" else "Clear file",
+                        icon = Icons.Default.Close,
+                        onClick = {
+                            path = ""
+                            displayName = ""
+                            packageName = ""
+                            versionName = ""
+                            versionCode = ""
+                            permissions = emptyList()
+                            xml = ""
+                            showXml = false
+                            error = ""
+                        },
+                    )
+                }
+            }
         }
 
         if (error.isNotBlank()) {

@@ -69,6 +69,76 @@ class TempFilesTest {
     }
 
     @Test
+    fun sweepDir_keepNamesProtectsTheFileInUse() {
+        // DEX 浏览器场景：选单个 .dex 时传进来的就是 cacheDir 里的 dexx_input_* 副本，
+        // 清理不能把它自己删掉，否则紧接着解析就报「文件不存在」。
+        val root = tmp.newFolder("cache4")
+        val inUse = File(root, "dexx_input_100_classes.dex").apply {
+            writeBytes(ByteArray(3))
+            setLastModified(1_000L)
+        }
+        val leftover = File(root, "dexx_ab12_classes.dex").apply {
+            writeBytes(ByteArray(5))
+            setLastModified(2_000L)
+        }
+
+        val (removed, freed) = TempFiles.sweepDir(
+            root, listOf("dexx_"), keepRecent = 0, keepNames = setOf(inUse.name), minAgeMs = 0,
+        )
+
+        assertEquals(1, removed)
+        assertEquals(5L, freed)
+        assertTrue(inUse.exists())
+        assertFalse(leftover.exists())
+    }
+
+    @Test
+    fun sweepDir_minAgeProtectsFreshFiles() {
+        val root = tmp.newFolder("cache5")
+        val fresh = File(root, "picked_fresh.apk").apply {
+            writeBytes(ByteArray(2))
+            setLastModified(System.currentTimeMillis())
+        }
+        val stale = File(root, "picked_stale.apk").apply {
+            writeBytes(ByteArray(7))
+            setLastModified(System.currentTimeMillis() - 3_600_000L)
+        }
+
+        val (removed, freed) = TempFiles.sweepDir(
+            root, listOf("picked_"), keepRecent = 0, minAgeMs = 600_000L,
+        )
+
+        assertEquals(1, removed)
+        assertEquals(7L, freed)
+        assertTrue(fresh.exists())
+        assertFalse(stale.exists())
+    }
+
+    @Test
+    fun sweepCopies_keepsOnlyTheNamedFile() {
+        val root = tmp.newFolder("cache6")
+        val keep = File(root, "dexx_input_9_a.dex").apply {
+            writeBytes(ByteArray(1))
+            setLastModified(1_000L)
+        }
+        val other1 = File(root, "dexx_input_8_b.dex").apply {
+            writeBytes(ByteArray(1))
+            setLastModified(2_000L)
+        }
+        val other2 = File(root, "dexx_ff_c.dex").apply {
+            writeBytes(ByteArray(1))
+            setLastModified(3_000L)
+        }
+
+        val (removed, _) = TempFiles.sweepCopies(root, "dexx_", keep.name)
+
+        assertEquals(2, removed)
+        assertTrue(keep.exists())
+        assertFalse(other1.exists())
+        assertFalse(other2.exists())
+    }
+
+    @Test
     fun sweepDir_missingRootIsNoop() {
         val (removed, freed) = TempFiles.sweepDir(File(tmp.root, "nope"), listOf("picked_"), 1)
         assertEquals(0, removed)

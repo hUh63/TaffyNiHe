@@ -11,9 +11,12 @@ import java.io.File
  * 从不删除。多 dex APK、APK 里的 `.so` 动辄几十上百 MB，用一段时间 cacheDir 就能堆到 GB 级——
  * 而系统只在「存储不足」时才清 cache，那时用户已经看到写失败或者分析直接失败了。
  *
- * 策略：只清「明确可重建」的前缀，且每个前缀保留最新的 [keepRecent] 份（正在被已打开工作区引用的
- * 通常就是最后一份）。`tunnel_creds.json` / `tunnel_config.yml` / `updates/` / `unidbg` /
- * `flutter-inspect` 这类可能被运行中的服务或未完成的 Blutter 任务持有的，不在名单里。
+ * 策略：只清「明确可重建」的前缀，且
+ *  - 每个前缀保留最新 [keepRecent] 份（正在被已打开工作区引用的通常就是最后一份）；
+ *  - 文件名在 [keepNames] 里的一律不动（调用方正在用的那份）；
+ *  - 太新的不动（[minAgeMs]，防止把「刚创建、还没来得及被引用」的副本删掉）。
+ * `tunnel_creds.json` / `tunnel_config.yml` / `updates/` / `unidbg` / `dexindex` / `dexidx` /
+ * `edbg_decompile_input` 这类固定名或运行中可能持有的，不在默认名单里。
  */
 internal object TempFiles {
 
@@ -36,13 +39,15 @@ internal object TempFiles {
         // 但进程被杀/被回收时 finally 不跑，残留会永远留着（每个目录下是 libapp/libflutter）。
         // 启动时不可能有正在跑的任务，所以回收是安全的。
         "flutter-inspect",
-        // 故意不列入：dexindex / dexidx / edbg_decompile_input / unidbg / flutter-inspect。
-        // 它们都是**固定名的一份**副本，不会堆积；写进名单反而会在启动时把「当前打开工作区
-        // 正在引用的那份」按 keepRecent 删掉，下次用虽然会重建，但那一次读取会拿到空。
+        // 故意不列入：dexindex / dexidx / edbg_decompile_input / unidbg —— 它们都是**固定名的一份**
+        // 副本，不会堆积；写进名单反而会在启动时把「当前打开工作区正在引用的那份」按 keepRecent 删掉。
     )
 
+    /** 年轻文件保护窗：默认 10 分钟。 */
+    const val DEFAULT_MIN_AGE_MS: Long = 10L * 60 * 1000
+
     /**
-     * 按前缀清理 cacheDir，每个前缀保留最新 [keepRecent] 份。
+     * 按前缀清理 cacheDir。
      *
      * @return (删除的份数, 释放的字节数)
      */
@@ -50,22 +55,31 @@ internal object TempFiles {
         context: Context,
         prefixes: List<String> = CACHE_PREFIXES,
         keepRecent: Int = 1,
+        keepNames: Set<String> = emptySet(),
+        minAgeMs: Long = DEFAULT_MIN_AGE_MS,
     ): Pair<Int, Long> {
         val root = runCatching { context.applicationContext.cacheDir }.getOrNull() ?: return 0 to 0L
-        return sweepDir(root, prefixes, keepRecent)
+        return sweepDir(root, prefixes, keepRecent, keepNames, minAgeMs)
     }
 
     /**
      * 纯文件系统版本（可在 JVM 单测里用临时目录跑，不依赖 Android）。
      *
+     * @param keepRecent 每个前缀保留最新的几份
+     * @param keepNames 文件名命中这里的不动（调用方正在用的那份）
+     * @param minAgeMs 修改时间距今不足这个值的文件不动（0 = 不保护；默认 0，生产入口
+     *   [sweepCache] 才带 10 分钟保护窗，单测因此不用等时间）
      * @return (删除的份数, 释放的字节数)
      */
     fun sweepDir(
         root: File,
         prefixes: List<String> = CACHE_PREFIXES,
         keepRecent: Int = 1,
+        keepNames: Set<String> = emptySet(),
+        minAgeMs: Long = 0,
     ): Pair<Int, Long> {
         if (!root.isDirectory) return 0 to 0L
+        val now = System.currentTimeMillis()
         var removed = 0
         var bytes = 0L
         for (prefix in prefixes) {
@@ -73,12 +87,29 @@ internal object TempFiles {
                 root.listFiles { f -> f.name.startsWith(prefix) }?.sortedByDescending { it.lastModified() }
             }.getOrNull() ?: continue
             matches.drop(keepRecent.coerceAtLeast(0)).forEach { f ->
+                if (f.name in keepNames) return@forEach
+                if (minAgeMs > 0 && now - f.lastModified() < minAgeMs) return@forEach
                 bytes += runCatching { if (f.isDirectory) dirSize(f) else f.length() }.getOrDefault(0L)
                 if (runCatching { f.deleteRecursively() }.getOrDefault(false)) removed++
             }
         }
         return removed to bytes
     }
+
+    /**
+     * 只清某个前缀下的「旧副本」，并跳过 [keep] 里指定的文件名。
+     *
+     * DEX 浏览器用它：选单个 `.dex` 时传进来的路径本身就是 cacheDir 里的副本，
+     * 无差别清理会把它自己删掉，紧接着解析就报「文件不存在」。
+     */
+    fun sweepCopies(root: File, prefix: String, keep: String): Pair<Int, Long> =
+        sweepDir(
+            root = root,
+            prefixes = listOf(prefix),
+            keepRecent = 0,
+            keepNames = if (keep.isBlank()) emptySet() else setOf(keep),
+            minAgeMs = 0,
+        )
 
     private fun dirSize(dir: File): Long =
         dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }

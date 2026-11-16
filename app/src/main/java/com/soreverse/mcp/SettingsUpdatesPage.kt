@@ -327,8 +327,10 @@ internal fun SettingsUpdatesPage(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(Modifier.weight(1f))
+                        // 纯展示徽章：disabled 掉点击，否则按下去有水波纹却什么都不发生
                         AssistChip(
                             onClick = {},
+                            enabled = false,
                             label = {
                                 Text(
                                     update.tag,
@@ -339,6 +341,8 @@ internal fun SettingsUpdatesPage(
                             colors = AssistChipDefaults.assistChipColors(
                                 containerColor = accent.copy(alpha = 0.16f),
                                 labelColor = accent,
+                                disabledContainerColor = accent.copy(alpha = 0.16f),
+                                disabledLabelColor = accent,
                             ),
                             border = null,
                         )
@@ -512,6 +516,7 @@ private fun UpdateVersionCard(versionText: String, badge: String?, accent: Color
             val badgeText = badge
             AssistChip(
                 onClick = {},
+                enabled = false,
                 label = {
                     Text(
                         badgeText,
@@ -522,6 +527,8 @@ private fun UpdateVersionCard(versionText: String, badge: String?, accent: Color
                 colors = AssistChipDefaults.assistChipColors(
                     containerColor = accent.copy(alpha = 0.18f),
                     labelColor = accent,
+                    disabledContainerColor = accent.copy(alpha = 0.18f),
+                    disabledLabelColor = accent,
                 ),
                 border = null,
             )

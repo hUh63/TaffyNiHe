@@ -21,8 +21,8 @@ internal object TempFiles {
     val CACHE_PREFIXES: List<String> = listOf(
         "picked_",              // 选择文件的通用副本（分析页、引擎来源）
         "apk_so_",              // APK 里抽出来的 .so
-        "dexindex_src_", "dexindex", "dexidx",   // DEX 索引/编辑工作副本
-        "dexedit_", "rz_open_",                  // 反汇编/编辑输入副本
+        "dexindex_src_",        // DEX 索引的源副本（每次带 nanoTime）
+        "dexedit_", "rz_open_", // 反汇编/编辑输入副本（每次带时间戳）
         "apk_edit_",            // APK 编辑器输入
         "picked-full-backup-", "restore-",       // 备份/恢复临时文件
         "dexx_",                // DEX 浏览器按 entry 解出的 dex
@@ -32,7 +32,9 @@ internal object TempFiles {
         "native-exec-",         // 可执行文件副本
         "import_", "keystore-import-",  // 扩展/密钥导入副本
         "vip_",                 // 会员入口扫描导入副本
-        "edbg_decompile_input", // eDBG 反编译输入
+        // 故意不列入：dexindex / dexidx / edbg_decompile_input / unidbg / flutter-inspect。
+        // 它们都是**固定名的一份**副本，不会堆积；写进名单反而会在启动时把「当前打开工作区
+        // 正在引用的那份」按 keepRecent 删掉，下次用虽然会重建，但那一次读取会拿到空。
     )
 
     /**

@@ -8,9 +8,13 @@
 已经看到写入失败或分析直接失败了。
 
 新增 `TempFiles`：按前缀清理，**每个前缀保留最新 1 份**（正在被已打开工作区引用的通常就是最后一份）。
-覆盖 `picked_` / `apk_so_` / `dexindex*` / `rz_open_` / `apk_edit_` / `dexx_` / `dexinspect_` /
-`taffy_cmd_` / `restore-` / `vip_` 等 19 类前缀，启动时在后台线程跑一次（不阻塞启动，日志里有
-「cache 清理: N 份临时副本, X MB」）。
+覆盖 `picked_` / `apk_so_` / `dexindex_src_` / `dexedit_` / `rz_open_` / `apk_edit_` / `dexx_` /
+`dexinspect_` / `taffy_cmd_` / `restore-` / `vip_` 等 16 类前缀，启动时在后台线程跑一次（不阻塞启动，
+日志里有「cache 清理: N 份临时副本, X MB」）。
+
+**刻意不列入** `dexindex` / `dexidx` / `edbg_decompile_input` / `unidbg` / `flutter-inspect`：
+它们都是固定名的一份副本、不会堆积，写进名单反而会在启动时把「当前打开工作区正在引用的那份」
+按 keepRecent 删掉。
 
 `tunnel_creds.json` / `updates/` / `unidbg` / `flutter-inspect` 这些可能被运行中的服务或未完成的
 任务持有，**不在名单里**。附带 4 条单测（纯文件系统版本 `sweepDir`，用临时目录跑）。

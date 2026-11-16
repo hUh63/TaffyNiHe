@@ -50,6 +50,27 @@ internal object BrowseMemory {
     val dexDisplayName = androidx.compose.runtime.mutableStateOf("")
     val dexQuery = androidx.compose.runtime.mutableStateOf("")
     val dexSelected = androidx.compose.runtime.mutableStateOf<String?>(null)
+
+    /**
+     * 取回上次的文件路径，但**文件已不存在时清空**。
+     *
+     * cacheDir 会被系统回收、用户也会移动/删除文件，常驻路径因此很容易失效；页面如果照旧显示，
+     * 用户点下去只会拿到「文件不存在」。进入页面时校验一次，失效就退回空态（各页有空态提示）。
+     */
+    fun takeExistingPath(state: androidx.compose.runtime.MutableState<String>): String {
+        val p = state.value
+        if (p.isBlank()) return p
+        if (!runCatching { java.io.File(p).isFile }.getOrDefault(false)) state.value = ""
+        return state.value
+    }
+
+    /** 同上，但要求是目录（Git 仓库路径）。 */
+    fun takeExistingDir(state: androidx.compose.runtime.MutableState<String>): String {
+        val p = state.value
+        if (p.isBlank()) return p
+        if (!runCatching { java.io.File(p).isDirectory }.getOrDefault(false)) state.value = ""
+        return state.value
+    }
 }
 
 internal object DexJumpBridge {

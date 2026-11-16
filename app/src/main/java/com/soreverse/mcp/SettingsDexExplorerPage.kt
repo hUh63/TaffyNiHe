@@ -207,6 +207,9 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
         if (path.isNotBlank() && path != loadedPath && !loading) load(path)
     }
 
+    // 常驻路径可能已失效（cacheDir 被系统回收、用户删了文件）：进来先校验，失效就退回空态
+    LaunchedEffect(Unit) { BrowseMemory.takeExistingPath(BrowseMemory.dexPath) }
+
     // 跳转请求必须在 load / openClass 之后声明（Kotlin 局部函数先声明后使用）
     LaunchedEffect(Unit) {
         val tgt = DexJumpBridge.pending.value ?: return@LaunchedEffect

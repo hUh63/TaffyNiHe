@@ -32,6 +32,10 @@ internal object TempFiles {
         "native-exec-",         // 可执行文件副本
         "import_", "keystore-import-",  // 扩展/密钥导入副本
         "vip_",                 // 会员入口扫描导入副本
+        // Blutter 的 scratch（cacheDir/flutter-inspect/<UUID>/）：正常路径有 finally 清理，
+        // 但进程被杀/被回收时 finally 不跑，残留会永远留着（每个目录下是 libapp/libflutter）。
+        // 启动时不可能有正在跑的任务，所以回收是安全的。
+        "flutter-inspect",
         // 故意不列入：dexindex / dexidx / edbg_decompile_input / unidbg / flutter-inspect。
         // 它们都是**固定名的一份**副本，不会堆积；写进名单反而会在启动时把「当前打开工作区
         // 正在引用的那份」按 keepRecent 删掉，下次用虽然会重建，但那一次读取会拿到空。

@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -59,6 +60,8 @@ internal fun SettingsApkEditPage(t: UiText) {
 
     // 选中的 APK 挂进程内常驻状态：设置页切换会销毁子树，选一次文件不该丢
     var path by BrowseMemory.apkEditPath
+    // 文件可能已被删/移走：进来先校验，失效就清空（页面有空态提示）
+    LaunchedEffect(Unit) { BrowseMemory.takeExistingPath(BrowseMemory.apkEditPath) }
     var displayName by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }

@@ -70,6 +70,8 @@ internal fun SettingsGitPage(t: UiText) {
         WorkspacePolicy.workDirPath(context) ?: context.filesDir.resolve("workspace").absolutePath
     }
     var repoPath by BrowseMemory.gitRepoPath
+    // 目录可能已被删：失效就清空，下一行自动回退到默认工作目录
+    LaunchedEffect(Unit) { BrowseMemory.takeExistingDir(BrowseMemory.gitRepoPath) }
     if (repoPath.isBlank()) repoPath = defaultRepo
     var repoInput by remember { mutableStateOf(repoPath) }
     var refreshTick by remember { mutableIntStateOf(0) }
@@ -225,6 +227,19 @@ internal fun SettingsGitPage(t: UiText) {
                     { repoPath = repoInput; refreshTick++ },
                     Modifier.weight(1f),
                     leading = Icons.Filled.Refresh,
+                )
+                // 换了工作目录之后仓库路径不会自动跟过去（那会覆盖用户手填的路径），
+                // 给一个显式的一次性跟随入口，省掉手抄一遍路径。
+                SecondaryActionButton(
+                    if (zh) "跟随工作目录" else "Follow workspace",
+                    {
+                        val ws = runCatching { WorkspacePolicy.workDirPath(context) }.getOrNull()
+                            ?: defaultRepo
+                        repoPath = ws
+                        repoInput = ws
+                        refreshTick++
+                    },
+                    Modifier.weight(1f),
                 )
             }
         }

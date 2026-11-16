@@ -37,7 +37,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -65,8 +64,9 @@ internal fun SettingsPythonPage(t: UiText) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val zh = t.zh
-    val bg = Color(0xFF0B0F14)
-    val fg = Color(0xFFD6E2F0)
+    // 深色代码区配色统一走 TerminalColors（此前与帮助页各写一份同样的十六进制）
+    val bg = TerminalColors.bg
+    val fg = TerminalColors.fg
     val marker = "__TAFFY_END__"
 
     var code by rememberSaveable { mutableStateOf("") }
@@ -249,13 +249,13 @@ internal fun SettingsPythonPage(t: UiText) {
                 value = code,
                 onValueChange = { code = it },
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp),
-                placeholder = { Text(if (zh) "# 在此编写 Python 代码\nprint('hello')\n\n# 变量会在多次运行间保留" else "# write Python here\nprint('hello')\n\n# variables persist across runs", color = Color(0xFF607D8B), fontFamily = FontFamily.Monospace) },
+                placeholder = { Text(if (zh) "# 在此编写 Python 代码\nprint('hello')\n\n# 变量会在多次运行间保留" else "# write Python here\nprint('hello')\n\n# variables persist across runs", color = TerminalColors.dim.copy(alpha = 0.62f), fontFamily = FontFamily.Monospace) },
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp, color = fg),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = bg,
                     unfocusedContainerColor = bg,
                     focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f),
-                    unfocusedBorderColor = Color(0xFF1E2A36),
+                    unfocusedBorderColor = TerminalColors.border,
                 ),
                 shape = RoundedCornerShape(AppShape.md),
             )
@@ -299,14 +299,14 @@ internal fun SettingsPythonPage(t: UiText) {
                     value = replInput,
                     onValueChange = { replInput = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text(if (zh) ">>> 输入表达式（Enter 执行）" else ">>> expression (Enter to run)", color = Color(0xFF90A4AE), fontFamily = FontFamily.Monospace) },
+                    placeholder = { Text(if (zh) ">>> 输入表达式（Enter 执行）" else ">>> expression (Enter to run)", color = TerminalColors.dim, fontFamily = FontFamily.Monospace) },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, color = fg),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = bg,
                         unfocusedContainerColor = bg,
                         focusedBorderColor = AppPalette.teal.copy(alpha = 0.5f),
-                        unfocusedBorderColor = Color(0xFF1E2A36),
+                        unfocusedBorderColor = TerminalColors.border,
                     ),
                     shape = RoundedCornerShape(AppShape.md),
                 )

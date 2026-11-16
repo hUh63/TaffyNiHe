@@ -10,6 +10,15 @@ val releaseKeystoreProperties = Properties().apply {
     if (file.isFile) file.inputStream().use(::load)
 }
 
+// 锁死动态版本：APKEditor 的传递依赖写成 `com.google.guava:guava:[15.0,)`，Gradle 每次构建都要
+// 向每个仓库做一次「版本列表」查询（pivot），既慢又容易撞上镜像抖动——2026-11-16 就因此让
+// package job 的依赖解析失败过。dexlib2 3.0.x 的参考版本是 31.1-jre，钉住即可。
+configurations.configureEach {
+    resolutionStrategy {
+        force("com.google.guava:guava:31.1-jre")
+    }
+}
+
 android {
     // 逆核: namespace(源码包名/JNI 命名空间)保留 com.soreverse.mcp 不动 —— native JNI 函数名
     // 写死 Java_com_soreverse_mcp_...，改了要连 C++ 一起改极易崩且用户看不见。
@@ -26,8 +35,8 @@ android {
         // 太墟移植：convention 插件（build-logic）统一 minSdk=29，太墟模块全部按 Android 10+ 设计
         minSdk = 29
         targetSdk = 36
-        versionCode = 318
-        versionName = "1.5.79"
+        versionCode = 319
+        versionName = "1.5.80"
 
         // 逆核: 禁用 CMake native 编译, 完全使用从原版 SOMCP 提取的预编译 so(在 jniLibs/)。
         // 原因: 我们没有 rizin/lief 的交叉编译产物, CMake 只会产出 stub 桩覆盖真 so。

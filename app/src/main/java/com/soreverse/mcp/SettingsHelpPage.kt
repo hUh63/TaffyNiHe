@@ -22,7 +22,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -42,8 +41,8 @@ internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     // 代码块配色跟随主题（与编辑器 / 日志块一致）：浅色主题下白页里嵌一块纯黑太割裂
     val blockDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val bg = if (blockDark) Color(0xFF0B0F14) else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (blockDark) Color(0xFFD6E2F0) else MaterialTheme.colorScheme.onSurface
+    val bg = if (blockDark) TerminalColors.bg else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (blockDark) TerminalColors.fg else MaterialTheme.colorScheme.onSurface
     var tab by remember { mutableStateOf(0) }   // 0=功能教程 1=实现原理 2=MCP Skill
 
     SettingsScaffold(

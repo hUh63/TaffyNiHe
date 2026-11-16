@@ -91,6 +91,8 @@ internal object TerminalColors {
     val prompt = Color(0xFF4DD0E1)
     val ok = Color(0xFF30D158)
     val err = Color(0xFFFF453A)
+    /** 深色输入框的未聚焦描边（与 bg 同色系，只比底色亮一档）。 */
+    val border = Color(0xFF1E2A36)
 }
 
 /** 复制到系统剪贴板（避免使用已废弃的 Compose Clipboard API）。 */

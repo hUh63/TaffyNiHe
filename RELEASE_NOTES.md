@@ -35,7 +35,15 @@
 `configurations.configureEach { resolutionStrategy { force(...) } }` 钉到 `31.1-jre`（dexlib2 3.0.x
 的参考版本），构建期不再做 pivot 查询。
 
-### 5. 深色代码区配色收敛
+### 5. 修掉一个「自己删自己」的 bug
+
+v1.5.78 给 DEX 浏览器加的 `dexx_*` 清理会**无差别删除**——而「选单个 .dex 文件」时传进来的路径
+本身就是 `cacheDir/dexx_input_<ts>_<name>`：先复制进去、再在 `load()` 里被自己删掉，紧接着
+`dexFilesOf` 就报「文件不存在」。分析单个 dex 必现失败。
+
+现在清理时跳过当前这份文件。
+
+### 6. 深色代码区配色收敛
 
 Python 页与帮助页各自写了一份同样的 `0xFF0B0F14` / `0xFFD6E2F0` / `0xFF1E2A36`。统一走
 `TerminalColors`（新增 `border`），以后调深色代码底色只改一处。

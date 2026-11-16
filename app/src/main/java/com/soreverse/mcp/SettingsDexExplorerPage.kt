@@ -121,9 +121,12 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
     fun load(p: String) {
         if (p.isBlank()) return
         loadedPath = p
-        // 换文件先释放上一份 dex 副本：缓存文件不带头信息，无法按来源保留，宁可重建
+        // 换文件先释放上一份 dex 副本：缓存文件不带头信息，无法按来源保留，宁可重建。
+        // 必须跳过当前这份 —— 选单个 .dex 时传进来的就是 cacheDir 里的 dexx_input_<ts>_<name>，
+        // 无差别删除会把它自己删掉，紧接着 dexFilesOf 就报「文件不存在」。
         runCatching {
-            context.cacheDir.listFiles { fl -> fl.isFile && fl.name.startsWith("dexx_") }
+            val keep = File(p).name
+            context.cacheDir.listFiles { fl -> fl.isFile && fl.name.startsWith("dexx_") && fl.name != keep }
                 ?.forEach { it.delete() }
         }
         loading = true

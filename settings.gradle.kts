@@ -19,10 +19,12 @@ dependencyResolutionManagement {
         maven { url = uri(rootDir.resolve("repo")) }
         google()
         mavenCentral()
+        // jitpack 必须排在 aliyun 之前：APKEditor / smali 这类 com.github.* 依赖只有 jitpack 有，
+        // 而 aliyun 镜像偶发 502 时 Gradle 会把该仓库 disabled 并整体失败（2026-11-16 实测过一次）。
+        maven("https://jitpack.io")
         maven("https://maven.aliyun.com/repository/google")
         maven("https://maven.aliyun.com/repository/public")
         maven("https://maven.aliyun.com/repository/central")
-        maven("https://jitpack.io")
     }
 }
 

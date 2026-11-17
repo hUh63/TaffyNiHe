@@ -33,9 +33,23 @@ internal object OutputPaths {
         if (parent != null && !insideCache) return parent
         val ws = runCatching { WorkspacePolicy.workDirPath(app) }.getOrNull()
         return if (!ws.isNullOrBlank()) {
-            File(ws, "taffy-out/$feature").apply { runCatching { mkdirs() } }
+            File(ws, "taffy-out/$feature").apply { ensureDir(this) }
         } else {
-            File(app.filesDir, feature).apply { runCatching { mkdirs() } }
+            File(app.filesDir, feature).apply { ensureDir(this) }
+        }
+    }
+
+    /**
+     * 建目录，并在其中放一个 `.gitignore`。
+     *
+     * 工作区常常同时是 Git 仓库（Git 页默认就是它），`git add -A` 会把几百 MB 的产物一起提交。
+     * 产物目录自带 ignore 规则就不会污染用户的提交。
+     */
+    private fun ensureDir(dir: File) {
+        runCatching { dir.mkdirs() }
+        val ignore = File(dir, ".gitignore")
+        if (!ignore.isFile) {
+            runCatching { ignore.writeText("*\n!.gitignore\n") }
         }
     }
 

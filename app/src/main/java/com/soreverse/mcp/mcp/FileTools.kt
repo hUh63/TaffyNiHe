@@ -1,5 +1,6 @@
 package com.soreverse.mcp.mcp
 
+import com.soreverse.mcp.core.AtomicWrite
 import com.soreverse.mcp.core.bool
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
@@ -216,7 +217,11 @@ object FileTools {
 
         when (writeMode) {
             "append" -> file.appendBytes(bytes)
-            else -> file.writeBytes(bytes)
+            // 直接 writeBytes 会先把目标截断成 0 字节再写：写到一半被杀进程 / 存储写满，
+            // 得到的是「半截文件」，原内容也没了。改走同目录临时文件 + rename。
+            else -> if (!AtomicWrite.bytes(file, bytes)) {
+                return@EngineToolHandler err("WRITE_FAILED", "写入失败（权限或存储空间不足）", "path", path)
+            }
         }
 
         ok(JSONObject()
@@ -626,10 +631,25 @@ object FileTools {
         val dst = File(a.str("target"))
         if (dst.exists()) {
             if (!a.bool("overwrite", false)) return@EngineToolHandler err("TARGET_EXISTS", "目标已存在", "target", a.str("target"))
-            dst.deleteRecursively()
+            if (!dst.deleteRecursively()) {
+                return@EngineToolHandler err(
+                    "TARGET_DELETE_FAILED", "目标已存在且删除失败（权限或只读）", "target", a.str("target"),
+                )
+            }
         }
         dst.parentFile?.mkdirs()
-        src.copyRecursively(dst, overwrite = true)
+        // copyRecursively 失败只返回 false，不看返回值就是「报了成功其实没复制」——
+        // 上一轮修 batch_rename 时同一个坑，这里补上。
+        var copyFailure: String? = null
+        val copied = src.copyRecursively(dst, overwrite = true) { failed, e ->
+            copyFailure = "${failed.absolutePath}: ${e.javaClass.simpleName}: ${e.message}"
+            OnErrorAction.TERMINATE
+        }
+        if (!copied) {
+            return@EngineToolHandler err(
+                "COPY_FAILED", "复制失败: ${copyFailure ?: "unknown"}", "source", a.str("source"),
+            )
+        }
         ok(JSONObject().put("source", src.absolutePath).put("target", dst.absolutePath).put("isDir", src.isDirectory))
     }
 
@@ -651,7 +671,9 @@ object FileTools {
         if (file.isDirectory && !a.bool("recursive", false) && file.list()?.isNotEmpty() == true) {
             return@EngineToolHandler err("DIR_NOT_EMPTY", "目录非空, 设置 recursive=true 递归删除", "path", a.str("path"))
         }
-        file.deleteRecursively()
+        if (!file.deleteRecursively()) {
+            return@EngineToolHandler err("DELETE_FAILED", "删除失败（权限或只读）", "path", a.str("path"))
+        }
         ok(JSONObject().put("deleted", true).put("path", a.str("path")))
     }
 

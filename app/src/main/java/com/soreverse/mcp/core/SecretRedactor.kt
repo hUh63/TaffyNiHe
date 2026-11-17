@@ -28,8 +28,16 @@ object SecretRedactor {
     /** `password=xxx` / `"api_key": xxx` —— 裸值替换到分隔符为止。 */
     private val PLAIN_VALUE = Regex("""(?i)((?:$KEY_NAMES)\s*[:=]\s*)([^\s,;&}\]\["']+)""")
 
-    /** `Bearer <token>` */
+    /** `Authorization: Bearer <token>`（以及 Basic / Digest / Token / Negotiate）。 */
+    private val AUTH_HEADER = Regex(
+        """(?i)(authorization\s*[:=]\s*)(Bearer|Basic|Digest|Token|Negotiate)\s+[^\s,;&}\]\["']+""",
+    )
+
+    /** 裸 `Bearer <token>`（没有 Authorization 前缀时）。 */
     private val BEARER = Regex("""(?i)Bearer\s+[A-Za-z0-9._~+/=-]{8,}""")
+
+    /** 鉴权方案名本身不是凭据：`Authorization: Bearer [REDACTED]` 不能被二次替换掉。 */
+    private val AUTH_SCHEMES = setOf("bearer", "basic", "digest", "token", "negotiate", "ntlm")
 
     /** 常见平台的 key 前缀。 */
     private val KNOWN_KEY = Regex("""\b(?:sk-[A-Za-z0-9_-]{16,}|sk-ant-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{20,})""")
@@ -53,13 +61,19 @@ object SecretRedactor {
         if (text.isEmpty()) return text
         var s = text
         s = s.replace(PRIVATE_KEY, "[REDACTED PRIVATE KEY]")
+        // 必须排在裸值规则之前：否则 `Authorization: Bearer xxx` 只会把 scheme 当成值脱掉，
+        // token 本身留下来。这套顺序是单测（redactsBearerToken）守住的。
+        s = s.replace(AUTH_HEADER) { m -> "${m.groupValues[1]}${m.groupValues[2]} [REDACTED]" }
         s = s.replace(JSON_VALUE) { m ->
             "${m.groupValues[1]}${m.groupValues[2]}[REDACTED]${m.groupValues[2]}"
         }
         s = s.replace(QUOTED_VALUE) { m ->
             "${m.groupValues[1]}${m.groupValues[2]}[REDACTED]${m.groupValues[2]}"
         }
-        s = s.replace(PLAIN_VALUE) { m -> "${m.groupValues[1]}[REDACTED]" }
+        s = s.replace(PLAIN_VALUE) { m ->
+            val value = m.groupValues[2]
+            if (value.lowercase() in AUTH_SCHEMES) m.value else "${m.groupValues[1]}[REDACTED]"
+        }
         s = s.replace(BEARER, "Bearer [REDACTED]")
         s = s.replace(KNOWN_KEY, "[REDACTED]")
         s = s.replace(URL_CREDENTIAL) { m -> "${m.groupValues[1]}[REDACTED]" }

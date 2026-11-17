@@ -149,7 +149,9 @@ object SafeFileIo {
             }
             if (src.isDirectory) {
                 dst.mkdirs()
-                childrenNoFollow(src).forEach { child ->
+                // 这里刻意用 listFiles() 而不是 childrenNoFollow：链接要被列出来，
+                // 由 walk 开头的 isSymbolicLink 分支记进 skipped —— 否则「跳过了什么」对用户不可见。
+                src.listFiles()?.forEach { child ->
                     walk(child, File(dst, child.name))
                 }
                 return

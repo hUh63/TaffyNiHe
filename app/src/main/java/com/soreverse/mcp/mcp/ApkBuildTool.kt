@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.android.apksig.ApkSigner
+import com.soreverse.mcp.core.OutputPaths
 import com.android.tools.smali.smali.Smali
 import com.android.tools.smali.smali.SmaliOptions
 import com.soreverse.mcp.core.ApkBuildSignerBridge
@@ -122,7 +123,7 @@ object ApkBuildTool {
             if (!input.isFile) return err("FILE_NOT_FOUND", "APK 不存在: $inputPath", "inputApk", inputPath)
             return runCatching {
                 val output = args.str("outputApk").ifBlank {
-                    File(input.parentFile, "${input.nameWithoutExtension}-signed.apk").absolutePath
+                    File(OutputPaths.productDir(ctx.context, input, "apk-sign"), "${input.nameWithoutExtension}-signed.apk").absolutePath
                 }
                 // 签名策略来自设置页「APK 签名设置」：密钥来源 / 签名方案 / V1 文件名
                 val (key, cert) = ApkSigningPolicy.resolveSigner(ctx.context)

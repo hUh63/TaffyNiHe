@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.AesDexDecryptor
+import com.soreverse.mcp.core.OutputPaths
 import com.soreverse.mcp.core.DexFixer
 import com.soreverse.mcp.core.XorDexScanner
 import com.soreverse.mcp.core.err
@@ -137,7 +138,8 @@ object DexAesDecryptTool {
                         if (found.isEmpty()) {
                             result.put("note", "解出来了但没扫到合法 dex：key 对但数据不是 dex（可能是 so/bin），或还需再解一层（XOR/另一层 AES）")
                         } else {
-                            val outDir = File(args.str("outDir").ifBlank { File(file.absoluteFile.parentFile, "aes-dex").absolutePath })
+                            val outDir = args.str("outDir").takeIf { it.isNotBlank() }?.let { File(it) }
+                                ?: OutputPaths.productDir(ctx.context, file, "aes-dex")
                             val written = JSONArray()
                             for (f in found) {
                                 val bytes = XorDexScanner.extract(plain, f) ?: continue
@@ -163,7 +165,8 @@ object DexAesDecryptTool {
                         val data = read(file)
                         val hits = AesDexDecryptor.autoDecrypt(data, args.intValue("maxKeys", 12).coerceIn(1, 24))
                         val arr = JSONArray()
-                        val outDir = File(args.str("outDir").ifBlank { File(file.absoluteFile.parentFile, "aes-dex").absolutePath })
+                        val outDir = args.str("outDir").takeIf { it.isNotBlank() }?.let { File(it) }
+                                ?: OutputPaths.productDir(ctx.context, file, "aes-dex")
                         for (h in hits) {
                             outDir.mkdirs()
                             val out = File(outDir, "${file.nameWithoutExtension}.auto.off${Integer.toHexString(h.entry.offset)}.dex")

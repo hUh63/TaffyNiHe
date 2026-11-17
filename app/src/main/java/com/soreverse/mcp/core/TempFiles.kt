@@ -58,8 +58,37 @@ internal object TempFiles {
         keepNames: Set<String> = emptySet(),
         minAgeMs: Long = DEFAULT_MIN_AGE_MS,
     ): Pair<Int, Long> {
-        val root = runCatching { context.applicationContext.cacheDir }.getOrNull() ?: return 0 to 0L
+        val root = cacheDirOf(context) ?: return 0 to 0L
         return sweepDir(root, prefixes, keepRecent, keepNames, minAgeMs)
+    }
+
+    /**
+     * 取 cacheDir。
+     *
+     * 单独抽出来是为了让「取目录」与「清理策略」分层：策略全部在纯函数 [sweepDir] 里（JVM 单测覆盖），
+     * 这里只剩一次 Android 调用（JVM 单测无法构造 Context，不重复测）。
+     */
+    internal fun cacheDirOf(context: Context): File? =
+        runCatching { context.applicationContext.cacheDir }.getOrNull()
+
+    /**
+     * 限制某个产物目录里同后缀文件的份数。
+     *
+     * 只用于「可再生成的辅助产物」（hook 脚本、报告）。**用户产物（APK、dex）绝不能走这里**——
+     * 删掉用户要的东西比占几 MB 空间严重得多。
+     *
+     * @return 删掉的份数
+     */
+    fun pruneProducts(dir: File?, suffix: String, keepRecent: Int = 20): Int {
+        if (dir == null || !dir.isDirectory) return 0
+        val files = runCatching { dir.listFiles { f -> f.isFile && f.name.endsWith(suffix) } }
+            .getOrNull() ?: return 0
+        if (files.size <= keepRecent) return 0
+        var removed = 0
+        files.sortedByDescending { it.lastModified() }.drop(keepRecent.coerceAtLeast(0)).forEach {
+            if (runCatching { it.delete() }.getOrDefault(false)) removed++
+        }
+        return removed
     }
 
     /**

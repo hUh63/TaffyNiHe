@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.reandroid.apk.ApkModule
+import com.soreverse.mcp.core.TempFiles
 import com.soreverse.mcp.core.VipEntryScanner
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
@@ -56,6 +57,7 @@ object VipEntryTool {
                         val script = VipEntryScanner.buildHookScript(pkg, result.findings)
                         val out = outputFile(ctx, file, args.str("outPath"), ".vip_hook.js")
                         out.writeText(script)
+                        if (args.str("outPath").isBlank()) TempFiles.pruneProducts(out.parentFile, ".vip_hook.js")
                         ok(
                             JSONObject()
                                 .put("action", "hook")
@@ -75,6 +77,7 @@ object VipEntryTool {
                         val script = VipEntryScanner.buildMinimalHookScript(pkg, result.findings)
                         val out = outputFile(ctx, file, args.str("outPath"), ".vip_min.js")
                         out.writeText(script)
+                        if (args.str("outPath").isBlank()) TempFiles.pruneProducts(out.parentFile, ".vip_min.js")
                         val top = result.findings
                             .filter { it.kind == "METHOD" && it.smaliSig.isNotBlank() }
                             .maxByOrNull { it.score }
@@ -95,6 +98,7 @@ object VipEntryTool {
                         val md = VipEntryScanner.buildReport(pkg, result)
                         val out = outputFile(ctx, file, args.str("outPath"), ".vip_report.md")
                         out.writeText(md)
+                        if (args.str("outPath").isBlank()) TempFiles.pruneProducts(out.parentFile, ".vip_report.md")
                         ok(
                             JSONObject()
                                 .put("action", "report")

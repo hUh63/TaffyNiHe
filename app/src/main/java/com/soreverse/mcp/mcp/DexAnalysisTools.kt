@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.android.tools.smali.baksmali.BaksmaliOptions
+import com.soreverse.mcp.core.OutputPaths
 import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.dexlib2.iface.ClassDef
@@ -387,7 +388,10 @@ object DexAnalysisTools {
             if (!dexFile.isFile) return err("FILE_NOT_FOUND", "DEX 不存在: $dexPath", "dexPath", dexPath)
             if (!smaliDirFile.isDirectory) return err("DIR_NOT_FOUND", "smali 目录不存在: $smaliDir", "smaliDir", smaliDir)
 
-            val outPath = args.str("outDex").ifBlank { File(dexFile.parentFile, "out.dex").absolutePath }
+            // 输入在 cacheDir 里时产物要挪到 filesDir，否则重编出来的 dex 会随缓存一起被清
+            val outPath = args.str("outDex").ifBlank {
+                File(OutputPaths.productDir(ctx.context, dexFile, "dex-out"), "out.dex").absolutePath
+            }
             val api = args.intValue("apiLevel", 34)
 
             return runCatching {

@@ -53,6 +53,8 @@ internal object BrowseMemory {
     val vipPath = androidx.compose.runtime.mutableStateOf("")
     val vipPkg = androidx.compose.runtime.mutableStateOf("")
     val dexScanPath = androidx.compose.runtime.mutableStateOf("")
+    val vipHookPath = androidx.compose.runtime.mutableStateOf("")
+    val vipReportPath = androidx.compose.runtime.mutableStateOf("")
 
     /**
      * 统一清理入口。
@@ -75,6 +77,8 @@ internal object BrowseMemory {
     fun clearVip() {
         vipPath.value = ""
         vipPkg.value = ""
+        vipHookPath.value = ""
+        vipReportPath.value = ""
     }
 
     fun clearDexScan() {

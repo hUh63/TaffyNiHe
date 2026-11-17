@@ -74,8 +74,9 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<JSONObject?>(null) }
-    var hookPath by remember { mutableStateOf("") }
-    var reportPath by remember { mutableStateOf("") }
+    // 产物路径也常驻：切页回来还能看到上次生成的脚本与命令（文件在 filesDir/vip-scan 里，不会被缓存回收）
+    var hookPath by BrowseMemory.vipHookPath
+    var reportPath by BrowseMemory.vipReportPath
     // frida-server 状态：生成 hook 脚本后最常问的就是「现在能直接跑吗」。
     // 这里只读状态，不替用户启动（启动涉及 root 授权，应由用户在 Frida 页显式操作）。
     var frida by remember { mutableStateOf<FridaManager.Status?>(null) }
@@ -87,6 +88,11 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
     // 所以选完先复制到 cacheDir 再交给工具（大 APK 会占一份临时空间，扫描完可手动清）。
     // 常驻路径可能已失效（cacheDir 被回收/用户删了文件）：进来先校验，失效就退回空态
     LaunchedEffect(Unit) { BrowseMemory.takeExistingPath(BrowseMemory.vipPath) }
+    // 产物可能被「按数量保留 N 份」回收掉：不存在的路径不该继续显示成可用命令
+    LaunchedEffect(Unit) {
+        BrowseMemory.takeExistingPath(BrowseMemory.vipHookPath)
+        BrowseMemory.takeExistingPath(BrowseMemory.vipReportPath)
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -264,8 +270,6 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
                         onClick = {
                             BrowseMemory.clearVip()
                             status = ""
-                            hookPath = ""
-                            reportPath = ""
                             result = null
                         },
                     )

@@ -181,6 +181,50 @@ class TempFilesTest {
     }
 
     @Test
+    fun pruneProducts_keepsNewestBySuffix() {
+        val dir = tmp.newFolder("products")
+        val old = File(dir, "a.vip_hook.js").apply {
+            writeBytes(ByteArray(2))
+            setLastModified(1_000L)
+        }
+        val mid = File(dir, "b.vip_hook.js").apply {
+            writeBytes(ByteArray(2))
+            setLastModified(2_000L)
+        }
+        val newest = File(dir, "c.vip_hook.js").apply {
+            writeBytes(ByteArray(2))
+            setLastModified(3_000L)
+        }
+        // 别的后缀不能被牵连（同一目录下可能还有报告）
+        val report = File(dir, "a.vip_report.md").apply {
+            writeBytes(ByteArray(2))
+            setLastModified(500L)
+        }
+
+        val removed = TempFiles.pruneProducts(dir, ".vip_hook.js", keepRecent = 2)
+
+        assertEquals(1, removed)
+        assertFalse(old.exists())
+        assertTrue(mid.exists())
+        assertTrue(newest.exists())
+        assertTrue(report.exists())
+    }
+
+    @Test
+    fun pruneProducts_belowLimitTouchesNothing() {
+        val dir = tmp.newFolder("products2")
+        val only = File(dir, "only.vip_min.js").apply {
+            writeBytes(ByteArray(1))
+            setLastModified(1_000L)
+        }
+
+        val removed = TempFiles.pruneProducts(dir, ".vip_min.js", keepRecent = 5)
+
+        assertEquals(0, removed)
+        assertTrue(only.exists())
+    }
+
+    @Test
     fun sweepDir_missingRootIsNoop() {
         val (removed, freed) = TempFiles.sweepDir(File(tmp.root, "nope"), listOf("picked_"), 1)
         assertEquals(0, removed)

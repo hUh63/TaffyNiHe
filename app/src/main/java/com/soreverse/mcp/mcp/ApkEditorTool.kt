@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.reandroid.apkeditor.compile.BuildOptions
+import com.soreverse.mcp.core.OutputPaths
 import com.reandroid.apkeditor.decompile.DecompileOptions
 import com.reandroid.apkeditor.merge.MergerOptions
 import com.reandroid.apkeditor.refactor.RefactorOptions
@@ -170,7 +171,8 @@ object ApkEditorTool {
             return try {
                 val signer = ApkSigningPolicy.resolveSigner(ctx.context) ?: return null
                 val dest = if (outPath != null) File(outPath)
-                    else File(apk.parentFile, "${apk.nameWithoutExtension}-signed.apk")
+                    // 输入若是 cacheDir 里的副本，产物不能跟着落进 cache（会被回收清掉）
+                    else File(OutputPaths.productDir(ctx.context, apk, "apk-sign"), "${apk.nameWithoutExtension}-signed.apk")
                 val (v1, v2, v3) = ApkSigningPolicy.schemeFlags(ctx.context)
                 val v1Name = ApkSigningPolicy.v1SignerName(ctx.context)
                 val cfgBuilder = com.android.apksig.ApkSigner.SignerConfig.Builder(v1Name, signer.first, listOf(signer.second))

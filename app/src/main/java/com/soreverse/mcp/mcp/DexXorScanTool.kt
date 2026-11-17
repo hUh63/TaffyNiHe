@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.DexFixer
+import com.soreverse.mcp.core.OutputPaths
 import com.soreverse.mcp.core.XorDexScanner
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
@@ -75,7 +76,7 @@ object DexXorScanTool {
                         "changes" to JSONArray().apply { for (c in report.changes) put(c) })
                 }
                 val outPath = args.str("outPath").ifBlank {
-                    File(file.absoluteFile.parentFile, file.nameWithoutExtension + ".fixed.dex").absolutePath
+                    File(OutputPaths.productDir(ctx.context, file, "dex-recovered"), file.nameWithoutExtension + ".fixed.dex").absolutePath
                 }
                 val out = File(outPath)
                 out.parentFile?.mkdirs()
@@ -96,7 +97,7 @@ object DexXorScanTool {
             val maxHits = args.intValue("maxHits", 32).coerceIn(1, 500)
             val outDir = if (action == "extract") {
                 val d = args.str("outDir")
-                if (d.isBlank()) File(file.absoluteFile.parentFile, "dex-recovered") else File(d)
+                if (d.isBlank()) OutputPaths.productDir(ctx.context, file, "dex-recovered") else File(d)
             } else null
 
             return runCatching {

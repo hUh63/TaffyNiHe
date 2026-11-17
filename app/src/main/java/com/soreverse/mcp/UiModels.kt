@@ -90,6 +90,9 @@ internal object BrowseMemory {
     fun takeExistingPath(state: androidx.compose.runtime.MutableState<String>): String {
         val p = state.value
         if (p.isBlank()) return p
+        // 只校验本地绝对路径：content:// / file:// 之类交给各工具自己报「不支持」，
+        // 在这里悄悄清掉会把用户手输的东西弄没
+        if (!p.startsWith("/")) return p
         if (!runCatching { java.io.File(p).isFile }.getOrDefault(false)) state.value = ""
         return state.value
     }
@@ -98,6 +101,7 @@ internal object BrowseMemory {
     fun takeExistingDir(state: androidx.compose.runtime.MutableState<String>): String {
         val p = state.value
         if (p.isBlank()) return p
+        if (!p.startsWith("/")) return p
         if (!runCatching { java.io.File(p).isDirectory }.getOrDefault(false)) state.value = ""
         return state.value
     }

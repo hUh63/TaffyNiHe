@@ -121,6 +121,8 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
             busy = false
             copied.onSuccess {
                 path = it
+                // 换文件后包名必须重猜：留着上一个 APK 的包名会让生成的 frida 命令指向别的应用
+                pkg = ""
                 status = if (zh) "已导入：$it" else "Imported: $it"
             }.onFailure {
                 status = (if (zh) "导入失败：" else "Import failed: ") + (it.message ?: it.javaClass.simpleName)

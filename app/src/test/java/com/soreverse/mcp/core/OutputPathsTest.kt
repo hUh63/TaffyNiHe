@@ -1,60 +1,69 @@
 package com.soreverse.mcp.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** OutputPaths 的判定逻辑（不碰 Android API：Context 入口是薄壳，核心在 resolveDir）。 */
+/**
+ * OutputPaths 的两步判定（不碰 Android API：Context 入口是薄壳，判定全在 isInsideCache / productRoot）。
+ */
 class OutputPathsTest {
 
     @get:Rule
     val tmp = TemporaryFolder()
 
     @Test
-    fun resolveDir_inputInsideCacheGoesToFilesDir() {
+    fun isInsideCache_fileDirectlyInCache() {
         val cache = tmp.newFolder("cache")
-        val files = tmp.newFolder("files")
-        val input = File(cache, "picked_apk.apk")
 
-        val dir = OutputPaths.resolveDir(input.parentFile, cache.canonicalPath, files, "apk-sign")
-
-        assertEquals(File(files, "apk-sign").canonicalPath, dir.canonicalPath)
+        assertTrue(OutputPaths.isInsideCache(File(cache, "picked_apk.apk").parentFile, cache.canonicalPath))
     }
 
     @Test
-    fun resolveDir_inputInWorkspaceStaysNextToIt() {
-        val workspace = tmp.newFolder("workspace")
-        val cache = tmp.newFolder("cache2")
-        val files = tmp.newFolder("files2")
-        val input = File(workspace, "app.apk")
+    fun isInsideCache_nestedFolderUnderCache() {
+        val cache = tmp.newFolder("cache")
+        val nested = File(cache, "picked/deep").apply { mkdirs() }
 
-        val dir = OutputPaths.resolveDir(input.parentFile, cache.canonicalPath, files, "apk-sign")
-
-        assertEquals(workspace.canonicalPath, dir.canonicalPath)
+        assertTrue(OutputPaths.isInsideCache(nested, cache.canonicalPath))
     }
 
     @Test
-    fun resolveDir_noParentGoesToFilesDir() {
-        val files = tmp.newFolder("files3")
-
-        val dir = OutputPaths.resolveDir(null, null, files, "dex-out")
-
-        assertEquals(File(files, "dex-out").canonicalPath, dir.canonicalPath)
-    }
-
-    @Test
-    fun resolveDir_siblingOfCacheIsNotTreatedAsInside() {
+    fun isInsideCache_siblingNamedCacheExtraIsNotInside() {
         // 前缀判断不能只看 startsWith("cache")：/data/.../cache-extra 不在 cache 里
         val root = tmp.newFolder("app")
         val cache = File(root, "cache").apply { mkdirs() }
         val cacheExtra = File(root, "cache-extra").apply { mkdirs() }
-        val files = File(root, "files").apply { mkdirs() }
-        val input = File(cacheExtra, "a.apk")
 
-        val dir = OutputPaths.resolveDir(input.parentFile, cache.canonicalPath, files, "dex-out")
+        assertFalse(OutputPaths.isInsideCache(cacheExtra, cache.canonicalPath))
+    }
 
-        assertEquals(cacheExtra.canonicalPath, dir.canonicalPath)
+    @Test
+    fun isInsideCache_falseWithoutParentOrCache() {
+        val cache = tmp.newFolder("cache")
+
+        assertFalse(OutputPaths.isInsideCache(null, cache.canonicalPath))
+        assertFalse(OutputPaths.isInsideCache(tmp.newFolder("ws"), null))
+    }
+
+    @Test
+    fun productRoot_usesWorkspaceTaffyOut() {
+        val ws = tmp.newFolder("workspace")
+        val files = tmp.newFolder("files")
+
+        val root = OutputPaths.productRoot(ws.canonicalPath, files)
+
+        assertEquals(File(ws, OutputPaths.OUTPUT_ROOT).canonicalPath, root.canonicalPath)
+    }
+
+    @Test
+    fun productRoot_fallsBackToFilesDirWhenNoWorkspace() {
+        val files = tmp.newFolder("files")
+
+        assertEquals(files.canonicalPath, OutputPaths.productRoot(null, files).canonicalPath)
+        assertEquals(files.canonicalPath, OutputPaths.productRoot("   ", files).canonicalPath)
     }
 }

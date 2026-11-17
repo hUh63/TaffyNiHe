@@ -55,6 +55,9 @@ internal data class RikkaTool(
 
 internal class RikkaAgentEngine(
     private val client: OkHttpClient,
+
+    /** 本轮内「猜错工具名」的计数（run() 开始时清空）。 */
+    private val unknownToolAttempts = HashMap<String, Int>()
     private val provider: String,
     private val endpoint: String,
     private val apiKey: String,
@@ -90,6 +93,8 @@ internal class RikkaAgentEngine(
         onCheckpoint: (suspend (List<RikkaMessage>) -> Unit)? = null,
         onParts: (List<RikkaPart>) -> Unit,
     ): String {
+        // 每轮重新计数：模型猜错工具名时逐步升级提示，而不是每次都回同一段 available_tools
+        unknownToolAttempts.clear()
         val messages = if (initialMessages.isNotEmpty()) {
             initialMessages.toMutableList()
         } else {
@@ -192,10 +197,22 @@ internal class RikkaAgentEngine(
             ?: tools.firstOrNull { it.name.equals(requestedName, ignoreCase = true) }
             ?: tools.firstOrNull { it.name.equals(shortName, ignoreCase = true) }
         if (tool == null) {
+            // 同一轮里反复猜同一个不存在的工具，说明只回一份工具清单不够。
+            // 第 2 次明确「不要自行拼写」，第 3 次起要求直接收尾——否则模型会在
+            // 工具名上把步数烧光（一次 run 的 maxSteps 通常只有十几步）。
+            val attempt = (unknownToolAttempts[requestedName] ?: 0) + 1
+            unknownToolAttempts[requestedName] = attempt
+            val hint = when {
+                attempt >= 3 -> "已连续 $attempt 次请求不存在的工具。停止猜测工具名，直接基于已有观察输出结论。"
+                attempt == 2 -> "工具名必须从 available_tools 中精确选择（区分大小写），不要自行拼写或翻译。"
+                else -> "请求的工具不存在，请从 available_tools 中选择。"
+            }
             return JSONObject()
                 .put("status", "error")
                 .put("error", "unknown_tool")
                 .put("tool", requestedName)
+                .put("attempt", attempt)
+                .put("hint", hint)
                 .put("available_tools", tools.map { it.name })
                 .toString()
         }

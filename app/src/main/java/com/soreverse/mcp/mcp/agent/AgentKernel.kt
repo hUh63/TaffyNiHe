@@ -25,10 +25,12 @@ internal class AgentBudget(
     val maxSubAgents: Int = 5,
     val maxToolCalls: Int = 80,
     val wallClockMs: Long = 8 * 60_000L,
+    /** 仅供单测注入起始时间；正常构造一律用「现在」。 */
+    startedAtMs: Long = System.currentTimeMillis(),
 ) {
     private val agents = AtomicInteger(0)
     private val tools = AtomicInteger(0)
-    private val startedAt = System.currentTimeMillis()
+    private val startedAt = startedAtMs
 
     @Volatile
     private var cancelledFlag = false
@@ -52,6 +54,24 @@ internal class AgentBudget(
 
     /** 是否还能继续：没取消、没超时、还有代理额度。 */
     fun healthy(): Boolean = !cancelled() && !expired()
+
+    /**
+     * 随预算消耗递减的工具结果上限（借鉴太墟 harness「当前轮工具结果按预算先行压缩」）。
+     *
+     * 一次工具结果太长，会把后续每一步的上下文都顶满（既贵又容易让模型忘掉任务）；
+     * 越接近收尾，越应该「少灌数据、多给结论」。预算过半开始收紧，剩 15% 时压到 1/4。
+     */
+    fun toolResultLimit(base: Int): Int {
+        if (base <= 0) return base
+        val pct = if (wallClockMs <= 0) 0 else (elapsedMs() * 100 / wallClockMs).toInt()
+        val factor = when {
+            pct >= 85 -> 25
+            pct >= 65 -> 50
+            pct >= 40 -> 75
+            else -> 100
+        }
+        return (base.toLong() * factor / 100).toInt().coerceAtLeast(2_000)
+    }
 
     fun toJson(): JSONObject = JSONObject()
         .put("maxSubAgents", maxSubAgents)
@@ -193,7 +213,7 @@ internal object AgentKernel {
                     }
                     onEvent(AgentEvent.ToolCalled(nodeId, name, payload.optBoolean("ok", true)))
                     AppLog.i("agent[$nodeId] tool $name done ok=${payload.optBoolean("ok", true)}")
-                    truncate(payload.toString(), ctx.settings.toolResultMaxChars)
+                    truncate(payload.toString(), budget.toolResultLimit(ctx.settings.toolResultMaxChars))
                 }
             }
         }

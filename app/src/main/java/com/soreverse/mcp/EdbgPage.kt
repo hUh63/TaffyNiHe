@@ -1,6 +1,10 @@
 package com.soreverse.mcp
 
+/** JADX 反编译输入上限：再大也不应该整包进内存。 */
+private const val SAFE_FILE_IO_MAX_INPUT_BYTES = 512L * 1024 * 1024
+
 import android.widget.Toast
+import com.soreverse.mcp.core.SafeFileIo
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -125,13 +129,22 @@ internal fun EdbgPage(t: UiText) {
             busyMsg = if (zh) "正在反编译…" else "Decompiling…"
             val res = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
-                    val input = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("read failed")
+                    // 系统选择器可以选到任意文件：旧实现一次 readBytes() 把整个 APK 读进堆，
+                    // 几百 MB 就是 OOM 闪退。改为有界流式落盘（512 MiB 上限）。
                     val f = File(context.cacheDir, "edbg_decompile_input")
-                    f.writeBytes(input)
-                    decompileName = f.name
-                    val ctx = ToolContext(context, settings, EngineProvider.get(context))
-                    JadxTool.decompile.handle(ctx, JSONObject().put("action", "list").put("path", f.absolutePath).put("limit", 2000))
+                    try {
+                        context.contentResolver.openInputStream(uri)?.use { ins ->
+                            f.outputStream().use { out ->
+                                SafeFileIo.copy(ins, out, maxBytes = SAFE_FILE_IO_MAX_INPUT_BYTES)
+                            }
+                        } ?: throw IllegalStateException("read failed")
+                        decompileName = f.name
+                        val ctx = ToolContext(context, settings, EngineProvider.get(context))
+                        JadxTool.decompile.handle(ctx, JSONObject().put("action", "list").put("path", f.absolutePath).put("limit", 2000))
+                    } catch (t: Throwable) {
+                        runCatching { f.delete() }
+                        throw t
+                    }
                 }
             }
             val r = res.getOrElse { JSONObject().put("error", it.message ?: "decompile failed") }

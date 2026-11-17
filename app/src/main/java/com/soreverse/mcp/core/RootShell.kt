@@ -64,6 +64,23 @@ object RootShell {
         return input.isNotBlank() && SAFE_CHARS.matches(input)
     }
 
+    /** 常见 bash-only 语法。命中 + 命令失败 + 错误像语法/找不到命令时才提示。 */
+    private val BASH_ONLY = listOf(
+        "[[", "]]", "==", "&>", "<(", ">(", "function ", "source ", "declare ", "shopt ",
+    )
+
+    private fun bashOnlyHint(command: String, stderr: String): String? {
+        if (command.isBlank()) return null
+        val looksLikeShellFailure = stderr.contains("not found", ignoreCase = true) ||
+            stderr.contains("syntax error", ignoreCase = true) ||
+            stderr.contains("unexpected", ignoreCase = true) ||
+            stderr.contains("bad substitution", ignoreCase = true)
+        if (!looksLikeShellFailure) return null
+        val hit = BASH_ONLY.firstOrNull { command.contains(it) } ?: return null
+        return "[hint] /system/bin/sh is mksh, not bash: `$hit` is unsupported. Use POSIX syntax " +
+            "or invoke bash explicitly if it is installed."
+    }
+
     /** 检测 root 是否可用(缓存结果)。 */
     fun isRootAvailable(): Boolean {
         // 失败结果只缓存 30 秒：开机早期 / 授权弹窗未响应时首次检测失败，
@@ -122,7 +139,12 @@ object RootShell {
             if (code != 0 && (errText.contains("Permission denied") || errText.contains("not found"))) {
                 invalidateRootCache()
             }
-            Result(code, (out.text().trim() + tail).trim(), (errText + tail).trim())
+            // Android 的 /system/bin/sh 是 mksh，不是 bash：`[[ ]]`、`==`、`&>` 这些写法
+            // 会报 "unexpected"/"syntax error"，但错误信息本身不会告诉你「这是 bash 专有语法」。
+            // 借鉴太墟 harness 的做法，在这里补一句能直接照做的提示。
+            val hint = if (code != 0) bashOnlyHint(command, errText) else null
+            val errOut = listOf(errText, tail, hint.orEmpty()).filter { it.isNotBlank() }.joinToString("\n")
+            Result(code, (out.text().trim() + tail).trim(), errOut)
         }.getOrElse { e ->
             Result(-1, "", e.message ?: e.javaClass.simpleName)
         }

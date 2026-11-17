@@ -86,17 +86,20 @@ object FullBackup {
             val pwd = password?.takeIf { it.isNotBlank() }
                 ?: throw IllegalArgumentException("该备份已加密，请提供密码")
             onProgress("解密备份包…")
-            // 解密同样要整包进内存（密文 + 明文 + Base64 中间态），超限直接拒绝而不是让系统杀进程。
-            val restoreLimit = 200L * 1024 * 1024
-            if (src.length() > restoreLimit) {
-                throw IllegalStateException(
-                    "备份包 ${src.length() / 1048576}MB，超过可恢复上限 ${restoreLimit / 1048576}MB（解密需要约 3 倍内存）。"
-                )
-            }
-            val plain = Base64.decode(BackupCrypto.decrypt(src.readBytes(), pwd), Base64.DEFAULT)
+            // 流式解密（v2 备份）：内存占用与包大小无关，不再需要「3 倍内存」闸门。
+            // 旧 v1 备份（密文解出 Base64 文本）仍走兼容分支，由 BackupCrypto 内部识别。
             val tmp = File(context.cacheDir, "restore-" + stamp() + ".zip")
-            FileOutputStream(tmp).use { it.write(plain) }
-            plain.fill(0)
+            val decOk = runCatching {
+                tmp.outputStream().use { out ->
+                    src.inputStream().use { ins ->
+                        BackupCrypto.decryptStream(ins, out, pwd)
+                    }
+                }
+            }.getOrDefault(false)
+            if (!decOk || tmp.length() == 0L) {
+                runCatching { tmp.delete() }
+                throw IllegalArgumentException("密码错误或备份包已损坏（认证标签校验失败）")
+            }
             working = tmp
         } else {
             working = src
@@ -118,6 +121,10 @@ object FullBackup {
             } catch (e: Exception) {
                 throw IllegalStateException("无法创建恢复前快照，已中止恢复: ${e.message.orEmpty()}", e)
             }
+            // 每次恢复都会自动留一份 pre-restore 快照。以前没有清理：反复恢复（尤其是
+            // 反复失败重试）会把备份目录堆到几 GB，而这些文件对用户来说来历不明。
+            // 只保留最近 3 份，够回滚，又不会无限增长。
+            runCatching { prunePreRestoreBackups(backupsDir(context), keep = 3) }
 
             var stagedDirs = emptyList<Pair<File, File>>()
             try {
@@ -230,20 +237,23 @@ object FullBackup {
 
         if (encrypted) {
             onProgress("加密备份包…")
-            // 整包读入 + Base64 字符串 + 密文 ≈ 3 倍内存，超过闸门直接失败并保留中间包以便用户改用不加密备份。
-            val sizeLimit = 200L * 1024 * 1024
-            if (zipFile.length() > sizeLimit) {
+            // 流式加密（v2）：直接对 zip 字节做 AES-GCM，不再经过「读全量 → Base64 字符串 → 加密」
+            // 这条 3 倍内存的链路，200 MB 闸门随之取消。
+            val encTmp = File(dir, ".enc-" + tag + ".tmp")
+            val encOk = runCatching {
+                encTmp.outputStream().use { out ->
+                    zipFile.inputStream().use { ins ->
+                        BackupCrypto.encryptStream(ins, out, password!!)
+                    }
+                }
+                true
+            }.getOrDefault(false)
+            if (!encOk) {
+                runCatching { encTmp.delete() }
                 throw IllegalStateException(
-                    "备份内容 ${zipFile.length() / 1048576}MB，超过加密上限 ${sizeLimit / 1048576}MB，" +
-                        "加密需要约 3 倍内存。请关闭密码改用不加密备份（中间包保留在 ${zipFile.name}）。"
+                    "加密失败（存储空间不足或写入被拒）。中间包保留在 ${zipFile.name}，可直接当不加密备份使用。"
                 )
             }
-            val plain = zipFile.readBytes()
-            val payload = Base64.encodeToString(plain, Base64.NO_WRAP)
-            plain.fill(0)
-            val blob = BackupCrypto.encrypt(payload, password!!)
-            val encTmp = File(dir, ".enc-" + tag + ".tmp")
-            FileOutputStream(encTmp).use { it.write(blob) }
             if (!encTmp.renameTo(outFile)) {
                 encTmp.copyTo(outFile, overwrite = true)
                 encTmp.delete()
@@ -692,6 +702,12 @@ object FullBackup {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** 只清理自动生成的恢复前快照，绝不动用户自己的备份。 */
+    private fun prunePreRestoreBackups(dir: File, keep: Int) {
+        val files = dir.listFiles { f -> f.isFile && f.name.startsWith("pre-restore-") } ?: return
+        files.sortedByDescending { it.lastModified() }.drop(keep).forEach { runCatching { it.delete() } }
     }
 
     private fun backupsDir(context: Context): File {

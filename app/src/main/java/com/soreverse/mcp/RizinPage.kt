@@ -1,5 +1,10 @@
 package com.soreverse.mcp
 
+import com.soreverse.mcp.core.SafeFileIo
+
+/** Rizin 打开文件的上限：大 SO 可以到几百 MB，再大就不该整包走内存路径。 */
+private const val RZ_MAX_INPUT_BYTES = 512L * 1024 * 1024
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -143,14 +148,23 @@ internal fun RizinPage(t: UiText) {
             errMsg = ""
             val res = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
-                    val input = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: throw IllegalStateException("read failed")
+                    // 同 EdbgPage：选择器能选到任意文件，一次 readBytes() 就是 OOM。
+                    // 有界流式落盘；打开失败时把临时文件删掉（旧实现会一直堆在 cacheDir 里）。
                     val f = File(context.cacheDir, "rz_open_${System.currentTimeMillis()}.so")
-                    f.writeBytes(input)
-                    val r = engine.open(f.absolutePath, true)
-                    val ws = r.optString("workspaceId", r.optString("id"))
-                    if (ws.isBlank()) throw IllegalStateException(r.optString("error", "open failed"))
-                    ws to f.name
+                    try {
+                        context.contentResolver.openInputStream(uri)?.use { ins ->
+                            f.outputStream().use { out ->
+                                SafeFileIo.copy(ins, out, maxBytes = RZ_MAX_INPUT_BYTES)
+                            }
+                        } ?: throw IllegalStateException("read failed")
+                        val r = engine.open(f.absolutePath, true)
+                        val ws = r.optString("workspaceId", r.optString("id"))
+                        if (ws.isBlank()) throw IllegalStateException(r.optString("error", "open failed"))
+                        ws to f.name
+                    } catch (t: Throwable) {
+                        runCatching { f.delete() }
+                        throw t
+                    }
                 }
             }
             res.onSuccess { pair ->

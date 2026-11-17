@@ -695,6 +695,7 @@ internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var result by remember { androidx.compose.runtime.mutableStateOf<com.soreverse.mcp.core.IntegrityGuard.Result?>(null) }
     var threats by remember { androidx.compose.runtime.mutableStateOf<List<String>>(emptyList()) }
+    var envItems by remember { androidx.compose.runtime.mutableStateOf<List<com.soreverse.mcp.core.EnvDoctor.Item>>(emptyList()) }
     var busy by remember { androidx.compose.runtime.mutableStateOf(false) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
@@ -703,6 +704,8 @@ internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             result = com.soreverse.mcp.core.IntegrityGuard.verify(context)
             threats = com.soreverse.mcp.core.IntegrityGuard.runtimeThreats(context, force = true)
+            // 能力通道自检（root / Shizuku / Python / 引擎 / 空间）：只报告，不申请权限。
+            envItems = runCatching { com.soreverse.mcp.core.EnvDoctor.check(context, t.zh) }.getOrDefault(emptyList())
         }
         busy = false
     }
@@ -751,6 +754,33 @@ internal fun SettingsSelfCheckPage(t: UiText, onBack: () -> Unit) {
                                 title = threat,
                                 subtitle = if (t.zh) "该项只作提示：不影响签名校验结论" else "Informational only: does not change the signature verdict",
                                 value = null,
+                                onClick = { scope.safeLaunch { runCheck() } },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item("env") {
+            SettingsSection(if (t.zh) "能力通道" else "Capability channels") {
+                if (envItems.isEmpty()) {
+                    PreferenceSurface(first = true, last = true) {
+                        SettingsItemRow(
+                            icon = settingsIcon(SettingsDest.Permissions),
+                            title = if (t.zh) "检测中…" else "Checking…",
+                            subtitle = if (t.zh) "root / Shizuku / Python / 引擎 / 空间" else "root / Shizuku / Python / engine / storage",
+                            value = null,
+                            onClick = { scope.safeLaunch { runCheck() } },
+                        )
+                    }
+                } else {
+                    envItems.forEachIndexed { index, env ->
+                        PreferenceSurface(first = index == 0, last = index == envItems.lastIndex) {
+                            SettingsItemRow(
+                                icon = settingsIcon(SettingsDest.Permissions),
+                                title = if (t.zh) env.titleZh else env.titleEn,
+                                subtitle = if (t.zh) env.detailZh else env.detailEn,
+                                value = if (env.ok) "OK" else (if (t.zh) "不可用" else "N/A"),
                                 onClick = { scope.safeLaunch { runCheck() } },
                             )
                         }

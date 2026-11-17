@@ -2,6 +2,7 @@ package com.soreverse.mcp.mcp.agent
 
 import com.soreverse.mcp.core.AppLog
 import com.soreverse.mcp.core.RikkaAgentEngine
+import com.soreverse.mcp.core.RikkaMessage
 import com.soreverse.mcp.core.RikkaPart
 import com.soreverse.mcp.mcp.ToolContext
 import java.io.File
@@ -31,6 +32,12 @@ internal class SubAgentRunner(
 
     /** 单个节点的硬超时上限（还要再受全局 deadline 约束）。 */
     private val nodeTimeoutCapMs = 5 * 60_000L
+
+    /** 正常取证阶段占总预算的比例；剩下的用于收尾协商。 */
+    private val WRAP_UP_RATIO_PERCENT = 85
+
+    /** 收尾阶段至少留这么多时间，否则不值得中断主阶段。 */
+    private val WRAP_UP_MIN_MS = 15_000L
 
     suspend fun run(
         node: AgentNode,
@@ -102,15 +109,25 @@ internal class SubAgentRunner(
         val initialMessages = if (resumed) readHistory(histFile) else emptyList()
         if (resumed) onEvent(AgentEvent.Note("resume ${node.id} from checkpoint (${initialMessages.size} messages)"))
 
-        val produced: String? = try {
-            withTimeoutOrNull(timeoutMs) {
+        // 时间预算拆两段：先用 85% 正常取证，把剩下的留给「收尾协商」。
+        // 硬超时直接取消会把已经查到的证据一起丢掉（只剩流式片段），而一条
+        // 「停止调用工具、按已有观察给结论」的收尾请求通常十几秒就能产出可用结论。
+        var checkpointHistory: List<RikkaMessage> = initialMessages
+        val canWrapUp = timeoutMs > WRAP_UP_MIN_MS + 5_000L
+        val softTimeoutMs = if (canWrapUp) (timeoutMs * WRAP_UP_RATIO_PERCENT / 100) else timeoutMs
+
+        var produced: String? = try {
+            withTimeoutOrNull(softTimeoutMs) {
                 engine.run(
                     systemPrompt = system,
                     userPrompt = user,
                     tools = toolSet.tools,
                     maxSteps = steps,
                     initialMessages = initialMessages,
-                    onCheckpoint = { msgs -> persistHistory(histFile, msgs) },
+                    onCheckpoint = { msgs ->
+                        checkpointHistory = msgs
+                        persistHistory(histFile, msgs)
+                    },
                 ) { parts ->
                     val text = parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }
                     if (text.length > streamed.length) {
@@ -137,6 +154,51 @@ internal class SubAgentRunner(
                 ms = System.currentTimeMillis() - started,
                 error = e.message ?: e.javaClass.simpleName,
             )
+        }
+
+        if (produced == null && canWrapUp) {
+            val wrapUp = if (zh) {
+                "时间预算即将用完。请立刻停止调用任何工具，只根据上面已经获得的观察，输出最终结论：" +
+                    "先列 EVIDENCE（每条写明来源工具与关键数值），再给结论与不确定性说明。"
+            } else {
+                "Time budget is almost exhausted. Stop calling tools now and answer using only the " +
+                    "observations above: list EVIDENCE (tool + key values) then the conclusion and its uncertainty."
+            }
+            val wrapBudget = (timeoutMs - softTimeoutMs).coerceAtLeast(WRAP_UP_MIN_MS)
+            onEvent(AgentEvent.Note("budget nearly exhausted, asking ${node.id} to wrap up"))
+            val closing = if (checkpointHistory.isEmpty()) {
+                listOf(
+                    RikkaMessage("system", listOf(RikkaPart.Text(system))),
+                    RikkaMessage("user", listOf(RikkaPart.Text(wrapUp))),
+                )
+            } else {
+                checkpointHistory + RikkaMessage("user", listOf(RikkaPart.Text(wrapUp)))
+            }
+            produced = try {
+                withTimeoutOrNull(wrapBudget) {
+                    engine.run(
+                        systemPrompt = system,
+                        userPrompt = wrapUp,
+                        tools = emptyList(),
+                        maxSteps = 1,
+                        initialMessages = closing,
+                        onCheckpoint = { msgs -> persistHistory(histFile, msgs) },
+                    ) { parts ->
+                        val text = parts.filterIsInstance<RikkaPart.Text>().joinToString("") { it.text }
+                        if (text.length > streamed.length) {
+                            onEvent(AgentEvent.TextDelta(node.id, text.substring(streamed.length)))
+                            streamed = text
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: TimeoutCancellationException) {
+                null
+            } catch (e: Throwable) {
+                AppLog.w("agent[$runId/${node.id}] wrap-up failed: ${e.message}")
+                null
+            }
         }
 
         val ms = System.currentTimeMillis() - started

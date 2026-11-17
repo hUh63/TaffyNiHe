@@ -1,3 +1,50 @@
+## 塔菲逆核 v1.5.84 —— 产物落点收口 / 三处「说成功其实没成」
+
+### 1. 重命名产物不再单独一个 `renamed/`
+
+`taffy_dex_rename_mapping` 的 `apply` 之前落在工作区根的 `renamed/`，其它工具早就落
+`taffy-out/<功能>/`。现在统一到 `taffy-out/dex-renamed/`，工具描述里的路径也一起改了
+（旧描述写着 `renamed/`，按它找会找不到）。
+
+### 2. VIP 的 hook 脚本终于落在你看得见的地方
+
+`taffy_vip_entry_scan` 的 `hook` / `minimal` / `report` 三个动作，产物一直写
+`filesDir/vip-scan/`——那是应用私有目录，非 root 根本打不开。现在走和其它工具同一套规则：
+
+- 输入是缓存里的临时副本（选文件后复制出来的那种）→ `工作区/taffy-out/vip-scan/`；
+- 输入是你自己的工作区文件 → 就写在它旁边。
+
+`filesDir` 只作为「没配工作区」时的兜底。
+
+### 3. `taffy-out/` 自带说明与忽略规则
+
+- 根目录放一份 `README.md`：哪个子目录是哪个工具生成的，一眼对上；
+- 根目录 `.gitignore`（`*` + 白名单）：工作区常常同时是 Git 仓库，`git add -A` 不会把几百 MB
+  产物一起提交；
+- 明确一件事：**这个目录不会自动删你的产物**。APK、dex 是用户要的东西，删掉比占几 MB
+  严重得多——只有 `vip-scan/` 里的 hook 脚本 / 报告（可再生成）按份数回收。
+
+### 4. 三处「rename 失败但报成功」
+
+`File.renameTo()` 失败只返回 `false`，不看返回值就是静默丢弃：
+
+| 位置 | 原来的表现 | 现在 |
+|---|---|---|
+| `taffy_file` 的 `batch_rename` | 跨分区/权限不足时仍标 `done`，用户以为全改完 | 标 `failed` 并把原因写进 `errors` |
+| `BinaryManager` 下载二进制 | 落盘失败仍返回 `ok=true`（随后 `execve` 报找不到文件） | 换下一个镜像重试，全失败才报错 |
+| 多智能体断点历史 | 先删旧文件再 rename，一旦失败**旧历史也没了** | 不删旧文件（同卷 rename 本就原子覆盖），失败只记日志 |
+
+### 5. `OutputPaths` 的判定终于有单测管着
+
+原来 4 条单测全打在 `resolveDir` 上——而生产代码根本不走它（`productDir` 自己重写了一遍判定）。
+现在拆成 `isInsideCache` / `productRoot` 两个纯函数，`productDir` 直接复用，6 条单测覆盖：
+缓存内、缓存子目录、`cache-extra` 这种同名前缀的兄弟目录、无父目录、有/无工作区。
+
+### 6. 可点文本补足触摸区
+
+`labelSmall`（11sp）只有 15dp 高，点起来很费劲。这几处包成最小 32/36dp 的点击区：
+VIP 候选的「打开」与调用者名、MCP 客户端的工具名、帮助页的「复制 Skill」与「导出工具契约」。
+
 ## 塔菲逆核 v1.5.83 —— 产物不再落进缓存 / 扫描产物能看见了
 
 ### 1. 写类工具的产物落点统一了（新增 `core/OutputPaths`）

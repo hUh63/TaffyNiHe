@@ -1,6 +1,8 @@
 package com.soreverse.mcp
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -531,16 +533,22 @@ private fun VipCandidateRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            // 「跳过去看」比「复制签名」更接近下一步动作，所以给它独立的点击区而不是长按
-            Text(
-                if (zh) "打开" else "Open",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
+            // 「跳过去看」比「复制签名」更接近下一步动作，所以给它独立的点击区而不是长按。
+            // heightIn(32dp) 是为了触摸目标：labelSmall 文字本身只有 ~15dp 高，直接点很难命中。
+            Box(
+                Modifier
+                    .heightIn(min = 32.dp)
                     .clip(RoundedCornerShape(AppShape.sm))
                     .clickable { onJump(copyText) }
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (zh) "打开" else "Open",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
         if (hits != null && hits.length() > 0) {
             Text(
@@ -564,16 +572,21 @@ private fun VipCandidateRow(
                 for (i in 0 until callers.length()) {
                     val raw = callers.optString(i)
                     if (raw.isBlank()) continue
-                    Text(
-                        shortMember(raw),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        color = MaterialTheme.colorScheme.tertiary,
-                        maxLines = 1,
-                        modifier = Modifier
+                    Box(
+                        Modifier
+                            .heightIn(min = 32.dp)
                             .clip(RoundedCornerShape(AppShape.sm))
                             .clickable { onJump(raw) }
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
-                    )
+                            .padding(horizontal = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            shortMember(raw),
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.tertiary,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }

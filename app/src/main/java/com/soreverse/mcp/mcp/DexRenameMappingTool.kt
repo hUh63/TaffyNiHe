@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.soreverse.mcp.core.DexRenameEngine
+import com.soreverse.mcp.core.OutputPaths
 import com.soreverse.mcp.core.WorkspacePolicy
 import com.soreverse.mcp.core.ZipRepack
 import com.soreverse.mcp.core.err
@@ -32,7 +33,7 @@ object DexRenameMappingTool {
 用 dexlib2 的 rewriter 递归改写：类定义、指令里的 invoke/field 引用、注解、签名、调试信息全部跟着变，
 不是文本替换。映射 key 按「所属类 + 名称 + 签名」精确匹配，不会把无关的同名方法一起改。
 建议先 action=plan（dryRun，返回将改多少项 + 冲突列表），确认无误再 action=apply；
-apply 输出到工作区 renamed/ 目录（不改原 APK，避免破坏 zipalign 与签名）。"""
+apply 输出到工作区 taffy-out/dex-renamed/ 目录（不改原 APK，避免破坏 zipalign 与签名）。"""
 
     private const val EN = """Apply dozens/hundreds of renames at once (ProGuard mapping or a renames array).
 Split from taffy_dex_rename: that one handles single symbols (one rewrite per symbol); this one uses
@@ -40,7 +41,7 @@ dexlib2's DexRewriter to do everything in a single pass - built for post-deobfus
 Uses dexlib2's rewriter, so class defs, invoke/field references, annotations, signatures and debug
 info are all rewritten - not a text replace. Mapping keys are matched by owner + name + descriptor,
 so unrelated same-named methods are untouched. Run action=plan (dry run with conflict report) before
-action=apply; output goes to the workspace renamed/ dir (the original APK is never modified)."""
+action=apply; output goes to <workspace>/taffy-out/dex-renamed/ (the original APK is never modified)."""
 
     val tool: ToolHandler = object : ToolHandler {
         override val meta = ToolMeta(
@@ -224,9 +225,11 @@ action=apply; output goes to the workspace renamed/ dir (the original APK is nev
                 return ok(base)
             }
 
-            val workDir = WorkspacePolicy.workDirPath(ctx.context)
+            // 工作区必须可用：重命名产物要落在用户能看到的地方
+            WorkspacePolicy.workDirPath(ctx.context)
                 ?: return err("NO_WORKSPACE", "工作区不可用，先在设置里选择工作目录", "path", file.path)
-            val outDir = File(workDir, "renamed")
+            // 与其它工具统一落 taffy-out/<feature>（输入在缓存里时也不会随缓存被清）
+            val outDir = OutputPaths.productDir(ctx.context, file, "dex-renamed")
             val result = runCatching { DexRenameEngine.apply(file, plan, outDir) }
                 .getOrElse { e ->
                     return err(

@@ -1,6 +1,9 @@
 package com.soreverse.mcp
 
 import android.widget.Toast
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -41,8 +45,8 @@ internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     // 代码块配色跟随主题（与编辑器 / 日志块一致）：浅色主题下白页里嵌一块纯黑太割裂
     val blockDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val bg = if (blockDark) TerminalColors.bg else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (blockDark) TerminalColors.fg else MaterialTheme.colorScheme.onSurface
+    val bg = if (blockDark) Color(0xFF0B0F14) else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (blockDark) Color(0xFFD6E2F0) else MaterialTheme.colorScheme.onSurface
     var tab by remember { mutableStateOf(0) }   // 0=功能教程 1=实现原理 2=MCP Skill
 
     SettingsScaffold(
@@ -68,25 +72,39 @@ internal fun SettingsHelpPage(t: UiText, onBack: () -> Unit) {
                 if (zh) "↓ 复制这段 Skill 作为 AI 客户端的系统提示词，AI 就能正确驱动塔菲的全部 MCP 工具" else "↓ Copy this skill as a system prompt for any AI client",
                 style = MaterialTheme.typography.labelSmall, color = statusWarning(blockDark),
             )
-            Text(
-                if (zh) "复制 Skill" else "Copy skill",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clickable {
-                    clipboard.setText(AnnotatedString(MCP_SKILL))
-                    Toast.makeText(context, if (zh) "MCP Skill 已复制" else "Skill copied", Toast.LENGTH_LONG).show()
-                }.padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-            Text(
-                if (zh) "导出工具契约 (Markdown)" else "Export tool contracts (Markdown)",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clickable {
-                    val md = buildToolContractsMarkdown(zh)
-                    val f = java.io.File(context.filesDir, "taffy-tools-SKILL.md")
-                    runCatching { f.writeText(md) }
-                    clipboard.setText(AnnotatedString(md))
-                    Toast.makeText(context, if (zh) "已导出并复制: ${f.absolutePath}" else "Exported & copied: ${f.absolutePath}", Toast.LENGTH_LONG).show()
-                }.padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+            Box(
+                Modifier
+                    .heightIn(min = 32.dp)
+                    .clickable {
+                        clipboard.setText(AnnotatedString(MCP_SKILL))
+                        Toast.makeText(context, if (zh) "MCP Skill 已复制" else "Skill copied", Toast.LENGTH_LONG).show()
+                    }
+                    .padding(horizontal = 6.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    if (zh) "复制 Skill" else "Copy skill",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Box(
+                Modifier
+                    .heightIn(min = 32.dp)
+                    .clickable {
+                        val md = buildToolContractsMarkdown(zh)
+                        val f = java.io.File(context.filesDir, "taffy-tools-SKILL.md")
+                        runCatching { f.writeText(md) }
+                        clipboard.setText(AnnotatedString(md))
+                        Toast.makeText(context, if (zh) "已导出并复制: ${f.absolutePath}" else "Exported & copied: ${f.absolutePath}", Toast.LENGTH_LONG).show()
+                    }
+                    .padding(horizontal = 6.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    if (zh) "导出工具契约 (Markdown)" else "Export tool contracts (Markdown)",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
         SelectionContainer {
             Text(

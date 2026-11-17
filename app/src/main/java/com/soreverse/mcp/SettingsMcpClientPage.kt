@@ -22,6 +22,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -311,12 +313,20 @@ internal fun SettingsMcpClientPage(t: UiText) {
                         val tl = list.optJSONObject(i) ?: continue
                         val nm = tl.optString("name")
                         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                nm,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.clickable { toolName = nm },
-                            )
+                            // 点名字填入工具名：bodyMedium 行高只有 ~20dp，撑到 36dp 才好点
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 36.dp)
+                                    .clickable { toolName = nm },
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                Text(
+                                    nm,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
                             Text(
                                 tl.optString("description"),
                                 style = MaterialTheme.typography.bodySmall,

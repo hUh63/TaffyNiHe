@@ -763,8 +763,15 @@ object FileTools {
                         errors.put("跳过: $newName 已存在")
                         op.put("skipped", true)
                     } else {
-                        f.renameTo(newFile)
-                        op.put("done", true)
+                        // renameTo 会静默失败（跨分区 / 只读挂载 / 权限），必须看返回值：
+                        // 旧实现无条件 done=true，用户以为全改完了，实际一个都没动
+                        val moved = runCatching { f.renameTo(newFile) }.getOrDefault(false)
+                        if (moved) {
+                            op.put("done", true)
+                        } else {
+                            errors.put("失败: $oldName → $newName（跨分区或权限不足）")
+                            op.put("failed", true)
+                        }
                     }
                 }
                 operations.put(op)

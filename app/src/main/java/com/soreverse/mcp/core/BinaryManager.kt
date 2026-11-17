@@ -159,7 +159,13 @@ object BinaryManager {
                             continue
                         }
                     }
-                    tmp.renameTo(target)
+                    if (!tmp.renameTo(target)) {
+                        // 落盘失败就别报成功：后面 execve 会以「文件不存在 / 0 字节」失败，
+                        // 报成 ok=true 只会让人以为装好了
+                        AppLog.w("BinaryManager: ${tool.fileName} rename to target failed from $candidate")
+                        runCatching { tmp.delete() }
+                        continue
+                    }
                     AppLog.i("BinaryManager: ${tool.fileName} downloaded (${target.length() / 1024 / 1024} MB) from $candidate")
                     return JSONObject()
                         .put("ok", true)

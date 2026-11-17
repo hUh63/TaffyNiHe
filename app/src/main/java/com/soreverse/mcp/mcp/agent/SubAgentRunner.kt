@@ -196,9 +196,12 @@ internal class SubAgentRunner(
                 if (dir != null && !dir.exists()) dir.mkdirs()
                 val tmp = File(file.parentFile, file.name + ".tmp")
                 tmp.writeText(AgentHistoryCodec.encode(messages).toString(), Charsets.UTF_8)
-                // 原子替换：写一半被杀时不会留下半截 JSON 让恢复失败
-                if (file.exists()) file.delete()
-                tmp.renameTo(file)
+                // 原子替换：写一半被杀时不会留下半截 JSON 让恢复失败。
+                // 不要先 delete 目标——同卷 rename(2) 本身就会原子覆盖，而先删再 rename
+                // 一旦 rename 失败，旧历史也跟着没了。
+                if (!tmp.renameTo(file)) {
+                    AppLog.w("agent[$runId] persist history rename failed: ${file.absolutePath}")
+                }
             }.onFailure { AppLog.w("agent[$runId] persist history failed: ${it.message}") }
         }
     }

@@ -45,6 +45,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -81,6 +82,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -834,6 +836,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // 批量加同一个注解/修饰符往往连做几行几次，记住上次输入与落点能省掉重复打字
     var multiInsertText by remember { mutableStateOf(edPrefs.getString("editor_multi_insert_text", "") ?: "") }
     var multiInsertAtEnd by remember { mutableStateOf(edPrefs.getBoolean("editor_multi_insert_at_end", false)) }
+    // 第三种落点：按绝对列插入（短行补空格）—— 需要视觉对齐时才有用
+    var multiInsertUseColumn by remember { mutableStateOf(edPrefs.getBoolean("editor_multi_insert_use_column", false)) }
+    var multiInsertColumn by remember { mutableStateOf(edPrefs.getInt("editor_multi_insert_column", 0)) }
     val guideLines = remember(code) { code.lineSequence().take(2_000).toList() }
     // 光标所在括号块的行范围：参考线用它把「正在改的那块」画成主色，
     // 大纲用它显示每个符号的块区间（折叠的可用替代——不改文档内容，只做导航）。
@@ -2505,14 +2510,32 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(
-                            selected = !multiInsertAtEnd,
-                            onClick = { multiInsertAtEnd = false },
+                            selected = !multiInsertAtEnd && !multiInsertUseColumn,
+                            onClick = { multiInsertAtEnd = false; multiInsertUseColumn = false },
                             label = { Text(if (zh) "对齐缩进后" else "After indent") },
                         )
                         FilterChip(
-                            selected = multiInsertAtEnd,
-                            onClick = { multiInsertAtEnd = true },
+                            selected = multiInsertAtEnd && !multiInsertUseColumn,
+                            onClick = { multiInsertAtEnd = true; multiInsertUseColumn = false },
                             label = { Text(if (zh) "行尾" else "Line end") },
+                        )
+                        FilterChip(
+                            selected = multiInsertUseColumn,
+                            onClick = { multiInsertUseColumn = true },
+                            label = { Text(if (zh) "指定列" else "Column") },
+                        )
+                    }
+                    if (multiInsertUseColumn) {
+                        OutlinedTextField(
+                            value = if (multiInsertColumn <= 0) "" else multiInsertColumn.toString(),
+                            onValueChange = { v ->
+                                multiInsertColumn = v.filter { it.isDigit() }.take(4).toIntOrNull() ?: 0
+                            },
+                            label = { Text(if (zh) "列号（从 0 开始）" else "Column (0-based)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
@@ -2523,6 +2546,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     onClick = {
                         val res = EditorTextOps.insertAtColumn(
                             code, tf.selection.min, tf.selection.max, multiInsertText, multiInsertAtEnd,
+                            // 指定列：函数里 column >= 0 会优先于 atEnd
+                            column = if (multiInsertUseColumn) multiInsertColumn else -1,
                         )
                         host.recordUndo()
                         host.setText(res.first, res.second)
@@ -2530,6 +2555,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             edPrefs.edit()
                                 .putString("editor_multi_insert_text", multiInsertText)
                                 .putBoolean("editor_multi_insert_at_end", multiInsertAtEnd)
+                                .putBoolean("editor_multi_insert_use_column", multiInsertUseColumn)
+                                .putInt("editor_multi_insert_column", multiInsertColumn)
                                 .apply()
                         }
                         multiInsertOpen = false

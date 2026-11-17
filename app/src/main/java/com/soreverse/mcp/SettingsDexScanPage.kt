@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,7 +51,8 @@ internal fun SettingsDexScanPage(t: UiText) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var path by rememberSaveable { mutableStateOf("") }
+    // 目标文件挂进程内常驻：设置页切换会销毁子树，重选一次文件是纯浪费
+    var path by BrowseMemory.dexScanPath
     var modes by rememberSaveable { mutableStateOf("plain,xor1,xorn") }
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -58,6 +60,9 @@ internal fun SettingsDexScanPage(t: UiText) {
     var aesKey by rememberSaveable { mutableStateOf("") }
     var aesIv by rememberSaveable { mutableStateOf("") }
     var aesResult by remember { mutableStateOf<JSONObject?>(null) }
+
+    // 常驻路径可能已失效：进来先校验，失效就退回空态
+    LaunchedEffect(Unit) { BrowseMemory.takeExistingPath(BrowseMemory.dexScanPath) }
 
     suspend fun callTool(name: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         runCatching {
@@ -258,6 +263,16 @@ internal fun SettingsDexScanPage(t: UiText) {
                         onClick = {
                             if (parts.contains("xorn")) parts.remove("xorn") else parts.add("xorn")
                             modes = parts.filter { it.isNotBlank() }.joinToString(",")
+                        },
+                    )
+                    // 常驻路径的显式退出入口
+                    ToolChip(
+                        label = if (zh) "清除" else "Clear",
+                        enabled = !busy && path.isNotBlank(),
+                        onClick = {
+                            BrowseMemory.clearDexScan()
+                            result = null
+                            message = ""
                         },
                     )
                 }

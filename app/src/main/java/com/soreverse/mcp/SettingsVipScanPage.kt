@@ -68,8 +68,9 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
 
-    var path by rememberSaveable { mutableStateOf("") }
-    var pkg by rememberSaveable { mutableStateOf("") }
+    // 目标文件与包名挂进程内常驻：设置页切换会销毁子树，重选一次 APK 是纯浪费
+    var path by BrowseMemory.vipPath
+    var pkg by BrowseMemory.vipPkg
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<JSONObject?>(null) }
@@ -84,6 +85,9 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
 
     // 目标文件选择：dexlib2 需要真实路径，content:// 不能直接喂给扫描器，
     // 所以选完先复制到 cacheDir 再交给工具（大 APK 会占一份临时空间，扫描完可手动清）。
+    // 常驻路径可能已失效（cacheDir 被回收/用户删了文件）：进来先校验，失效就退回空态
+    LaunchedEffect(Unit) { BrowseMemory.takeExistingPath(BrowseMemory.vipPath) }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.safeLaunch {
@@ -250,6 +254,18 @@ internal fun SettingsVipScanPage(t: UiText, onDest: (SettingsDest) -> Unit = {})
                         icon = Icons.Filled.Description,
                         enabled = !busy && path.isNotBlank(),
                         onClick = { runAction("report") },
+                    )
+                    // 常驻路径的显式退出入口
+                    ToolChip(
+                        label = if (zh) "清除" else "Clear",
+                        enabled = !busy && (path.isNotBlank() || pkg.isNotBlank()),
+                        onClick = {
+                            BrowseMemory.clearVip()
+                            status = ""
+                            hookPath = ""
+                            reportPath = ""
+                            result = null
+                        },
                     )
                     if (busy) CircularProgressIndicator(modifier = Modifier.width(20.dp), strokeWidth = 2.dp)
                 }

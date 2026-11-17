@@ -272,9 +272,7 @@ internal fun SettingsDexExplorerPage(t: UiText, onDest: (SettingsDest) -> Unit =
                     label = if (zh) "清除当前文件" else "Clear file",
                     icon = Icons.Default.Close,
                     onClick = {
-                        path = ""
-                        displayName = ""
-                        selected = null
+                        BrowseMemory.clearDexBrowse()
                         classes = emptyList()
                         members = emptyList()
                         error = ""

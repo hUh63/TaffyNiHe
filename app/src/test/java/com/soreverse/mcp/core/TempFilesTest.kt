@@ -139,6 +139,48 @@ class TempFilesTest {
     }
 
     @Test
+    fun sweepDir_rootIsAFileIsNoop() {
+        // cacheDir 理论上不会是文件，但 sweepCache 会把任何拿到的路径丢进来：
+        // 这里保证不会因为「拿错路径」反而去删别的东西或抛异常。
+        val notADir = File(tmp.root, "cache-file.txt").apply { writeText("x") }
+
+        val (removed, freed) = TempFiles.sweepDir(notADir, listOf("picked_"), keepRecent = 0)
+
+        assertEquals(0, removed)
+        assertEquals(0L, freed)
+        assertTrue(notADir.exists())
+    }
+
+    @Test
+    fun sweepDir_emptyPrefixListTouchesNothing() {
+        val root = tmp.newFolder("cache7")
+        val f = File(root, "picked_a.apk").apply {
+            writeBytes(ByteArray(4))
+            setLastModified(1_000L)
+        }
+
+        val (removed, _) = TempFiles.sweepDir(root, emptyList(), keepRecent = 0)
+
+        assertEquals(0, removed)
+        assertTrue(f.exists())
+    }
+
+    @Test
+    fun sweepDir_negativeKeepRecentBehavesLikeZero() {
+        val root = tmp.newFolder("cache8")
+        val f = File(root, "vip_a.apk").apply {
+            writeBytes(ByteArray(6))
+            setLastModified(1_000L)
+        }
+
+        val (removed, freed) = TempFiles.sweepDir(root, listOf("vip_"), keepRecent = -3)
+
+        assertEquals(1, removed)
+        assertEquals(6L, freed)
+        assertFalse(f.exists())
+    }
+
+    @Test
     fun sweepDir_missingRootIsNoop() {
         val (removed, freed) = TempFiles.sweepDir(File(tmp.root, "nope"), listOf("picked_"), 1)
         assertEquals(0, removed)

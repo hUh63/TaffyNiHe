@@ -50,6 +50,36 @@ internal object BrowseMemory {
     val dexDisplayName = androidx.compose.runtime.mutableStateOf("")
     val dexQuery = androidx.compose.runtime.mutableStateOf("")
     val dexSelected = androidx.compose.runtime.mutableStateOf<String?>(null)
+    val vipPath = androidx.compose.runtime.mutableStateOf("")
+    val vipPkg = androidx.compose.runtime.mutableStateOf("")
+    val dexScanPath = androidx.compose.runtime.mutableStateOf("")
+
+    /**
+     * 统一清理入口。
+     *
+     * 为什么不把上面这些收成一个 data class：页面里已经写着 `var path by BrowseMemory.dexPath`，
+     * 收成 data class 要把每个引用都改成 `st.path`（改动面大、还容易漏）。这里用「一个 clear
+     * 函数管一组字段」达到同样目的——新增字段时只改这里，页面不会再出现「清了路径忘了清选中类」。
+     */
+    fun clearDexBrowse() {
+        dexPath.value = ""
+        dexDisplayName.value = ""
+        dexQuery.value = ""
+        dexSelected.value = null
+    }
+
+    fun clearApkEdit() {
+        apkEditPath.value = ""
+    }
+
+    fun clearVip() {
+        vipPath.value = ""
+        vipPkg.value = ""
+    }
+
+    fun clearDexScan() {
+        dexScanPath.value = ""
+    }
 
     /**
      * 取回上次的文件路径，但**文件已不存在时清空**。

@@ -220,7 +220,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                         label = if (zh) "清除当前文件" else "Clear file",
                         icon = Icons.Default.Close,
                         onClick = {
-                            path = ""
+                            BrowseMemory.clearApkEdit()
                             displayName = ""
                             packageName = ""
                             versionName = ""
@@ -229,6 +229,7 @@ internal fun SettingsApkEditPage(t: UiText) {
                             xml = ""
                             showXml = false
                             error = ""
+                            loadedForPath = ""
                         },
                     )
                 }

@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.android.tools.smali.baksmali.Baksmali
+import com.soreverse.mcp.core.OutputPaths
 import com.android.tools.smali.dexlib2.DexFileFactory
 import com.android.tools.smali.dexlib2.Opcodes
 import com.android.tools.smali.smali.Smali
@@ -538,7 +539,8 @@ object SmaliBatchTool {
             return try {
                 val signer = ApkSigningPolicy.resolveSigner(ctx.context) ?: return null
                 val dest = if (outPath != null) File(outPath)
-                    else File(apk.parentFile, "${apk.nameWithoutExtension}-signed.apk")
+                    // 输入在 cacheDir 时产物要挪到用户能拿到的地方（否则随缓存被清）
+                    else File(OutputPaths.productDir(ctx.context, apk, "apk-sign"), "${apk.nameWithoutExtension}-signed.apk")
                 val (v1, v2, v3) = ApkSigningPolicy.schemeFlags(ctx.context)
                 val v1Name = ApkSigningPolicy.v1SignerName(ctx.context)
                 // 构造器第一个参数即 V1 签名者名（META-INF/<name>.RSA/.SF）；再尝试独立 setter（apksig 新版本）

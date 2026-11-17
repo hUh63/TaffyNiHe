@@ -304,6 +304,15 @@ object AdvancedTools {
                                 }
                                 System.arraycopy(writeBytes, 0, newBytes, offset, writeBytes.size)
 
+                                // 上次若在打包途中异常退出，同目录可能留着 patch_*.apk（体积等同 APK）。
+                                // 只清一小时前的，避免误删并发中的临时文件。
+                                runCatching {
+                                    val cutoff = System.currentTimeMillis() - 3_600_000L
+                                    file.parentFile?.listFiles { f ->
+                                        f.isFile && f.name.startsWith("patch_") && f.name.endsWith(".apk") &&
+                                            f.lastModified() < cutoff
+                                    }?.forEach { it.delete() }
+                                }
                                 val tempFile = File.createTempFile("patch_", ".apk", file.parentFile)
                                 EditSnapshotService.snapshot(ctx.context, "taffy_apk_patch_bytes", file.absolutePath)
                                 // 只在没有备份时复制：原来每次补丁都覆盖，第二次之后 .bak 已不是原始 APK，

@@ -15,7 +15,14 @@ import java.io.File
  */
 internal object OutputPaths {
 
-    /** 该功能的产物目录（保证存在）。 */
+    /**
+     * 该功能的产物目录（保证存在）。
+     *
+     * 落点优先级：
+     *  1. 输入不在 cache 里 → 就近放（用户自己选的文件，产物就该在旁边）；
+     *  2. 输入在 cache 里 → 用户**能拿到**的地方：先工作区 `taffy-out/<feature>/`，
+     *     没配工作区才退到应用私有 `filesDir/<feature>/`（私有目录非 root 看不见，只作兜底）。
+     */
     fun productDir(context: Context, input: File, feature: String): File {
         val app = context.applicationContext
         val parent = input.parentFile
@@ -23,10 +30,12 @@ internal object OutputPaths {
         val p = runCatching { parent?.canonicalPath }.getOrNull()
         val insideCache = cache != null && p != null &&
             (p == cache || p.startsWith(cache + File.separator))
-        return if (parent == null || insideCache) {
-            File(app.filesDir, feature).apply { runCatching { mkdirs() } }
+        if (parent != null && !insideCache) return parent
+        val ws = runCatching { WorkspacePolicy.workDirPath(app) }.getOrNull()
+        return if (!ws.isNullOrBlank()) {
+            File(ws, "taffy-out/$feature").apply { runCatching { mkdirs() } }
         } else {
-            parent
+            File(app.filesDir, feature).apply { runCatching { mkdirs() } }
         }
     }
 

@@ -1,3 +1,56 @@
+## 塔菲逆核 v1.5.83 —— 产物不再落进缓存 / 扫描产物能看见了
+
+### 1. 写类工具的产物落点统一了（新增 `core/OutputPaths`）
+
+v1.5.82 修掉了 VIP hook 脚本落缓存的问题，但同类问题还在别处：**签名后的 APK、解出来的 dex、
+重编出来的 dex** 默认都写在「输入文件旁边」。而输入常常是 cacheDir 里的临时副本（选文件 → 复制到
+cache → 交给引擎），于是产物躺在 cache 里——缓存一回收就没了。
+
+`OutputPaths.productDir()` 的落点优先级：
+
+1. 输入不在 cache 里 → **就近**放（用户自己选的工作区文件，产物就该在旁边）；
+2. 输入在 cache 里 → 放到用户**能拿到**的地方：先工作区 `taffy-out/<feature>/`，
+   没配工作区才退到应用私有 `filesDir/<feature>/`（私有目录非 root 看不见，只作兜底）。
+
+接入的工具：
+
+| 工具 | feature |
+|---|---|
+| `taffy_apk_editor`（签名产物） | `apk-sign` |
+| `taffy_apk_build` | `apk-sign` |
+| `taffy_dex_aes`（解密出的 dex 目录） | `aes-dex` |
+| `taffy_dex_xor_scan`（还原的 dex / 目录） | `dex-recovered` |
+| `taffy_dex_compile`（重编 dex） | `dex-out` |
+
+就地改名、`.bak` 备份、`createTempFile` 这类**必须同目录**的操作没有动——它们靠同文件系统保证
+原子替换，挪走反而会出问题。
+
+### 2. 辅助产物按数量限额
+
+`filesDir/vip-scan/` 里每次扫描都会生成 hook 脚本与报告，同名覆盖但不同 APK 会累积。
+新增 `TempFiles.pruneProducts(dir, suffix, keepRecent)`：按后缀保留最新 20 份。
+
+**只用于可再生成的辅助产物**（脚本、报告）——用户产物（APK / dex）绝不能走这里，删掉用户要的
+东西比占几 MB 严重得多。
+
+### 3. VIP 页的产物路径也常驻了
+
+`hookPath` / `reportPath` 之前是 `remember`，切页回来命令区就消失了（得重新生成才看得到）。
+现在挂到 `BrowseMemory`，进页面时校验文件是否还在（可能被限额回收）——不在了就不显示成可用命令。
+
+### 4. 顺手清掉泄漏的补丁临时文件
+
+`taffy_apk_patch_bytes` 用 `createTempFile("patch_", ".apk", 目标目录)` 做原子替换，正常与失败
+路径都删，但**中途抛异常**会留下一个和 APK 等大的临时文件。现在每次操作前清掉一小时前的
+`patch_*.apk`（只清旧的，避免误删并发中的那份）。
+
+### 5. 可测性
+
+- `OutputPaths.resolveDir()` 是纯函数（4 条单测：cache 内 / 工作区 / 无父目录 / 「cache-extra」
+  不算 cache 内——前缀判断不能用裸 `startsWith("cache")`）；
+- `TempFiles.cacheDirOf()` 把「取 cacheDir」与「清理策略」分层，策略全在纯函数 `sweepDir` 里；
+- `pruneProducts` 2 条单测（按后缀保最新 / 低于限额不动）。
+
 ## 塔菲逆核 v1.5.82 —— 扫描页也记住目标 / 列插入支持指定列 / 两个会被悄悄搞错的小地方
 
 ### 1. VIP 与加密 DEX 扫描页：目标文件也常驻了

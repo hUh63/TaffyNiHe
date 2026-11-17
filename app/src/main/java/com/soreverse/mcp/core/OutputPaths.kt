@@ -16,18 +16,13 @@ import java.io.File
  *  2. 输入在 cacheDir 内（选文件复制出来的临时副本）→ 产物写 `工作区/taffy-out/<feature>/`，
  *     没配工作区才退到应用私有 `filesDir/<feature>/`（私有目录非 root 看不见，仅兜底）。
  *
- * 另：产物目录会随手清到最新 KEEP_FILES 份——默认落点跑几十次就会堆出几百 MB。
+ * 这里**不做**产物自动清理：APK / dex 是用户要的东西，删掉比占几 MB 严重得多
+ * （同 [TempFiles.pruneProducts] 的既定原则，那边也只清可再生成的 hook 脚本 / 报告）。
  */
 internal object OutputPaths {
 
     /** 工作区里的产物根目录名。 */
     const val OUTPUT_ROOT = "taffy-out"
-
-    /** 每个 feature 子目录保留的最新份数。 */
-    const val KEEP_FILES = 12
-
-    /** 刚落盘不久的产物不动（可能是本次正要交给用户的那份）。 */
-    private const val PROTECT_MS = 10 * 60 * 1000L
 
     /** 该功能的产物目录（保证存在）。 */
     fun productDir(context: Context, input: File, feature: String): File {
@@ -47,7 +42,6 @@ internal object OutputPaths {
             File(root, feature)
         }
         runCatching { target.mkdirs() }
-        runCatching { pruneFeatureDir(target) }
         return target
     }
 
@@ -65,30 +59,6 @@ internal object OutputPaths {
     /** 产物根目录（纯函数）：配了工作区 → `<工作区>/taffy-out`，否则 → `filesDir`。 */
     fun productRoot(workspacePath: String?, filesDir: File): File =
         if (!workspacePath.isNullOrBlank()) File(workspacePath, OUTPUT_ROOT) else filesDir
-
-    /**
-     * 产物目录只留最新 [keep] 份（纯文件系统，可单测）。
-     *
-     * 两个保护：①最新的 keep 份不动；②10 分钟内刚写出的不动——那是本次的产物。
-     *
-     * @return 删掉几份
-     */
-    fun pruneFeatureDir(
-        dir: File?,
-        keep: Int = KEEP_FILES,
-        minAgeMs: Long = PROTECT_MS,
-    ): Int {
-        if (dir == null || !dir.isDirectory) return 0
-        val files = runCatching { dir.listFiles { f -> f.isFile } }.getOrNull() ?: return 0
-        if (files.size <= keep) return 0
-        val now = System.currentTimeMillis()
-        var removed = 0
-        for (f in files.sortedByDescending { it.lastModified() }.drop(keep.coerceAtLeast(0))) {
-            if (now - f.lastModified() < minAgeMs) continue
-            if (runCatching { f.delete() }.getOrDefault(false)) removed++
-        }
-        return removed
-    }
 
     /**
      * 产物根目录自带 `.gitignore`。
@@ -120,9 +90,10 @@ internal object OutputPaths {
                 | `dex-recovered/` | `taffy_dex_xor_scan` 还原 / 修复的 dex |
                 | `dex-out/` | `taffy_dex_compile` 重编出来的 dex |
                 | `dex-renamed/` | `taffy_dex_rename_mapping` 重命名后的 dex / apk |
+                | `vip-scan/` | `taffy_vip_entry_scan` 生成的 Frida hook 脚本、最小验证脚本与报告 |
 
-                每个子目录只保留最新 12 份，更早的会在下次导出时自动清掉——想长期留的请把文件搬到别处。
                 输入文件不在应用缓存里时（例如你自己选的工作区文件），产物仍然写在它旁边，不进这个目录。
+                本目录不会自动删除你的产物；只有 `vip-scan/` 里的脚本 / 报告会按份数回收（可再生成）。
                 """.trimIndent()
             )
         }

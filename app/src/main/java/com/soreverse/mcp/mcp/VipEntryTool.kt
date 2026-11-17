@@ -1,6 +1,7 @@
 package com.soreverse.mcp.mcp
 
 import com.reandroid.apk.ApkModule
+import com.soreverse.mcp.core.OutputPaths
 import com.soreverse.mcp.core.TempFiles
 import com.soreverse.mcp.core.VipEntryScanner
 import com.soreverse.mcp.core.err
@@ -56,8 +57,8 @@ object VipEntryTool {
                         val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
                         val script = VipEntryScanner.buildHookScript(pkg, result.findings)
                         val out = outputFile(ctx, file, args.str("outPath"), ".vip_hook.js")
+                        if (args.str("outPath").isBlank() && out.parentFile?.name == "vip-scan") TempFiles.pruneProducts(out.parentFile, ".vip_hook.js")
                         out.writeText(script)
-                        if (args.str("outPath").isBlank()) TempFiles.pruneProducts(out.parentFile, ".vip_hook.js")
                         ok(
                             JSONObject()
                                 .put("action", "hook")
@@ -76,8 +77,8 @@ object VipEntryTool {
                         val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
                         val script = VipEntryScanner.buildMinimalHookScript(pkg, result.findings)
                         val out = outputFile(ctx, file, args.str("outPath"), ".vip_min.js")
+                        if (args.str("outPath").isBlank() && out.parentFile?.name == "vip-scan") TempFiles.pruneProducts(out.parentFile, ".vip_min.js")
                         out.writeText(script)
-                        if (args.str("outPath").isBlank()) TempFiles.pruneProducts(out.parentFile, ".vip_min.js")
                         val top = result.findings
                             .filter { it.kind == "METHOD" && it.smaliSig.isNotBlank() }
                             .maxByOrNull { it.score }
@@ -97,8 +98,8 @@ object VipEntryTool {
                         val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
                         val md = VipEntryScanner.buildReport(pkg, result)
                         val out = outputFile(ctx, file, args.str("outPath"), ".vip_report.md")
+                        if (args.str("outPath").isBlank() && out.parentFile?.name == "vip-scan") TempFiles.pruneProducts(out.parentFile, ".vip_report.md")
                         out.writeText(md)
-                        if (args.str("outPath").isBlank()) TempFiles.pruneProducts(out.parentFile, ".vip_report.md")
                         ok(
                             JSONObject()
                                 .put("action", "report")
@@ -143,16 +144,16 @@ object VipEntryTool {
     }
 
     /**
-     * 产物落盘位置。
+     * 产物落盘位置（与其它工具同一套规则，见 [OutputPaths]）。
      *
-     * 默认不再写在输入文件旁边：输入通常是 cacheDir 里的临时副本（`vip_*`），
-     * 生成的 hook 脚本 / 报告放那儿会被缓存回收清掉，用户也难找。
-     * 改到 `filesDir/vip-scan/`（应用私有持久目录），与输入同名。
+     * 输入通常是 cacheDir 里的临时副本（`vip_*`），产物不能跟着落在缓存里；
+     * 走 [OutputPaths.productDir] 后：输入在缓存 → `工作区/taffy-out/vip-scan/`（用户能拿到），
+     * 输入是自己的工作区文件 → 就地放它旁边。旧的 `filesDir/vip-scan/` 非 root 根本看不见。
      */
     private fun outputFile(ctx: ToolContext, input: File, custom: String, suffix: String): File {
         if (custom.isNotBlank()) return File(custom)
         val base = input.name.substringBeforeLast('.', input.name)
-        val dir = File(ctx.context.filesDir, "vip-scan").apply { runCatching { mkdirs() } }
+        val dir = OutputPaths.productDir(ctx.context, input, "vip-scan")
         return File(dir, base + suffix)
     }
 

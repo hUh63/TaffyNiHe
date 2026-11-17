@@ -66,42 +66,4 @@ class OutputPathsTest {
         assertEquals(files.canonicalPath, OutputPaths.productRoot(null, files).canonicalPath)
         assertEquals(files.canonicalPath, OutputPaths.productRoot("   ", files).canonicalPath)
     }
-
-    @Test
-    fun pruneFeatureDir_keepsNewestAndDropsOlder() {
-        val dir = tmp.newFolder("apk-sign")
-        repeat(5) { i ->
-            val f = File(dir, "p$i.apk").apply { writeText("x") }
-            f.setLastModified(1_000_000L + i * 1000L)
-        }
-
-        val removed = OutputPaths.pruneFeatureDir(dir, keep = 2, minAgeMs = 0)
-
-        assertEquals(3, removed)
-        assertEquals(listOf("p3.apk", "p4.apk"), dir.listFiles()!!.map { it.name }.sorted())
-    }
-
-    @Test
-    fun pruneFeatureDir_protectsFreshFiles() {
-        // 刚写出的那几份即使超出 keep 也不删（可能是本次要交给用户的那份）
-        val dir = tmp.newFolder("aes-dex")
-        val fresh = File(dir, "new.dex").apply { writeText("x") }
-        val old = File(dir, "old.dex").apply { writeText("x") }
-        old.setLastModified(System.currentTimeMillis() - 60 * 60 * 1000L)
-
-        val removed = OutputPaths.pruneFeatureDir(dir, keep = 1, minAgeMs = 10 * 60 * 1000L)
-
-        assertEquals(1, removed)
-        assertTrue(fresh.isFile)
-        assertFalse(old.isFile)
-    }
-
-    @Test
-    fun pruneFeatureDir_ignoresMissingOrBelowLimit() {
-        assertEquals(0, OutputPaths.pruneFeatureDir(null))
-        assertEquals(0, OutputPaths.pruneFeatureDir(File(tmp.root, "nope")))
-        val dir = tmp.newFolder("dex-out")
-        File(dir, "out.dex").writeText("x")
-        assertEquals(0, OutputPaths.pruneFeatureDir(dir, keep = 3, minAgeMs = 0))
-    }
 }

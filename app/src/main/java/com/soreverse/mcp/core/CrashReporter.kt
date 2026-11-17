@@ -78,7 +78,9 @@ object CrashReporter {
             val ackFile = ackFile(app, token)
             runCatching {
                 cleanOldReports(app)
-                writeAtomically(reportFile, buildReport(thread, throwable))
+                // 崩溃栈、日志尾部与设备信息里会带 MCP access token / AI key / 带凭据的 URL /
+                // 手机号 / 私钥块。报告是要被导出、贴进 issue 的，写盘前先脱敏。
+                writeAtomically(reportFile, SecretRedactor.redact(buildReport(thread, throwable)))
                 app.startActivity(
                     Intent(app, CrashReportActivity::class.java)
                         .putExtra(EXTRA_TOKEN, token)

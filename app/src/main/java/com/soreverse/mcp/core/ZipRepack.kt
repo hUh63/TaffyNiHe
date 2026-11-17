@@ -131,15 +131,36 @@ internal object ZipRepack {
                             // 旧实现无条件 readBytes()，重打包多 ABI 大 APK 时把几十 MB 灌进堆（OOM 风险）。
                             val streaming = override == null && e.method == ZipEntry.STORED &&
                                 e.size >= 0 && e.crc >= 0
-                            val data: ByteArray? = if (streaming) {
-                                null
-                            } else {
-                                override ?: zf.getInputStream(e).use { it.readBytes() }
+                            // override 为 null 但必须转 STORED 的条目（原包里被 DEFLATED 的
+                            // lib/*.so、resources.arsc）：旧实现整条 readBytes()，单个 200 MB
+                            // 的 libil2cpp.so 就能把重打包进程顶上 OOM。与 writeFreshFile 一样
+                            // 走两遍：先扫一遍算 size/crc，再流式写入（写完由下面的 data==null
+                            // 分支复用第二遍读取）。
+                            var twoPassStore = false
+                            val data: ByteArray? = when {
+                                streaming -> null
+                                override != null -> override
+                                else -> { twoPassStore = true; null }
                             }
                             if (streaming) {
                                 entry.size = e.size
                                 entry.compressedSize = e.size
                                 entry.crc = e.crc
+                            } else if (twoPassStore) {
+                                var crc = CRC32()
+                                var size = 0L
+                                zf.getInputStream(e).use { ins ->
+                                    val buf = ByteArray(64 * 1024)
+                                    while (true) {
+                                        val n = ins.read(buf)
+                                        if (n <= 0) break
+                                        crc.update(buf, 0, n)
+                                        size += n
+                                    }
+                                }
+                                entry.size = size
+                                entry.compressedSize = size
+                                entry.crc = crc.value
                             } else {
                                 val d = data ?: ByteArray(0)
                                 entry.size = d.size.toLong()

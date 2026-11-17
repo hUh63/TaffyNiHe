@@ -62,6 +62,29 @@ object LspClient {
             val p = pb.start()
             proc = p
             writer = p.outputStream
+            // jedi-language-server 会把启动日志 / 告警写到 stderr，而下面只读 stdout。
+            // 管道缓冲区（通常 64 KB）一满，子进程的 write 就永久阻塞 —— LSP 不再输出任何
+            // 响应，界面上表现为「补全一直转圈，重启才恢复」。必须持续排空：前 50 行记进诊断，
+            // 之后只读取丢弃（不能停，停了还是会满）。
+            Thread({
+                runCatching {
+                    BufferedReader(InputStreamReader(p.errorStream, Charsets.UTF_8)).use { r ->
+                        var kept = 0
+                        while (true) {
+                            val line = r.readLine() ?: break
+                            if (line.isBlank()) continue
+                            if (kept < 50) {
+                                kept++
+                                synchronized(diagLock) {
+                                    diagnosticsBuffer.add("stderr: " + line.take(200))
+                                    while (diagnosticsBuffer.size > 50) diagnosticsBuffer.removeAt(0)
+                                }
+                            }
+                        }
+                    }
+                }
+            }, "taffy-lsp-stderr").apply { isDaemon = true; start() }
+
             // 读线程：解析 framing → 分发响应/通知
             Thread({
                 runCatching {

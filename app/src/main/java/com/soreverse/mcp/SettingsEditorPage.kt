@@ -92,6 +92,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.soreverse.mcp.core.FileSniff
 import com.soreverse.mcp.core.readChildText
 import com.soreverse.mcp.core.EditorAiHelper
 import com.soreverse.mcp.core.LspClient
@@ -604,6 +605,25 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 ).show()
                 return@safeLaunch
             }
+            // 体积闸门只挡「太大」，挡不住「不太大但根本不是文本」：一个 3 MiB 的 .so 被
+            // decodeToString 之后是几百万个替换字符，BasicTextField 直接卡死，保存还会写坏原文件。
+            val kind = withContext(Dispatchers.IO) {
+                runCatchingCancellable {
+                    context.contentResolver.openInputStream(uri)?.use { ins ->
+                        val sample = ByteArray(FileSniff.SAMPLE_BYTES)
+                        val n = ins.read(sample)
+                        if (n <= 0) FileSniff.Kind.TEXT else FileSniff.sniff(sample, n)
+                    }
+                }.getOrNull() ?: FileSniff.Kind.TEXT
+            }
+            if (kind != FileSniff.Kind.TEXT) {
+                android.widget.Toast.makeText(
+                    context,
+                    "${kind.labelZh}，不能当文本编辑 —— ${FileSniff.hint(kind, true)}",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                return@safeLaunch
+            }
             val text = withContext(Dispatchers.IO) {
                 runCatchingCancellable { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
             }
@@ -645,7 +665,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     val f = File(path)
                     // 与 SAF 选择路径统一上限：原来是 64 MiB，比 SAF 宽 8 倍。几十 MB 的文本
                     // 塞进 BasicTextField 不是「慢一点」，是整个界面卡死（甚至有 OOM）。
-                    if (f.length() > 8L * 1024 * 1024) null else f.readText()
+                    when {
+                        f.length() > 8L * 1024 * 1024 -> null
+                        FileSniff.sniffFile(f) != FileSniff.Kind.TEXT -> null
+                        else -> f.readText()
+                    }
                 }.getOrNull()
             }
             if (text != null) {
@@ -665,7 +689,14 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     CodeHighlighter.activePack = com.soreverse.mcp.core.EditorSyntaxPacks.forExt(File(path).extension)
                 }
             } else {
-                appendOut("\n[无法读取: $path]（不存在、无权限，或超过 8 MiB 上限）\n")
+                val kind = withContext(Dispatchers.IO) {
+                    runCatchingCancellable { FileSniff.sniffFile(File(path)) }.getOrDefault(FileSniff.Kind.TEXT)
+                }
+                if (kind != FileSniff.Kind.TEXT) {
+                    appendOut("\n[${kind.labelZh} —— ${FileSniff.hint(kind, zh)}]\n")
+                } else {
+                    appendOut("\n[无法读取: $path]（不存在、无权限，或超过 8 MiB 上限）\n")
+                }
             }
         }
     }

@@ -129,7 +129,7 @@ object FullBackup {
                 // 否则恢复完仍按旧通道/旧 key 发请求
                 AiChannelStore.invalidate()
                 // 成功：旧目录整体丢弃
-                stagedDirs.forEach { (_, old) -> runCatching { old.deleteRecursively() } }
+                stagedDirs.forEach { (_, old) -> runCatching { SafeFileIo.deleteTreeNoFollow(old) } }
                 Summary(
                     path = src.absolutePath,
                     bytes = src.length(),
@@ -316,14 +316,22 @@ object FullBackup {
             val dir = stack.removeLast()
             val children = dir.listFiles() ?: continue
             for (f in children) {
+                // File.isDirectory / deleteRecursively 都会「跟随」符号链接：备份目录里只要有一个
+                // 指向 /sdcard 或 /data 的链接，就会把外部文件一起打包；恢复回滚时甚至会顺着链接
+                // 删到应用目录之外。这里一律按「链接本身」处理，不进去。
+                val rel = f.absolutePath.removePrefix(basePath)
+                    .trimStart(File.separatorChar)
+                    .replace(File.separatorChar, '/')
+                if (SafeFileIo.isSymbolicLink(f)) {
+                    sk++
+                    skipped += root.prefix + rel + " (符号链接，已跳过)"
+                    continue
+                }
                 if (f.isDirectory) {
                     stack.addLast(f)
                     continue
                 }
                 if (!f.isFile) continue
-                val rel = f.absolutePath.removePrefix(basePath)
-                    .trimStart(File.separatorChar)
-                    .replace(File.separatorChar, '/')
                 if (rel.isEmpty()) continue
                 if (f.length() > MAX_SINGLE_FILE_BYTES) {
                     sk++
@@ -337,7 +345,11 @@ object FullBackup {
                 }
                 try {
                     zos.putNextEntry(ZipEntry(root.prefix + rel))
-                    f.inputStream().use { it.copyTo(zos, COPY_BUFFER) }
+                    // 上面的 length 检查只是「看起来多大」，文件可能在检查后被追加；
+                    // copyTo 是无界的，真出现这种情况会把堆打爆。有界复制兜底。
+                    f.inputStream().use { ins ->
+                        SafeFileIo.copy(ins, zos, maxBytes = MAX_SINGLE_FILE_BYTES)
+                    }
                     zos.closeEntry()
                     entries++
                 } catch (e: Exception) {
@@ -452,9 +464,9 @@ object FullBackup {
     /** 取消/回滚后处理被挪走的旧目录：keepNew=false 时先清掉新写入的半成品再还原。 */
     private fun restoreStagedDirs(staged: List<Pair<File, File>>, keepNew: Boolean) {
         for ((orig, old) in staged) {
-            if (!keepNew) runCatching { if (orig.exists()) orig.deleteRecursively() }
+            if (!keepNew) runCatching { if (orig.exists()) SafeFileIo.deleteTreeNoFollow(orig) }
             if (!orig.exists()) runCatching { old.renameTo(orig) }
-            runCatching { if (old.exists()) old.deleteRecursively() }
+            runCatching { if (old.exists()) SafeFileIo.deleteTreeNoFollow(old) }
         }
     }
 

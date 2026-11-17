@@ -1,3 +1,70 @@
+## 塔菲逆核 v1.5.85 —— 太墟 v1.12.0 能力整合 / LSP 卡死 / 重打包 OOM
+
+这一版把上游太墟 v1.9.0 → v1.12.0 里对逆向工具有实际价值的那部分搬了进来，
+并顺着上游的同类 bugfix 找到本仓库两个真问题。
+
+### 1. 编辑器不再把二进制文件当文本打开
+
+以前只有「8 MiB 上限」这一道闸门：体积没超就把 `readBytes().decodeToString()` 的结果
+塞进输入框。打开一个 3 MiB 的 `.so`、一个 `.apk`、一个 `classes.dex`，得到的是几百万个
+替换字符 —— 界面直接卡死，手一抖按保存还会把原文件写坏。
+
+新增 `core/FileSniff`（移植自太墟 `BinaryFileSniffer`，判定更细）：
+
+- 按魔数识别 ELF / DEX / ZIP(APK) / PE / Mach-O / PNG·JPEG·GIF / PDF / SQLite / 媒体；
+- 无魔数时看 NUL 与控制字符占比，中文 UTF-8 与 BOM 文本不会被误判；
+- 系统选择器与工作区两条打开路径都接上，命中就给一句能直接照做的提示：
+  「ELF 二进制（.so / 可执行文件） —— 请用「分析」页打开（反汇编 / 伪 C / 节区 / 符号）」。
+
+### 2. 崩溃报告写盘前先脱敏
+
+崩溃栈、日志尾巴、设备信息里经常带 MCP access token、AI API key、
+`Authorization: Bearer ...`、带凭据的 URL、私钥块、JWT、手机号 —— 而这份报告是要被
+导出、贴进 issue、发到群里的。新增 `core/SecretRedactor`（移植自太墟 `SecretRedactor`）：
+
+- 覆盖 `password=` / `"api_key":` / `Bearer` / `?token=` / PEM 私钥 / JWT / 手机号；
+- 正则**全部预编译**（上游修过的点：原先在函数里每调用一次编译一次）；
+- 对正常文本零改动（单测里拿中文代码与版本号串做了反例）。
+
+### 3. 备份不再被符号链接带到外面
+
+`File.isDirectory` 与 `deleteRecursively` 都会**跟随**符号链接：
+
+- 备份：目录里只要有一个指向 `/sdcard`、`/data` 的链接，就会把外部文件一起打进包里；
+- 恢复失败回滚：`deleteRecursively` 会顺着链接删到应用目录之外。
+
+新增 `core/SafeFileIo`（移植自太墟 `BoundedStreamCopy` + `SafeFileTree`）：
+
+- 有界流复制（超限可中断可截断，单测覆盖三种边界）；
+- 不跟随链接的删除 / 复制 / 目录列举；
+- 备份遍历跳过符号链接并在 `skipped` 里逐条写明原因。
+
+### 4. Python 代码补全「一直转圈」的根因
+
+`LspClient` 起 `jedi-language-server` 时只读 stdout，**stderr 没人读**。
+服务端往 stderr 写几十 KB 启动日志后管道缓冲区满，子进程 `write` 永久阻塞 ——
+LSP 再也不返回响应，界面上就是补全一直转圈、只能重启。
+
+现在起一个守护线程持续排空 stderr（前 50 行进诊断缓冲，之后只丢弃），
+并且不会因为「满了就不再读」重新把管道堵上。
+
+### 5. 重打包大条目不再整条进堆
+
+`ZipRepack` 里原包条目被 DEFLATED、但按规则必须转成 STORED 时（`lib/**/*.so`、
+`resources.arsc`），旧实现是整条 `readBytes()` 再算 CRC —— 单个 200 MB 的
+`libil2cpp.so` 就足以把重打包进程顶上 OOM。改为与 `writeFreshFile` 同样的两遍流式：
+第一遍只扫 size/CRC，第二遍直接流式写入，内存占用与条目大小无关。
+
+### 6. 上游评估后**没有**搬的部分（避免重复造）
+
+| 上游能力 | 判断 |
+|---|---|
+| `McpResponseSizeLimiter`（512KB 内联 / 4MB 落盘 / 硬熔断） | 本仓库 `McpHttpServer.capResponseSize` 已有等价阈值与落盘，语义一致 |
+| `ServiceRecoveryPolicy`（指数退避 + 健康检查） | `CloudflareTunnelManager` 已有连续失败 3 次才重启 + 最小间隔，接入收益低 |
+| `PluginSignatureVerifier` / 远程插件库 | 本仓库插件是本地 Python 脚本，没有远程分发链路，签名验证无对象可签 |
+| Android SDK 在线下载、内置 Ubuntu 24.04 rootfs | 体积与场景不匹配（前者几百 MB，后者本仓库已有 termux rootfs 通道） |
+| Bot / 群聊 / 分身虚拟屏 / PiP | 与逆向工具无关 |
+
 ## 塔菲逆核 v1.5.84 —— 产物落点收口 / 三处「说成功其实没成」
 
 ### 1. 重命名产物不再单独一个 `renamed/`

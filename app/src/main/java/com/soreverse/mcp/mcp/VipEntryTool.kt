@@ -54,7 +54,7 @@ object VipEntryTool {
                     "hook" -> {
                         val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
                         val script = VipEntryScanner.buildHookScript(pkg, result.findings)
-                        val out = outputFile(file, args.str("outPath"), ".vip_hook.js")
+                        val out = outputFile(ctx, file, args.str("outPath"), ".vip_hook.js")
                         out.writeText(script)
                         ok(
                             JSONObject()
@@ -73,7 +73,7 @@ object VipEntryTool {
                         // 只 hook 分数最高的 1 个方法：先验证方向对不对，比一次挂 40 个目标更容易读日志
                         val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
                         val script = VipEntryScanner.buildMinimalHookScript(pkg, result.findings)
-                        val out = outputFile(file, args.str("outPath"), ".vip_min.js")
+                        val out = outputFile(ctx, file, args.str("outPath"), ".vip_min.js")
                         out.writeText(script)
                         val top = result.findings
                             .filter { it.kind == "METHOD" && it.smaliSig.isNotBlank() }
@@ -93,7 +93,7 @@ object VipEntryTool {
                     "report" -> {
                         val pkg = args.str("pkg").trim().ifBlank { guessPackage(file) }
                         val md = VipEntryScanner.buildReport(pkg, result)
-                        val out = outputFile(file, args.str("outPath"), ".vip_report.md")
+                        val out = outputFile(ctx, file, args.str("outPath"), ".vip_report.md")
                         out.writeText(md)
                         ok(
                             JSONObject()
@@ -138,10 +138,18 @@ object VipEntryTool {
         }.getOrDefault("")
     }
 
-    private fun outputFile(input: File, custom: String, suffix: String): File {
+    /**
+     * 产物落盘位置。
+     *
+     * 默认不再写在输入文件旁边：输入通常是 cacheDir 里的临时副本（`vip_*`），
+     * 生成的 hook 脚本 / 报告放那儿会被缓存回收清掉，用户也难找。
+     * 改到 `filesDir/vip-scan/`（应用私有持久目录），与输入同名。
+     */
+    private fun outputFile(ctx: ToolContext, input: File, custom: String, suffix: String): File {
         if (custom.isNotBlank()) return File(custom)
         val base = input.name.substringBeforeLast('.', input.name)
-        return File(input.parentFile ?: File("."), base + suffix)
+        val dir = File(ctx.context.filesDir, "vip-scan").apply { runCatching { mkdirs() } }
+        return File(dir, base + suffix)
     }
 
     private fun findingsJson(findings: List<VipEntryScanner.Finding>, limit: Int): JSONArray {

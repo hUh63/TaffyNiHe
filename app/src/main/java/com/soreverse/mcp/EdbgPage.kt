@@ -1,8 +1,5 @@
 package com.soreverse.mcp
 
-/** JADX 反编译输入上限：再大也不应该整包进内存。 */
-private const val SAFE_FILE_IO_MAX_INPUT_BYTES = 512L * 1024 * 1024
-
 import android.widget.Toast
 import com.soreverse.mcp.core.SafeFileIo
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -59,6 +56,9 @@ import org.json.JSONObject
 import java.io.File
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.core.runCatchingCancellable
+
+/** JADX 反编译输入上限：再大也不应该整包进内存。 */
+private const val SAFE_FILE_IO_MAX_INPUT_BYTES = 512L * 1024 * 1024
 
 /** 数值比较内核版本（旧代码用字符串比较，"5.9" 会被判为 ≥"5.10"，属逻辑错误）。 */
 private fun versionAtLeast(value: String, min: String): Boolean {

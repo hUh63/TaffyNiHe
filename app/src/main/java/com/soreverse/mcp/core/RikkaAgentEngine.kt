@@ -56,8 +56,6 @@ internal data class RikkaTool(
 internal class RikkaAgentEngine(
     private val client: OkHttpClient,
 
-    /** 本轮内「猜错工具名」的计数（run() 开始时清空）。 */
-    private val unknownToolAttempts = HashMap<String, Int>()
     private val provider: String,
     private val endpoint: String,
     private val apiKey: String,
@@ -77,6 +75,9 @@ internal class RikkaAgentEngine(
      */
     private val toolSchemaMode: String = "full",
 ) {
+    /** 本轮内「猜错工具名」的计数（run() 开始时清空）。 */
+    private val unknownToolAttempts = HashMap<String, Int>()
+
     // 用字面量比较而非常量：属性初始化器对 companion 的前向引用在部分 Kotlin 版本上会踩
     // "unresolved reference"，而这里只差一个字符串，没必要赌编译器行为。
     private val useSkillsLike = toolSchemaMode.trim().lowercase() == "skills_like"

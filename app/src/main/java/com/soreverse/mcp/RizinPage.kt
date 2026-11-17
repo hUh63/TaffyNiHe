@@ -2,8 +2,6 @@ package com.soreverse.mcp
 
 import com.soreverse.mcp.core.SafeFileIo
 
-/** Rizin 打开文件的上限：大 SO 可以到几百 MB，再大就不该整包走内存路径。 */
-private const val RZ_MAX_INPUT_BYTES = 512L * 1024 * 1024
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,6 +55,9 @@ import org.json.JSONObject
 import java.io.File
 import com.soreverse.mcp.core.safeLaunch
 import com.soreverse.mcp.core.runCatchingCancellable
+
+/** Rizin 打开文件的上限：大 SO 可以到几百 MB，再大就不该整包走内存路径。 */
+private const val RZ_MAX_INPUT_BYTES = 512L * 1024 * 1024
 
 /**
  * Rizin 引擎页（图形化分析工作台，对标 Explorer So）。

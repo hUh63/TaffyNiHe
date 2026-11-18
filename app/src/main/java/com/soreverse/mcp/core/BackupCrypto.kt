@@ -50,7 +50,10 @@ object BackupCrypto {
     private const val COPY_BUFFER = 64 * 1024
 
     private val random = SecureRandom()
-    private val argon2 = Argon2Kt()
+    // 懒加载：Argon2Kt 构造会触发 Android JNI 初始化，纯 JVM 单测里一碰就
+    // ExceptionInInitializerError。只有真正加解密（deriveKey）时才需要它，
+    // 而「解析文件头 / 判断是否加密」这些纯逻辑必须能在单测里跑。
+    private val argon2 by lazy { Argon2Kt() }
 
     /** 解析出来的文件头。 */
     data class Header(val version: Int, val salt: ByteArray, val nonce: ByteArray, val headerBytes: Int)

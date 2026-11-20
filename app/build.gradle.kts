@@ -237,6 +237,13 @@ dependencies {
     implementation(project(":terminal-view"))
 
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    // 代码编辑器：sora-editor（io.github.rosemoe，LGPL-2.1）。编辑器页的渲染层已从自研
+    // BasicTextField 换成它：增量语法高亮、代码折叠、括号匹配、undo/redo、放大镜、滚动条
+    // 都由库提供，塔菲只保留业务层（多标签/备份/命令工具条/搜索替换）。
+    // 选 0.24.6 而不是 0.24.7：后者是 prerelease，且 0.24.6 依赖 kotlin 2.3.10（本项目 2.4.21 兼容）。
+    implementation("io.github.rosemoe:editor:0.24.6")
+    implementation("io.github.rosemoe:language-java:0.24.6")
+
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

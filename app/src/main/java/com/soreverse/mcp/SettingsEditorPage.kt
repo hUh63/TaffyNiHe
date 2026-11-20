@@ -512,6 +512,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var viewerMode by remember { mutableStateOf(false) }
     val viewerListState = rememberLazyListState()
     // 编辑区
+    // 编辑器渲染层（sora-editor）；业务层通过它设文本/选区、跳行、取选中内容。
+    val soraHandle = remember { SoraEditorHandle() }
     val editorScroll = rememberScrollState()
     val editorLineCount = remember(code) { code.count { c -> c == '\n' } + 1 }
     var showJump by remember { mutableStateOf(false) }
@@ -547,11 +549,15 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     fun setCode(text: String) {
         code = text
         tf = TextFieldValue(text, selection = TextRange(text.length))
+        // 同步渲染层：文本相同只移光标，不会重置 sora 的撤销栈。
+        soraHandle.setText(text, text.length)
     }
 
     fun setCodeAt(text: String, caret: Int) {
         code = text
-        tf = TextFieldValue(text, selection = TextRange(caret.coerceIn(0, text.length)))
+        val at = caret.coerceIn(0, text.length)
+        tf = TextFieldValue(text, selection = TextRange(at))
+        soraHandle.setText(text, at)
     }
 
     // ── 撤销/重做 ──
@@ -635,7 +641,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             }
             if (text != null) {
                 pushUndo(tf.text)
-                code = text; tf = TextFieldValue(text); savedCode = text; currentFile = null; currentFilePath = null
+                code = text; tf = TextFieldValue(text); soraHandle.setText(text, 0); savedCode = text; currentFile = null; currentFilePath = null
             }
         }
     }
@@ -683,6 +689,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 undoStack.clear(); redoStack.clear()
                 code = text
                 tf = TextFieldValue(text)
+                soraHandle.setText(text, text.length)
                 savedCode = text
                 currentFilePath = path
                 currentFile = File(path).name
@@ -775,6 +782,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val target = if (dir >= 0) starts.firstOrNull { it > cur } ?: starts.first()
         else starts.lastOrNull { it < cur } ?: starts.last()
         tf = TextFieldValue(tf.text, selection = TextRange(target, (target + findQuery.length).coerceAtMost(tf.text.length)))
+        soraHandle.setSelectionOffsets(target, (target + findQuery.length).coerceAtMost(tf.text.length))
     }
 
     fun replaceCurrentMatch() {
@@ -805,29 +813,21 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     fun followCursor() {
-        scope.safeLaunch {
-            delay(30)
-            if (viewerMode || editorViewport <= 0) return@safeLaunch
-            val lineIdx = EditorTextOps.lineOf(tf.text, tf.selection.start) - 1
-            val lineH = with(density) { 19.sp.toPx() }
-            val y = lineIdx * lineH
-            val vp = editorViewport.toFloat()
-            val cur = editorScroll.value.toFloat()
-            if (y < cur + lineH || y > cur + vp - lineH * 2f) {
-                runCatching { editorScroll.scrollTo((y - vp * 0.4f).toInt().coerceAtLeast(0)) }
-            }
-        }
+        // sora 自己管滚动：只需保证光标可见，不再手算 ScrollState（那套只对自绘编辑区有效）。
+        if (!viewerMode) soraHandle.ensureVisible()
     }
 
     fun jumpToLine(n: Int) {
         if (tf.text.isEmpty()) return
         val off = EditorTextOps.lineStartOffset(tf.text, n)
         tf = TextFieldValue(tf.text, selection = TextRange(off))
+        soraHandle.setSelectionOffsets(off, off)
         followCursor()
     }
 
     fun moveCaretTo(offset: Int) {
         tf = TextFieldValue(tf.text, selection = TextRange(offset.coerceIn(0, tf.text.length)))
+        soraHandle.setSelectionOffsets(offset, offset)
     }
 
     fun applyTextOp(res: Pair<String, Int>) {
@@ -1003,6 +1003,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val first = list[0]
         code = first.code
         tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
+        soraHandle.setText(first.code, first.code.length)
         // 上次会话里首个标签是脏的，就保持「未保存」标记（savedCode 置空即 dirty）
         savedCode = if (sessionEntries.firstOrNull()?.dirty == true) "" else first.code
         mode = first.mode
@@ -1548,7 +1549,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 "copy" -> clipboardCopy(false)
                 "cut" -> clipboardCopy(true)
                 "paste" -> clipboardPaste()
-                "selectall" -> tf = TextFieldValue(tf.text, TextRange(0, tf.text.length))
+                "selectall" -> { tf = TextFieldValue(tf.text, TextRange(0, tf.text.length)); soraHandle.setSelectionOffsets(0, tf.text.length) }
                 "save" -> saveFile()
                 "open" -> loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*"))
                 "new" -> newFile()
@@ -1598,6 +1599,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     if (blk == null) appendOut("\n[光标不在括号块内]\n")
                     else {
                         tf = TextFieldValue(tf.text, TextRange(blk.first, (blk.second + 1).coerceAtMost(tf.text.length)))
+                        soraHandle.setSelectionOffsets(blk.first, (blk.second + 1).coerceAtMost(tf.text.length))
                         followCursor()
                     }
                 }
@@ -1870,129 +1872,39 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         }
                     }
                 } else {
-                    Row(Modifier.fillMaxWidth().verticalScroll(editorScroll).padding(vertical = 6.dp)) {
-                        if (showLineNumbers) {
-                            EditorGutter(editorLineCount, curLn, marks, edDim, editorFontSize) { n -> jumpToLine(n) }
-                        }
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .then(if (softWrap) Modifier else Modifier.horizontalScroll(editorHScroll)),
-                        ) {
-                        if (!softWrap && showIndentGuides && charWidthPx > 0f) {
-                            val step = charWidthPx * 4f
-                            val lineH = with(density) { contentLineHeight.toPx() }
-                            val guideColor = edDim.copy(alpha = 0.35f)
-                            val blockColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-                            val blockFrom = blockLineRange?.first ?: -1
-                            val blockTo = blockLineRange?.second ?: -1
-                            Canvas(Modifier.matchParentSize()) {
-                                // 总量上限：极端文件（2000 行、每行 20 层缩进）会画几万条短线，
-                                // 那种情况下列表本身也没法看，画到 4000 条就够表达"有缩进结构"。
-                                var drawn = 0
-                                for ((idx, line) in guideLines.withIndex()) {
-                                    if (drawn >= 4000) break
-                                    var indent = 0
-                                    for (ch in line) {
-                                        if (ch == ' ') indent++ else if (ch == '\t') indent += 4 else break
-                                    }
-                                    val levels = indent / 4
-                                    if (levels <= 0) continue
-                                    val top = idx * lineH
-                                    val lineNo = idx + 1
-                                    val color = if (blockFrom in 1..lineNo && lineNo <= blockTo) blockColor else guideColor
-                                    for (j in 1..levels.coerceAtMost(24)) {
-                                        val x = j * step
-                                        drawLine(
-                                            color = color,
-                                            start = androidx.compose.ui.geometry.Offset(x, top + lineH * 0.15f),
-                                            end = androidx.compose.ui.geometry.Offset(x, top + lineH * 0.85f),
-                                            strokeWidth = 1f,
-                                        )
-                                        drawn++
-                                    }
-                                }
-                            }
-                        }
-                        BasicTextField(
-                            value = tf,
-                            onValueChange = { nv ->
-                                // 只处理「纯插入一个字符」：多字符（输入法整段提交、粘贴）交回默认行为，
-                                // 否则自动缩进会把整段粘贴改得面目全非。
-                                val typed = typedSingleChar(tf.text, nv.text)
-                                val applied = if (!readOnly && typed != null) {
-                                    EditorCodeIntel.applyTyped(
-                                        tf.text,
-                                        tf.selection.min,
-                                        tf.selection.max,
-                                        typed,
-                                        indentUnit,
-                                        autoPair,
-                                        autoIndent,
-                                    )
-                                } else null
-                                pushUndo(tf.text)
-                                if (applied != null) {
-                                    tf = TextFieldValue(applied.text, TextRange(applied.caret, applied.selectionEnd))
-                                    code = applied.text
-                                } else {
-                                    tf = nv; code = nv.text
-                                }
+                    SoraEditorView(
+                        handle = soraHandle,
+                        text = code,
+                        readOnly = readOnly,
+                        lang = mode,
+                        dark = editorDark,
+                        colors = SoraColors(
+                            background = edBg,
+                            text = edFg,
+                            gutter = edDim,
+                            gutterCurrent = edCursor,
+                            selection = edCursor.copy(alpha = 0.24f),
+                            currentLine = edFg.copy(alpha = 0.06f),
+                            accent = edCursor,
+                        ),
+                        fontSizeSp = contentFontSize.value,
+                        lineNumbers = showLineNumbers,
+                        wordWrap = softWrap,
+                        modifier = Modifier.fillMaxSize(),
+                        onTextChanged = { newText, selStart, selEnd ->
+                            if (newText != code) {
+                                // sora 有自己的细粒度撤销栈，但工具条的撤销/重做是我们按「操作」粒度
+                                // 维护的整篇快照（pushUndo 内部有 600ms 节流），两者不冲突，这里照旧记。
+                                pushUndo(code)
+                                code = newText
                                 lastInputAt = System.currentTimeMillis()
-                            },
-                            modifier = if (softWrap) Modifier.fillMaxWidth() else Modifier.width(editorContentWidth),
-                            readOnly = readOnly,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = contentFontSize,
-                                lineHeight = contentLineHeight,
-                                color = edFg,
-                            ),
-                            cursorBrush = SolidColor(edCursor),
-                            visualTransformation = remember(mode, editorDark, editorDiags, editorBracket, caretLineRange, edCursor, errorColor, lineColor) {
-                                VisualTransformation { text ->
-                                    val src = text.text
-                                    val base = highlightCache[src] ?: CodeHighlighter.highlight(src, mode).also {
-                                        if (highlightCache.size > 32) highlightCache.clear()
-                                        highlightCache[src] = it
-                                    }
-                                    val ann = decorateEditorText(
-                                        base,
-                                        src,
-                                        editorDiags,
-                                        editorBracket,
-                                        caretLineRange,
-                                        lineColor,
-                                        edCursor,
-                                        errorColor,
-                                    )
-                                    androidx.compose.ui.text.input.TransformedText(
-                                        ann,
-                                        androidx.compose.ui.text.input.OffsetMapping.Identity,
-                                    )
-                                }
-                            },
-                            decorationBox = { inner ->
-                                Box {
-                                    if (code.isEmpty()) {
-                                        Text(
-                                            when (mode) {
-                                                CodeHighlighter.Lang.PYTHON -> if (zh) "# Python 代码（变量跨运行保留）" else "# Python code (state kept)"
-                                                CodeHighlighter.Lang.SHELL -> "# Shell 脚本"
-                                                CodeHighlighter.Lang.JSON -> "{ \"key\": \"value\" }"
-                                                else -> if (zh) "纯文本" else "plain text"
-                                            },
-                                            color = edDim, fontFamily = FontFamily.Monospace,
-                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = AppText.bodyStrong),
-                                            modifier = Modifier.padding(6.dp),
-                                        )
-                                    }
-                                    inner()
-                                }
-                            },
-                        )
-                        }
-                    }
+                            }
+                            val a = selStart.coerceIn(0, newText.length)
+                            val b = selEnd.coerceIn(0, newText.length)
+                            tf = TextFieldValue(newText, TextRange(minOf(a, b), maxOf(a, b)))
+                        },
+                        onCursorMoved = { _, _ -> },
+                    )
                 }
 
                 if (readOnly) {
@@ -2664,6 +2576,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         }) { Text(if (zh) "跳到块尾" else "Go to end") }
                         TextButton(onClick = {
                             tf = TextFieldValue(tf.text, TextRange(blk.first, (blk.second + 1).coerceAtMost(tf.text.length)))
+                            soraHandle.setSelectionOffsets(blk.first, (blk.second + 1).coerceAtMost(tf.text.length))
                             blockCardOpen = false
                             followCursor()
                         }) { Text(if (zh) "选中整块" else "Select") }

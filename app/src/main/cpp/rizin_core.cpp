@@ -1798,10 +1798,11 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
         anchors.size(),
         seededNeighbors);
 
-    // 顺序有讲究：pdg 是用户要的注解渲染，pdgj 同一份源码但从不读 console context。
-    // `pdd`（r2dec）与 `pdgo`/`pdgd`/`pdgx` 一样走注解打印器，本仓库也不带 r2dec，故都不作为
-    // 回落 —— 让它们进来只会在 console context 被置空后复现 #37 的崩溃。
-    const char* commands[] = { "pdg", "pdgj" };
+    // 顺序有讲究：pdg 是用户要的注解渲染；pdgj 同一份源码但从不读 console context（最安全的
+    // 回落）；pdd（r2dec）保留在最后 —— 它同样经 console 打印，但本入口已装上 ConsoleContextScope，
+    // 不会再复现 #37 的 NULL 解引用。删掉它会让「只装了 r2dec 没装 ghidra」的用户直接失去伪 C。
+    // `pdgo`/`pdgd`/`pdgx` 仍不作为回落：它们只是 pdg 的变体，没有独立能力。
+    const char* commands[] = { "pdg", "pdgj", "pdd" };
     const char* selected = nullptr;
     char* result = nullptr;
     std::string pickedText;

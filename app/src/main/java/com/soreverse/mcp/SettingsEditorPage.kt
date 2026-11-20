@@ -1903,7 +1903,16 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             val b = selEnd.coerceIn(0, newText.length)
                             tf = TextFieldValue(newText, TextRange(minOf(a, b), maxOf(a, b)))
                         },
-                        onCursorMoved = { _, _ -> },
+                        onCursorMoved = { _, _ ->
+                            // 光标移动（不输入）时文本不变，ContentChangeEvent 不会来；但状态栏行号、
+                            // 当前行高亮、括号匹配、AI 补全的上下文都读 tf.selection，必须镜像回来。
+                            val (a0, b0) = soraHandle.selectionOffsets()
+                            val a = a0.coerceIn(0, code.length)
+                            val b = b0.coerceIn(0, code.length)
+                            if (a != tf.selection.min || b != tf.selection.max) {
+                                tf = TextFieldValue(code, TextRange(minOf(a, b), maxOf(a, b)))
+                            }
+                        },
                     )
                 }
 

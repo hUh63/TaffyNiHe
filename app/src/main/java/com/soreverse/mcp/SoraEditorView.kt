@@ -237,7 +237,7 @@ internal fun SoraEditorView(
  */
 private class TaffyScheme(dark: Boolean, c: SoraColors) : EditorColorScheme(dark) {
     init {
-        setColor(EditorColorScheme.BACKGROUND, c.background.toArgb())
+        setColor(EditorColorScheme.WHOLE_BACKGROUND, c.background.toArgb())
         setColor(EditorColorScheme.TEXT_NORMAL, c.text.toArgb())
         setColor(EditorColorScheme.LINE_NUMBER, c.gutter.toArgb())
         setColor(EditorColorScheme.LINE_NUMBER_BACKGROUND, c.background.toArgb())
@@ -256,5 +256,10 @@ private class TaffyScheme(dark: Boolean, c: SoraColors) : EditorColorScheme(dark
         setColor(EditorColorScheme.COMPLETION_WND_TEXT_MATCHED, c.accent.toArgb())
         setColor(EditorColorScheme.COMPLETION_WND_ITEM_CURRENT, c.selection.toArgb())
         setColor(EditorColorScheme.COMPLETION_WND_CORNER, c.background.toArgb())
+        setColor(EditorColorScheme.SCROLL_BAR_TRACK, c.currentLine.toArgb())
+        setColor(EditorColorScheme.SCROLL_BAR_THUMB, c.gutter.copy(alpha = 0.55f).toArgb())
+        setColor(EditorColorScheme.SCROLL_BAR_THUMB_PRESSED, c.accent.copy(alpha = 0.75f).toArgb())
+        setColor(EditorColorScheme.LINE_DIVIDER, c.currentLine.toArgb())
+        setColor(EditorColorScheme.MATCHED_TEXT_BACKGROUND, c.selection.toArgb())
     }
 }

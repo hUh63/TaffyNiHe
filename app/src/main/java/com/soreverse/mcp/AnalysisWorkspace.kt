@@ -1987,7 +1987,7 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
             TextButton(onClick = { load((parseOffset(offsetText) - step).coerceAtLeast(0L)) }, enabled = !loading) { Text("◀", fontSize = AppText.label) }
             TextButton(onClick = { load(0L) }, enabled = !loading) { Text(if (zh) "顶部" else "Top", fontSize = AppText.label) }
             TextButton(onClick = { load(parseOffset(offsetText) + step) }, enabled = !loading) { Text("▶", fontSize = AppText.label) }
-            AddrSectionsMenu(ctx, path) { at -> offsetText = "0x" + java.lang.Long.toHexString(at); load(at) }
+            AddrSectionsMenu(ctx, path, zh) { at -> offsetText = "0x" + java.lang.Long.toHexString(at); load(at) }
             Spacer(Modifier.weight(1f))
             if (loading) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
             Text(info, style = monoStyle(), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
 import com.soreverse.mcp.core.ElfSections
@@ -41,6 +42,7 @@ internal fun AddrSectionsMenu(
     var items by remember { mutableStateOf<List<ElfSections.Item>>(emptyList()) }
     var error by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val currentPath = rememberUpdatedState(path)
 
     // 换了文件就要重新读；不预加载（用户不点就不读盘）。
     LaunchedEffect(path) {
@@ -61,9 +63,13 @@ internal fun AddrSectionsMenu(
             val list = withContext(Dispatchers.IO) {
                 runCatchingCancellable { ElfSections.read(context, p) }.getOrElse { emptyList() }
             }
-            items = list
-            if (list.isEmpty()) error = if (zh) "不是 ELF，或没有可读的节区表" else "not ELF / no section table"
-            loading = false
+            // 解析期间用户可能已经换了文件：只把结果写回它属于的那个路径，
+            // 否则会把 A 的节区表显示在 B 的下拉里。
+            if (currentPath.value.trim() == p) {
+                items = list
+                if (list.isEmpty()) error = if (zh) "不是 ELF，或没有可读的节区表" else "not ELF / no section table"
+                loading = false
+            }
         }
     }
 

@@ -58,22 +58,27 @@ object MemoryPressure {
      * @return null = 允许分配；非 null = 拒绝原因（中文，可直接展示）
      */
     fun guardAllocation(context: Context, sizeBytes: Long, what: String): String? {
-        // 先自救再判断：低内存或堆已用超 85% 时，先丢掉可重建的缓存（共享 RzCore 等），
-        // 再按真实余量决定是否拒绝。否则「差 20MiB」也会被直接拒绝，而其实缓存一丢就够。
-        if (systemLowMemory(context) || heapUsedFraction() > 0.85f) reclaimAll()
+        // 自救只在「本来就要拒绝」时发生：丢掉共享 RzCore 之后下一次命令要重新 load +
+        // 全量分析（大文件 3~10 秒），无脑在每次大分配前调用等于把性能砸掉。
         if (systemLowMemory(context)) {
-            return "系统内存不足（low memory），已停止加载${what}以避免崩溃。请关闭部分后台应用后重试"
+            reclaimAll()
+            if (systemLowMemory(context)) {
+                return "系统内存不足（low memory），已停止加载${what}以避免崩溃。请关闭部分后台应用后重试"
+            }
         }
         if (sizeBytes > 0L) {
             val rt = Runtime.getRuntime()
             val max = rt.maxMemory()
-            val headroom = max - (rt.totalMemory() - rt.freeMemory())
             // 余量按 0.8 打折：GC 后可回收空间并不总能及时释放，且 native 解析（LIEF/xanso）
             // 还会产生额外副本，实际峰值需求高于文件大小本身。
-            if (sizeBytes > headroom * 0.8) {
-                val mb = sizeBytes / 1024 / 1024
-                val room = headroom / 1024 / 1024
-                return "加载${what}约需 ${mb}MiB，超过当前堆余量（可用约 ${room}MiB / 上限 ${max / 1024 / 1024}MiB），已停止以防 OOM"
+            fun headroom(): Long = max - (rt.totalMemory() - rt.freeMemory())
+            if (sizeBytes > headroom() * 0.8) {
+                reclaimAll()
+                if (sizeBytes > headroom() * 0.8) {
+                    val mb = sizeBytes / 1024 / 1024
+                    val room = headroom() / 1024 / 1024
+                    return "加载${what}约需 ${mb}MiB，超过当前堆余量（可用约 ${room}MiB / 上限 ${max / 1024 / 1024}MiB），已停止以防 OOM"
+                }
             }
         }
         return null

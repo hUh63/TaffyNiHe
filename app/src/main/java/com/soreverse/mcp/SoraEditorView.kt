@@ -184,10 +184,13 @@ internal fun SoraEditorView(
                 ed.appliedScheme = scheme
             }
             if (ed.appliedLang != lang) {
-                ed.editorLanguage = when (lang) {
-                    CodeHighlighter.Lang.JAVA, CodeHighlighter.Lang.C, CodeHighlighter.Lang.SMALI -> JavaLanguage()
-                    else -> EmptyLanguage()
-                }
+                // 用方法而不是合成属性：getter 与 setter 的可空性不一致时 Kotlin 只合成 val。
+                ed.setEditorLanguage(
+                    when (lang) {
+                        CodeHighlighter.Lang.JAVA, CodeHighlighter.Lang.C, CodeHighlighter.Lang.SMALI -> JavaLanguage()
+                        else -> EmptyLanguage()
+                    },
+                )
                 ed.appliedLang = lang
             }
             if (ed.appliedFontPx != fontPx) {

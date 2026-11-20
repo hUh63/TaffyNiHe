@@ -1,3 +1,57 @@
+## 塔菲逆核 v1.5.87 —— 伪C 打印器空指针崩溃修复 / 地址查看器随机访问 / 自检空间口径
+
+这一版的主体是**一个真崩溃**的根因修复（与上游 SOMCP #38 同源），外加两处「改完整」的
+边界收口。没有新页面，但下面每一条都是可感知的行为变化。
+
+### 1. 伪C 打印器的空指针崩溃（根因）
+
+rizin 的 `rz_core_annotated_code_print()` 是 `pdg`/`pdgo` 的最后一步，它无条件读进程级
+console context；而 `rz_core_free()` → `rz_core_fini()` → `rz_cons_free()` 会把该 context
+置 NULL（rizin 0.9.1 `cons.c:701-721`）。塔菲每个 JNI 入口都新建并销毁 RzCore，所以第一次
+核心销毁之后，任何伪 C 打印都会解引用 NULL+0x730 —— 崩溃点不在我们自己的代码里，日志只有
+「x8=0 / fault 0x730」，几乎无法归因。
+
+修法是**守卫上下文而不是信号处理器**：
+
+- 库加载时创建一个本桥持有的 console context（永不释放），每个 JNI 入口装上、退出还原，
+  并把 errno pin 回入口值（`rz_cons_singleton()` 重建 console 时会改 errno）；
+- decompile 打印前若 context 仍为空，**拒绝读文本**并回 `printBlocked`，而不是让 ghidra 的
+  C++ 栈帧被 sigsetjmp 掀掉（那会在回退路径下面留下半释放的堆）；
+- 打印链改为 `pdg → pdgj → pdd`：`pdgj` 不读 console context，是最安全的回落；`pdd` 保留给
+  只装了 r2dec 没装 ghidra 的用户（不删能力）；
+- 命令通道与反编译通道共用一个错误码 `UNSAFE_DECOMPILER_PRINT`，并**逐段**拒绝
+  `pdg`/`pdgo`/`pdgd`/`pdgx`（rizin 按 `;` 与换行切段执行，整串前缀检查挡不住 `s 0x10; pdg`）；
+  `pdgj` / `pdg*` / `pdgs*` 仍然开放（它们不碰该上下文）。
+
+### 2. 地址查看器改成随机访问窗口读
+
+以前是「整份读进内存 → 只显示 512 字节」：200 MB 的 SO 翻 10 页就读 2 GB，512 MiB 的 APK
+直接 OOM，所谓「128 MiB 上限」只是把崩溃点往后推了一点。现在：
+
+- 普通文件用 `RandomAccessFile` seek 到窗口起点，只读 `[offset, offset+length)`；
+- `content://` 先走 `openFileDescriptor` 的真正随机访问（多数 provider 支持），不支持 seek 的
+  provider 落地一份本地副本再按文件读，副本按 URI hash 复用、最多留 3 份；
+- offset 改成 Long 并在界面按 hex 显示，**大于 2GB 的文件也能翻页**。
+
+### 3. 环境自检的「可用空间」取三处最小值
+
+以前只看 `cacheDir`，会报「空间充足」，然后在写备份或导出时失败。现在取 cache / files /
+外部专属目录三处的**最小值**作为结论，并指出哪一处最先写满。
+
+### 4. 编辑器打开 content:// 的有界读
+
+8 MiB 闸门依赖 `openAssetFileDescriptor().length`，而 SAF / 云盘 provider 常返回 -1（未知
+长度）→ 闸门静默失效 → `readBytes()` 整份进内存。新增 `StreamLimits` 按上限流式读，
+与 length 是否可信无关。
+
+### 核查过但不需要改的
+
+- `HeavyGate` 的租约看门狗与 poisoned 状态、`ScriptTool` 的 heavy 闸门、`FullBackup` 的
+  `stageTargetDirs`（恢复前整体挪走目标目录，已解决「备份里删掉的文件复活」）、
+  `HttpCaptureServer.stop` 关闭已建连接 —— 复核确认都在前几版已修好。
+- 太墟 v1.12.0 的 LazyList pending-scroll 修复：塔菲只有 `scrollToItem`（无 animate），
+  模式不适用；其内置 Ubuntu rootfs 需要 proot 运行时，塔菲没有消费者，不搬。
+
 ## 塔菲逆核 v1.5.86 —— 备份流式加密 / 子代理收尾协商 / 环境自检 / 无界读清零
 
 上一版把太墟的「文件安全三件套」搬完了；这一版把剩下的**结构性**问题一并收口，

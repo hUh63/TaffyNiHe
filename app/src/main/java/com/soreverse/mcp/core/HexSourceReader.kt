@@ -110,8 +110,10 @@ internal object HexSourceReader {
         }.getOrNull() ?: return null
         var fis: FileInputStream? = null
         return try {
-            fis = FileInputStream(pfd.fileDescriptor)
-            val channel = fis.channel
+            // K2 不会把 var 局部变量的可空类型经赋值后智能转换，所以用不可变局部量取 channel。
+            val stream = FileInputStream(pfd.fileDescriptor)
+            fis = stream
+            val channel = stream.channel
             val total = runCatching { channel.size() }.getOrDefault(-1L)
             if (total <= 0) return null
             if (from >= total) return Window(ByteArray(0), total, total, "")

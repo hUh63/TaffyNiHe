@@ -187,7 +187,12 @@ internal fun SoraEditorView(
                 // 用方法而不是合成属性：getter 与 setter 的可空性不一致时 Kotlin 只合成 val。
                 ed.setEditorLanguage(
                     when (lang) {
-                        CodeHighlighter.Lang.JAVA, CodeHighlighter.Lang.C, CodeHighlighter.Lang.SMALI -> JavaLanguage()
+                        // Java 词法分析器也用来上色 C / Smali / JSON / XML：这几种的
+                        // 字符串、数字、标点与 Java 同构，比纯文本可读得多；反过来
+                        // Python/Shell 的 # 注释在 Java 规则下会被当成普通字符，反而更乱，
+                        // 所以它们暂时走纯文本（下一版接 textmate 语法包再补）。
+                        CodeHighlighter.Lang.JAVA, CodeHighlighter.Lang.C, CodeHighlighter.Lang.SMALI,
+                        CodeHighlighter.Lang.JSON, CodeHighlighter.Lang.XML -> JavaLanguage()
                         else -> EmptyLanguage()
                     },
                 )

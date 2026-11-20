@@ -28,7 +28,7 @@ class DecompilerPrintGuardTest {
         assertEquals("pdg", annotatedPrintSegment("s 0x1040;pdg"))
         assertEquals("pdg", annotatedPrintSegment("s 0x1040; pdg"))
         assertEquals("pdg", annotatedPrintSegment("s 0x1040\npdg"))
-        assertEquals("pdg", annotatedPrintSegment("\n  pdg @ 0x1040"))
+        assertEquals("pdg @ 0x1040", annotatedPrintSegment("\n  pdg @ 0x1040"))
     }
 
     @Test

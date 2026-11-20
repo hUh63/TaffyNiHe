@@ -1564,16 +1564,14 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 "toggle:pairs" -> {
                     autoPair = !autoPair
                     persistBool("editor_auto_pair", autoPair)
-                    appendOut(if (autoPair) "\n[自动配对括号: 开]\n" else "\n[自动配对括号: 关]\n")
+                    appendOut("\n[自动配对括号由编辑器库提供，始终生效]\n")
                 }
                 "toggle:guides" -> {
                     showIndentGuides = !showIndentGuides
                     persistBool("editor_indent_guides", showIndentGuides)
                     appendOut(
                         when {
-                            !showIndentGuides -> "\n[缩进参考线: 关]\n"
-                            softWrap -> "\n[缩进参考线: 开（需先关闭自动换行才画得出）]\n"
-                            else -> "\n[缩进参考线: 开]\n"
+                            else -> "\n[缩进参考线已由编辑器库的代码折叠取代，不再单独绘制]\n"
                         }
                     )
                 }
@@ -1586,7 +1584,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 "toggle:autoindent" -> {
                     autoIndent = !autoIndent
                     persistBool("editor_auto_indent", autoIndent)
-                    appendOut(if (autoIndent) "\n[自动缩进: 开]\n" else "\n[自动缩进: 关]\n")
+                    appendOut("\n[自动缩进由编辑器库提供，始终生效]\n")
                 }
                 "nav:bracket" -> {
                     val m = editorBracket

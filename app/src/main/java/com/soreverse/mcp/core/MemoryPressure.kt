@@ -2,6 +2,7 @@ package com.soreverse.mcp.core
 
 import android.app.ActivityManager
 import android.content.Context
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 内存压力守卫 —— 借鉴上游 SOMCP #63 修复思路：
@@ -12,6 +13,25 @@ import android.content.Context
  * 返回 null 表示可继续，否则返回可直接展示的拒绝原因（MCP err / UI 提示通用）。
  */
 object MemoryPressure {
+
+    /**
+     * 「可重建缓存」的释放钩子（键 → 动作）。
+     *
+     * 分析引擎把整份 SO 的解析结果常驻在共享 RzCore 里（大文件几十 MB），这类数据
+     * 随时可以重建，但不会自己让出来。内存紧张时先把它们丢掉，比直接拒绝用户操作好：
+     * 丢掉之后重新 load 只是慢一点，而拒绝就是功能不可用。
+     */
+    private val reclaimers = ConcurrentHashMap<String, () -> Unit>()
+
+    /** 按 key 注册（重复注册是幂等的，后注册的覆盖先注册的）。 */
+    fun registerReclaimer(key: String, action: () -> Unit) {
+        reclaimers[key] = action
+    }
+
+    /** 立即释放所有登记的缓存。 */
+    fun reclaimAll() {
+        for (action in reclaimers.values) runCatching { action() }
+    }
 
     /** 系统级低内存标志（所有应用共享的物理内存状态，系统建议停止大分配）。 */
     fun systemLowMemory(context: Context): Boolean {
@@ -38,6 +58,9 @@ object MemoryPressure {
      * @return null = 允许分配；非 null = 拒绝原因（中文，可直接展示）
      */
     fun guardAllocation(context: Context, sizeBytes: Long, what: String): String? {
+        // 先自救再判断：低内存或堆已用超 85% 时，先丢掉可重建的缓存（共享 RzCore 等），
+        // 再按真实余量决定是否拒绝。否则「差 20MiB」也会被直接拒绝，而其实缓存一丢就够。
+        if (systemLowMemory(context) || heapUsedFraction() > 0.85f) reclaimAll()
         if (systemLowMemory(context)) {
             return "系统内存不足（low memory），已停止加载${what}以避免崩溃。请关闭部分后台应用后重试"
         }

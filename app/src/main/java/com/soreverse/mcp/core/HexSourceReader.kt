@@ -36,6 +36,14 @@ internal object HexSourceReader {
     private const val MAX_COPY_ENTRIES = 3
 
     /**
+     * 本地副本的总字节上限。
+     *
+     * 只限份数不够：三份 1.5GB 的镜像就是 4.5GB 缓存，用户会在「存储空间」里看到一堆
+     * 来路不明的 src_*.bin，而且是应用自己写出来的。总字节与份数同时约束才安全。
+     */
+    private const val MAX_COPY_BYTES: Long = 1_500L * 1024 * 1024
+
+    /**
      * 一个窗口的读取结果。
      *
      * 失败时 [data] 为 null、[error] 是可直接展示的原因；`offset` 超出文件末尾
@@ -152,12 +160,15 @@ internal object HexSourceReader {
             runCatching { target.setLastModified(System.currentTimeMillis()) }
             return target
         }
+        // 先按份数/总量腾出空间，避免复制到一半把存储写满。
+        prune(dir, null)
         val tmp = File(dir, "src_$key.tmp")
         val input = runCatching { context.contentResolver.openInputStream(uri) }.getOrNull() ?: return null
         var total = 0L
         try {
             tmp.outputStream().use { out ->
                 val buf = ByteArray(64 * 1024)
+                var sinceCheck = 0L
                 while (true) {
                     val r = input.read(buf)
                     if (r <= 0) break
@@ -167,6 +178,15 @@ internal object HexSourceReader {
                         return null
                     }
                     out.write(buf, 0, r)
+                    sinceCheck += r
+                    if (sinceCheck >= 4L * 1024 * 1024) {
+                        sinceCheck = 0
+                        // 存储写满时宁可放弃这次 dump，也不要把设备塞到别的功能全失败。
+                        if (runCatching { dir.usableSpace }.getOrDefault(Long.MAX_VALUE) < 32L * 1024 * 1024) {
+                            runCatching { tmp.delete() }
+                            return null
+                        }
+                    }
                 }
             }
         } catch (e: Throwable) {
@@ -183,14 +203,19 @@ internal object HexSourceReader {
         return target
     }
 
-    private fun prune(dir: File, keep: File) {
+    private fun prune(dir: File, keep: File?) {
         val files = dir.listFiles()?.filter { it.name.startsWith("src_") && it.isFile } ?: return
         val ordered = files.sortedBy { it.lastModified() }
-        var excess = ordered.size - MAX_COPY_ENTRIES
+        var count = ordered.size
+        var bytes = ordered.sumOf { it.length() }
         for (f in ordered) {
             if (f == keep) continue
-            if (excess <= 0) break
-            if (runCatching { f.delete() }.getOrDefault(false)) excess--
+            if (count <= MAX_COPY_ENTRIES && bytes <= MAX_COPY_BYTES) break
+            val len = f.length()
+            if (runCatching { f.delete() }.getOrDefault(false)) {
+                count--
+                bytes -= len
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.soreverse.mcp.engine
 
+import com.soreverse.mcp.core.MemoryPressure
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.RzCmdKind
 import com.soreverse.mcp.core.classifyRzCommand
@@ -480,7 +481,20 @@ internal fun EngineRuntime.rzCommand(
     res
 }
 
+/**
+ * 内存紧张时丢掉共享 RzCore（它常驻着一整份 SO 的解析结果，随时可重建）。
+ * 第一次调用 rzCommand 时注册；重复注册幂等。
+ */
+private object RizinReclaimer {
+    init {
+        MemoryPressure.registerReclaimer("rizin-shared") { releaseRizinSharedAnalysis() }
+    }
+
+    fun ensure() = Unit
+}
+
 private fun EngineRuntime.rzCommandCore(workspaceId: String, editSessionId: String = "", command: String, unsafe: Boolean = false): JSONObject = guarded {
+    RizinReclaimer.ensure()
     val bytes = dataFor(workspaceId, editSessionId)
     val elf = elfFor(workspaceId, editSessionId)
     if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")

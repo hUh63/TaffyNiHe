@@ -485,6 +485,11 @@ private fun EngineRuntime.rzCommandCore(workspaceId: String, editSessionId: Stri
     val elf = elfFor(workspaceId, editSessionId)
     if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")
     if (command.isBlank()) return@guarded err("INVALID_ARGUMENT", "command must not be blank", "command", command)
+    // Rizin 的注解代码打印器（pdg/pdgo/pdgd/pdgx，issue #37）会解引用本网关不持有的
+    // console context，native 侧已用 ConsoleContextScope 兜住但这里仍不该让它进来：
+    // 拒绝比崩溃好，而且能告诉调用方改用什么。逐段检查是因为 rz_core_cmd_str 会按
+    // ';' 与换行切段执行，只看整串开头会漏掉 `s 0x10; pdg`。
+    annotatedPrintSegment(command)?.let { segment -> return@guarded decompilerPrintBlocked(command, segment) }
     // Align low-level axt/axtj with high-level analyze_xrefs / rizin_api xrefs enrichment.
     parseAxtCommand(command)?.let { (va, asJson) ->
         val enriched = rzXrefs(workspaceId, editSessionId, hex(va), "to")
@@ -586,6 +591,30 @@ internal fun EngineRuntime.rzDecompile(workspaceId: String, editSessionId: Strin
         .put("addr", hex(va))
         .put("requestedBackend", "rizin-ghidra")
         .put("usesBuiltinPseudo", false)
+    // native 侧拒绝把 NULL console context 交给注解打印器（issue #37），并在自己的字段里
+    // 说明；没有拿到可用文本时，调用方需要知道是 console 而不是函数本身的问题。
+    val printBlocked = payload.optJSONObject("printBlocked")
+    if (printBlocked != null &&
+        printBlocked.optBoolean("needsConsoleContext", false) &&
+        payload.optString("pseudocode").isBlank()
+    ) {
+        val reason = printBlocked.optString("reason").ifBlank { "console context was unavailable" }
+        // 塔菲的既有策略是「尽量给输出」：纯 Java 伪 C 不走 rizin，console 坏了也能用。
+        if (strict) {
+            val fallback = standaloneJavaPseudoDecompile(bytes, elf, va, name)
+            if (fallback.optBoolean("ok", false)) return@guarded fallback
+        }
+        return@guarded decompilerPrintBlocked(
+            "pdg @ ${hex(va)}",
+            reason,
+            "The decompiler console context was unavailable, so function ${hex(va)} was not rendered ($reason). " +
+                "The engine is fine and other calls work; retry, or use disassembly instead.",
+        ).also { result ->
+            result.getJSONObject("error").getJSONObject("diagnostics")
+                .put("addr", hex(va))
+                .put("payload", payload)
+        }
+    }
     val decompErr = payload.optString("error")
     if ((decompErr == "DECOMPILER_UNAVAILABLE" || decompErr == "DECOMPILER_FAILED") && strict) {
         // Ghidra 反编译失败且 strict=true 时，同样降级为纯 Java 兜底（若可用），保证有输出。
@@ -981,3 +1010,55 @@ internal fun EngineRuntime.rizinImportStubHints(workspaceId: String, editSession
         }
         return hints
     }
+
+/**
+ * 会走到 Rizin 注解代码打印器的那一段命令，没有则返回 null。
+ *
+ * `pdg`/`pdgo` 最后一步是 rz_core_annotated_code_print()，它无条件读进程级 console
+ * context（issue #37）；`pdgj` 与 `pdg*` 用不碰该上下文的打印器，`pdgs*` 根本不打印代码，
+ * 所以它们仍可从命令通道走。rizin 会按 ';' 与换行切段执行，整串前缀检查不够。
+ */
+internal fun annotatedPrintSegment(command: String): String? {
+    var start = 0
+    while (start <= command.length) {
+        val end = command.indexOfFirstFrom(start) { it == ';' || it == '\n' || it == '\r' }
+        val segment = command.substring(start, end).trimStart(' ', '\t', '\r')
+        val word = segment.takeWhile { it !in WORD_BREAK }
+        if (word.startsAnnotatedPrint()) return segment
+        if (end >= command.length) break
+        start = end + 1
+    }
+    return null
+}
+
+/** 渲染注解代码的 rizin 命令：ghidra 组减去 JSON(pdgj)/注释(pdg*)/sleigh 清单(pdgs*)。 */
+private fun String.startsAnnotatedPrint(): Boolean =
+    startsWith("pdg") && this != "pdgj" && this != "pdg*" && !startsWith("pdgs")
+
+/** 结束命令单词；`~` 过滤、`?` 帮助、`$` 求值都不会走到打印器。 */
+private val WORD_BREAK = setOf(' ', '\t', '~', '?', '$')
+
+private fun String.indexOfFirstFrom(from: Int, predicate: (Char) -> Boolean): Int {
+    for (i in from until length) {
+        if (predicate(this[i])) return i
+    }
+    return length
+}
+
+private const val UNSAFE_DECOMPILER_PRINT = "UNSAFE_DECOMPILER_PRINT"
+
+/**
+ * 打印机被拒的唯一错误出口：命令通道与反编译通道共用一份文案，避免同一个原因两种说法。
+ * `nativeMessage` 非空时用 native 给的更精确原因（例如 "console context was NULL"）。
+ */
+private fun decompilerPrintBlocked(command: String, segment: String, nativeMessage: String? = null): JSONObject = err(
+    UNSAFE_DECOMPILER_PRINT,
+    nativeMessage ?: (
+        "`$segment` renders through Rizin's annotated-code printer, which reads a console context this " +
+            "gateway does not own (issue #37), so it was not run. For decompiled code use " +
+            "rizin_api(action=decompile); for the same source here send pdgj (JSON) or pdg* (comment commands)."
+        ),
+    "command",
+    command,
+    "blockedSegment" to segment,
+)

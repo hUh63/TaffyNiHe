@@ -57,11 +57,140 @@
 #include <rz_diff.h>
 #include <rz_hash.h>
 #include <rz_reg.h>
+#include <rz_cons.h>
+#include <cerrno>
 
 namespace {
     std::mutex ghidraConfigMutex;
     std::string ghidraPluginDir;
     std::string ghidraSleighHome;
+
+    // Issue #37（SOMCP）同源缺陷：rz_core_annotated_code_print() 是 `pdg`/`pdgo` 的最后
+    // 一步，它无条件读 rz_cons_singleton()->context（cannotated_code.c:97/128）；而
+    // rz_core_free() -> rz_core_fini() -> rz_cons_free() 会把 `I.context = NULL`
+    // （cons.c:701-721）。塔菲每个 JNI 入口都新建并销毁 RzCore，所以第一次 core 销毁之后
+    // 任何伪 C 打印都会解引用 NULL+0x730 —— 崩溃点不在自己的代码里，日志只有
+    // 「x8=0 / fault 0x730」，极难归因。
+    //
+    // 修法是守卫上下文而不是信号处理器：本桥持有一个永不释放的 console context，每个入口
+    // 装上、退出还原；decompile 打印前若 context 仍为空则拒绝读文本并如实上报，而不是让
+    // ghidra 的 C++ 栈帧被 sigsetjmp 掀掉（那会在回退路径下面留下半释放的堆）。
+
+    // Rizin 的 console 是进程级单例，push/pop 本桥的 context 属于进程级状态；
+    // NativeEngine 侧本来就把调用串行化了，这把锁保证未来新入口忘记串行时也安全。
+    std::recursive_mutex g_consoleContextMutex;
+
+    // 进程生命周期内由本桥持有，永不 free：每个入口都会把 I.context 指向它，一旦
+    // rz_cons_context_free() 就会成为下一个入口的 use-after-free。静态初始化在库加载时
+    // 完成（早于任何 JNI 调用）；指针 thereafter 只读。
+    // DO NOT FREE.
+    RzConsContext* const g_consoleContext = rz_cons_context_new(nullptr);
+
+    /**
+     * 在一个 JNI 入口的执行期间装上本桥的 console context，退出时还原。
+     *
+     * 还原而不是清空：RzCore 初始化会 push 自己的临时 context，直接清空会把别人的丢掉。
+     * 同时 pin errno —— rz_cons_singleton() 在引用计数归零时会经 rz_cons_new() 重建
+     * console（cons.c:640-684），那条路径会调 tcgetattr/ioctl 改写 errno，调用方不应该
+     * 看到自己没造成的 errno 变化。
+     */
+    class ConsoleContextScope {
+    public:
+        explicit ConsoleContextScope(const char* site) {
+            errnoAtEntry = errno;
+            // recursive：decompile 的打印循环在 JNI 入口的 scope 内部又开一层，同线程嵌套。
+            consoleMutex.lock();
+            locked = true;
+            if (!g_consoleContext) {
+                RZ_NATIVE_LOG("rz_cons: owned context unavailable site=%s", site);
+                return;
+            }
+            RzCons* cons = rz_cons_singleton();
+            if (!cons) return;
+            saved = cons->context;
+            rz_cons_context_load(g_consoleContext);
+            installed = true;
+        }
+        ~ConsoleContextScope() {
+            if (installed) {
+                if (RzCons* cons = rz_cons_singleton()) cons->context = saved;
+            }
+            if (locked) consoleMutex.unlock();
+            errno = errnoAtEntry;
+        }
+        ConsoleContextScope(const ConsoleContextScope&) = delete;
+        ConsoleContextScope& operator=(const ConsoleContextScope&) = delete;
+    private:
+        std::recursive_mutex& consoleMutex = g_consoleContextMutex;
+        RzConsContext* saved = nullptr;
+        int errnoAtEntry = 0;
+        bool installed = false;
+        bool locked = false;
+    };
+
+    RzConsContext* currentConsoleContext() {
+        RzCons* cons = rz_cons_singleton();
+        return cons ? cons->context : nullptr;
+    }
+
+    /**
+     * 从 `pdgj` 的 JSON 里取 `code` 字段；没有该字段返回 false（= 不是伪 C，不能当成功）。
+     */
+    bool jsonCodeField(const std::string& json, std::string* out) {
+        static const char* key = "\"code\":\"";
+        const size_t at = json.find(key);
+        if (at == std::string::npos) return false;
+        std::string text;
+        for (size_t i = at + strlen(key); i < json.size(); ++i) {
+            const char c = json[i];
+            if (c == '"') {
+                *out = text;
+                return true;
+            }
+            if (c != '\\' || i + 1 >= json.size()) {
+                text += c;
+                continue;
+            }
+            const char esc = json[++i];
+            switch (esc) {
+                case 'n': text += '\n'; break;
+                case 'r': text += '\r'; break;
+                case 't': text += '\t'; break;
+                case 'b': text += '\b'; break;
+                case 'f': text += '\f'; break;
+                case '/': text += '/'; break;
+                case '"': text += '"'; break;
+                case '\\': text += '\\'; break;
+                case 'u': {
+                    if (i + 4 >= json.size()) return false;
+                    unsigned code = 0;
+                    for (int k = 1; k <= 4; ++k) {
+                        const char h = json[i + k];
+                        code <<= 4;
+                        if (h >= '0' && h <= '9') code |= static_cast<unsigned>(h - '0');
+                        else if (h >= 'a' && h <= 'f') code |= static_cast<unsigned>(h - 'a' + 10);
+                        else if (h >= 'A' && h <= 'F') code |= static_cast<unsigned>(h - 'A' + 10);
+                        else return false;
+                    }
+                    i += 4;
+                    // 伪 C 是 ASCII+CJK，代理对极少；孤立代理单元本身就不是合法 UTF-8，只编 BMP。
+                    if (code < 0x80) {
+                        text += static_cast<char>(code);
+                    } else if (code < 0x800) {
+                        text += static_cast<char>(0xC0 | (code >> 6));
+                        text += static_cast<char>(0x80 | (code & 0x3F));
+                    } else {
+                        text += static_cast<char>(0xE0 | (code >> 12));
+                        text += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+                        text += static_cast<char>(0x80 | (code & 0x3F));
+                    }
+                    break;
+                }
+                default: text += esc; break;
+            }
+        }
+        return false;
+    }
 
     void applyGhidraConfig(RzCore* core) {
         std::lock_guard<std::mutex> lock(ghidraConfigMutex);
@@ -653,6 +782,7 @@ extern "C"
 JNIEXPORT jboolean JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzConfigureGhidra(
         JNIEnv* env, jobject, jstring pluginDir, jstring sleighHome) {
+    ConsoleContextScope consoleScope("rzConfigureGhidra");
     {
         std::lock_guard<std::mutex> lock(ghidraConfigMutex);
         ghidraPluginDir = jStr(env, pluginDir);
@@ -692,6 +822,7 @@ extern "C" {
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzSelfTest(
         JNIEnv* env, jobject) {
+    ConsoleContextScope consoleScope("rzSelfTest");
     RzAsm* a = rz_asm_new();
     if (!a) return env->NewStringUTF("ERROR:rz_asm_new failed");
     // 先试 AArch64（`ret` = C0 03 5F D6）；若该构建未注册 arm64 插件，
@@ -854,6 +985,7 @@ static void seedAarch64BranchXrefs(RzCore* core, ut64 targetVa) {
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzXrefs(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring jarch, jlong atVa, jstring jdirection) {
+    ConsoleContextScope consoleScope("rzXrefs");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"xrefs\":[]}");
     std::vector<uint8_t> buf(len);
@@ -922,6 +1054,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzXrefs(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzAnalyze(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring jarch) {
+    ConsoleContextScope consoleScope("rzAnalyze");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"error\":\"empty\"}");
     std::vector<uint8_t> buf(len);
@@ -955,6 +1088,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzAnalyze(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzFunctions(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring jarch) {
+    ConsoleContextScope consoleScope("rzFunctions");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("[]");
     std::vector<uint8_t> buf(len);
@@ -1004,6 +1138,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzFunctions(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCfg(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring jarch, jlong funcVa) {
+    ConsoleContextScope consoleScope("rzCfg");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"error\":\"empty\"}");
     std::vector<uint8_t> buf(len);
@@ -1087,6 +1222,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCfg(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzSearchBytes(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring jarch, jstring jpattern, jlong fromVa, jlong toVa) {
+    ConsoleContextScope consoleScope("rzSearchBytes");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"hits\":[]}");
     std::vector<uint8_t> buf(len);
@@ -1140,6 +1276,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzSearchBytes(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzScanCrypto(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring jarch) {
+    ConsoleContextScope consoleScope("rzScanCrypto");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"hits\":[]}");
     std::vector<uint8_t> buf(len);
@@ -1213,6 +1350,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzScanCrypto(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzEsilStep(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring jarch, jlong startVa, jint stepCount) {
+    ConsoleContextScope consoleScope("rzEsilStep");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"error\":\"empty\"}");
     std::vector<uint8_t> buf(len);
@@ -1271,6 +1409,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzEsilStep(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDiff(
         JNIEnv* env, jobject, jbyteArray jbytesA, jbyteArray jbytesB) {
+    ConsoleContextScope consoleScope("rzDiff");
     jsize lenA = env->GetArrayLength(jbytesA);
     jsize lenB = env->GetArrayLength(jbytesB);
     if (lenA <= 0 || lenB <= 0) return env->NewStringUTF("{\"error\":\"empty\"}");
@@ -1319,6 +1458,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDiff(
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommand(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring, jstring jcmd, jboolean unsafe) {
+    ConsoleContextScope consoleScope("rzCommand");
     std::string cmd = jStr(env, jcmd);
     if (cmd.empty()) return env->NewStringUTF("{\"error\":\"empty_command\"}");
     // 命令链要**逐段**检查：`s 0x100; wx 9090 @ 0x100` 的第一段是 s，只查开头会直接放行，
@@ -1416,6 +1556,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzReleaseShared(JNIEnv*, job
 JNIEXPORT jstring JNICALL
 Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
         JNIEnv* env, jobject, jbyteArray jbytes, jstring, jlong funcVa) {
+    ConsoleContextScope consoleScope("rzDecompile");
     jsize len = env->GetArrayLength(jbytes);
     if (len <= 0) return env->NewStringUTF("{\"error\":\"empty\"}");
     std::vector<uint8_t> buf(len);
@@ -1657,10 +1798,19 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
         anchors.size(),
         seededNeighbors);
 
-    const char* commands[] = { "pdg", "pdd" };
+    // 顺序有讲究：pdg 是用户要的注解渲染，pdgj 同一份源码但从不读 console context。
+    // `pdd`（r2dec）与 `pdgo`/`pdgd`/`pdgx` 一样走注解打印器，本仓库也不带 r2dec，故都不作为
+    // 回落 —— 让它们进来只会在 console context 被置空后复现 #37 的崩溃。
+    const char* commands[] = { "pdg", "pdgj" };
     const char* selected = nullptr;
     char* result = nullptr;
+    std::string pickedText;
     std::string lastDiag;
+    // 独立于 selected/lastDiag：调用方只凭它判断「首选打印机被拒」，两者都不能覆盖它。
+    std::string printBlocked;
+    bool printBlockedNeedsContext = false;
+    // 打印循环自带 scope，不依赖 JNI 入口那层：无论从入口还是从别处进来，不变量一致。
+    ConsoleContextScope printScope("decompile-print");
     for (const char* cmd : commands) {
         // Seek again immediately before decompile so pdg uses the repaired function.
         if (RzAnalysisFunction* fcn = rz_analysis_get_function_at(core->analysis, va)) {
@@ -1670,28 +1820,56 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
             rz_core_seek(core, va, true);
         }
         result = rz_core_cmd_str(core, cmd);
-        std::string text = stripAnsi(result ? result : "");
+        const std::string rawText = result ? result : "";
+        std::string text = stripAnsi(rawText);
         RZ_NATIVE_LOG("ghidra command=%s len=%zu resized=%d size=%llu next=0x%llx output=%.200s",
             cmd, text.size(), resized ? 1 : 0,
             static_cast<unsigned long long>(fcnSize),
             static_cast<unsigned long long>(nextBoundary),
             text.c_str());
-        if (result && result[0] != '\0' && !isLikelyDecompilerError(text)) {
+        if (!currentConsoleContext()) {
+            // console 从脚底下被释放了。所有打印机都经 rz_cons_memcat -> CTX(buffer) ->
+            // context->buffer 写文本，此时 text 不可信，而且这一步距离 #37 的崩溃只差一次解引用。
+            if (printBlocked.empty()) {
+                printBlocked = std::string("console context was NULL, refusing to print ") + cmd;
+                printBlockedNeedsContext = true;
+            }
+            RZ_NATIVE_LOG("decompile print cmd=%s refused: console context is NULL", cmd);
+            if (result) { free(result); result = nullptr; }
+            continue;
+        }
+        std::string candidate = rawText;
+        if (!strcmp(cmd, "pdgj")) {
+            std::string code;
+            if (jsonCodeField(rawText, &code)) {
+                candidate = code;
+            } else {
+                // 没有 "code" 字段的 pdgj 回复不是伪 C，带着外壳走会被当成功、落成空源码。
+                candidate.clear();
+            }
+        }
+        const std::string candidateText = stripAnsi(candidate);
+        if (!candidateText.empty() && !isLikelyDecompilerError(candidateText)) {
             selected = cmd;
+            pickedText = candidate;
+            if (result) { free(result); result = nullptr; }
             break;
         }
-        if (!text.empty()) lastDiag = text.substr(0, 240);
+        if (!text.empty() && lastDiag.empty()) {
+            // 首个真实诊断胜出，后面的变体不能覆盖首选打印机为什么没出结果。
+            lastDiag = text.substr(0, 240);
+        }
         if (result) { free(result); result = nullptr; }
     }
 
     std::string out;
-    if (selected && result) {
+    if (selected && !pickedText.empty()) {
         char addr[32];
         snprintf(addr, sizeof(addr), "0x%llx", static_cast<unsigned long long>(funcVa));
         out = "{\"ok\":true,\"backend\":\"rizin-ghidra\",\"command\":\"";
         out += selected;
         out += "\",\"engine\":\"";
-        out += (selected && !strcmp(selected, "pdg")) ? "ghidra" : "pdd";
+        out += (!strcmp(selected, "pdg") || !strcmp(selected, "pdgj")) ? "ghidra" : "pdd";
         out += "\",\"addr\":\"";
         out += addr;
         out += "\",\"functionName\":\"";
@@ -1726,8 +1904,17 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
         out += "]";
         out += ",\"boundaryStrategy\":\"symbol+filtered-prologue+bl-anchors+nonrecursive-af+limit-reanalyze+resize-before-pdg\"";
         out += ",\"pseudocode\":\"";
-        out += escJson(stripAnsi(result));
-        out += "\"}";
+        out += escJson(stripAnsi(pickedText));
+        out += "\"";
+        // 两个分支都要串：回落到 pdgj 成功也必须告知「首选打印机被拒」，否则崩溃看起来只是修好了。
+        if (!printBlocked.empty()) {
+            out += ",\"printBlocked\":{\"reason\":\"";
+            out += escJson(printBlocked);
+            out += "\",\"needsConsoleContext\":";
+            out += printBlockedNeedsContext ? "true" : "false";
+            out += "}";
+        }
+        out += "}";
     } else {
         out = "{\"ok\":false,\"error\":\"DECOMPILER_FAILED\",\"backend\":\"rizin-ghidra\",\"message\":\"decompiler produced no usable output for this function after analysis-boundary repair\",\"addr\":\"";
         char addr[32];
@@ -1743,7 +1930,16 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzDecompile(
         out += std::to_string(seededNeighbors);
         out += ",\"diagnostic\":\"";
         out += escJson(lastDiag);
-        out += "\"}";
+        out += "\"";
+        // 两个分支都要串：回落到 pdgj 成功也必须告知「首选打印机被拒」，否则崩溃看起来只是修好了。
+        if (!printBlocked.empty()) {
+            out += ",\"printBlocked\":{\"reason\":\"";
+            out += escJson(printBlocked);
+            out += "\",\"needsConsoleContext\":";
+            out += printBlockedNeedsContext ? "true" : "false";
+            out += "}";
+        }
+        out += "}";
     }
     if (result) free(result);
     cleanupCore(core, path);

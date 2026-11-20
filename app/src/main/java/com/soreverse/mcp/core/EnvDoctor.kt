@@ -96,18 +96,47 @@ object EnvDoctor {
     }
 
     private fun storage(context: Context, zh: Boolean): Item {
-        val usable = runCatching { context.cacheDir.usableSpace }.getOrDefault(0L)
-        val ok = usable > 50L * 1024 * 1024
-        val text = "${usable / 1048576} MiB"
+        // 三处写入目标都可能先满：cache（临时产物）、files（工作区/备份）、外部专属目录（导出）。
+        // 只看 cacheDir 会报「空间充足」，然后在写备份或导出时失败 —— 取最小值才是用户真正
+        // 会遇到的约束，并指出是哪一处最先写满。
+        val targets = listOfNotNull(
+            context.cacheDir,
+            context.filesDir,
+            runCatching { context.getExternalFilesDir(null) }.getOrNull(),
+        )
+        val spaces = targets.mapNotNull { d -> runCatching { d.usableSpace }.getOrNull()?.let { d to it } }
+        if (spaces.isEmpty()) {
+            return Item(
+                key = "storage",
+                titleZh = "可用空间",
+                titleEn = "Free space",
+                ok = false,
+                detailZh = "三处写入目标都不可读",
+                detailEn = "none of the write targets is readable",
+                hintZh = "备份、反编译、产物写入都可能失败",
+                hintEn = "Backups, decompilation and output writes may fail",
+            )
+        }
+        val worstPair = spaces.minByOrNull { it.second }!!
+        val worst = worstPair.second
+        val ok = worst > 50L * 1024 * 1024
+        val detail = spaces.joinToString(" · ") { (d, v) -> "${storageLabel(d, context)} ${v / 1048576} MiB" }
+        val worstLabel = storageLabel(worstPair.first, context)
         return Item(
             key = "storage",
             titleZh = "可用空间",
             titleEn = "Free space",
             ok = ok,
-            detailZh = if (ok) text else "$text（不足 50 MiB）",
-            detailEn = if (ok) text else "$text (below 50 MiB)",
-            hintZh = if (ok) "" else "备份、反编译、产物写入都可能因空间不足失败",
-            hintEn = if (ok) "" else "Backups, decompilation and output writes may fail",
+            detailZh = if (ok) detail else "$detail（最低不足 50 MiB）",
+            detailEn = if (ok) detail else "$detail (lowest is below 50 MiB)",
+            hintZh = if (ok) "" else "最先写满的是 $worstLabel；备份、反编译、产物写入都会失败",
+            hintEn = if (ok) "" else "$worstLabel fills up first; backups, decompilation and output writes will fail",
         )
+    }
+
+    private fun storageLabel(dir: File, context: Context): String = when (dir.absolutePath) {
+        context.cacheDir.absolutePath -> "cache"
+        context.filesDir.absolutePath -> "files"
+        else -> "external"
     }
 }

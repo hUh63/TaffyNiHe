@@ -1927,12 +1927,14 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
 
-    fun parseOffset(s: String): Int = runCatching {
+    // offset 用 Long：窗口读已经支持任意大文件，clamp 到 Int.MAX 会让 >2GB 的 APK/SO
+    // 只能看前 2GB（原来整份读时这条永远走不到，现在走到了）。
+    fun parseOffset(s: String): Long = runCatching {
         val v = s.trim()
         if (v.startsWith("0x", true)) v.substring(2).toLong(16) else v.toLong()
-    }.getOrDefault(0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+    }.getOrDefault(0L).coerceAtLeast(0L)
 
-    fun load(off: Int) {
+    fun load(off: Long) {
         val p = path.trim()
         if (p.isBlank()) { error = if (zh) "请先选择文件或填入绝对路径" else "Pick a file or enter an absolute path"; return }
         scope.safeLaunch {
@@ -1940,27 +1942,20 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
             val len = (lengthText.trim().toIntOrNull() ?: 512).coerceIn(16, 65536)
             val res = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
-                    // v1.3.18: 原独立 hexdump 工具已收敛删除，这里直接用内置纯 Java HexDump。
-                    // content:// 文档 URI（SAF 选文件带进来的路径）不能当文件路径打开，需走 ContentResolver。
                     val isUri = p.startsWith("content://")
-                    // 先看大小再读（HexSourceReader）：原来的 readBytes 之后再判 128MiB，
-                    // 大文件会先 OOM，那条错误提示永远走不到。
-                    val src = com.soreverse.mcp.core.HexSourceReader.read(ctx, p)
-                    val data: ByteArray? = src.data
                     val displayName = if (isUri) (android.net.Uri.parse(p).lastPathSegment ?: p) else java.io.File(p).name
+                    // 随机访问窗口读：文件多大都只读 [off, off+len)，不再整份进内存。
+                    val win = com.soreverse.mcp.core.HexSourceReader.readWindow(ctx, p, off, len)
+                    val data = win.data
                     if (data == null) {
-                        JSONObject().put("error", src.error.ifBlank { "file not found: $p" })
-                    } else if (data.size > 128L * 1024 * 1024) {
-                        JSONObject().put("error", "file too large for hex view: " + data.size + " bytes (max 128MiB)")
+                        JSONObject().put("error", win.error.ifBlank { "file not found: $p" })
                     } else {
-                        val from = off.coerceIn(0, data.size)
-                        val actual = len.coerceAtMost(data.size - from)
                         JSONObject()
                             .put("file", displayName)
-                            .put("fileSize", data.size)
-                            .put("offset", from)
-                            .put("length", actual)
-                            .put("hexdump", com.soreverse.mcp.engine.standalone.HexDump.dump(data, 0L, from, actual))
+                            .put("fileSize", win.totalSize)
+                            .put("offset", win.offset)
+                            .put("length", data.size)
+                            .put("hexdump", com.soreverse.mcp.engine.standalone.HexDump.dump(data, win.offset, 0, data.size))
                     }
                 }.getOrElse { e -> JSONObject().put("error", e.message ?: "hexdump failed") }
             }
@@ -1969,8 +1964,9 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
                 error = e; dump = ""
             } else {
                 dump = res.optString("hexdump")
-                info = res.optString("file") + " · size=" + res.optInt("fileSize") + " · off=" + res.optInt("offset") + " · len=" + res.optInt("length")
-                offsetText = "0x" + Integer.toHexString(res.optInt("offset"))
+                val at = res.optLong("offset")
+                info = res.optString("file") + " · size=" + res.optLong("fileSize") + " · off=0x" + java.lang.Long.toHexString(at) + " · len=" + res.optInt("length")
+                offsetText = "0x" + java.lang.Long.toHexString(at)
             }
             loading = false
         }
@@ -1988,8 +1984,8 @@ private fun HexPane(state: WorkspaceState, zh: Boolean) {
         Spacer(Modifier.size(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             val step = (lengthText.trim().toIntOrNull() ?: 512).coerceIn(16, 65536)
-            TextButton(onClick = { load((parseOffset(offsetText) - step).coerceAtLeast(0)) }, enabled = !loading) { Text("◀", fontSize = AppText.label) }
-            TextButton(onClick = { load(0) }, enabled = !loading) { Text(if (zh) "顶部" else "Top", fontSize = AppText.label) }
+            TextButton(onClick = { load((parseOffset(offsetText) - step).coerceAtLeast(0L)) }, enabled = !loading) { Text("◀", fontSize = AppText.label) }
+            TextButton(onClick = { load(0L) }, enabled = !loading) { Text(if (zh) "顶部" else "Top", fontSize = AppText.label) }
             TextButton(onClick = { load(parseOffset(offsetText) + step) }, enabled = !loading) { Text("▶", fontSize = AppText.label) }
             Spacer(Modifier.weight(1f))
             if (loading) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)

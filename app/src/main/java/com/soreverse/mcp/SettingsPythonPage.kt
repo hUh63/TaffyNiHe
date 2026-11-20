@@ -95,7 +95,13 @@ internal fun SettingsPythonPage(t: UiText) {
                 return@safeLaunch
             }
             val text = withContext(Dispatchers.IO) {
-                runCatchingCancellable { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
+                runCatchingCancellable {
+                    // 8 MiB 闸门用的是 openAssetFileDescriptor().length，SAF/云盘 provider 常返回 -1
+                    // （未知长度）→ 闸门静默失效 → readBytes 整份进内存。改成按上限流式读。
+                    context.contentResolver.openInputStream(uri)?.use { ins ->
+                        com.soreverse.mcp.core.StreamLimits.readText(ins, limit)
+                    }
+                }.getOrNull()
             }
             if (text != null) code = text else output = output + "\n[加载失败]\n"
         }

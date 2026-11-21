@@ -54,7 +54,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -444,51 +443,49 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // 原来 200 KB 就切只读 + 自绘 LazyColumn，等于把「能编辑的文件」限制成了纯文本查看器。
     LaunchedEffect(code) { viewerMode = code.length > 2_000_000 }
 
+    // ── 撤销/重做 ──
+    // 只有一套历史：sora 的 UndoManager 监听 Content 的 insert/delete，按 delta 记录
+    // （原来这里是「整篇文本快照」，400 条 × 1 MB 就能把中端机吃穿）。
+    // 现在键盘 Ctrl+Z、长按撤销、工具条按钮、程序化编辑共用同一份栈，
+    // 相邻快速输入由库自己按 merge time limit 合并成一步。
+    var undoable by remember { mutableStateOf(false) }
+    var redoable by remember { mutableStateOf(false) }
+
+    fun refreshUndoState() {
+        undoable = soraHandle.canUndo()
+        redoable = soraHandle.canRedo()
+    }
+
+    fun doUndo() {
+        if (!soraHandle.canUndo()) return
+        soraHandle.undo()
+        refreshUndoState()
+    }
+
+    fun doRedo() {
+        if (!soraHandle.canRedo()) return
+        soraHandle.redo()
+        refreshUndoState()
+    }
+
     // ── 文本读写原语（须定义在其它局部函数之前：Kotlin 局部函数不支持前向引用）──
     fun setCode(text: String) {
         code = text
         tf = TextFieldValue(text, selection = TextRange(text.length))
-        // 同步渲染层：文本相同只移光标，不会重置 sora 的撤销栈。
+        // 打开/切换/新建文件走整篇替换：库会重建 Content，历史一并清空
+        // （否则在新文件里按撤销，会退回上一个文件的内容）。
         soraHandle.setText(text, text.length)
+        refreshUndoState()
     }
 
     fun setCodeAt(text: String, caret: Int) {
         code = text
         val at = caret.coerceIn(0, text.length)
         tf = TextFieldValue(text, selection = TextRange(at))
-        soraHandle.setText(text, at)
-    }
-
-    // ── 撤销/重做 ──
-    val undoStack = remember { mutableStateListOf<String>() }
-    val redoStack = remember { mutableStateListOf<String>() }
-    var lastEditAt by remember { mutableStateOf(0L) }
-
-    fun pushUndo(prev: String) {
-        val now = System.currentTimeMillis()
-        if (now - lastEditAt > 600L) {
-            undoStack.add(prev)
-            // 撤销栈存的是整篇文本副本，只按 400 条限制并不安全：
-            // 400 × 1MB 的文本就是 400MB，中端机直接 OOM。大文件时把条数压到 20。
-            val limit = if (prev.length > 200_000) 20 else 400
-            while (undoStack.size > limit) undoStack.removeAt(0)
-            redoStack.clear()
-        }
-        lastEditAt = now
-    }
-
-    fun doUndo() {
-        if (undoStack.isEmpty()) return
-        val prev = undoStack.removeAt(undoStack.size - 1)
-        redoStack.add(tf.text)
-        setCode(prev)
-    }
-
-    fun doRedo() {
-        if (redoStack.isEmpty()) return
-        val next = redoStack.removeAt(redoStack.size - 1)
-        undoStack.add(tf.text)
-        setCode(next)
+        // 程序化编辑（缩进/注释/格式化/AI 插入/替换）走差量替换：
+        // 撤销栈里记的是「这次操作」本身，而不是一次整篇重写。
+        soraHandle.applyText(text, at)
+        refreshUndoState()
     }
 
     val loadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -539,7 +536,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 }.getOrNull()
             }
             if (text != null) {
-                pushUndo(tf.text)
                 code = text; tf = TextFieldValue(text); soraHandle.setText(text, 0); savedCode = text; currentFile = null; currentFilePath = null
             }
         }
@@ -585,7 +581,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             }
             if (text != null) {
                 snapshotIfChanged(path)
-                undoStack.clear(); redoStack.clear()
                 code = text
                 tf = TextFieldValue(text)
                 soraHandle.setText(text, text.length)
@@ -653,7 +648,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 return@safeLaunch
             }
             runCatching { withContext(Dispatchers.IO) { EditorCheckpointStore.push(context, key, code, if (zh) "回退前" else "before-rewind") } }
-            pushUndo(tf.text)
             setCode(text)
             checkpoints = withContext(Dispatchers.IO) { EditorCheckpointStore.list(context, key) }
             appendOut("\n[已回退到快照 #${meta.id} · ${meta.label} · ${meta.lines} 行]\n")
@@ -690,7 +684,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val text = tf.text
         val cur = tf.selection
         val at = starts.firstOrNull { it == cur.start && it + findQuery.length == cur.end } ?: starts.first()
-        pushUndo(text)
         val newText = text.substring(0, at) + replaceQuery + text.substring(at + findQuery.length)
         setCodeAt(newText, at + replaceQuery.length)
     }
@@ -699,7 +692,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         if (findQuery.isEmpty()) return
         val hits = currentMatches().orEmpty().size
         val text = tf.text
-        pushUndo(text)
         val newText = if (findRegex) {
             runCatching { Regex(findQuery).replace(text, replaceQuery) }.getOrDefault(text)
         } else if (findCaseSensitive) {
@@ -730,7 +722,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     fun applyTextOp(res: Pair<String, Int>) {
-        pushUndo(tf.text)
         setCodeAt(res.first, res.second)
     }
 
@@ -1111,7 +1102,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val text = tf.text
         val s = tf.selection.start.coerceIn(0, text.length)
         val wordStart = Regex("[A-Za-z0-9_]*$").find(text.substring(0, s))?.range?.first ?: s
-        pushUndo(text)
         setCodeAt(text.substring(0, wordStart) + name + text.substring(s), wordStart + name.length)
         showCompletions = false
     }
@@ -1347,7 +1337,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 runCatchingCancellable { File(File(context.filesDir, "editor_files"), name).readText() }.getOrNull()
             }
             if (text != null) {
-                undoStack.clear(); redoStack.clear()
                 setCode(text)
                 savedCode = text
                 currentFile = name
@@ -1369,14 +1358,13 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         if (latest == null) { appendOut("\n[没有可回滚的备份]\n") } else {
             scope.safeLaunch {
                 val text = withContext(Dispatchers.IO) { runCatchingCancellable { latest.readText() }.getOrNull() }
-                if (text != null) { pushUndo(tf.text); setCode(text); appendOut("\n[已回滚到备份: ${latest.name}]\n") }
+                if (text != null) { setCode(text); appendOut("\n[已回滚到备份: ${latest.name}]\n") }
             }
         }
     }
 
     fun newFile() {
         snapshotCurrent()
-        undoStack.clear(); redoStack.clear()
         setCode(""); savedCode = ""; currentFile = null; currentFilePath = null; showCompletions = false
         tabs = tabs.toMutableList().also { it[activeTab] = EditorTab(if (zh) "草稿" else "Draft", null, "", mode, true) }
     }
@@ -1421,10 +1409,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         override val selStart get() = tf.selection.min
         override val selEnd get() = tf.selection.max
         override val lang get() = mode
-        override val canUndo get() = undoStack.isNotEmpty()
-        override val canRedo get() = redoStack.isNotEmpty()
+        override val canUndo get() = undoable
+        override val canRedo get() = redoable
         override val zh get() = t.zh
-        override fun recordUndo() = pushUndo(tf.text)
+        // 不需要手动记账：程序化编辑走 Content.replace，编辑器的 UndoManager 自己记
+        override fun recordUndo() { }
         override fun setText(newText: String, caret: Int) = setCodeAt(newText, caret)
         override fun say(msg: String) = appendOut("\n$msg\n")
         override fun flag(name: String): Boolean = when (name) {
@@ -1783,11 +1772,10 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         // 这时绝不能把 code 当成空串，否则一次输入就会把整篇内容清掉。
                         val txt = newText ?: code
                         if (newText != null && newText != code) {
-                            // sora 有自己的细粒度撤销栈，但工具条的撤销/重做是我们按「操作」粒度
-                            // 维护的整篇快照（pushUndo 内部有 600ms 节流），两者不冲突，这里照旧记。
-                            pushUndo(code)
                             code = newText
                             lastInputAt = System.currentTimeMillis()
+                            // 输入已经由编辑器记进 UndoManager，这里只同步按钮的可用状态
+                            refreshUndoState()
                         }
                         val a = selStart.coerceIn(0, txt.length)
                         val b = selEnd.coerceIn(0, txt.length)
@@ -1922,7 +1910,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         }
                     }
                     item { KeyCap("⏎") { insertText("\n") } }
-                    item { KeyCap("↶", accent = true, enabled = undoStack.isNotEmpty()) { doUndo() } }
+                    item { KeyCap("↶", accent = true, enabled = undoable) { doUndo() } }
                     item {
                         KeyCap("A-") {
                             editorFontSize = (if (editorFontSize == 0) 13 else editorFontSize - 1).coerceIn(10, 24)
@@ -1967,7 +1955,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             editorDiags.firstOrNull()?.let { jumpToLine(it.line) }
                         }
                     }
-                    item { KeyCap("↷", enabled = redoStack.isNotEmpty()) { doRedo() } }
+                    item { KeyCap("↷", enabled = redoable) { doRedo() } }
                     item { KeyCap("💾", accent = true) { saveFile() } }
                 }
                 LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

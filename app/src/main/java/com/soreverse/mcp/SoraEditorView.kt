@@ -144,6 +144,41 @@ internal class SoraEditorHandle {
         editor?.ensureSelectionVisible()
     }
 
+    /**
+     * 把整篇文本「差量」写进编辑器：只替换前后缀之外的最小区间。
+     *
+     * 走 `Content.replace` —— sora 的 UndoManager 就挂在 Content 上（ContentListener），
+     * 所以这次编辑天然进撤销栈；而 `setText` 会重建 Content，把历史全清掉。
+     * 程序化编辑（缩进、注释、格式化、AI 插入）都用这个，撤销栈才只有一套。
+     */
+    fun applyText(text: String, caret: Int = -1) {
+        val e = editor ?: return
+        val cur = e.text
+        // Content.charAt(int) 在 Kotlin 里会和 charAt(line, column) 撞（编译报 no value passed for p1），
+        // 这里统一拿一份字符串做差量比较。只读的大文件不会走到这个入口，代价只在命令级操作上。
+        val old = cur.toString()
+        val oldLen = old.length
+        if (oldLen == text.length && old == text) {
+            if (caret >= 0) setSelectionOffsets(caret, caret)
+            return
+        }
+        var pre = 0
+        val maxPre = minOf(oldLen, text.length)
+        while (pre < maxPre && old[pre] == text[pre]) pre++
+        var suf = 0
+        val maxSuf = minOf(oldLen - pre, text.length - pre)
+        while (suf < maxSuf && old[oldLen - 1 - suf] == text[text.length - 1 - suf]) suf++
+        val ins = text.substring(pre, text.length - suf)
+        // replace 会触发 ContentChangeEvent，业务层的 code/tf 由事件回写
+        runCatching { cur.replace(pre, oldLen - suf, ins) }
+        val at = (if (caret >= 0) caret else pre + ins.length).coerceIn(0, e.text.length)
+        setSelectionOffsets(at, at)
+    }
+
+    fun canUndo(): Boolean = editor?.canUndo() ?: false
+
+    fun canRedo(): Boolean = editor?.canRedo() ?: false
+
     /** 把诊断铺到整行上（库负责画波浪线、长按提示）。传空列表即清空。 */
     fun setDiagnostics(items: List<SoraDiag>) {
         val e = editor ?: return

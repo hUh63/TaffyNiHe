@@ -17,7 +17,7 @@ object CodeHighlighter {
 
     enum class Lang(val ext: String) {
         PYTHON("py"), SHELL("sh"), JSON("json"),
-        SMALI("smali"), C("c"), JAVA("java"), XML("xml"), MD("md"),
+        SMALI("smali"), C("c"), JAVA("java"), XML("xml"), MD("md"), ASM("s"),
         EXT("ext"),   // 语法包扩展语言（EditorSyntaxPacks 安装的插件语言）
         TEXT("txt");
 
@@ -34,6 +34,8 @@ object CodeHighlighter {
                     "java", "kt", "kts" -> JAVA
                     "xml", "html", "svg" -> XML
                     "md", "markdown" -> MD
+                    // 反汇编导出的 .s / .asm：塔菲是逆向工具，这类文件很常见
+                    "s", "asm", "arm", "aarch64" -> ASM
                     "txt" -> TEXT
                     else -> null
                 }

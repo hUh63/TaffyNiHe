@@ -178,6 +178,7 @@ private fun langLabel(m: CodeHighlighter.Lang, zh: Boolean): String = when (m) {
     CodeHighlighter.Lang.JAVA -> "Java/Kt"
     CodeHighlighter.Lang.XML -> "XML"
     CodeHighlighter.Lang.MD -> "Markdown"
+    CodeHighlighter.Lang.ASM -> if (zh) "汇编" else "Assembly"
     CodeHighlighter.Lang.EXT -> {
         val pack = CodeHighlighter.activePack
         if (pack != null) "✦ ${pack.name}" else if (zh) "扩展" else "Ext"
@@ -206,6 +207,11 @@ private fun outlineOf(src: String, m: CodeHighlighter.Lang): List<OutlineItem> {
         )
         CodeHighlighter.Lang.XML -> listOf(
             "id" to Regex("android:id=\"@\\+id/([\\w.]+)\""),
+        )
+        // 汇编：标签就是跳转目标；.globl/.type 给出的符号名也一并列出
+        CodeHighlighter.Lang.ASM -> listOf(
+            "label" to Regex("^\\s*([A-Za-z_.$][\\w.$]*):\\s*(?:[#;].*)?$"),
+            "global" to Regex("^\\s*\\.(?:globl|global|type|func)\\s+([\\w.$]+)"),
         )
         CodeHighlighter.Lang.MD -> listOf(
             "h" to Regex("^(#{1,3})\\s+(.+)$"),

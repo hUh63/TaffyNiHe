@@ -255,6 +255,7 @@ internal fun CodeHighlighter.Lang.lexerSyntax(): EditorLexer.Syntax? = when (thi
     CodeHighlighter.Lang.JAVA -> EditorLexer.Syntax.JAVA
     CodeHighlighter.Lang.XML -> EditorLexer.Syntax.XML
     CodeHighlighter.Lang.MD -> EditorLexer.Syntax.MARKDOWN
+    CodeHighlighter.Lang.ASM -> EditorLexer.Syntax.ASSEMBLY
     // 语法包（EXT）的语言定义是运行期 JSON，词法规则不固定，走纯文本
     CodeHighlighter.Lang.EXT -> EditorLexer.Syntax.PLAIN
     CodeHighlighter.Lang.TEXT -> null

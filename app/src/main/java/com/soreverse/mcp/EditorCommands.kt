@@ -145,6 +145,8 @@ internal object EditorCommands {
     fun commentPrefix(lang: CodeHighlighter.Lang): String = when (lang) {
         CodeHighlighter.Lang.PYTHON, CodeHighlighter.Lang.SHELL, CodeHighlighter.Lang.SMALI -> "# "
         CodeHighlighter.Lang.XML -> "<!-- "
+        // 汇编（ARM/x86 通用）用分号；armasm 的 @ 只在 Windows 侧，不追
+        CodeHighlighter.Lang.ASM -> "; "
         else -> "// "
     }
 

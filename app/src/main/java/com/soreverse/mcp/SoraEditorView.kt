@@ -16,6 +16,8 @@ import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.event.SelectionChangeEvent
 import io.github.rosemoe.sora.lang.EmptyLanguage
 import io.github.rosemoe.sora.lang.analysis.AnalyzeManager
+import io.github.rosemoe.sora.lang.diagnostic.DiagnosticRegion
+import io.github.rosemoe.sora.lang.diagnostic.DiagnosticsContainer
 import io.github.rosemoe.sora.text.ContentReference
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.SymbolPairMatch
@@ -51,6 +53,18 @@ internal data class SoraColors(
     val currentLine: Color,
     val accent: Color,
 )
+
+/**
+ * 一条诊断（来自 LSP）。只带整行信息 —— LSP 那边也只保留了行号与消息，
+ * 所以整行画波浪线，不去猜字符范围（猜错会让人以为错在别的地方）。
+ */
+internal data class SoraDiag(val line1: Int, val severity: Int, val message: String) {
+    companion object {
+        const val ERROR = 0
+        const val WARNING = 1
+        const val INFO = 2
+    }
+}
 
 /** 业务层持有的编辑器句柄；View 未挂载时所有调用都是空操作。 */
 internal class SoraEditorHandle {
@@ -128,6 +142,30 @@ internal class SoraEditorHandle {
     /** 只保证光标可见，不改选区（跳转会先设选区，再调这个）。 */
     fun ensureVisible() {
         editor?.ensureSelectionVisible()
+    }
+
+    /** 把诊断铺到整行上（库负责画波浪线、长按提示）。传空列表即清空。 */
+    fun setDiagnostics(items: List<SoraDiag>) {
+        val e = editor ?: return
+        val t = e.text
+        val container = DiagnosticsContainer(true)
+        if (items.isNotEmpty()) {
+            val lastLine = (t.lineCount - 1).coerceAtLeast(0)
+            for (d in items.take(200)) {
+                val line = (d.line1 - 1).coerceIn(0, lastLine)
+                val start = runCatching { t.indexer.getCharIndex(line, 0) }.getOrDefault(0)
+                val len = runCatching { t.getLine(line).length }.getOrDefault(0)
+                val end = (start + len).coerceAtMost(t.length)
+                if (end <= start) continue
+                val sev = when (d.severity) {
+                    SoraDiag.ERROR -> DiagnosticRegion.SEVERITY_ERROR
+                    SoraDiag.WARNING -> DiagnosticRegion.SEVERITY_WARNING
+                    else -> DiagnosticRegion.SEVERITY_TYPO
+                }
+                container.addDiagnostic(DiagnosticRegion(start, end, sev))
+            }
+        }
+        e.setDiagnostics(container)
     }
 
     fun cursorLine0(): Int = editor?.cursor?.leftLine ?: 0
@@ -371,6 +409,7 @@ internal fun SoraEditorView(
                 if (syntax == null) {
                     ed.analyzer = null
                     ed.setEditorLanguage(EmptyLanguage())
+                    ed.setDiagnostics(DiagnosticsContainer(true))
                 } else {
                     val analyzer = EditorAnalyzer(syntax, KIND_COLOR_IDS)
                     analyzer.setDiffLines(diffLines)

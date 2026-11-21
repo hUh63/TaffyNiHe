@@ -1071,6 +1071,21 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 }.getOrDefault(false)
             }
             val diags = if (ok) LspClient.takeDiagnostics() else emptyList()
+            // 同时把诊断画到编辑器里（整行波浪线）：只在控制台里列文字太远，
+            // 原来的自绘红底已经随 BasicTextField 一起去掉了。
+            soraHandle.setDiagnostics(
+                diags.map {
+                    SoraDiag(
+                        line1 = it.line,
+                        severity = when (it.severity) {
+                            "E" -> SoraDiag.ERROR
+                            "W" -> SoraDiag.WARNING
+                            else -> SoraDiag.INFO
+                        },
+                        message = it.message,
+                    )
+                },
+            )
             appendOut("\n── 诊断 (LSP) ──\n")
             if (diags.isEmpty()) appendOut("（无诊断问题）\n")
             diags.forEach { appendOut("[${it.severity}] 行 ${it.line}: ${it.message}\n") }
@@ -1491,6 +1506,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     // ══════════════════════ UI ══════════════════════
     val dirty = code != savedCode
+    // 换文件后不能留着上一个文件的波浪线
+    LaunchedEffect(currentFile) { soraHandle.setDiagnostics(emptyList()) }
     // 未保存状态暴露给 MainActivity（切换底部导航时做「离开前确认」）
     LaunchedEffect(dirty) { EditorSession.dirty = dirty }
     LaunchedEffect(Unit) { EditorSession.confirmOnExit = EditorCommands.confirmOnExit(context) }

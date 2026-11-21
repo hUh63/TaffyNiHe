@@ -27,8 +27,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -71,23 +69,17 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -174,51 +166,6 @@ private fun typedSingleChar(old: String, new: String): String? {
     var i = 0
     while (i < old.length && old[i] == new[i]) i++
     return new.substring(i, i + 1)
-}
-
-/**
- * 在语法高亮结果上叠加两件事：
- *  - 括号匹配：光标紧邻的括号与它的配对括号加底色（sora-editor 的 bracket highlight 等价物）；
- *  - 诊断：出错那一行整行浅红底 + 下划线（sora 是画波浪线，Compose 的 SpanStyle 没有波浪，
- *    用「底色 + 下划线」这种在等宽代码里同样一眼能看见的组合）。
- *
- * 只加样式、不改文本长度，因此 OffsetMapping 仍是 Identity。
- */
-private fun decorateEditorText(
-    base: AnnotatedString,
-    src: String,
-    diags: List<EditorCodeIntel.Diag>,
-    bracket: EditorCodeIntel.BracketMatch?,
-    currentLine: Pair<Int, Int>?,
-    lineColor: Color,
-    bracketColor: Color,
-    errorColor: Color,
-): AnnotatedString {
-    if (diags.isEmpty() && bracket == null && currentLine == null) return base
-    if (src.length > 400_000) return base
-    val b = AnnotatedString.Builder(base)
-    // 先加当前行底色：后加的样式优先级更高，诊断与括号匹配要盖在它上面
-    if (currentLine != null && currentLine.second > currentLine.first) {
-        b.addStyle(SpanStyle(background = lineColor.copy(alpha = 0.06f)), currentLine.first, currentLine.second)
-    }
-    if (bracket != null && bracket.open < src.length && bracket.close < src.length) {
-        val style = SpanStyle(background = bracketColor.copy(alpha = 0.24f), fontWeight = FontWeight.Bold)
-        b.addStyle(style, bracket.open, bracket.open + 1)
-        b.addStyle(style, bracket.close, bracket.close + 1)
-    }
-    for (d in diags.take(20)) {
-        val off = d.offset.coerceIn(0, src.length)
-        val lineStart = if (off == 0) 0 else src.lastIndexOf('\n', off - 1).let { if (it < 0) 0 else it + 1 }
-        var lineEnd = src.indexOf('\n', off)
-        if (lineEnd < 0) lineEnd = src.length
-        if (lineEnd <= lineStart) continue
-        b.addStyle(
-            SpanStyle(background = errorColor.copy(alpha = 0.14f), textDecoration = TextDecoration.Underline),
-            lineStart,
-            lineEnd,
-        )
-    }
-    return b.toAnnotatedString()
 }
 
 /** 语言显示名。 */
@@ -375,60 +322,6 @@ private fun KeyCap(
     }
 }
 
-/** 编辑模式行号 gutter：当前行高亮 + 可点击跳行 + Git 风格行标记色条。 */
-@Composable
-private fun EditorGutter(
-    lineCount: Int,
-    currentLine: Int,
-    marks: Map<Int, EditorDiffMarks.Mark>,
-    dim: Color,
-    fontSize: Int = 0,
-    onLineClick: (Int) -> Unit,
-) {
-    if (lineCount <= 0 || lineCount > 3000) return
-    Column(Modifier.width(58.dp).padding(end = 6.dp)) {
-        for (i in 1..lineCount) {
-            val active = i == currentLine
-            val mark = marks[i]
-            val markColor = when (mark) {
-                EditorDiffMarks.Mark.ADDED -> AppPalette.green
-                EditorDiffMarks.Mark.MODIFIED -> AppPalette.orange
-                EditorDiffMarks.Mark.DELETED -> AppPalette.red
-                null -> null
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(AppShape.xs))
-                    .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent)
-                    .clickable { onLineClick(i) },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .height(14.dp)
-                        .clip(RoundedCornerShape(AppShape.xs))
-                        .background(markColor ?: Color.Transparent),
-                )
-                Text(
-                    i.toString(),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        // 行号比正文小一号，行高必须与正文完全同源——否则行号与代码错位
-                        fontSize = (if (fontSize > 0) (fontSize - 1).sp else AppText.label),
-                        lineHeight = (if (fontSize > 0) fontSize * 1.5f else 19f).sp,
-                    ),
-                    color = if (active) MaterialTheme.colorScheme.primary else dim,
-                    textAlign = TextAlign.End,
-                )
-            }
-        }
-    }
-}
-
 /** 面板分页。 */
 private enum class EditorPanel { CONSOLE, FILES, OUTLINE }
 
@@ -510,7 +403,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var replaceExpanded by remember { mutableStateOf(false) }
     // 大文件窗口化
     var viewerMode by remember { mutableStateOf(false) }
-    val viewerListState = rememberLazyListState()
     // 编辑区
     // 编辑器渲染层（sora-editor）；业务层通过它设文本/选区、跳行、取选中内容。
     val soraHandle = remember { SoraEditorHandle() }
@@ -541,9 +433,10 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var toolbarVersion by remember { mutableIntStateOf(0) }   // 工具条顺序变更后重读
     var wsPanelExpanded by remember { mutableStateOf(true) }
     var wsTreeExpanded by remember { mutableStateOf(setOf("")) }
-    var editorViewport by remember { mutableStateOf(0) }
     // 双向：旧实现只置 true，打开过一次大文件后所有文件都变只读（且没有常规退出入口）
-    LaunchedEffect(code) { viewerMode = code.length > 200_000 }
+    // 2 MB 以上切只读：sora 本身能渲染这么大的文本，但业务层每键回传全文的代价太高。
+    // 原来 200 KB 就切只读 + 自绘 LazyColumn，等于把「能编辑的文件」限制成了纯文本查看器。
+    LaunchedEffect(code) { viewerMode = code.length > 2_000_000 }
 
     // ── 文本读写原语（须定义在其它局部函数之前：Kotlin 局部函数不支持前向引用）──
     fun setCode(text: String) {
@@ -896,23 +789,6 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     val editorBracket = remember(code, tf.selection.min, diagnoseOn) {
         if (!diagnoseOn) null else runCatching { EditorCodeIntel.matchBracket(code, tf.selection.min) }.getOrNull()
     }
-    // 高亮结果按文本缓存：光标移动会让括号高亮变，但语法高亮不必重算——
-    // 这个 cache 放在 visualTransformation 之外，就是为了跨「光标移动」复用。
-    val highlightCache = remember(mode, editorDark) { HashMap<String, AnnotatedString>() }
-    val errorColor = MaterialTheme.colorScheme.error
-    // 当前行高亮：只在没有选区时画——有选区时用户的注意力在选区上，再叠一层底色只会更花。
-    val caretLineRange = remember(code, tf.selection.min, tf.selection.max) {
-        if (tf.selection.min != tf.selection.max) null
-        else {
-            val off = tf.selection.min.coerceIn(0, code.length)
-            val ls = if (off == 0) 0 else code.lastIndexOf('\n', off - 1).let { if (it < 0) 0 else it + 1 }
-            var le = code.indexOf('\n', off)
-            if (le < 0) le = code.length
-            ls to le
-        }
-    }
-    val lineColor = MaterialTheme.colorScheme.primary
-
     fun insertText(s: String) {
         applyTextOp(EditorTextOps.insert(tf.text, tf.selection.min, tf.selection.max, s))
     }
@@ -1618,8 +1494,10 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // 未保存状态暴露给 MainActivity（切换底部导航时做「离开前确认」）
     LaunchedEffect(dirty) { EditorSession.dirty = dirty }
     LaunchedEffect(Unit) { EditorSession.confirmOnExit = EditorCommands.confirmOnExit(context) }
-    val curLn = EditorTextOps.lineOf(tf.text, tf.selection.start)
-    val curCol = EditorTextOps.columnOf(tf.text, tf.selection.start)
+    // 光标行列由 onCursorMoved 回传：原来每次重组都对着 tf.text 从头扫到光标，
+    // 2 MB 文件里这就是每帧几十万次字符比较。
+    var curLn by remember { mutableStateOf(1) }
+    var curCol by remember { mutableStateOf(1) }
     val outline = remember(code, mode) { outlineOf(code, mode) }
     val toolbarIds = remember(toolbarVersion, context) { EditorCommands.order(context) }
     val textActions = EditorTextActions.all()
@@ -1628,6 +1506,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
     // 行级改动标记（以最近一次备份为基线；IO 放到后台）
     val marks by produceState<Map<Int, EditorDiffMarks.Mark>>(emptyMap(), code, currentFile) {
+        // 每个按键都读一次备份文件 + 全量 diff 太浪费；400 ms 内没有新输入才算一次
+        delay(400)
         value = withContext(Dispatchers.IO) { EditorDiffMarks.marksFor(context, currentFile, code) }
     }
 
@@ -1848,71 +1728,61 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 .background(edBg)
                 .border(1.dp, edBorder, RoundedCornerShape(AppShape.md)),
         ) {
-            Box(Modifier.fillMaxSize().onSizeChanged { editorViewport = it.height }) {
-                if (viewerMode) {
-                    val vLines = remember(code) { code.lineSequence().take(200_001).toList() }
-                    LazyColumn(state = viewerListState, modifier = Modifier.fillMaxSize().padding(4.dp)) {
-                        itemsIndexed(vLines) { idx, line ->
-                            Row(Modifier.fillMaxWidth()) {
-                                Text(
-                                    (idx + 1).toString(),
-                                    modifier = Modifier.width(50.dp).padding(end = 6.dp),
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.label),
-                                    color = if (idx + 1 == curLn) edCursor else edDim,
-                                    textAlign = TextAlign.End,
-                                )
-                                Text(
-                                    line.ifEmpty { " " },
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = AppText.bodyStrong, lineHeight = 19.sp),
-                                    color = edFg,
-                                )
-                            }
+            Box(Modifier.fillMaxSize()) {
+                SoraEditorView(
+                    handle = soraHandle,
+                    text = code,
+                    readOnly = readOnly || viewerMode,
+                    lang = mode,
+                    dark = editorDark,
+                    colors = SoraColors(
+                        background = edBg,
+                        text = edFg,
+                        gutter = edDim,
+                        gutterCurrent = edCursor,
+                        selection = edCursor.copy(alpha = 0.24f),
+                        currentLine = edFg.copy(alpha = 0.06f),
+                        accent = edCursor,
+                    ),
+                    fontSizeSp = contentFontSize.value,
+                    lineNumbers = showLineNumbers,
+                    wordWrap = softWrap,
+                    marks = marks,
+                    // 整行底色用低透明度：满饱和的绿/橙/红铺满一行会盖住语法着色
+                    markColors = mapOf(
+                        EditorDiffMarks.Mark.ADDED to AppPalette.green.copy(alpha = 0.13f),
+                        EditorDiffMarks.Mark.MODIFIED to AppPalette.orange.copy(alpha = 0.15f),
+                        EditorDiffMarks.Mark.DELETED to AppPalette.red.copy(alpha = 0.15f),
+                    ),
+                    modifier = Modifier.fillMaxSize(),
+                    onTextChanged = { newText, selStart, selEnd ->
+                        // newText == null：编辑器那边判断文本太大、没有回传全文（见 SoraEditorView）。
+                        // 这时绝不能把 code 当成空串，否则一次输入就会把整篇内容清掉。
+                        val txt = newText ?: code
+                        if (newText != null && newText != code) {
+                            // sora 有自己的细粒度撤销栈，但工具条的撤销/重做是我们按「操作」粒度
+                            // 维护的整篇快照（pushUndo 内部有 600ms 节流），两者不冲突，这里照旧记。
+                            pushUndo(code)
+                            code = newText
+                            lastInputAt = System.currentTimeMillis()
                         }
-                    }
-                } else {
-                    SoraEditorView(
-                        handle = soraHandle,
-                        text = code,
-                        readOnly = readOnly,
-                        lang = mode,
-                        dark = editorDark,
-                        colors = SoraColors(
-                            background = edBg,
-                            text = edFg,
-                            gutter = edDim,
-                            gutterCurrent = edCursor,
-                            selection = edCursor.copy(alpha = 0.24f),
-                            currentLine = edFg.copy(alpha = 0.06f),
-                            accent = edCursor,
-                        ),
-                        fontSizeSp = contentFontSize.value,
-                        lineNumbers = showLineNumbers,
-                        wordWrap = softWrap,
-                        modifier = Modifier.fillMaxSize(),
-                        onTextChanged = { newText, selStart, selEnd ->
-                            if (newText != code) {
-                                // sora 有自己的细粒度撤销栈，但工具条的撤销/重做是我们按「操作」粒度
-                                // 维护的整篇快照（pushUndo 内部有 600ms 节流），两者不冲突，这里照旧记。
-                                pushUndo(code)
-                                code = newText
-                                lastInputAt = System.currentTimeMillis()
-                            }
-                            val a = selStart.coerceIn(0, newText.length)
-                            val b = selEnd.coerceIn(0, newText.length)
-                            tf = TextFieldValue(newText, TextRange(minOf(a, b), maxOf(a, b)))
-                        },
-                        onCursorMoved = { _, _ ->
-                            // 光标移动（不输入）时文本不变，ContentChangeEvent 不会来；但状态栏行号、
-                            // 当前行高亮、括号匹配、AI 补全的上下文都读 tf.selection，必须镜像回来。
-                            val (a0, b0) = soraHandle.selectionOffsets()
-                            val a = a0.coerceIn(0, code.length)
-                            val b = b0.coerceIn(0, code.length)
-                            if (a != tf.selection.min || b != tf.selection.max) {
-                                tf = TextFieldValue(code, TextRange(minOf(a, b), maxOf(a, b)))
-                            }
-                        },
-                    )
-                }
+                        val a = selStart.coerceIn(0, txt.length)
+                        val b = selEnd.coerceIn(0, txt.length)
+                        tf = TextFieldValue(txt, TextRange(minOf(a, b), maxOf(a, b)))
+                    },
+                    onCursorMoved = { line0, col0 ->
+                        curLn = line0 + 1
+                        curCol = col0 + 1
+                        // 光标移动（不输入）时文本不变，ContentChangeEvent 不会来；但状态栏行号、
+                        // 当前行高亮、括号匹配、AI 补全的上下文都读 tf.selection，必须镜像回来。
+                        val (a0, b0) = soraHandle.selectionOffsets()
+                        val a = a0.coerceIn(0, code.length)
+                        val b = b0.coerceIn(0, code.length)
+                        if (a != tf.selection.min || b != tf.selection.max) {
+                            tf = TextFieldValue(code, TextRange(minOf(a, b), maxOf(a, b)))
+                        }
+                    },
+                )
 
                 if (readOnly) {
                     Text(

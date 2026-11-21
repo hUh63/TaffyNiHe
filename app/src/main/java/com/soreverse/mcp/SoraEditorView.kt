@@ -11,15 +11,16 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.soreverse.mcp.core.EditorLexer
 import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.event.SelectionChangeEvent
 import io.github.rosemoe.sora.lang.EmptyLanguage
-import io.github.rosemoe.sora.langs.java.JavaLanguage
+import io.github.rosemoe.sora.lang.analysis.AnalyzeManager
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 
 /**
- * 编辑器渲染层已换成 sora-editor（io.github.rosemoe:editor，LGPL-2.1）。
+ * 编辑器渲染层是 sora-editor（io.github.rosemoe:editor，LGPL-2.1）。
  *
  * 原来是用 `BasicTextField` + 自绘行号 + 自绘缩进参考线 + 自绘语法着色拼出来的：
  * 大文件要自己窗口化、撤销栈要自己维护、自动缩进/括号配对要自己算、滚动要自己接
@@ -27,12 +28,17 @@ import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
  * 自动缩进、undo/redo、放大镜、滚动条都是现成的，塔菲只保留业务层（多标签、备份、
  * 命令工具条、搜索替换）。
  *
+ * 语法着色不再用库里自带的 Java 词法：塔菲的目标文件是 smali / 汇编 / 配置 / 脚本，
+ * Java 词法会把 `.method`、`p0`、`#0x10` 全当普通文本。这里接
+ * [EditorAnalyzer]（Java）+ [EditorLexer]（Kotlin，有单测），同时把「行级改动标记」
+ * 画成整行底色 —— 库的 LineBackground 正好是这个用途。
+ *
  * 这里是一层薄封装：
  * - [SoraEditorHandle] 给业务层调（设文本、设选择、撤销/重做、跳行、取选区）；
  * - [SoraEditorView] 负责把 Compose 的状态同步进 View，并把编辑/光标事件回传。
  *
  * 不做「每帧 setText」：文本只在 `LaunchedEffect(text)` 里比对后同步，样式类属性在
- * `update` 里比对字段后同步，避免大文件每次重组都整串 toString（8 MiB 的文件那会卡死）。
+ * `update` 里比对字段后同步，避免大文件每次重组都整串 toString。
  */
 internal data class SoraColors(
     val background: Color,
@@ -50,8 +56,16 @@ internal class SoraEditorHandle {
     internal var editor: CodeEditor? = null
         private set
 
+    /**
+     * 最近一次由编辑器回传给业务层的文本对象。
+     * 用来跳过「自己的改动又通过 LaunchedEffect 同步回编辑器」这次无意义的全文比较。
+     */
+    @Volatile
+    internal var lastEmitted: String? = null
+
     internal fun bind(e: CodeEditor?) {
         editor = e
+        if (e == null) lastEmitted = null
     }
 
     fun currentText(): String = editor?.text?.toString().orEmpty()
@@ -81,6 +95,7 @@ internal class SoraEditorHandle {
             return
         }
         e.setText(text)
+        lastEmitted = null
         if (caret >= 0) setSelectionOffsets(caret, caret)
     }
 
@@ -125,6 +140,92 @@ private class TaffyCodeEditor(context: Context) : CodeEditor(context) {
     var appliedFontPx: Float = -1f
     var appliedWrap: Boolean? = null
     var appliedLineNumbers: Boolean? = null
+    var appliedDiff: Map<Int, Int>? = null
+    var analyzer: EditorAnalyzer? = null
+}
+
+/** 只负责「把分析器交给库」的语言实现；自动缩进/符号配对用库的默认行为。 */
+private class TaffyLanguage(private val analyzer: AnalyzeManager) : EmptyLanguage() {
+    override fun getAnalyzeManager(): AnalyzeManager = analyzer
+}
+
+/** CodeHighlighter.Lang → 词法语法族；null 表示不着色。 */
+internal fun CodeHighlighter.Lang.lexerSyntax(): EditorLexer.Syntax? = when (this) {
+    CodeHighlighter.Lang.PYTHON -> EditorLexer.Syntax.PYTHON
+    CodeHighlighter.Lang.SHELL -> EditorLexer.Syntax.SHELL
+    CodeHighlighter.Lang.JSON -> EditorLexer.Syntax.JSON
+    CodeHighlighter.Lang.SMALI -> EditorLexer.Syntax.SMALI
+    CodeHighlighter.Lang.C -> EditorLexer.Syntax.C
+    CodeHighlighter.Lang.JAVA -> EditorLexer.Syntax.JAVA
+    CodeHighlighter.Lang.XML -> EditorLexer.Syntax.XML
+    CodeHighlighter.Lang.MD -> EditorLexer.Syntax.MARKDOWN
+    // 语法包（EXT）的语言定义是运行期 JSON，词法规则不固定，走纯文本
+    CodeHighlighter.Lang.EXT -> EditorLexer.Syntax.PLAIN
+    CodeHighlighter.Lang.TEXT -> null
+}
+
+/** token 类型 → sora 颜色槽（槽位在 EditorAnalyzer 里定义，避开库预定义的 1..83）。 */
+private val KIND_COLOR_IDS: Map<EditorLexer.Kind, Int> = mapOf(
+    EditorLexer.Kind.KEYWORD to EditorAnalyzer.CID_KEYWORD,
+    EditorLexer.Kind.COMMENT to EditorAnalyzer.CID_COMMENT,
+    EditorLexer.Kind.STRING to EditorAnalyzer.CID_STRING,
+    EditorLexer.Kind.NUMBER to EditorAnalyzer.CID_NUMBER,
+    EditorLexer.Kind.FUNC to EditorAnalyzer.CID_FUNC,
+    EditorLexer.Kind.TYPE to EditorAnalyzer.CID_TYPE,
+    EditorLexer.Kind.CONST to EditorAnalyzer.CID_CONST,
+    EditorLexer.Kind.TAG to EditorAnalyzer.CID_TAG,
+    EditorLexer.Kind.ATTR to EditorAnalyzer.CID_ATTR,
+    EditorLexer.Kind.DIRECTIVE to EditorAnalyzer.CID_DIRECTIVE,
+    EditorLexer.Kind.CODE to EditorAnalyzer.CID_CODE,
+)
+
+/**
+ * 词法配色：与 CodeHighlighter 的 Compose 调色板同源（深浅两套分别对齐 VSCode-Dark 与 One-Light，
+ * 浅色底上压暗过，保证 4.5:1 以上对比度）。
+ */
+private class SyntaxColors(
+    val keyword: Int,
+    val comment: Int,
+    val string: Int,
+    val number: Int,
+    val func: Int,
+    val type: Int,
+    val const: Int,
+    val tag: Int,
+    val attr: Int,
+    val directive: Int,
+    val code: Int,
+) {
+    companion object {
+        private val DARK = SyntaxColors(
+            keyword = 0xFFC586C0.toInt(),
+            comment = 0xFF7E8894.toInt(),
+            string = 0xFF6AAB73.toInt(),
+            number = 0xFFB5CEA8.toInt(),
+            func = 0xFFDCDCAA.toInt(),
+            type = 0xFF4EC9B0.toInt(),
+            const = 0xFF569CD6.toInt(),
+            tag = 0xFF569CD6.toInt(),
+            attr = 0xFF9CDCFE.toInt(),
+            directive = 0xFFD7BA7D.toInt(),
+            code = 0xFFCE9178.toInt(),
+        )
+        private val LIGHT = SyntaxColors(
+            keyword = 0xFFA626A4.toInt(),
+            comment = 0xFF6C7178.toInt(),
+            string = 0xFF3F813E.toInt(),
+            number = 0xFF7C5700.toInt(),
+            func = 0xFF2D63D6.toInt(),
+            type = 0xFF2A7B72.toInt(),
+            const = 0xFF0B6E99.toInt(),
+            tag = 0xFF0B6E99.toInt(),
+            attr = 0xFF2D63D6.toInt(),
+            directive = 0xFFA0522D.toInt(),
+            code = 0xFF8B5A00.toInt(),
+        )
+
+        fun of(dark: Boolean): SyntaxColors = if (dark) DARK else LIGHT
+    }
 }
 
 @Composable
@@ -139,7 +240,9 @@ internal fun SoraEditorView(
     lineNumbers: Boolean,
     wordWrap: Boolean,
     modifier: Modifier = Modifier,
-    onTextChanged: (text: String, selectionStart: Int, selectionEnd: Int) -> Unit,
+    marks: Map<Int, EditorDiffMarks.Mark> = emptyMap(),
+    markColors: Map<EditorDiffMarks.Mark, Color> = emptyMap(),
+    onTextChanged: (text: String?, selectionStart: Int, selectionEnd: Int) -> Unit,
     onCursorMoved: (line0: Int, column0: Int) -> Unit,
 ) {
     val onText = rememberUpdatedState(onTextChanged)
@@ -147,6 +250,21 @@ internal fun SoraEditorView(
     val density = LocalDensity.current
     val fontPx = with(density) { fontSizeSp.sp.toPx() }
     val scheme = remember(dark, colors) { TaffyScheme(dark, colors) }
+
+    // 差异行：marks 是 1 基行号，sora 的 LineBackground 用 0 基
+    val diffArgb = remember(markColors) { markColors.mapValues { it.value.toArgb() } }
+    val diffLines = remember(marks, diffArgb) {
+        if (marks.isEmpty()) {
+            emptyMap<Int, Int>()
+        } else {
+            val out = HashMap<Int, Int>(marks.size)
+            for ((ln, kind) in marks) {
+                val argb = diffArgb[kind] ?: continue
+                out[ln - 1] = argb
+            }
+            out
+        }
+    }
 
     AndroidView(
         modifier = modifier,
@@ -166,8 +284,15 @@ internal fun SoraEditorView(
                 // ContentChangeEvent，把业务层的 code 清成空串（factory 时文本还没同步）。
                 subscribeEvent(ContentChangeEvent::class.java) { _, _ ->
                     // 显式 this.text：外层 composable 的参数也叫 text，不写 this 会取到那个 String。
-                    val (a, b) = runCatching { this.text.cursor.left to this.text.cursor.right }.getOrDefault(0 to 0)
-                    onText.value(this.text.toString(), a, b)
+                    val c = this.text.cursor
+                    val a = c.left
+                    val b = c.right
+                    // 2 MB 以上的文本业务层是只读的（见编辑器页），这里再兜一层：
+                    // 真的有人拿它编辑超大文件时不回传全文，免得每次按键都复制整篇。
+                    // 回传 null 表示「文本没同步」，调用方要保留自己的副本而不是当成空串。
+                    val full: String? = if (this.text.length <= 2_000_000) this.text.toString() else null
+                    handle.lastEmitted = full
+                    onText.value(full, a, b)
                 }
                 subscribeEvent(SelectionChangeEvent::class.java) { _, _ ->
                     runCatching {
@@ -184,19 +309,27 @@ internal fun SoraEditorView(
                 ed.appliedScheme = scheme
             }
             if (ed.appliedLang != lang) {
-                // 用方法而不是合成属性：getter 与 setter 的可空性不一致时 Kotlin 只合成 val。
-                ed.setEditorLanguage(
-                    when (lang) {
-                        // Java 词法分析器也用来上色 C / Smali / JSON / XML：这几种的
-                        // 字符串、数字、标点与 Java 同构，比纯文本可读得多；反过来
-                        // Python/Shell 的 # 注释在 Java 规则下会被当成普通字符，反而更乱，
-                        // 所以它们暂时走纯文本（下一版接 textmate 语法包再补）。
-                        CodeHighlighter.Lang.JAVA, CodeHighlighter.Lang.C, CodeHighlighter.Lang.SMALI,
-                        CodeHighlighter.Lang.JSON, CodeHighlighter.Lang.XML -> JavaLanguage()
-                        else -> EmptyLanguage()
-                    },
-                )
+                val syntax = lang.lexerSyntax()
+                if (syntax == null) {
+                    ed.analyzer = null
+                    ed.setEditorLanguage(EmptyLanguage())
+                } else {
+                    val analyzer = EditorAnalyzer(syntax, KIND_COLOR_IDS)
+                    analyzer.setDiffLines(diffLines)
+                    ed.analyzer = analyzer
+                    ed.setEditorLanguage(TaffyLanguage(analyzer))
+                    ed.appliedDiff = diffLines
+                }
                 ed.appliedLang = lang
+            }
+            // 差异行变了：换 map + 重跑一次分析（LineBackground 只能由分析结果整体产出）
+            if (ed.appliedDiff !== diffLines) {
+                ed.appliedDiff = diffLines
+                ed.analyzer?.let {
+                    it.setDiffLines(diffLines)
+                    // 分析器还没被库 reset 过时 rerun 会抛，重跑一次也无害
+                    runCatching { it.rerun() }
+                }
             }
             if (ed.appliedFontPx != fontPx) {
                 ed.setTextSizePx(fontPx)
@@ -213,17 +346,18 @@ internal fun SoraEditorView(
             if (ed.isEditable != !readOnly) {
                 ed.isEditable = !readOnly
             }
-            // 文本不在 update 里比对：8 MiB 文件每次重组都 toString 会卡死，改由
-            // LaunchedEffect(text) 在外部状态真的变化时做一次比对与同步。
         },
         onRelease = { ed ->
             handle.bind(null)
+            ed.analyzer = null
             runCatching { ed.release() }
         },
     )
 
     androidx.compose.runtime.LaunchedEffect(text, handle) {
         val ed = handle.editor ?: return@LaunchedEffect
+        // 编辑器自己回传的文本不用再同步回去：省掉一次全文比较（大文件这里是实打实的开销）
+        if (handle.lastEmitted === text) return@LaunchedEffect
         if (ed.text.toString() != text) {
             val caret = ed.cursor.left.coerceAtMost(text.length)
             ed.setText(text)
@@ -239,9 +373,8 @@ internal fun SoraEditorView(
 /**
  * 把塔菲的配色映射到 sora 的 EditorColorScheme。
  *
- * 只覆盖实际会显示出来的槽位：正文、行号、当前行、选择、滚动条与补全浮层。
- * 语法着色由 Language 自己的 span 决定，不在这里设死颜色 —— 否则换语言后
- * 关键字全变成一种色。
+ * 覆盖实际会显示出来的槽位：正文、行号、当前行、选择、滚动条、补全浮层，
+ * 以及词法着色的 11 个自定义槽（由 [EditorAnalyzer] 引用）。
  */
 private class TaffyScheme(dark: Boolean, c: SoraColors) : EditorColorScheme(dark) {
     init {
@@ -269,5 +402,18 @@ private class TaffyScheme(dark: Boolean, c: SoraColors) : EditorColorScheme(dark
         setColor(EditorColorScheme.SCROLL_BAR_THUMB_PRESSED, c.accent.copy(alpha = 0.75f).toArgb())
         setColor(EditorColorScheme.LINE_DIVIDER, c.currentLine.toArgb())
         setColor(EditorColorScheme.MATCHED_TEXT_BACKGROUND, c.selection.toArgb())
+
+        val syn = SyntaxColors.of(dark)
+        setColor(EditorAnalyzer.CID_KEYWORD, syn.keyword)
+        setColor(EditorAnalyzer.CID_COMMENT, syn.comment)
+        setColor(EditorAnalyzer.CID_STRING, syn.string)
+        setColor(EditorAnalyzer.CID_NUMBER, syn.number)
+        setColor(EditorAnalyzer.CID_FUNC, syn.func)
+        setColor(EditorAnalyzer.CID_TYPE, syn.type)
+        setColor(EditorAnalyzer.CID_CONST, syn.const)
+        setColor(EditorAnalyzer.CID_TAG, syn.tag)
+        setColor(EditorAnalyzer.CID_ATTR, syn.attr)
+        setColor(EditorAnalyzer.CID_DIRECTIVE, syn.directive)
+        setColor(EditorAnalyzer.CID_CODE, syn.code)
     }
 }

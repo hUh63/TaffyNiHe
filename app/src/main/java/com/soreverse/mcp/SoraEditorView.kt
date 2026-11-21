@@ -16,7 +16,9 @@ import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.event.SelectionChangeEvent
 import io.github.rosemoe.sora.lang.EmptyLanguage
 import io.github.rosemoe.sora.lang.analysis.AnalyzeManager
+import io.github.rosemoe.sora.text.ContentReference
 import io.github.rosemoe.sora.widget.CodeEditor
+import io.github.rosemoe.sora.widget.SymbolPairMatch
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 
 /**
@@ -144,9 +146,65 @@ private class TaffyCodeEditor(context: Context) : CodeEditor(context) {
     var analyzer: EditorAnalyzer? = null
 }
 
-/** 只负责「把分析器交给库」的语言实现；自动缩进/符号配对用库的默认行为。 */
-private class TaffyLanguage(private val analyzer: AnalyzeManager) : EmptyLanguage() {
+/**
+ * 只负责「把分析器与编辑辅助交给库」的语言实现。
+ *
+ * 换掉库里自带的 Java 语言后有两个编辑体验会丢：自动补右括号、回车自动缩进
+ * （EmptyLanguage 里两者都是空实现）。这里按「未闭合括号深度」补回来：
+ * - 光标前的 `(` `[` `{` 未闭合几个，就多缩几级；Python 的 `:` 结尾也缩一级；
+ * - 括号与引号补全。
+ * 不追求把每种语法的缩进规则做全 —— 只要回车后不用手动敲空格就够。
+ */
+private class TaffyLanguage(
+    private val analyzer: AnalyzeManager,
+    private val syntax: EditorLexer.Syntax,
+) : EmptyLanguage() {
+
     override fun getAnalyzeManager(): AnalyzeManager = analyzer
+
+    override fun getSymbolPairs(): SymbolPairMatch = SYMBOL_PAIRS
+
+    override fun getIndentAdvance(text: ContentReference, line: Int, column: Int): Int {
+        val src = runCatching {
+            val l = text.getLine(line)
+            l.substring(0, column.coerceIn(0, l.length))
+        }.getOrNull() ?: return 0
+        var depth = 0
+        var quote: Char? = null
+        var i = 0
+        while (i < src.length) {
+            val c = src[i]
+            if (quote != null) {
+                if (c == '\\') {
+                    i += 2
+                    continue
+                }
+                if (c == quote) quote = null
+                i++
+                continue
+            }
+            when (c) {
+                '"', '\'' -> quote = c
+                '(', '[', '{' -> depth++
+                ')', ']', '}' -> if (depth > 0) depth--
+            }
+            i++
+        }
+        if (depth > 0) return depth * 4
+        // Python 的复合语句以 : 结尾，下一行要缩进一级
+        if (syntax == EditorLexer.Syntax.PYTHON && src.trimEnd().endsWith(":")) return 4
+        return 0
+    }
+
+    companion object {
+        private val SYMBOL_PAIRS = SymbolPairMatch().apply {
+            putPair("(", SymbolPairMatch.SymbolPair("(", ")"))
+            putPair("[", SymbolPairMatch.SymbolPair("[", "]"))
+            putPair("{", SymbolPairMatch.SymbolPair("{", "}"))
+            putPair("\"", SymbolPairMatch.SymbolPair("\"", "\""))
+            putPair("'", SymbolPairMatch.SymbolPair("'", "'"))
+        }
+    }
 }
 
 /** CodeHighlighter.Lang → 词法语法族；null 表示不着色。 */
@@ -317,7 +375,7 @@ internal fun SoraEditorView(
                     val analyzer = EditorAnalyzer(syntax, KIND_COLOR_IDS)
                     analyzer.setDiffLines(diffLines)
                     ed.analyzer = analyzer
-                    ed.setEditorLanguage(TaffyLanguage(analyzer))
+                    ed.setEditorLanguage(TaffyLanguage(analyzer, syntax))
                     ed.appliedDiff = diffLines
                 }
                 ed.appliedLang = lang

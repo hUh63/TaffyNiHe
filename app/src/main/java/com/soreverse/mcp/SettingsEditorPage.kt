@@ -537,6 +537,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             }
             if (text != null) {
                 code = text; tf = TextFieldValue(text); soraHandle.setText(text, 0); savedCode = text; currentFile = null; currentFilePath = null
+                refreshUndoState()
             }
         }
     }
@@ -584,6 +585,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 code = text
                 tf = TextFieldValue(text)
                 soraHandle.setText(text, text.length)
+                refreshUndoState()
                 savedCode = text
                 currentFilePath = path
                 currentFile = File(path).name
@@ -719,6 +721,23 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     fun moveCaretTo(offset: Int) {
         tf = TextFieldValue(tf.text, selection = TextRange(offset.coerceIn(0, tf.text.length)))
         soraHandle.setSelectionOffsets(offset, offset)
+    }
+
+    /** 跳到上一个/下一个折叠块的首行（长文件里按方法/对象跳，比滚屏快）。 */
+    fun jumpBlock(dir: Int) {
+        val starts = soraHandle.blockStarts()
+        if (starts.isEmpty()) {
+            appendOut("\n[当前文本没有可折叠的块]\n")
+            return
+        }
+        val cur = soraHandle.cursorLine0()
+        val target = if (dir > 0) {
+            starts.firstOrNull { it > cur } ?: starts.first()
+        } else {
+            starts.lastOrNull { it < cur } ?: starts.last()
+        }
+        jumpToLine(target + 1)
+        followCursor()
     }
 
     fun applyTextOp(res: Pair<String, Int>) {
@@ -877,6 +896,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         code = first.code
         tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
         soraHandle.setText(first.code, first.code.length)
+        refreshUndoState()
         // 上次会话里首个标签是脏的，就保持「未保存」标记（savedCode 置空即 dirty）
         savedCode = if (sessionEntries.firstOrNull()?.dirty == true) "" else first.code
         mode = first.mode
@@ -1258,28 +1278,34 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     fun writeCurrentFile(forcePath: String? = null) {
         val text = code
         scope.safeLaunch {
-            val result = withContext(Dispatchers.IO) {
+            // 返回值带「是否真的写成功」：以前不管成败都把 savedCode 设成新内容，
+            // 写失败时界面显示已保存、退出也不提示，等于骗用户。
+            val (ok, result) = withContext(Dispatchers.IO) {
                 val target = forcePath ?: currentFilePath
                 if (target != null && File(target).isFile) {
                     snapshotIfChanged(target)
                     // 原子写：先写同目录临时文件再 rename。直接 writeText 会先把原文件截断，
                     // 写到一半被杀（大文件 / 存储满）就只剩 0 字节或半截内容。
-                    val ok = com.soreverse.mcp.core.AtomicWrite.text(File(target), text)
-                    if (ok) {
+                    val written = com.soreverse.mcp.core.AtomicWrite.text(File(target), text)
+                    if (written) {
                         // 写完刷新指纹，避免下一次保存把自己刚写的当成外部修改
                         val fresh = FileStampUtil.stamp(File(target))
                         if (fresh != null) fileStamps[target] = fresh else fileStamps.remove(target)
-                        "已保存到工作区: $target"
-                    } else "写回失败（无权限？用 root/Termux 或改为另存）"
+                        true to "已保存到工作区: $target"
+                    } else {
+                        false to "写回失败（无权限？用 root/Termux 或改为另存）"
+                    }
                 } else {
                     val dir = File(context.filesDir, "editor_files").apply { mkdirs() }
                     val ext = mode.ext
                     val name = currentFile ?: "file_${System.currentTimeMillis()}.$ext"
-                    File(dir, name).writeText(text)
-                    "已保存: ${File(dir, name).absolutePath}"
+                    val f = File(dir, name)
+                    // 私有目录同样原子写：这是用户的草稿，写坏就是直接丢内容
+                    val written = com.soreverse.mcp.core.AtomicWrite.text(f, text)
+                    written to if (written) "已保存: ${f.absolutePath}" else "保存失败（私有目录不可写？）"
                 }
             }
-            savedCode = text
+            if (ok) savedCode = text
             appendOut("\n[$result]\n")
             pushCheckpoint(if (zh) "手动保存" else "manual save")
             refreshRecent()
@@ -1478,6 +1504,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 }
                 "nav:blockcard" -> blockCardOpen = true
                 "line:multiinsert" -> multiInsertOpen = true
+                "nav:prevblock" -> jumpBlock(-1)
+                "nav:nextblock" -> jumpBlock(1)
                 "nav:block" -> {
                     val blk = EditorCodeIntel.enclosingBlock(tf.text, tf.selection.min)
                     if (blk == null) appendOut("\n[光标不在括号块内]\n")
@@ -1511,6 +1539,15 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var curLn by remember { mutableStateOf(1) }
     var curCol by remember { mutableStateOf(1) }
     val outline = remember(code, mode) { outlineOf(code, mode) }
+    // 三色差异标记：remember 一次。每次重组 new 一个 map 会让 SoraEditorView 里的
+    // remember(markColors) 失效，进而每帧重算 diffLines。
+    val markColors = remember {
+        mapOf(
+            EditorDiffMarks.Mark.ADDED to AppPalette.green.copy(alpha = 0.13f),
+            EditorDiffMarks.Mark.MODIFIED to AppPalette.orange.copy(alpha = 0.15f),
+            EditorDiffMarks.Mark.DELETED to AppPalette.red.copy(alpha = 0.15f),
+        )
+    }
     val toolbarIds = remember(toolbarVersion, context) { EditorCommands.order(context) }
     val textActions = EditorTextActions.all()
     val matchCount = remember(findQuery, code, findRegex, findCaseSensitive, showFind) {
@@ -1654,7 +1691,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         },
                     )
                     EditorCommands.grouped().forEach { (_, cmds) ->
-                        cmds.take(6).forEach { cmd ->
+                        // 每组最多 8 条：菜单本身可滚动，少截断一点少一次「找不到命令」
+                        cmds.take(8).forEach { cmd ->
                             DropdownMenuItem(
                                 text = { Text(cmd.label(zh), color = if (cmd.enabled(host)) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) },
                                 leadingIcon = if (cmd.icon != null) {
@@ -1761,11 +1799,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     wordWrap = softWrap,
                     marks = marks,
                     // 整行底色用低透明度：满饱和的绿/橙/红铺满一行会盖住语法着色
-                    markColors = mapOf(
-                        EditorDiffMarks.Mark.ADDED to AppPalette.green.copy(alpha = 0.13f),
-                        EditorDiffMarks.Mark.MODIFIED to AppPalette.orange.copy(alpha = 0.15f),
-                        EditorDiffMarks.Mark.DELETED to AppPalette.red.copy(alpha = 0.15f),
-                    ),
+                    markColors = markColors,
                     modifier = Modifier.fillMaxSize(),
                     onTextChanged = { newText, selStart, selEnd ->
                         // newText == null：编辑器那边判断文本太大、没有回传全文（见 SoraEditorView）。

@@ -59,6 +59,16 @@ public class EditorAnalyzer extends SimpleAnalyzeManager<Integer> {
     /** 行级差异底色：key = 0 基行号，value = ARGB。 */
     private volatile Map<Integer, Integer> diffLines = Collections.emptyMap();
 
+    /**
+     * 最近一次分析产出的块。给「上一块 / 下一块」导航用 ——
+     * 库只在自己的渲染层用 blocks，没有对外暴露，所以这里留一份只读引用。
+     */
+    private volatile List<CodeBlock> lastBlocks = Collections.emptyList();
+
+    public List<CodeBlock> getLastBlocks() {
+        return lastBlocks;
+    }
+
     public EditorAnalyzer(EditorLexer.Syntax syntax, Map<EditorLexer.Kind, Integer> colorIds) {
         this.syntax = syntax;
         this.colorIds = colorIds;
@@ -148,6 +158,7 @@ public class EditorAnalyzer extends SimpleAnalyzeManager<Integer> {
         for (int i = 0; i < blocks.size(); i++) {
             styles.addCodeBlock(blocks.get(i));
         }
+        lastBlocks = Collections.unmodifiableList(blocks);
 
         Map<Integer, Integer> diff = diffLines;
         if (!diff.isEmpty()) {

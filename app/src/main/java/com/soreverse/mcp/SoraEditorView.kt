@@ -170,10 +170,20 @@ internal class SoraEditorHandle {
         while (suf < maxSuf && old[oldLen - 1 - suf] == text[text.length - 1 - suf]) suf++
         val ins = text.substring(pre, text.length - suf)
         // replace 会触发 ContentChangeEvent，业务层的 code/tf 由事件回写
-        runCatching { cur.replace(pre, oldLen - suf, ins) }
+        val ok = runCatching { cur.replace(pre, oldLen - suf, ins) }.isSuccess
+        if (!ok) {
+            // 差量替换失败（索引异常/并发改动）：退回整篇替换，至少保证界面和业务层一致
+            e.setText(text)
+            if (caret >= 0) setSelectionOffsets(caret, caret)
+            return
+        }
         val at = (if (caret >= 0) caret else pre + ins.length).coerceIn(0, e.text.length)
         setSelectionOffsets(at, at)
     }
+
+    /** 当前分析出的折叠块起始行（0 基，升序）；给「上一块/下一块」跳转用。 */
+    fun blockStarts(): List<Int> =
+        (editor as? TaffyCodeEditor)?.analyzer?.lastBlocks?.map { it.startLine }?.sorted() ?: emptyList()
 
     fun canUndo(): Boolean = editor?.canUndo() ?: false
 
@@ -455,8 +465,10 @@ internal fun SoraEditorView(
                 }
                 ed.appliedLang = lang
             }
-            // 差异行变了：换 map + 重跑一次分析（LineBackground 只能由分析结果整体产出）
-            if (ed.appliedDiff !== diffLines) {
+            // 差异行变了：换 map + 重跑一次分析（LineBackground 只能由分析结果整体产出）。
+            // 用内容比较而不是引用比较 —— 调用方会周期性重算出新 map，
+            // 内容没变时不该触发一次全量词法分析。
+            if (ed.appliedDiff != diffLines) {
                 ed.appliedDiff = diffLines
                 ed.analyzer?.let {
                     it.setDiffLines(diffLines)

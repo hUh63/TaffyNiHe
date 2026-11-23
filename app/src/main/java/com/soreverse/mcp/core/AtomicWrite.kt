@@ -19,7 +19,13 @@ object AtomicWrite {
         val dir = target.parentFile
         if (dir != null && !dir.exists()) dir.mkdirs()
         val tmp = File(dir, "." + target.name + ".tmp" + System.nanoTime())
-        tmp.writeBytes(data)
+        // 必须 sync：只 write 不落盘时，rename 成功但数据还在页缓存里，
+        // 断电/内核崩溃后目标文件可能变成 0 字节（rename 的原子性只保证「目录项」）。
+        java.io.FileOutputStream(tmp).use { out ->
+            out.write(data)
+            out.flush()
+            runCatching { out.fd.sync() }
+        }
         move(tmp, target)
     }.getOrDefault(false)
 

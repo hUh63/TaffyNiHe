@@ -31,8 +31,15 @@ internal object StreamLimits {
         val buf = ByteArray(64 * 1024)
         var total = 0L
         while (true) {
-            val n = runCatching { input.read(buf) }.getOrDefault(-1)
-            if (n <= 0) break
+            // 读异常必须与 EOF 区分：吞成 -1 会把「流中途断开」当成读完，
+            // 返回半截内容 —— 调用方（编辑器）可能拿它覆盖原文件。
+            val n = try {
+                input.read(buf)
+            } catch (e: java.io.IOException) {
+                return null
+            }
+            if (n < 0) break
+            if (n == 0) continue
             total += n
             if (total > maxBytes) return null
             out.write(buf, 0, n)

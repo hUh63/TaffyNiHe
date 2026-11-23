@@ -250,6 +250,8 @@ internal object EditorCommands {
         EditorCommand("view.wrap", "自动换行", "Word wrap", G_VIEW, icon = Icons.Filled.AspectRatio, isOn = { it.flag("wrap") }) { it.act("toggle:wrap") },
         EditorCommand("view.guides", "缩进参考线", "Indent guides", G_VIEW, icon = Icons.Filled.FormatIndentIncrease, isOn = { it.flag("guides") }) { it.act("toggle:guides") },
         EditorCommand("nav.bracket", "跳到配对括号", "Jump to match", G_NAV, icon = Icons.Filled.MyLocation) { it.act("nav:bracket") },
+        EditorCommand("nav.prevblock", "上一块", "Prev block", G_NAV, icon = Icons.Filled.ArrowUpward) { it.act("nav:prevblock") },
+        EditorCommand("nav.nextblock", "下一块", "Next block", G_NAV, icon = Icons.Filled.ArrowDownward) { it.act("nav:nextblock") },
         EditorCommand("nav.block", "选中所在块", "Select block", G_NAV, icon = Icons.Filled.SelectAll) { it.act("nav:block") },
         EditorCommand("nav.blockcard", "当前块卡片", "Block card", G_NAV, icon = Icons.Filled.Info) { it.act("nav:blockcard") },
         // ── 代码智能 ──

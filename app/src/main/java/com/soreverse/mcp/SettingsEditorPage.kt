@@ -185,6 +185,21 @@ private fun langLabel(m: CodeHighlighter.Lang, zh: Boolean): String = when (m) {
     CodeHighlighter.Lang.TEXT -> if (zh) "文本" else "Text"
 }
 
+/** 塔菲的语言枚举 → CM 语言包名（assets/editor/cm.js 的 LANG 表）。 */
+private fun cmLangName(m: CodeHighlighter.Lang): String = when (m) {
+    CodeHighlighter.Lang.PYTHON -> "python"
+    CodeHighlighter.Lang.SHELL -> "plain"
+    CodeHighlighter.Lang.JSON -> "json"
+    CodeHighlighter.Lang.SMALI -> "smali"
+    CodeHighlighter.Lang.C -> "cpp"
+    CodeHighlighter.Lang.JAVA -> "java"
+    CodeHighlighter.Lang.XML -> "xml"
+    CodeHighlighter.Lang.MD -> "markdown"
+    CodeHighlighter.Lang.ASM -> "asm"
+    CodeHighlighter.Lang.EXT -> "plain"
+    CodeHighlighter.Lang.TEXT -> "plain"
+}
+
 /** 从源码提取符号大纲（跨语言启发式正则）。 */
 private fun outlineOf(src: String, m: CodeHighlighter.Lang): List<OutlineItem> {
     val rules: List<Pair<String, Regex>> = when (m) {
@@ -409,8 +424,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // 大文件窗口化
     var viewerMode by remember { mutableStateOf(false) }
     // 编辑区
-    // 编辑器渲染层（sora-editor）；业务层通过它设文本/选区、跳行、取选中内容。
-    val soraHandle = remember { SoraEditorHandle() }
+    // 编辑器渲染层：WebView + CodeMirror 6；业务层通过它设文本/选区、跳行、取选中内容。
+    // 渲染层换成 WebView + CodeMirror 6：文本真源在 JS 侧，这里持一份同步影子副本
+    // （cm.currentText()），界面派生计算读节流的 code，打字路径不整页重算。
+    val cm = remember { CodeMirrorHandle() }
+    fun liveText(): String = cm.currentText()
     val editorScroll = rememberScrollState()
     val editorLineCount = remember(code) { code.count { c -> c == '\n' } + 1 }
     var showJump by remember { mutableStateOf(false) }
@@ -439,33 +457,38 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var wsPanelExpanded by remember { mutableStateOf(true) }
     var wsTreeExpanded by remember { mutableStateOf(setOf("")) }
     // 双向：旧实现只置 true，打开过一次大文件后所有文件都变只读（且没有常规退出入口）
-    // 2 MB 以上切只读：sora 本身能渲染这么大的文本，但业务层每键回传全文的代价太高。
+    // 2 MB 以上切只读：CM 能渲染，但业务层的全文派生计算（大纲/差异/诊断）会明显变慢。
     // 原来 200 KB 就切只读 + 自绘 LazyColumn，等于把「能编辑的文件」限制成了纯文本查看器。
     LaunchedEffect(code) { viewerMode = code.length > 2_000_000 }
 
     // ── 撤销/重做 ──
-    // 只有一套历史：sora 的 UndoManager 监听 Content 的 insert/delete，按 delta 记录
-    // （原来这里是「整篇文本快照」，400 条 × 1 MB 就能把中端机吃穿）。
-    // 现在键盘 Ctrl+Z、长按撤销、工具条按钮、程序化编辑共用同一份栈，
-    // 相邻快速输入由库自己按 merge time limit 合并成一步。
+    // 只有一套历史：CM 的 history 扩展按事务记录 delta（不是整篇快照）。
+    // 键盘撤销、工具条按钮、程序化编辑（缩进/注释/格式化）共用同一份栈，
+    // 相邻快速输入由库按时间窗合并成一步。
     var undoable by remember { mutableStateOf(false) }
     var redoable by remember { mutableStateOf(false) }
 
     fun refreshUndoState() {
-        undoable = soraHandle.canUndo()
-        redoable = soraHandle.canRedo()
+        undoable = cm.canUndo.value
+        redoable = cm.canRedo.value
     }
 
     fun doUndo() {
-        if (!soraHandle.canUndo()) return
-        soraHandle.undo()
+        if (!cm.canUndo.value) return
+        cm.undo()
         refreshUndoState()
     }
 
     fun doRedo() {
-        if (!soraHandle.canRedo()) return
-        soraHandle.redo()
+        if (!cm.canRedo.value) return
+        cm.redo()
         refreshUndoState()
+    }
+
+    // CM 每次事务都会上报 undo/redo 深度，按钮可用状态由此自动跟随（不必逐处手调 refresh）
+    LaunchedEffect(cm.canUndo.value, cm.canRedo.value) {
+        if (undoable != cm.canUndo.value) undoable = cm.canUndo.value
+        if (redoable != cm.canRedo.value) redoable = cm.canRedo.value
     }
 
     // ── 文本读写原语（须定义在其它局部函数之前：Kotlin 局部函数不支持前向引用）──
@@ -474,7 +497,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         tf = TextFieldValue(text, selection = TextRange(text.length))
         // 打开/切换/新建文件走整篇替换：库会重建 Content，历史一并清空
         // （否则在新文件里按撤销，会退回上一个文件的内容）。
-        soraHandle.setText(text, text.length)
+        cm.setText(text, text.length)
         refreshUndoState()
     }
 
@@ -484,7 +507,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         tf = TextFieldValue(text, selection = TextRange(at))
         // 程序化编辑（缩进/注释/格式化/AI 插入/替换）走差量替换：
         // 撤销栈里记的是「这次操作」本身，而不是一次整篇重写。
-        soraHandle.applyText(text, at)
+        cm.applyText(text, at)
         refreshUndoState()
     }
 
@@ -536,7 +559,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 }.getOrNull()
             }
             if (text != null) {
-                code = text; tf = TextFieldValue(text); soraHandle.setText(text, 0); savedCode = text; currentFile = null; currentFilePath = null
+                code = text; tf = TextFieldValue(text); cm.setText(text, 0); savedCode = text; currentFile = null; currentFilePath = null
                 refreshUndoState()
             }
         }
@@ -584,7 +607,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 snapshotIfChanged(path)
                 code = text
                 tf = TextFieldValue(text)
-                soraHandle.setText(text, text.length)
+                cm.setText(text, text.length)
                 refreshUndoState()
                 savedCode = text
                 currentFilePath = path
@@ -659,7 +682,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     // ── 查找（支持正则/大小写）──
     fun currentMatches(): List<Int>? {
-        val text = tf.text
+        val text = liveText()
         if (findQuery.isEmpty()) return emptyList()
         return if (findRegex) {
             runCatching { Regex(findQuery).findAll(text).map { it.range.first }.toList() }.getOrNull()
@@ -676,14 +699,14 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val cur = tf.selection.start
         val target = if (dir >= 0) starts.firstOrNull { it > cur } ?: starts.first()
         else starts.lastOrNull { it < cur } ?: starts.last()
-        tf = TextFieldValue(tf.text, selection = TextRange(target, (target + findQuery.length).coerceAtMost(tf.text.length)))
-        soraHandle.setSelectionOffsets(target, (target + findQuery.length).coerceAtMost(tf.text.length))
+        tf = TextFieldValue(liveText(), selection = TextRange(target, (target + findQuery.length).coerceAtMost(liveText().length)))
+        cm.setSelectionOffsets(target, (target + findQuery.length).coerceAtMost(liveText().length))
     }
 
     fun replaceCurrentMatch() {
         val starts = currentMatches().orEmpty()
         if (starts.isEmpty()) return
-        val text = tf.text
+        val text = liveText()
         val cur = tf.selection
         val at = starts.firstOrNull { it == cur.start && it + findQuery.length == cur.end } ?: starts.first()
         val newText = text.substring(0, at) + replaceQuery + text.substring(at + findQuery.length)
@@ -693,7 +716,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     fun replaceAllMatches() {
         if (findQuery.isEmpty()) return
         val hits = currentMatches().orEmpty().size
-        val text = tf.text
+        val text = liveText()
         val newText = if (findRegex) {
             runCatching { Regex(findQuery).replace(text, replaceQuery) }.getOrDefault(text)
         } else if (findCaseSensitive) {
@@ -706,38 +729,27 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     fun followCursor() {
-        // sora 自己管滚动：只需保证光标可见，不再手算 ScrollState（那套只对自绘编辑区有效）。
-        if (!viewerMode) soraHandle.ensureVisible()
+        // 滚动由 CM 接管（setSel 自带 scrollIntoView），这里只把焦点还给编辑器
+        if (!viewerMode) cm.focus()
     }
 
     fun jumpToLine(n: Int) {
-        if (tf.text.isEmpty()) return
-        val off = EditorTextOps.lineStartOffset(tf.text, n)
-        tf = TextFieldValue(tf.text, selection = TextRange(off))
-        soraHandle.setSelectionOffsets(off, off)
+        if (liveText().isEmpty()) return
+        val off = EditorTextOps.lineStartOffset(liveText(), n)
+        tf = TextFieldValue(liveText(), selection = TextRange(off))
+        cm.setSelectionOffsets(off, off)
         followCursor()
     }
 
     fun moveCaretTo(offset: Int) {
-        tf = TextFieldValue(tf.text, selection = TextRange(offset.coerceIn(0, tf.text.length)))
-        soraHandle.setSelectionOffsets(offset, offset)
+        tf = TextFieldValue(liveText(), selection = TextRange(offset.coerceIn(0, liveText().length)))
+        cm.setSelectionOffsets(offset, offset)
     }
 
     /** 跳到上一个/下一个折叠块的首行（长文件里按方法/对象跳，比滚屏快）。 */
     fun jumpBlock(dir: Int) {
-        val starts = soraHandle.blockStarts()
-        if (starts.isEmpty()) {
-            appendOut("\n[当前文本没有可折叠的块]\n")
-            return
-        }
-        val cur = soraHandle.cursorLine0()
-        val target = if (dir > 0) {
-            starts.firstOrNull { it > cur } ?: starts.first()
-        } else {
-            starts.lastOrNull { it < cur } ?: starts.last()
-        }
-        jumpToLine(target + 1)
-        followCursor()
+        // 块表由 CM 用语法树/正则现场算（Kotlin 侧不再维护块索引，也就不存在过期问题）
+        cm.jumpBlock(dir)
     }
 
     fun applyTextOp(res: Pair<String, Int>) {
@@ -806,11 +818,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         if (!diagnoseOn) null else runCatching { EditorCodeIntel.matchBracket(code, tf.selection.min) }.getOrNull()
     }
     fun insertText(s: String) {
-        applyTextOp(EditorTextOps.insert(tf.text, tf.selection.min, tf.selection.max, s))
+        applyTextOp(EditorTextOps.insert(liveText(), tf.selection.min, tf.selection.max, s))
     }
 
     fun clipboardCopy(cut: Boolean = false) {
-        val text = tf.text
+        val text = liveText()
         val a = tf.selection.min
         val b = tf.selection.max
         if (a == b) return
@@ -895,7 +907,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val first = list[0]
         code = first.code
         tf = TextFieldValue(first.code, selection = TextRange(first.code.length))
-        soraHandle.setText(first.code, first.code.length)
+        cm.setText(first.code, first.code.length)
         refreshUndoState()
         // 上次会话里首个标签是脏的，就保持「未保存」标记（savedCode 置空即 dirty）
         savedCode = if (sessionEntries.firstOrNull()?.dirty == true) "" else first.code
@@ -972,13 +984,13 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     fun requestPythonSmart(kind: String) {
         val script = PythonRuntime.supportScript(context, "completion.py")
         if (kind == "complete" && tf.selection.start > 0) {
-            val prev = tf.text[tf.selection.start - 1]
+            val prev = liveText()[tf.selection.start - 1]
             if (prev == '\n' || prev == '\t' || prev == ' ' || prev == '(') { showCompletions = false; return }
         }
-        val ln = EditorTextOps.lineOf(tf.text, tf.selection.start)
-        val col = EditorTextOps.columnOf(tf.text, tf.selection.start)
+        val ln = EditorTextOps.lineOf(liveText(), tf.selection.start)
+        val col = EditorTextOps.columnOf(liveText(), tf.selection.start)
         if (kind == "complete" && tf.selection.start > 0) {
-            val before = tf.text.substring(0, tf.selection.start)
+            val before = liveText().substring(0, tf.selection.start)
             val word = Regex("[A-Za-z0-9_]+$").find(before)?.value.orEmpty()
             if (word.length >= 2) {
                 val docSyms = Regex("\\b([A-Za-z_][A-Za-z0-9_]{2,})\\b").findAll(code).map { it.value }.toSet()
@@ -1061,7 +1073,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     fun shellCompletions(): List<JSONObject> {
-        val before = tf.text.substring(0, tf.selection.start.coerceIn(0, tf.text.length))
+        val before = liveText().substring(0, tf.selection.start.coerceIn(0, liveText().length))
         val word = Regex("[A-Za-z0-9_.\\-]+$").find(before)?.value.orEmpty()
         return SHELL_CMDS.filter { it.first.startsWith(word) && it.first != word }
             .take(30)
@@ -1069,10 +1081,10 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     fun jsonKeyCompletions(): List<JSONObject> {
-        val s = tf.selection.start.coerceIn(0, tf.text.length)
-        val before = tf.text.substring(0, s)
+        val s = tf.selection.start.coerceIn(0, liveText().length)
+        val before = liveText().substring(0, s)
         val word = Regex("([A-Za-z0-9_\\-.]+)\"?$").find(before)?.groupValues?.get(1).orEmpty()
-        val keys = Regex("\"([A-Za-z0-9_\\-.]+)\"\\s*:").findAll(tf.text).map { it.groupValues[1] }.distinct().toList()
+        val keys = Regex("\"([A-Za-z0-9_\\-.]+)\"\\s*:").findAll(liveText()).map { it.groupValues[1] }.distinct().toList()
         return keys.filter { it.startsWith(word) && it != word }.take(30)
             .map { JSONObject().put("name", it).put("type", "key").put("doc", if (zh) "文档中已有的键" else "existing key") }
     }
@@ -1090,14 +1102,14 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             val diags = if (ok) LspClient.takeDiagnostics() else emptyList()
             // 同时把诊断画到编辑器里（整行波浪线）：只在控制台里列文字太远，
             // 原来的自绘红底已经随 BasicTextField 一起去掉了。
-            soraHandle.setDiagnostics(
+            cm.setDiagnostics(
                 diags.map {
-                    SoraDiag(
+                    CmDiag(
                         line1 = it.line,
                         severity = when (it.severity) {
-                            "E" -> SoraDiag.ERROR
-                            "W" -> SoraDiag.WARNING
-                            else -> SoraDiag.INFO
+                            "E" -> CmDiag.ERROR
+                            "W" -> CmDiag.WARNING
+                            else -> CmDiag.INFO
                         },
                         message = it.message,
                     )
@@ -1119,7 +1131,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     fun insertCompletion(name: String) {
-        val text = tf.text
+        val text = liveText()
         val s = tf.selection.start.coerceIn(0, text.length)
         val wordStart = Regex("[A-Za-z0-9_]*$").find(text.substring(0, s))?.range?.first ?: s
         setCodeAt(text.substring(0, wordStart) + name + text.substring(s), wordStart + name.length)
@@ -1405,7 +1417,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             else -> null
         }
         if (off != null) {
-            val text = tf.text
+            val text = liveText()
             val bytes = text.toByteArray(Charsets.UTF_8)
             val targetByte = off.coerceIn(0L, bytes.size.toLong()).toInt()
             var consumed = 0
@@ -1421,7 +1433,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         }
         val lineNo = s.removePrefix(":").removePrefix("L").removePrefix("l").toIntOrNull()
         if (lineNo != null && lineNo > 0) { jumpToLine(lineNo); return }
-        val all = outlineOf(tf.text, mode)
+        val all = outlineOf(liveText(), mode)
         val hit = all.firstOrNull { it.name.equals(s, true) } ?: all.firstOrNull { it.name.contains(s, true) }
         if (hit != null) { jumpToLine(hit.line); appendOut("\n[跳转符号 ${hit.name} @ 行 ${hit.line}]\n") }
         else appendOut("\n[无法解析跳转目标: $s]\n")
@@ -1431,7 +1443,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     // ── 命令宿主：把页面能力暴露给 EditorCommands / EditorTextActions ──
     val host = object : EditorHost {
-        override val text get() = tf.text
+        override val text get() = liveText()
         override val selStart get() = tf.selection.min
         override val selEnd get() = tf.selection.max
         override val lang get() = mode
@@ -1461,7 +1473,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 "copy" -> clipboardCopy(false)
                 "cut" -> clipboardCopy(true)
                 "paste" -> clipboardPaste()
-                "selectall" -> { tf = TextFieldValue(tf.text, TextRange(0, tf.text.length)); soraHandle.setSelectionOffsets(0, tf.text.length) }
+                "selectall" -> { tf = TextFieldValue(liveText(), TextRange(0, liveText().length)); cm.setSelectionOffsets(0, liveText().length) }
                 "save" -> saveFile()
                 "open" -> loadLauncher.launch(arrayOf("text/plain", "text/x-python", "application/json", "*/*"))
                 "new" -> newFile()
@@ -1507,11 +1519,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 "nav:prevblock" -> jumpBlock(-1)
                 "nav:nextblock" -> jumpBlock(1)
                 "nav:block" -> {
-                    val blk = EditorCodeIntel.enclosingBlock(tf.text, tf.selection.min)
+                    val blk = EditorCodeIntel.enclosingBlock(liveText(), tf.selection.min)
                     if (blk == null) appendOut("\n[光标不在括号块内]\n")
                     else {
-                        tf = TextFieldValue(tf.text, TextRange(blk.first, (blk.second + 1).coerceAtMost(tf.text.length)))
-                        soraHandle.setSelectionOffsets(blk.first, (blk.second + 1).coerceAtMost(tf.text.length))
+                        tf = TextFieldValue(liveText(), TextRange(blk.first, (blk.second + 1).coerceAtMost(liveText().length)))
+                        cm.setSelectionOffsets(blk.first, (blk.second + 1).coerceAtMost(liveText().length))
                         followCursor()
                     }
                 }
@@ -1530,16 +1542,16 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     // ══════════════════════ UI ══════════════════════
     val dirty = code != savedCode
     // 换文件后不能留着上一个文件的波浪线
-    LaunchedEffect(currentFile) { soraHandle.setDiagnostics(emptyList()) }
+    LaunchedEffect(currentFile) { cm.setDiagnostics(emptyList()) }
     // 未保存状态暴露给 MainActivity（切换底部导航时做「离开前确认」）
     LaunchedEffect(dirty) { EditorSession.dirty = dirty }
     LaunchedEffect(Unit) { EditorSession.confirmOnExit = EditorCommands.confirmOnExit(context) }
-    // 光标行列由 onCursorMoved 回传：原来每次重组都对着 tf.text 从头扫到光标，
+    // 光标行列由 onCursorMoved 回传：原来每次重组都对着 liveText() 从头扫到光标，
     // 2 MB 文件里这就是每帧几十万次字符比较。
     var curLn by remember { mutableStateOf(1) }
     var curCol by remember { mutableStateOf(1) }
     val outline = remember(code, mode) { outlineOf(code, mode) }
-    // 三色差异标记：remember 一次。每次重组 new 一个 map 会让 SoraEditorView 里的
+    // 三色差异标记：remember 一次。每次重组 new 一个 map 会让渲染层里的
     // remember(markColors) 失效，进而每帧重算 diffLines。
     val markColors = remember {
         mapOf(
@@ -1558,6 +1570,47 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         // 每个按键都读一次备份文件 + 全量 diff 太浪费；400 ms 内没有新输入才算一次
         delay(400)
         value = withContext(Dispatchers.IO) { EditorDiffMarks.marksFor(context, currentFile, code) }
+    }
+
+    // ── CM → Compose 的同步 ──
+    // 打字/粘贴产生的文本走「节流快照」进 code：派生计算（大纲、差异、计数）每 250ms 才跑一次，
+    // 而不是每键一次全量正则扫描。选区单独进 tf —— 它很小，光标移动只影响读它的少数控件。
+    LaunchedEffect(cm.snapText.value) {
+        val snap = cm.snapText.value
+        if (code != snap) {
+            code = snap
+            // 用户输入的时间点：自动补全按「停顿多久」决定是否触发
+            lastInputAt = System.currentTimeMillis()
+        }
+    }
+    val cmSelNow = cm.sel.value
+    LaunchedEffect(cmSelNow) {
+        curLn = cmSelNow.line
+        curCol = cmSelNow.col
+        if (tf.selection.min != cmSelNow.min || tf.selection.max != cmSelNow.max) {
+            // tf 现在只承载选区（全文读取一律走 liveText()），用节流快照即可，
+            // 免得每次光标移动都对 1 MB 文本做一次 toString
+            tf = TextFieldValue(code, TextRange(cmSelNow.min, cmSelNow.max))
+        }
+    }
+    // 语言 / 行号 / 折行 / 差异标记：全部交给 CM 的扩展重新配置
+    LaunchedEffect(mode) { cm.setLanguage(cmLangName(mode)) }
+    LaunchedEffect(showLineNumbers) { cm.setGutter(showLineNumbers) }
+    LaunchedEffect(softWrap) { cm.setWordWrap(softWrap) }
+    LaunchedEffect(marks) {
+        cm.setDiffMarks(
+            marks.map { (line, m) ->
+                Triple(
+                    line,
+                    when (m) {
+                        EditorDiffMarks.Mark.ADDED -> "add"
+                        EditorDiffMarks.Mark.MODIFIED -> "mod"
+                        else -> "del"
+                    },
+                    "",
+                )
+            },
+        )
     }
 
     Column(
@@ -1779,54 +1832,24 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 .border(1.dp, edBorder, RoundedCornerShape(AppShape.md)),
         ) {
             Box(Modifier.fillMaxSize()) {
-                SoraEditorView(
-                    handle = soraHandle,
-                    text = code,
-                    readOnly = readOnly || viewerMode,
-                    lang = mode,
-                    dark = editorDark,
-                    colors = SoraColors(
+                CodeMirrorEditor(
+                    handle = cm,
+                    colors = CmColors(
                         background = edBg,
                         text = edFg,
-                        gutter = edDim,
-                        gutterCurrent = edCursor,
-                        selection = edCursor.copy(alpha = 0.24f),
-                        currentLine = edFg.copy(alpha = 0.06f),
+                        gutter = edBg,
+                        gutterCurrent = edCursor.copy(alpha = 0.10f),
+                        selection = edCursor.copy(alpha = 0.26f),
+                        currentLine = edFg.copy(alpha = 0.05f),
                         accent = edCursor,
+                        accentOn = edBg,
+                        panel = edBg,
+                        border = edBorder,
                     ),
-                    fontSizeSp = contentFontSize.value,
-                    lineNumbers = showLineNumbers,
-                    wordWrap = softWrap,
-                    marks = marks,
-                    // 整行底色用低透明度：满饱和的绿/橙/红铺满一行会盖住语法着色
-                    markColors = markColors,
+                    dark = editorDark,
+                    fontSizeSp = contentFontSize.value.toInt(),
+                    readOnly = readOnly || viewerMode,
                     modifier = Modifier.fillMaxSize(),
-                    onTextChanged = { newText, selStart, selEnd ->
-                        // newText == null：编辑器那边判断文本太大、没有回传全文（见 SoraEditorView）。
-                        // 这时绝不能把 code 当成空串，否则一次输入就会把整篇内容清掉。
-                        val txt = newText ?: code
-                        if (newText != null && newText != code) {
-                            code = newText
-                            lastInputAt = System.currentTimeMillis()
-                            // 输入已经由编辑器记进 UndoManager，这里只同步按钮的可用状态
-                            refreshUndoState()
-                        }
-                        val a = selStart.coerceIn(0, txt.length)
-                        val b = selEnd.coerceIn(0, txt.length)
-                        tf = TextFieldValue(txt, TextRange(minOf(a, b), maxOf(a, b)))
-                    },
-                    onCursorMoved = { line0, col0 ->
-                        curLn = line0 + 1
-                        curCol = col0 + 1
-                        // 光标移动（不输入）时文本不变，ContentChangeEvent 不会来；但状态栏行号、
-                        // 当前行高亮、括号匹配、AI 补全的上下文都读 tf.selection，必须镜像回来。
-                        val (a0, b0) = soraHandle.selectionOffsets()
-                        val a = a0.coerceIn(0, code.length)
-                        val b = b0.coerceIn(0, code.length)
-                        if (a != tf.selection.min || b != tf.selection.max) {
-                            tf = TextFieldValue(code, TextRange(minOf(a, b), maxOf(a, b)))
-                        }
-                    },
                 )
 
                 if (readOnly) {
@@ -1932,15 +1955,15 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     item { KeyCap("Tab") { insertText(if (mode == CodeHighlighter.Lang.SHELL || mode == CodeHighlighter.Lang.SMALI) "\t" else "    ") } }
-                    item { KeyCap("←", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaret(tf.text, tf.selection.start, -1)) } }
-                    item { KeyCap("→", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaret(tf.text, tf.selection.start, 1)) } }
-                    item { KeyCap("↑", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaretVertical(tf.text, tf.selection.start, -1)) } }
-                    item { KeyCap("↓", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaretVertical(tf.text, tf.selection.start, 1)) } }
-                    item { KeyCap("Home") { moveCaretTo(EditorTextOps.moveCaretEdge(tf.text, tf.selection.start, false)) } }
-                    item { KeyCap("End") { moveCaretTo(EditorTextOps.moveCaretEdge(tf.text, tf.selection.start, true)) } }
+                    item { KeyCap("←", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaret(liveText(), tf.selection.start, -1)) } }
+                    item { KeyCap("→", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaret(liveText(), tf.selection.start, 1)) } }
+                    item { KeyCap("↑", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaretVertical(liveText(), tf.selection.start, -1)) } }
+                    item { KeyCap("↓", repeatOnHold = true) { moveCaretTo(EditorTextOps.moveCaretVertical(liveText(), tf.selection.start, 1)) } }
+                    item { KeyCap("Home") { moveCaretTo(EditorTextOps.moveCaretEdge(liveText(), tf.selection.start, false)) } }
+                    item { KeyCap("End") { moveCaretTo(EditorTextOps.moveCaretEdge(liveText(), tf.selection.start, true)) } }
                     item {
                         KeyCap("⌫", repeatOnHold = true) {
-                            applyTextOp(EditorTextOps.deleteBackward(tf.text, tf.selection.min, tf.selection.max))
+                            applyTextOp(EditorTextOps.deleteBackward(liveText(), tf.selection.min, tf.selection.max))
                         }
                     }
                     item { KeyCap("⏎") { insertText("\n") } }
@@ -2497,8 +2520,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                             blockCardOpen = false
                         }) { Text(if (zh) "跳到块尾" else "Go to end") }
                         TextButton(onClick = {
-                            tf = TextFieldValue(tf.text, TextRange(blk.first, (blk.second + 1).coerceAtMost(tf.text.length)))
-                            soraHandle.setSelectionOffsets(blk.first, (blk.second + 1).coerceAtMost(tf.text.length))
+                            tf = TextFieldValue(liveText(), TextRange(blk.first, (blk.second + 1).coerceAtMost(liveText().length)))
+                            cm.setSelectionOffsets(blk.first, (blk.second + 1).coerceAtMost(liveText().length))
                             blockCardOpen = false
                             followCursor()
                         }) { Text(if (zh) "选中整块" else "Select") }

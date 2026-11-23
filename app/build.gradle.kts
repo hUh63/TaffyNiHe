@@ -237,12 +237,10 @@ dependencies {
     implementation(project(":terminal-view"))
 
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    // 代码编辑器：sora-editor（io.github.rosemoe，LGPL-2.1）。编辑器页的渲染层已从自研
-    // BasicTextField 换成它：增量语法高亮、代码折叠、括号匹配、undo/redo、放大镜、滚动条
-    // 都由库提供，塔菲只保留业务层（多标签/备份/命令工具条/搜索替换）。
-    // 选 0.24.6 而不是 0.24.7：后者是 prerelease，且 0.24.6 依赖 kotlin 2.3.10（本项目 2.4.21 兼容）。
-    implementation("io.github.rosemoe:editor:0.24.6")
-    implementation("io.github.rosemoe:language-java:0.24.6")
+    // 代码编辑器的渲染层是 WebView + CodeMirror 6（assets/editor/cm.js，源码在 tools/cm6/）。
+    // 换掉 sora-editor 的原因：它的 FoldingRegion 是零调用方的预留 API、布局层没有隐藏行概念，
+    // 代码折叠做不了。CM6 自带折叠/搜索/多光标/撤销栈，并做视口虚拟化。
+    // 无第三方 Gradle 依赖：JS 打包产物直接进 assets。
 
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")

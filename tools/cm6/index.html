@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>editor</title>
+  <style>
+    :root {
+      --bg: #101014; --fg: #E6E6EA; --gut: #101014; --gutfg: #6B6B76; --gutcur: #1C1C22;
+      --curline: #17171C; --sel: #2E4A6B; --caret: #7FB3FF; --accent: #6FA8FF; --accentfg: #0B1020;
+      --panel: #17171C; --input: #1F1F26; --border: #2A2A33; --foldbg: #23232B;
+      --findmatch: #4A3B10; --findsel: #7A5F10; --selmatch: #24303F;
+      --err: #FF6B6B; --warn: #E0A030; --info: #5A9BD5;
+      --c-comment: #7A8290; --c-keyword: #C792EA; --c-string: #A5D6A7; --c-number: #F2A65A;
+      --c-type: #7FD1E8; --c-func: #82AAFF; --c-prop: #B8C99A; --c-var: #E6E6EA;
+      --c-op: #A0A6B0; --c-tag: #7FD1E8; --c-heading: #82AAFF; --c-link: #6FA8FF;
+      --c-meta: #C792EA; --c-label: #E0A030;
+      --mono: ui-monospace, "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      --diffadd: #14301E; --diffmod: #2E2A12; --diffdel: #33141A;
+      --diagerr: #3A1618; --diagwarn: #3A2E12; --diaginfo: #14283A;
+      --fs: 13px;
+    }
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg);
+      -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+    #root { height: 100%; }
+    .cm-editor { height: 100%; }
+    /* 字号统一走 --fs：Kotlin 侧改这一个变量，行号与正文一起变 */
+    .cm-content, .cm-gutters, .cm-line { font-size: var(--fs); }
+    .cm-foldGutter .cm-gutterElement { padding: 0 3px; }
+    .cm-scroller { -webkit-overflow-scrolling: touch; }
+    /* 差异行与诊断行：整行底色，和 Kotlin 侧的状态栏计数对应 */
+    .cm-line.cm-diffAdd { background-color: var(--diffadd); }
+    .cm-line.cm-diffMod { background-color: var(--diffmod); }
+    .cm-line.cm-diffDel { background-color: var(--diffdel); }
+    .cm-line.cm-diagErr { background-color: var(--diagerr); border-bottom: 1px dashed var(--err); }
+    .cm-line.cm-diagWarn { background-color: var(--diagwarn); border-bottom: 1px dashed var(--warn); }
+    .cm-line.cm-diagInfo { background-color: var(--diaginfo); border-bottom: 1px dashed var(--info); }
+    /* 大文件降级：去掉不影响编辑的视觉开销 */
+    body[data-tier="1"] .cm-activeLine { background-color: transparent !important; }
+    body[data-tier="2"] .cm-activeLine { background-color: transparent !important; }
+    body[data-tier="2"] .cm-gutters { display: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="cm.js"></script>
+  <script>
+    // Kotlin 侧负责调用 CM.init()；页面自身不做初始化，避免双入口
+    (function () {
+      if (!window.CM) {
+        try { AndroidBridge.post("log", "cm-missing") } catch (e) {}
+      }
+    })();
+  </script>
+</body>
+</html>

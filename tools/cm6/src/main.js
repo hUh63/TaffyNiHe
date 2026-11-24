@@ -689,6 +689,15 @@ const api = {
 
 window.CM = api
 
+// 启动自检：Kotlin 会按名字调这些方法，缺一个就是「点了没反应」，
+// 与其在真机上猜，不如自报上来
+const REQUIRED_API = ["init", "beginDoc", "chunk", "endDoc", "applyDiff", "setSel", "undo", "redo",
+  "foldAll", "unfoldAll", "foldAtCursor", "unfoldAtCursor", "jumpBlock", "scrollToLine", "setDiff",
+  "setDiagnostics", "setTheme", "setFont", "setLang", "setGutter", "setWrap", "setReadOnly",
+  "cmd", "insert", "focus"]
+const missingApi = REQUIRED_API.filter((k) => typeof api[k] !== "function")
+if (missingApi.length) post("log", "api-missing: " + missingApi.join(","))
+
 // 页面级别：禁掉长按菜单里的「网页」项、确保软键盘不与内容重叠
 document.addEventListener("contextmenu", (e) => { e.preventDefault() })
 window.addEventListener("resize", () => { if (view) view.requestMeasure() })

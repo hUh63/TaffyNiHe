@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.FormatIndentDecrease
 import androidx.compose.material.icons.filled.FormatIndentIncrease
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.NoteAdd
@@ -250,6 +252,10 @@ internal object EditorCommands {
         EditorCommand("view.wrap", "自动换行", "Word wrap", G_VIEW, icon = Icons.Filled.AspectRatio, isOn = { it.flag("wrap") }) { it.act("toggle:wrap") },
         EditorCommand("view.guides", "缩进参考线", "Indent guides", G_VIEW, icon = Icons.Filled.FormatIndentIncrease, isOn = { it.flag("guides") }) { it.act("toggle:guides") },
         EditorCommand("nav.bracket", "跳到配对括号", "Jump to match", G_NAV, icon = Icons.Filled.MyLocation) { it.act("nav:bracket") },
+        // 折叠：CM6 自带 foldAll/unfoldAll，关掉行号也照样能折（折叠槽是独立 gutter）
+        EditorCommand("view.foldall", "折叠全部", "Fold all", G_VIEW, icon = Icons.Filled.KeyboardArrowUp) { it.act("fold:all") },
+        EditorCommand("view.unfoldall", "展开全部", "Unfold all", G_VIEW, icon = Icons.Filled.KeyboardArrowDown) { it.act("fold:none") },
+        EditorCommand("view.foldcur", "折叠/展开当前块", "Toggle fold", G_VIEW, icon = Icons.Filled.Code) { it.act("fold:current") },
         EditorCommand("nav.prevblock", "上一块", "Prev block", G_NAV, icon = Icons.Filled.ArrowUpward) { it.act("nav:prevblock") },
         EditorCommand("nav.nextblock", "下一块", "Next block", G_NAV, icon = Icons.Filled.ArrowDownward) { it.act("nav:nextblock") },
         EditorCommand("nav.block", "选中所在块", "Select block", G_NAV, icon = Icons.Filled.SelectAll) { it.act("nav:block") },

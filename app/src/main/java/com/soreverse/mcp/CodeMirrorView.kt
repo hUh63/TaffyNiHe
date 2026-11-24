@@ -449,6 +449,7 @@ internal class CodeMirrorHandle {
     internal fun unfoldAll() = enqueue("CM.unfoldAll()")
     internal fun foldAtCursor() = enqueue("CM.foldAtCursor()")
     internal fun unfoldAtCursor() = enqueue("CM.unfoldAtCursor()")
+    internal fun toggleFoldAtCursor() = enqueue("CM.toggleFold()")
     internal fun jumpBlock(dir: Int) = enqueue("CM.jumpBlock(${if (dir >= 0) 1 else -1})")
 
     internal fun openSearch() = enqueue("CM.cmd('search')")

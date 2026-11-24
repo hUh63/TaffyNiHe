@@ -553,6 +553,14 @@ const api = {
   foldAll() { if (!view) return; foldAll(view); emitState() },
   unfoldAll() { if (!view) return; unfoldAll(view); emitState() },
   foldAtCursor() { if (!view) return; foldCode(view) },
+  // 当前块：已折叠则展开，否则折叠（一个按钮两种状态）
+  toggleFold() {
+    if (!view) return
+    const before = foldCount()
+    unfoldCode(view)
+    if (foldCount() === before) foldCode(view)
+    emitState()
+  },
   unfoldAtCursor() { if (!view) return; unfoldCode(view) },
 
   // 块导航：按折叠块首行跳转（替代上一版的 Kotlin 侧块表）

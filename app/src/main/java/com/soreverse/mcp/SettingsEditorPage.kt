@@ -655,7 +655,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     /** 压入一份 checkpoint（IO 线程，失败静默）。 */
     fun pushCheckpoint(label: String) {
-        val text = code
+        val text = liveText()
         if (text.isBlank()) return
         val key = sessionKey()
         scope.safeLaunch {
@@ -673,11 +673,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 appendOut("\n[快照读取失败: #${meta.id}]\n")
                 return@safeLaunch
             }
-            if (text == code) {
+            if (text == liveText()) {
                 appendOut("\n[快照 #${meta.id} 与当前内容一致，无需回退]\n")
                 return@safeLaunch
             }
-            runCatching { withContext(Dispatchers.IO) { EditorCheckpointStore.push(context, key, code, if (zh) "回退前" else "before-rewind") } }
+            runCatching { withContext(Dispatchers.IO) { EditorCheckpointStore.push(context, key, liveText(), if (zh) "回退前" else "before-rewind") } }
             setCode(text)
             checkpoints = withContext(Dispatchers.IO) { EditorCheckpointStore.list(context, key) }
             appendOut("\n[已回退到快照 #${meta.id} · ${meta.label} · ${meta.lines} 行]\n")
@@ -931,7 +931,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     fun snapshotCurrent() {
         if (activeTab >= tabs.size) return
-        tabs = tabs.toMutableList().also { it[activeTab] = it[activeTab].copy(code = code, mode = mode) }
+        // 用精确文本：code 是 250ms 节流快照，切标签时直接用它会把最后几次按键丢掉
+        val live = liveText()
+        tabs = tabs.toMutableList().also { it[activeTab] = it[activeTab].copy(code = live, mode = mode) }
     }
 
     fun switchTab(i: Int) {
@@ -949,7 +951,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     fun closeTab(i: Int) {
         val closing = tabs[i]
-        val closingCode = if (i == activeTab) code else closing.code
+        val closingCode = if (i == activeTab) liveText() else closing.code
         if (closingCode.isNotBlank()) {
             runCatching {
                 val bakDir = File(context.filesDir, "editor_files/backup").apply { mkdirs() }
@@ -1016,7 +1018,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             val lspOk = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
                     if (!LspClient.ensureStarted(context)) return@runCatchingCancellable false
-                    LspClient.didChange(code)
+                    LspClient.didChange(liveText())
                     when (kind) {
                         "complete" -> {
                             via = "LSP"
@@ -1045,7 +1047,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     return@safeLaunch
                 }
                 via = if (kind == "defs") "jedi" else "jedi (LSP 回退)"
-                val payload = JSONObject().put("code", code).put("line", ln).put("col", col).put("kind", kind)
+                val payload = JSONObject().put("code", liveText()).put("line", ln).put("col", col).put("kind", kind)
                 val r = withContext(Dispatchers.IO) {
                     PythonRuntime.run(context, payload.toString(), args = listOf(script2), timeoutSec = 30)
                 }
@@ -1099,7 +1101,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
             val ok = withContext(Dispatchers.IO) {
                 runCatchingCancellable {
                     if (!LspClient.ensureStarted(context)) return@runCatchingCancellable false
-                    LspClient.didChange(code)
+                    LspClient.didChange(liveText())
                     Thread.sleep(1200)
                     true
                 }.getOrDefault(false)
@@ -1222,7 +1224,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     fun runCode() {
-        if (code.isBlank()) return
+        // 执行/格式化都是「把当前内容送出去」，必须用精确文本而不是 250ms 前的节流快照
+        val live = liveText()
+        if (live.isBlank()) return
         panel = EditorPanel.CONSOLE
         when (mode) {
             CodeHighlighter.Lang.PYTHON -> {
@@ -1233,7 +1237,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     val path = withContext(Dispatchers.IO) {
                         val dir = File(context.filesDir, "editor_files").apply { mkdirs() }
                         val f = File(dir, "_run_${System.currentTimeMillis()}.py")
-                        f.writeText(code); f.absolutePath
+                        f.writeText(live); f.absolutePath
                     }
                     appendOut("\n── 运行 Python ──\n")
                     writeToSession("exec(open(r'${path.replace("'", "\\'")}').read())")
@@ -1246,9 +1250,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 scope.safeLaunch {
                     val r = withContext(Dispatchers.IO) {
                         if (PermissionManager.isRootAvailable() || PermissionManager.isShizukuGranted()) {
-                            RootShell.exec(code, timeoutSec = 30)
+                            RootShell.exec(live, timeoutSec = 30)
                         } else {
-                            execShellCaptured(code)
+                            execShellCaptured(live)
                         }
                     }
                     appendOut(r.stdout.ifEmpty { "(无输出, exit=${r.code})" } + "\n")
@@ -1256,7 +1260,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 }
             }
             CodeHighlighter.Lang.JSON -> {
-                val formatted = EditorTextOps.formatJson(code)
+                val formatted = EditorTextOps.formatJson(live)
                 if (formatted != null) appendOut("\n✅ JSON 有效，已格式化：\n$formatted\n")
                 else appendOut("\n❌ JSON 无效\n")
             }
@@ -1277,13 +1281,13 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     var aiBusy by remember { mutableStateOf(false) }
 
     fun requestAiAssist(question: String = "解释这段代码的功能、潜在问题，并给出改进建议（含代码）。") {
-        if (code.isBlank()) { appendOut("\n[AI] 代码为空，先写点内容\n"); return }
+        if (liveText().isBlank()) { appendOut("\n[AI] 代码为空，先写点内容\n"); return }
         aiBusy = true
         panel = EditorPanel.CONSOLE
         appendOut("\n── 🤖 AI 助手 ──\n[发送中] $question\n")
         scope.safeLaunch {
             val r = withContext(Dispatchers.IO) {
-                runCatchingCancellable { EditorAiHelper.ask(EditorAiHelper.config(SettingsStore(context)), code, question, mode.name.lowercase()) }
+                runCatchingCancellable { EditorAiHelper.ask(EditorAiHelper.config(SettingsStore(context)), liveText(), question, mode.name.lowercase()) }
             }
             aiBusy = false
             r.onSuccess { appendOut("$it\n") }
@@ -1293,7 +1297,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     /** 真正落盘（冲突对话框的「覆盖」也走这里；forcePath 用于另存为新副本）。 */
     fun writeCurrentFile(forcePath: String? = null) {
-        val text = code
+        val text = liveText()
         scope.safeLaunch {
             // 返回值带「是否真的写成功」：以前不管成败都把 savedCode 设成新内容，
             // 写失败时界面显示已保存、退出也不提示，等于骗用户。
@@ -1336,7 +1340,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         val srcName = if (srcPath != null) File(srcPath).name else (currentFile ?: "file.${mode.ext}")
         val base = srcName.substringBeforeLast('.', srcName)
         val ext = srcName.substringAfterLast('.', mode.ext)
-        val text = code
+        val text = liveText()
         scope.safeLaunch {
             val target = File(File(context.filesDir, "editor_files").apply { mkdirs() }, "$base-${System.currentTimeMillis()}.$ext")
             val ok = withContext(Dispatchers.IO) { com.soreverse.mcp.core.AtomicWrite.text(target, text) }
@@ -1357,7 +1361,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     /** 保存入口（工具条 💾 / 命令 save / 命令面板都走这里）：先查「外部修改」冲突，再落盘。 */
     fun saveFile() {
-        if (code.isBlank()) return
+        if (liveText().isBlank()) return
         scope.safeLaunch {
             val target = currentFilePath
             if (target != null) {
@@ -1521,6 +1525,10 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                 }
                 "nav:blockcard" -> blockCardOpen = true
                 "line:multiinsert" -> multiInsertOpen = true
+                // 折叠（CM6 原生能力）：关行号时折叠槽仍在，命令也随时可达
+                "fold:all" -> cm.foldAll()
+                "fold:none" -> cm.unfoldAll()
+                "fold:current" -> cm.toggleFoldAtCursor()
                 "nav:prevblock" -> jumpBlock(-1)
                 "nav:nextblock" -> jumpBlock(1)
                 "nav:block" -> {
@@ -1749,8 +1757,8 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                         },
                     )
                     EditorCommands.grouped().forEach { (_, cmds) ->
-                        // 每组最多 8 条：菜单本身可滚动，少截断一点少一次「找不到命令」
-                        cmds.take(8).forEach { cmd ->
+                        // 每组全部列出来：菜单本身可滚动，截断只会让新命令「找不到」
+                        cmds.forEach { cmd ->
                             DropdownMenuItem(
                                 text = { Text(cmd.label(zh), color = if (cmd.enabled(host)) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) },
                                 leadingIcon = if (cmd.icon != null) {
@@ -1856,6 +1864,20 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     readOnly = readOnly || viewerMode,
                     modifier = Modifier.fillMaxSize(),
                 )
+
+                // WebView 加载 assets 有几百毫秒的空白期：盖一层同色底，避免闪白
+                if (!cm.readyState.value) {
+                    Box(
+                        Modifier.fillMaxSize().background(edBg),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (zh) "编辑器加载中…" else "Loading editor…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = edDim,
+                        )
+                    }
+                }
 
                 if (readOnly) {
                     Text(
@@ -2386,7 +2408,9 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
     }
 
     if (multiInsertOpen) {
-        val (rgFrom, rgTo) = EditorTextOps.selectionLineRange(code, tf.selection.min, tf.selection.max)
+        // 行操作基于精确文本算，否则会把用户刚敲的内容覆盖掉
+        val live = liveText()
+        val (rgFrom, rgTo) = EditorTextOps.selectionLineRange(live, tf.selection.min, tf.selection.max)
         val lineCount = (rgTo - rgFrom + 1).coerceAtLeast(1)
         AlertDialog(
             onDismissRequest = { multiInsertOpen = false },
@@ -2444,7 +2468,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
                     enabled = multiInsertText.isNotEmpty(),
                     onClick = {
                         val res = EditorTextOps.insertAtColumn(
-                            code, tf.selection.min, tf.selection.max, multiInsertText, multiInsertAtEnd,
+                            live, tf.selection.min, tf.selection.max, multiInsertText, multiInsertAtEnd,
                             // 指定列：函数里 column >= 0 会优先于 atEnd
                             column = if (multiInsertUseColumn) multiInsertColumn else -1,
                         )

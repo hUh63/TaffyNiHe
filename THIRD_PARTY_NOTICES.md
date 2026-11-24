@@ -71,6 +71,7 @@ TaffyNiHe 采用 **GNU General Public License v3.0**（见仓库根 `LICENSE`）
 | commons-codec / commons-io / commons-collections4 | `commons-codec:1.21.0` / `commons-io:2.21.0` / `commons-collections4:4.5.0` | Apache Software Foundation | Apache-2.0 |
 | slf4j-api | `org.slf4j:slf4j-api:2.0.20` | QOS.ch | MIT |
 | markdown（rikkaHub） | `com.github.rikkahub:markdown:d79a97cc8e` | [rikkahub/rikkahub](https://github.com/rikkahub/rikkahub) | AGPL-3.0 ⚠️ **重点待复核** |
+| CodeMirror 6（@codemirror/*、@lezer/*） | `assets/editor/cm.js`（打包产物，源码与构建脚本在 `tools/cm6/`） | [codemirror.net](https://codemirror.net) | MIT |
 | JUnit / org.json | 仅测试期 | — | EPL-1.0 / JSON License |
 
 ## 三、自建构建与 fork 改动留档

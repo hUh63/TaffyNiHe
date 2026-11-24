@@ -567,6 +567,11 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
 
     fun appendOut(s: String) { output = (output + s).takeLast(20000) }
 
+    // WebView 里的异常与自检结果回传到控制台：JS 出错如果只在 logcat 里，用户永远看不到
+    LaunchedEffect(Unit) {
+        cm.onLog = { msg -> appendOut("\n[编辑器] " + msg.take(400) + "\n") }
+    }
+
     fun refreshRecent() {
         recentFiles = runCatching {
             val dir = File(context.filesDir, "editor_files")

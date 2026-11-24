@@ -210,7 +210,9 @@ internal class CodeMirrorHandle {
 
     // ------------------------------------------------------------ JS → Kotlin
 
-    private class JsBridge(private val h: CodeMirrorHandle) {
+    // JavaBridge 走反射：类与方法都必须是可见的 public（Kotlin internal 编译后仍是 public），
+    // 并且 @JavascriptInterface 的方法会被 R8 自动 keep
+    internal class JsBridge(private val h: CodeMirrorHandle) {
         @JavascriptInterface
         fun post(kind: String, payload: String) {
             h.onJsMessage(kind, payload)

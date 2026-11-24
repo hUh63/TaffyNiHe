@@ -152,6 +152,10 @@ internal class CodeMirrorHandle {
 
     // ------------------------------------------------------------ 生命周期
 
+    private companion object {
+        const val ASSET_URL = "file:///android_asset/editor/index.html"
+    }
+
     internal fun attach(w: WebView) {
         if (web === w) return
         web = w
@@ -177,13 +181,18 @@ internal class CodeMirrorHandle {
         w.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = true
             override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
-                // 渲染进程崩掉（内存压力/驱动问题）时不要连带整个应用退出，重建即可
-                onLog?.invoke("webview render process gone")
-                main.post { runCatching { web?.destroy() }; web = null; ready = false; booted = false }
+                // 渲染进程崩掉（内存压力/驱动问题）时不要连带整个应用退出。
+                // 这里是 reload 而不是 destroy：Compose 的 AndroidView 不会因为 WebView 崩了
+                // 就重跑 factory，destroy 掉等于编辑器永久空白；reload 后走到 ready 会把文档重推一遍。
+                onLog?.invoke("webview render process gone, reloading")
+                ready = false
+                booted = false
+                readyState.value = false
+                main.post { runCatching { view?.loadUrl(ASSET_URL) } }
                 return true
             }
         }
-        w.loadUrl("file:///android_asset/editor/index.html")
+        w.loadUrl(ASSET_URL)
     }
 
     internal fun detach(w: WebView) {
@@ -228,7 +237,11 @@ internal class CodeMirrorHandle {
             "ready" -> {
                 ready = true
                 readyState.value = true
-                pendingText?.let { (t, c) -> pendingText = null; pushDoc(t, c) }
+                // 每次握手成功都重推当前文档：配置变更/渲染进程恢复/WebView 重建之后
+                // 编辑器是空的，而业务层不会主动再调 setText（它的 state 还是对的）。
+                val pend = pendingText
+                pendingText = null
+                pushDoc(pend?.first ?: doc.text(), pend?.second ?: -1)
                 flush()
                 main.post { onReady?.invoke() }
             }

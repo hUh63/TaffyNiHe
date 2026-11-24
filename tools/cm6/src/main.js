@@ -18,7 +18,7 @@ import {
 import { searchKeymap, highlightSelectionMatches, openSearchPanel, closeSearchPanel, search, findNext, findPrevious } from "@codemirror/search"
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete"
 import { tags as t } from "@lezer/highlight"
-import { smaliWordKind, smaliFoldEnd, asmIsCommentStart, asmIsLabelLine, asmStartsLabel, asmWordKind, ASM_DIRECTIVES, indentFoldEnd } from "./lang.js"
+import { smaliWordKind, smaliFoldEnd, asmIsCommentStart, asmIsLabelLine, asmStartsLabel, asmWordKind, ASM_DIRECTIVES, indentFoldEnd, normalizeChanges } from "./lang.js"
 import { java } from "@codemirror/lang-java"
 import { cpp } from "@codemirror/lang-cpp"
 import { python } from "@codemirror/lang-python"
@@ -358,9 +358,11 @@ const changePlugin = ViewPlugin.fromClass(class {
     for (const tr of u.transactions) { if (tr.annotation(Prog)) return }
     // 合并所有变更区间（Android 侧按 StringBuilder 应用，倒序即可）
     const list = []
+    const raw = []
     u.changes.iterChanges((fromA, toA, fromB, toB, ins) => {
-      list.push({ from: fromA, to: toA, insert: ins.toString() })
+      raw.push({ fromA: fromA, toA: toA, insert: ins.toString() })
     })
+    for (const c of normalizeChanges(raw)) list.push(c)
     if (list.length) {
       // 一次按键通常只有一段；多段（粘贴、批量替换）逐段说明
       post("change", JSON.stringify(list))
@@ -442,8 +444,8 @@ const api = {
     emitSel(true)
     emitState()
     post("ready", JSON.stringify({ tier, lines: view.state.doc.lines, len: view.state.doc.length }))
-    // 焦点后立即让 CM 自己能滚到光标
-    view.focus()
+    // 不主动 focus：一进页面就弹软键盘会挡住半屏，用户点一下代码区再输入更自然
+    view.requestMeasure()
   },
 
   // 分块推送全文（base64），避免单次 JSBridge 传超大字符串
@@ -676,7 +678,10 @@ const api = {
   insert(text) {
     if (!view) return
     const r = view.state.selection.main
-    view.dispatch({ changes: { from: r.from, to: r.to, insert: text }, selection: { anchor: r.from + text.length } })
+    progDispatch({
+      changes: { from: r.from, to: r.to, insert: text },
+      selection: { anchor: r.from + text.length },
+    })
     emitSel(true); emitState()
   },
 

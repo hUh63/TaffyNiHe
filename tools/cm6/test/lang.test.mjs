@@ -2,7 +2,7 @@ import test from "node:test"
 import assert from "node:assert"
 import {
   smaliFoldEnd, smaliWordKind, asmIsLabelLine, asmStartsLabel, asmIsCommentStart,
-  asmWordKind, ASM_REG, indentFoldEnd, minDiff,
+  asmWordKind, ASM_REG, indentFoldEnd, minDiff, normalizeChanges, applyChanges,
 } from "../src/lang.js"
 
 test("smali 折叠块识别", () => {
@@ -88,4 +88,36 @@ test("最小差异替换", () => {
   const dd = minDiff(x, y)
   assert.ok(dd.prefix + dd.suffix <= y.length)
   assert.equal(x.substring(0, dd.prefix) + dd.insert + x.substring(x.length - dd.suffix), y)
+})
+
+test("多段变更坐标归一化", () => {
+  // 单段：不变
+  assert.deepEqual(
+    normalizeChanges([{ fromA: 3, toA: 5, insert: "XY" }]),
+    [{ from: 3, to: 5, insert: "XY" }],
+  )
+  // 两段：第二段要加上第一段的长度变化（+1）
+  const two = normalizeChanges([
+    { fromA: 0, toA: 0, insert: "a" },
+    { fromA: 5, toA: 5, insert: "b" },
+  ])
+  assert.deepEqual(two, [{ from: 0, to: 0, insert: "a" }, { from: 6, to: 6, insert: "b" }])
+  // 应用后与逐个替换的结果一致
+  const old = "0123456789"
+  assert.equal(applyChanges(old, two), "a01234b56789")
+  // 删除 + 插入混排
+  const mixed = normalizeChanges([
+    { fromA: 2, toA: 6, insert: "" },        // 删掉 2345
+    { fromA: 8, toA: 8, insert: "ZZ" },      // 原 8 位置插入
+  ])
+  assert.deepEqual(mixed, [{ from: 2, to: 6, insert: "" }, { from: 4, to: 4, insert: "ZZ" }])
+  assert.equal(applyChanges(old, mixed), "01" + "67" + "ZZ" + "89")
+})
+
+test("多段变更：粘贴多行不能错位", () => {
+  const old = "line1\nline2\nline3\n"
+  // 两处都是纯插入（模拟两处粘贴）
+  const raw = [{ fromA: 0, toA: 0, insert: "A\n" }, { fromA: 6, toA: 6, insert: "B\n" }]
+  const got = applyChanges(old, normalizeChanges(raw))
+  assert.equal(got, "A\nline1\nB\nline2\nline3\n")
 })

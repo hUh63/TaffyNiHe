@@ -118,3 +118,28 @@ export function minDiff(oldText, newText) {
   while (s < max - p && oldText.charCodeAt(ol - 1 - s) === newText.charCodeAt(nl - 1 - s)) s++
   return { prefix: p, suffix: s, insert: newText.substring(p, nl - s) }
 }
+
+/**
+ * 把 CM 的 iterChanges 结果归一化成「按顺序应用」的坐标。
+ * iterChanges 给的是**变更前**的坐标，Kotlin 侧要按顺序往 StringBuilder 上应用，
+ * 所以第 n 段的坐标必须加上前 n-1 段的长度变化，否则粘贴多行/批量替换时镜像会错位。
+ */
+export function normalizeChanges(raw) {
+  let delta = 0
+  const out = []
+  for (const c of raw) {
+    const ins = c.insert == null ? "" : String(c.insert)
+    out.push({ from: c.fromA + delta, to: c.toA + delta, insert: ins })
+    delta += ins.length - (c.toA - c.fromA)
+  }
+  return out
+}
+
+/** 按 normalizeChanges 的结果顺序应用到旧文本（Kotlin 侧 EditorDoc 的等价实现，用于对拍）。 */
+export function applyChanges(text, changes) {
+  let out = text
+  for (const c of changes) {
+    out = out.substring(0, c.from) + c.insert + out.substring(c.to)
+  }
+  return out
+}

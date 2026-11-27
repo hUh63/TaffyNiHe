@@ -1272,8 +1272,8 @@ object ToolCatalog {
     fun grouped(zh: Boolean, includeApk: List<String> = emptyList()): List<Pair<String, List<Pair<String, String>>>> =
         ToolCatalogPresentation.grouped(zh, includeApk)
 
-    fun toolDescriptor(handler: ToolHandler, includeCategory: Boolean): JSONObject =
-        ToolCatalogPresentation.toolDescriptor(handler, includeCategory)
+    fun toolDescriptor(handler: ToolHandler, includeCategory: Boolean, leanDesc: Boolean = false): JSONObject =
+        ToolCatalogPresentation.toolDescriptor(handler, includeCategory, leanDesc)
 
     fun categoryOf(name: String): String? = registry.categoryOf(name)
 }

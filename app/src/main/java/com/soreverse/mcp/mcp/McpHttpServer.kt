@@ -1317,6 +1317,8 @@ $historyRows
         // heavy 闸门状态：poisoned=true 表示有 native 任务租约超期被回收（可能仍在后台跑），
         // 此时重工具仍可用但建议重启引擎，避免与僵尸任务并发操作同一引擎/文件。
         .put("heavy", HeavyGate.stats())
+        // 最慢的三个工具直接摆在这里：/health 是排障第一站，不该还要再调一次工具
+        .put("slowestTools", ToolPerf.snapshot(3))
         .put("hint", "Call taffy_meta_info (action=stats) for per-tool call counts and latency. Call taffy_system_control (action=status) to check SO+APK combo, tunnel state, and native backend status."))
 
     private fun nativeBackendStatus(): JSONObject {

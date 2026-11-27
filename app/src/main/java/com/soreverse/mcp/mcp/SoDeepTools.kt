@@ -23,6 +23,9 @@ import java.io.File
  * 绝不抛未捕获异常; 所有启发式结论都带 confidence 字段, 不伪造成确定事实。
  */
 object SoDeepTools {
+    // 生成 C++ 头文件时每个类名/方法名都要过滤一次，别在循环里重复编译正则
+    private val RE_SAFE_IDENT = Regex("[^A-Za-z0-9_]")
+
 
     // ── 公共小工具 ────────────────────────────────────────────────
 
@@ -385,11 +388,11 @@ object SoDeepTools {
                     if (want.isNotBlank() && !cls.contains(want, true) && !vAddr.equals(want, true)) continue
                     val slots = v.optJSONArray("slots") ?: JSONArray()
                     sb.append("// vtable @ ").append(vAddr).append("  slots=").append(slots.length()).append('\n')
-                    sb.append("class ").append(cls.replace(Regex("[^A-Za-z0-9_]"), "_")).append(" {\npublic:\n")
+                    sb.append("class ").append(cls.replace(RE_SAFE_IDENT, "_")).append(" {\npublic:\n")
                     for (j in 0 until slots.length()) {
                         val s = slots.optJSONObject(j) ?: continue
                         val nm = s.optString("name", "").ifBlank { "slot_$j" }
-                        sb.append("    virtual void* ").append(nm.replace(Regex("[^A-Za-z0-9_]"), "_")).append("();")
+                        sb.append("    virtual void* ").append(nm.replace(RE_SAFE_IDENT, "_")).append("();")
                         sb.append("  // slot ").append(j).append(" -> ").append(s.optString("addr", "?"))
                         sb.append('\n')
                     }

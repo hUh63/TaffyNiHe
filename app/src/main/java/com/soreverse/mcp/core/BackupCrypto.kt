@@ -164,7 +164,9 @@ object BackupCrypto {
 
         // v1：密文解出来是 Base64 文本，然后才是 zip 字节。旧备份才走这条，
         // 受调用方的体积闸门保护（新备份不会再写这种格式）。
-        val rest = source.readBytes()
+        // v1 是旧格式，仍然把整份密文读进内存 —— 但必须有上限：
+        // 用户导入一个几十 MB 的畸形备份时，readBytes() 会直接 OOM。
+        val rest = StreamLimits.readBytes(source, 32L * 1024 * 1024) ?: return false
         val plain = try {
             cipher.doFinal(rest)
         } catch (e: GeneralSecurityException) {

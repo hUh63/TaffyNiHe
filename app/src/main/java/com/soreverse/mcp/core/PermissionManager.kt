@@ -225,11 +225,13 @@ object PermissionManager {
     private fun execDhizuku(command: String, timeoutSec: Long): RootShell.Result = runCatching {
         val proc = Dhizuku.newProcess(arrayOf("sh", "-c", command), null, null)
         // 安全修复：stdout/stderr 并行读取（避免管道缓冲区写满互相等待的死锁）+ waitFor 超时强杀
+        // 有界读：root 命令的输出可能无限（例如 logcat / cat 大文件），
+        // 原来的 readText() 会把 stdout 全量堆在内存里，直到 OOM。
         val outFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-            runCatching { proc.inputStream.bufferedReader().use { it.readText() } }.getOrDefault("")
+            runCatching { StreamLimits.readText(proc.inputStream, 8L * 1024 * 1024).orEmpty() }.getOrDefault("")
         }
         val errFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-            runCatching { proc.errorStream.bufferedReader().use { it.readText() } }.getOrDefault("")
+            runCatching { StreamLimits.readText(proc.errorStream, 8L * 1024 * 1024).orEmpty() }.getOrDefault("")
         }
         val finished = proc.waitFor(timeoutSec.coerceAtLeast(1), java.util.concurrent.TimeUnit.SECONDS)
         if (!finished) {

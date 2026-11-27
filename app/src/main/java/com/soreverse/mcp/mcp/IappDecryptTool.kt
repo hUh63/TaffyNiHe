@@ -6,6 +6,7 @@ import com.android.tools.smali.dexlib2.iface.instruction.NarrowLiteralInstructio
 import com.reandroid.apk.ApkModule
 import com.soreverse.mcp.core.IappCrypto
 import com.soreverse.mcp.core.IappDecrypt
+import com.soreverse.mcp.core.StreamLimits
 import com.soreverse.mcp.core.bool
 import com.soreverse.mcp.core.err
 import com.soreverse.mcp.core.intValue
@@ -96,9 +97,9 @@ object IappDecryptTool {
 
         ZipFile(apk).use { zip ->
             libSoName = findEntry(zip, LIB_SO_PATHS, { it.endsWith("/lib.so") || it == "lib.so" })
-            libSo = libSoName?.let { zip.getInputStream(zip.getEntry(it)).use { s -> s.readBytes() } }
+            libSo = libSoName?.let { zip.getInputStream(zip.getEntry(it)).use { s -> StreamLimits.readBytes(s, 64L * 1024 * 1024) } }
             nativeSoName = findEntry(zip, SO_PATHS, { it.endsWith("libygsiyu.so") })
-            nativeSo = nativeSoName?.let { zip.getInputStream(zip.getEntry(it)).use { s -> s.readBytes() } }
+            nativeSo = nativeSoName?.let { zip.getInputStream(zip.getEntry(it)).use { s -> StreamLimits.readBytes(s, 64L * 1024 * 1024) } }
             signDer = readSignatureDer(zip)
         }
         if (libSo == null) return err("IAPP_NO_LIB_SO", "APK 中未找到 assets/lib.so（可能不是 iApp v3 打包包）", "path", apkPath)

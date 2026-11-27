@@ -53,4 +53,13 @@ class EditorDiffMarksTest {
         assertEquals(EditorDiffMarks.Mark.MODIFIED, m[10])
         assertEquals(1, m.size)
     }
+
+    @Test
+    fun oversizedText_skipsWithoutSplitting() {
+        // 体积闸门必须在 split 之前：2 MB 文本不该先分配几十万个 String 再判断行数
+        val big = "x".repeat(1_600_000)
+        assertTrue(EditorDiffMarks.diff("a", big).isEmpty())
+        assertTrue(EditorDiffMarks.diff(big, "a").isEmpty())
+        assertTrue(EditorDiffMarks.diff(big, big).isEmpty())
+    }
 }

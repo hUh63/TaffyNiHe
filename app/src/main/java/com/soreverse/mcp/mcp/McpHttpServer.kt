@@ -1256,10 +1256,18 @@ $historyRows
      * duplication between this server's `tools()` literal and the catalog
      * metadata. APK-merged tools are appended when the bridge is configured.
      */
+    // tools/list 每次都要为 160+ 工具重建整套 schema JSONObject。配置不变时结果完全一致，
+    // 缓存整份数组：key 覆盖所有会影响输出的开关，以及桥接工具清单（增/删会改 hashCode）。
+    @Volatile private var toolsCacheKey: String? = null
+    @Volatile private var toolsCacheValue: JSONArray? = null
+
     private fun tools(): JSONArray {
         val settings = SettingsStore(context)
         val includeCategory = settings.includeCategoryInSchema
         val lean = settings.leanTools
+        val mergedHash = apkBridge.mergedTools().map { it.name }.hashCode()
+        val key = "$includeCategory|$lean|${settings.apkMcpMergeTools}|${settings.apkMcpAutoProbe}|$mergedHash"
+        toolsCacheValue?.takeIf { toolsCacheKey == key }?.let { return it }
         val out = JSONArray()
         ToolCatalog.ALL.forEach { handler ->
             // leanTools=true hides generic (non-RE) utilities from tools/list to cut
@@ -1284,6 +1292,8 @@ $historyRows
                 out.put(obj)
             }
         }
+        toolsCacheKey = key
+        toolsCacheValue = out
         return out
     }
 

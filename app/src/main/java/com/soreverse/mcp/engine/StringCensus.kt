@@ -26,14 +26,15 @@ internal object StringCensus {
 
     private fun classify(value: String): List<String> {
         val out = mutableListOf<String>()
-        if (URL_RE.matches(value)) out += "url"
+        val isUrl = URL_RE.matches(value)
+        if (isUrl) out += "url"
         if (IP_PORT_RE.matches(value)) {
             out += "ip_port"
         } else if (HOST_PORT_RE.matches(value) && !PACKAGE_RE.matches(value)) {
             out += "host_port"
         }
         if (JAVA_DESC_RE.matches(value)) out += "java_descriptor"
-        if (ABS_PATH_RE.matches(value) && !URL_RE.matches(value)) out += "abs_path"
+        if (!isUrl && ABS_PATH_RE.matches(value)) out += "abs_path"
         if (FORMAT_RE.containsMatchIn(value)) out += "format_string"
         if (BASE64_RE.matches(value) || BASE64_URL_RE.matches(value)) out += "base64_like"
         if (HEXISH_RE.matches(value)) out += "hex_like"

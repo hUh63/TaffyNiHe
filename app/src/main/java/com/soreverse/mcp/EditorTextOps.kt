@@ -14,8 +14,18 @@ package com.soreverse.mcp
 internal object EditorTextOps {
 
     /** 偏移 → 行号（1-based）。 */
-    fun lineOf(text: String, offset: Int): Int =
-        text.substring(0, offset.coerceIn(0, text.length)).count { it == '\n' } + 1
+    fun lineOf(text: String, offset: Int): Int {
+        // 不能用 substring(0, offset)：2 MB 文本里光标靠后时一次调用就分配 2 MB 前缀，
+        // 而 selectionLineRange 会连调两次。逐字符扫描同样是 O(offset)，但零分配。
+        val end = offset.coerceIn(0, text.length)
+        var line = 1
+        var i = 0
+        while (i < end) {
+            if (text[i] == '\n') line++
+            i++
+        }
+        return line
+    }
 
     /** 列号（1-based，按 UTF-16 计数，与编辑器光标一致）。 */
     fun columnOf(text: String, offset: Int): Int {
@@ -40,9 +50,19 @@ internal object EditorTextOps {
 
     /** 选区覆盖的行号区间（1-based，含端点）。 */
     fun selectionLineRange(text: String, selStart: Int, selEnd: Int): Pair<Int, Int> {
-        val a = selStart.coerceIn(0, text.length)
-        val b = selEnd.coerceIn(0, text.length)
-        return lineOf(text, a) to lineOf(text, b)
+        // 原来调两次 lineOf = 两次从头扫到光标；这里一次扫描同时拿到两个行号。
+        val len = text.length
+        val a = selStart.coerceIn(0, len)
+        val b = selEnd.coerceIn(0, len)
+        var line = 1
+        var lineA = 1
+        var i = 0
+        while (i < b) {
+            if (text[i] == '\n') line++
+            if (i + 1 == a) lineA = line
+            i++
+        }
+        return lineA to line
     }
 
     /** 行区间变换：对 [from, to] 内每行应用 f(line, index)，光标落在 from 行行首。 */
@@ -283,6 +303,36 @@ internal object EditorTextOps {
         while (i >= 0) {
             out.add(i)
             i = text.indexOf(query, i + query.length)
+        }
+        return out
+    }
+
+    /**
+     * 大小写不敏感的子串查找（不重叠）。
+     *
+     * 原来这里写的是 `findAll(text.lowercase(), query.lowercase())`：
+     * ① 2 MB 文本每次查找都要分配一份完整的小写副本；
+     * ② `lowercase()` 可能改变字符串长度（如土耳其语 İ → i̇），
+     *    返回的偏移就与原文对不上，跳转/替换会落到错误位置。
+     * 逐字符比较零分配，且偏移始终基于原文。
+     */
+    fun findAllIgnoreCase(text: String, query: String): List<Int> {
+        if (query.isEmpty()) return emptyList()
+        val q = query.lowercase()
+        val n = text.length
+        val m = q.length
+        if (m > n) return emptyList()
+        val out = ArrayList<Int>()
+        var i = 0
+        while (i <= n - m) {
+            var k = 0
+            while (k < m && text[i + k].lowercaseChar() == q[k]) k++
+            if (k == m) {
+                out.add(i)
+                i += m
+            } else {
+                i++
+            }
         }
         return out
     }

@@ -181,4 +181,34 @@ class EditorTextOpsTest {
         val src = "  a"
         assertEquals(src to 0, EditorTextOps.insertAtColumn(src, 0, src.length, "", atEnd = false))
     }
+
+    @Test
+    fun selectionLineRange_edgeCases() {
+        // 空串 / 光标无选区 / 末尾越界：一次扫描版本必须与两次 lineOf 等价
+        assertEquals(1 to 1, EditorTextOps.selectionLineRange("", 0, 0))
+        assertEquals(2 to 2, EditorTextOps.selectionLineRange("\n", 1, 1)) // 换行本身算下一行
+        assertEquals(4 to 4, EditorTextOps.selectionLineRange(text, text.length, text.length))
+        assertEquals(1 to 4, EditorTextOps.selectionLineRange(text, 0, 999))
+        assertEquals(2 to 2, EditorTextOps.selectionLineRange(text, 6, 6))
+    }
+
+    @Test
+    fun findAllIgnoreCase_keepsOriginalOffsets() {
+        val src = "Alpha alpha ALPHA \u4e2d\u6587alpha"
+        assertEquals(listOf(0, 6, 12, 20), EditorTextOps.findAllIgnoreCase(src, "alpha"))
+        assertEquals(emptyList<Int>(), EditorTextOps.findAllIgnoreCase("abc", ""))
+        assertEquals(emptyList<Int>(), EditorTextOps.findAllIgnoreCase("a", "abcdef"))
+        // 与「先 lowercase 再 findAll」在 ASCII 上结果一致
+        assertEquals(
+            EditorTextOps.findAll(src.lowercase(), "alpha"),
+            EditorTextOps.findAllIgnoreCase(src, "alpha"),
+        )
+    }
+
+    @Test
+    fun lineOf_noExceptionOnLargeOffset() {
+        val big = "x\n".repeat(20000)
+        assertEquals(20001, EditorTextOps.lineOf(big, big.length))
+        assertEquals(1, EditorTextOps.lineOf(big, 0))
+    }
 }

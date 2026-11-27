@@ -490,7 +490,10 @@ class BoreClient(
                     fireEvent("${now()} ⏱ 连接总超时(${CONNECT_TIMEOUT_TOTAL_MS/1000}s)")
                     stop()
                 }
-            } catch (_: InterruptedException) {}
+            } catch (_: InterruptedException) {
+                // 恢复中断标志：否则上层的 cancel/close 会被这个线程静默吃掉
+                Thread.currentThread().interrupt()
+            }
         }.apply {
             isDaemon = true
             name = "bore-connect-timeout"

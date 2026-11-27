@@ -200,51 +200,61 @@ private fun cmLangName(m: CodeHighlighter.Lang): String = when (m) {
     CodeHighlighter.Lang.TEXT -> "plain"
 }
 
+    private val outlineRuleCache = java.util.concurrent.ConcurrentHashMap<CodeHighlighter.Lang, List<Pair<String, Regex>>>()
+
+    /** 正则按语言只编译一次：原来每 250ms 的节流快照都要重新编译 3~8 条正则。 */
+    private fun outlineRules(m: CodeHighlighter.Lang): List<Pair<String, Regex>> =
+        outlineRuleCache.getOrPut(m) {
+            when (m) {
+                    CodeHighlighter.Lang.PYTHON -> listOf(
+                        "def" to Regex("^\\s*def\\s+(\\w+)"),
+                        "class" to Regex("^\\s*class\\s+(\\w+)"),
+                    )
+                    CodeHighlighter.Lang.SHELL -> listOf(
+                        "func" to Regex("^\\s*(?:function\\s+)?(\\w+)\\s*\\(\\)\\s*\\{"),
+                    )
+                    CodeHighlighter.Lang.C, CodeHighlighter.Lang.JAVA -> listOf(
+                        "class" to Regex("^\\s*(?:public|private|protected|internal|open|abstract|final|static|data|sealed|enum|interface|object)\\s+(?:class|interface|object|enum\\s+class)\\s+(\\w+)"),
+                        "func" to Regex("^\\s{0,8}(?!if|for|while|switch|catch|return|else|do|case|new)\\w[\\w:<>,\\[\\]\\s\\*&]*\\s+(\\w+)\\s*\\([^;]*\\)\\s*\\{"),
+                        "struct" to Regex("^\\s*struct\\s+(\\w+)"),
+                    )
+                    CodeHighlighter.Lang.SMALI -> listOf(
+                        "method" to Regex("^\\s*\\.method[^\\n]*?\\s([\\w$<>]+)\\("),
+                        "class" to Regex("^\\s*\\.class[^\\n]*?L([\\w/$]+);"),
+                    )
+                    CodeHighlighter.Lang.XML -> listOf(
+                        "id" to Regex("android:id=\"@\\+id/([\\w.]+)\""),
+                    )
+                    // 汇编：标签就是跳转目标；.globl/.type 给出的符号名也一并列出
+                    CodeHighlighter.Lang.ASM -> listOf(
+                        "label" to Regex("^\\s*([A-Za-z_.$][\\w.$]*):\\s*(?:[#;].*)?$"),
+                        "global" to Regex("^\\s*\\.(?:globl|global|type|func)\\s+([\\w.$]+)"),
+                    )
+                    CodeHighlighter.Lang.MD -> listOf(
+                        "h" to Regex("^(#{1,3})\\s+(.+)$"),
+                    )
+                    else -> listOf(
+                        "sym" to Regex("^\\s*(?:def|function|func|fn|fun|class|struct|interface|object|const|let|var)\\s+(\\w+)"),
+                    )
+                }
+        }
+
 /** 从源码提取符号大纲（跨语言启发式正则）。 */
 private fun outlineOf(src: String, m: CodeHighlighter.Lang): List<OutlineItem> {
-    val rules: List<Pair<String, Regex>> = when (m) {
-        CodeHighlighter.Lang.PYTHON -> listOf(
-            "def" to Regex("^\\s*def\\s+(\\w+)"),
-            "class" to Regex("^\\s*class\\s+(\\w+)"),
-        )
-        CodeHighlighter.Lang.SHELL -> listOf(
-            "func" to Regex("^\\s*(?:function\\s+)?(\\w+)\\s*\\(\\)\\s*\\{"),
-        )
-        CodeHighlighter.Lang.C, CodeHighlighter.Lang.JAVA -> listOf(
-            "class" to Regex("^\\s*(?:public|private|protected|internal|open|abstract|final|static|data|sealed|enum|interface|object)\\s+(?:class|interface|object|enum\\s+class)\\s+(\\w+)"),
-            "func" to Regex("^\\s{0,8}(?!if|for|while|switch|catch|return|else|do|case|new)\\w[\\w:<>,\\[\\]\\s\\*&]*\\s+(\\w+)\\s*\\([^;]*\\)\\s*\\{"),
-            "struct" to Regex("^\\s*struct\\s+(\\w+)"),
-        )
-        CodeHighlighter.Lang.SMALI -> listOf(
-            "method" to Regex("^\\s*\\.method[^\\n]*?\\s([\\w$<>]+)\\("),
-            "class" to Regex("^\\s*\\.class[^\\n]*?L([\\w/$]+);"),
-        )
-        CodeHighlighter.Lang.XML -> listOf(
-            "id" to Regex("android:id=\"@\\+id/([\\w.]+)\""),
-        )
-        // 汇编：标签就是跳转目标；.globl/.type 给出的符号名也一并列出
-        CodeHighlighter.Lang.ASM -> listOf(
-            "label" to Regex("^\\s*([A-Za-z_.$][\\w.$]*):\\s*(?:[#;].*)?$"),
-            "global" to Regex("^\\s*\\.(?:globl|global|type|func)\\s+([\\w.$]+)"),
-        )
-        CodeHighlighter.Lang.MD -> listOf(
-            "h" to Regex("^(#{1,3})\\s+(.+)$"),
-        )
-        else -> listOf(
-            "sym" to Regex("^\\s*(?:def|function|func|fn|fun|class|struct|interface|object|const|let|var)\\s+(\\w+)"),
-        )
-    }
+    val rules = outlineRules(m)
     val out = ArrayList<OutlineItem>()
-    src.lineSequence().forEachIndexed { idx, raw ->
+    // 用 for + break，不用 forEachIndexed：那里的 `return@forEachIndexed` 只是 continue，
+    // 600 项上限并没有真的停下遍历 —— 2 MB 文件照样跑完全部十万行，而且每 250ms 一次。
+    for ((idx, raw) in src.lineSequence().withIndex()) {
         val line = raw.trimEnd()
-        if (line.isBlank()) return@forEachIndexed
+        if (line.isBlank()) continue
         for ((kind, re) in rules) {
             val mt = re.find(line) ?: continue
             val name = (mt.groupValues.getOrNull(2) ?: mt.groupValues.getOrNull(1)).orEmpty().trim()
             if (name.isNotBlank() && name.length <= 60) out.add(OutlineItem(kind, name, idx + 1))
             break
         }
-        if (out.size >= 600) return@forEachIndexed
+        if (out.size >= 600) break
     }
     return out
 }
@@ -694,7 +704,7 @@ internal fun SettingsEditorPage(t: UiText, editorTheme: String = "auto") {
         } else if (findCaseSensitive) {
             EditorTextOps.findAll(text, findQuery)
         } else {
-            EditorTextOps.findAll(text.lowercase(), findQuery.lowercase())
+            EditorTextOps.findAllIgnoreCase(text, findQuery)
         }
     }
 

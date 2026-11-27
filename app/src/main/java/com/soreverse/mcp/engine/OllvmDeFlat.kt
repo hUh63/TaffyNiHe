@@ -91,6 +91,21 @@ internal class DeFlatGraph(
 )
 
 internal object OllvmDeFlat {
+    // 反汇编是逐条解析：一个几千指令的函数原来要现场 new 十几个 Regex
+    // （构造 Regex = 编译 Pattern），这是去平坦化在长函数上慢的主因之一。
+    // 全部预编译到 object 初始化时，热路径只剩匹配。
+    private val RE_CLEAN = Regex("[\\s,>]")
+    private val RE_IMM_HASH = Regex("#(0x[0-9a-fA-F]+|[0-9]+)")
+    private val RE_ANY_NUM = Regex("(0x[0-9a-fA-F]+|(?<![0-9a-zA-Z_])[0-9]+)")
+    private val RE_HEX = Regex("0x[0-9a-fA-F]+")
+    private val RE_WREG = Regex("\\bw\\d+\\s*,")
+    private val RE_ADRP = Regex("^adrp\\s+(\\w+)\\s*,\\s*#?(0x[0-9a-fA-F]+)")
+    private val RE_ADD_IMM = Regex("^add\\s+(\\w+)\\s*,\\s*(\\w+)\\s*,\\s*#(0x[0-9a-fA-F]+|\\d+)")
+    private val RE_RIP = Regex("\\[\\s*rip\\s*\\+\\s*(0x[0-9a-fA-F]+|\\d+)\\s*\\]")
+    private val RE_LSL = Regex("\\[\\s*\\w+\\s*,\\s*\\w+\\s*,\\s*lsl\\s*#(\\d+)\\s*\\]")
+    private val RE_TWO_REG = Regex("\\[\\s*\\w+\\s*,\\s*\\w+\\s*\\]")
+    private val RE_REG_MUL = Regex("\\[\\s*(\\w+)\\s*\\+\\s*(\\w+)\\s*\\*\\s*(\\d+)\\s*\\]")
+    private val RE_SCALED = Regex("\\[\\s*(\\w+)\\s*\\*\\s*(\\d+)\\s*\\+\\s*(0x[0-9a-fA-F]+)\\s*\\]")
 
     // ───────────────────────── 指令编解码 ─────────────────────────
 
@@ -288,7 +303,7 @@ internal object OllvmDeFlat {
             val o = arr.optJSONObject(i) ?: continue
             val off = o.optLong("offset", -1L)
             val size = o.optInt("size", 0)
-            val hex = o.optString("bytes").ifBlank { o.optString("opcode") }.replace(Regex("[\\s,>]"), "")
+            val hex = o.optString("bytes").ifBlank { o.optString("opcode") }.replace(RE_CLEAN, "")
             val bytes = runCatching {
                 hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
             }.getOrDefault(ByteArray(0))
@@ -300,7 +315,7 @@ internal object OllvmDeFlat {
     /** 取文本里最后一个 `#立即数`（arm64 用 #，x86 用裸立即数）。 */
     internal fun lastImmediate(disasm: String): Long? {
         var last: Long? = null
-        Regex("#(0x[0-9a-fA-F]+|[0-9]+)").findAll(disasm).forEach { m ->
+        RE_IMM_HASH.findAll(disasm).forEach { m ->
             val t = m.groupValues[1]
             val v = if (t.startsWith("0x", true)) t.substring(2).toLongOrNull(16) else t.toLongOrNull()
             if (v != null) last = v
@@ -311,7 +326,7 @@ internal object OllvmDeFlat {
     /** 取文本里最后一个十六进制/十进制地址。 */
     internal fun lastAddress(disasm: String): Long? {
         var last: Long? = null
-        Regex("(0x[0-9a-fA-F]+|(?<![0-9a-zA-Z_])[0-9]+)").findAll(disasm).forEach { m ->
+        RE_ANY_NUM.findAll(disasm).forEach { m ->
             val t = m.groupValues[1]
             val v = if (t.startsWith("0x", true)) t.substring(2).toLongOrNull(16) else t.toLongOrNull()
             if (v != null) last = v
@@ -357,7 +372,7 @@ internal object OllvmDeFlat {
     }
 
     private fun firstHex(d: String): Long? {
-        val m = Regex("0x[0-9a-fA-F]+").find(d) ?: return null
+        val m = RE_HEX.find(d) ?: return null
         return m.value.substring(2).toLongOrNull(16)
     }
 
@@ -365,7 +380,7 @@ internal object OllvmDeFlat {
         "ldrb", "ldurb" -> 1
         "ldrh", "ldurh", "ldrsh", "ldursh", "movzx" -> 2
         "ldrsw", "ldursw", "movsxd", "movsx" -> 4
-        else -> if (Regex("\\bw\\d+\\s*,").containsMatchIn(disasm)) 4 else 8
+        else -> if (RE_WREG.containsMatchIn(disasm)) 4 else 8
     }
 
     /**
@@ -387,36 +402,36 @@ internal object OllvmDeFlat {
             val mn = d.substringBefore(' ').lowercase()
             when (mn) {
                 "adrp" -> {
-                    val m = Regex("^adrp\\s+(\\w+)\\s*,\\s*#?(0x[0-9a-fA-F]+)").find(d)
+                    val m = RE_ADRP.find(d)
                     if (m != null) {
                         adrpReg = m.groupValues[1]
                         adrpVal = m.groupValues[2].substring(2).toLongOrNull(16) ?: 0L
                     }
                 }
                 "add" -> {
-                    val m = Regex("^add\\s+(\\w+)\\s*,\\s*(\\w+)\\s*,\\s*#(0x[0-9a-fA-F]+|\\d+)").find(d)
+                    val m = RE_ADD_IMM.find(d)
                     if (m != null && adrpReg != null && m.groupValues[1] == adrpReg && m.groupValues[2] == adrpReg) {
                         tableVa = adrpVal + hexOrDec(m.groupValues[3])
                     }
                 }
                 "lea" -> {
-                    val rip = Regex("\\[\\s*rip\\s*\\+\\s*(0x[0-9a-fA-F]+|\\d+)\\s*\\]").find(d)
+                    val rip = RE_RIP.find(d)
                     tableVa = if (rip != null) ins.offset + ins.size + hexOrDec(rip.groupValues[1]) else firstHex(d)
                 }
                 "ldr", "ldrb", "ldrh", "ldrsw", "ldrsh", "ldur" -> {
-                    val m = Regex("\\[\\s*\\w+\\s*,\\s*\\w+\\s*,\\s*lsl\\s*#(\\d+)\\s*\\]").find(d)
+                    val m = RE_LSL.find(d)
                     if (m != null) {
                         scale = 1 shl (m.groupValues[1].toIntOrNull() ?: 0)
                         entrySize = loadEntrySize(mn, d)
                         signed = mn == "ldrsw" || mn == "ldrsh"
-                    } else if (Regex("\\[\\s*\\w+\\s*,\\s*\\w+\\s*\\]").containsMatchIn(d)) {
+                    } else if (RE_TWO_REG.containsMatchIn(d)) {
                         scale = 1
                         entrySize = loadEntrySize(mn, d)
                         signed = mn == "ldrsw" || mn == "ldrsh"
                     }
                 }
                 "movsxd", "movsx", "movzx", "mov" -> {
-                    val m = Regex("\\[\\s*(\\w+)\\s*\\+\\s*(\\w+)\\s*\\*\\s*(\\d+)\\s*\\]").find(d)
+                    val m = RE_REG_MUL.find(d)
                     if (m != null) {
                         scale = m.groupValues[3].toIntOrNull() ?: 0
                         entrySize = loadEntrySize(mn, d)
@@ -424,7 +439,7 @@ internal object OllvmDeFlat {
                     }
                 }
                 "jmp" -> {
-                    val m = Regex("\\[\\s*(\\w+)\\s*\\*\\s*(\\d+)\\s*\\+\\s*(0x[0-9a-fA-F]+)\\s*\\]").find(d)
+                    val m = RE_SCALED.find(d)
                     if (m != null) {
                         scale = m.groupValues[2].toIntOrNull() ?: 0
                         entrySize = 8

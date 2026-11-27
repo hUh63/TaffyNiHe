@@ -26,6 +26,9 @@ internal object EditorDiffMarks {
      */
     fun diff(oldText: String?, newText: String): Map<Int, Mark> {
         if (oldText == null || oldText == newText) return emptyMap()
+        // 先挡体积：原来不管多大都先 split 成两份全量行数组，再判断行数上限，
+        // 2 MB 文本白分配几十万个 String 对象。超过 1.5 MB 的大文件不画行级标记。
+        if (oldText.length > 1_500_000 || newText.length > 1_500_000) return emptyMap()
         val old = oldText.split('\n')
         val new = newText.split('\n')
         if (old.size > MAX_LINES || new.size > MAX_LINES) return emptyMap()
@@ -66,13 +69,30 @@ internal object EditorDiffMarks {
         return out
     }
 
+    // 差异标记每 400ms 算一次，每次都去磁盘重读同一份备份太浪费：
+    // 按 (文件名, mtime, size) 缓存基线；保存/回滚改了备份后指纹变化，缓存自然失效。
+    @Volatile private var cachedBaseName: String? = null
+    @Volatile private var cachedBaseStamp: Long = -1L
+    @Volatile private var cachedBaseSize: Long = -1L
+    @Volatile private var cachedBaseText: String? = null
+
     /** 取该文件最近一次备份内容（作为 diff 基线）；无备份返回 null。 */
     fun latestBackupText(context: android.content.Context, fileName: String?): String? {
         if (fileName.isNullOrBlank()) return null
         val dir = File(context.filesDir, "editor_files/backup")
         val f = dir.listFiles { it -> it.name.startsWith("$fileName.") && it.name.endsWith(".bak") }
             ?.maxByOrNull { it.lastModified() } ?: return null
-        return runCatching { if (f.length() > 4L * 1024 * 1024) null else f.readText() }.getOrNull()
+        val stamp = f.lastModified()
+        val size = f.length()
+        if (cachedBaseName == fileName && cachedBaseStamp == stamp && cachedBaseSize == size) {
+            return cachedBaseText
+        }
+        val text = runCatching { if (size > 4L * 1024 * 1024) null else f.readText() }.getOrNull()
+        cachedBaseName = fileName
+        cachedBaseStamp = stamp
+        cachedBaseSize = size
+        cachedBaseText = text
+        return text
     }
 
     /** 便捷入口：按文件路径/名称 + 当前内容算标记。 */

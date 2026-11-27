@@ -65,16 +65,40 @@ internal object EditorTextOps {
         return lineA to line
     }
 
-    /** 行区间变换：对 [from, to] 内每行应用 f(line, index)，光标落在 from 行行首。 */
+    /**
+     * 行区间变换：对 [from, to] 内每行应用 f(line, index)，光标落在 from 行行首。
+     *
+     * 只替换目标行、其余原样拷贝：原来 split 全篇再 joinToString，
+     * 2 MB 文件做一次「缩进 3 行」也要分配几十万个 String（两份）。
+     */
     fun transformLines(text: String, from: Int, to: Int, f: (String, Int) -> String): Pair<String, Int> {
-        val lines = text.split('\n')
-        if (lines.isEmpty()) return text to 0
-        val a = (from - 1).coerceIn(0, lines.size - 1)
-        val b = (to - 1).coerceIn(0, lines.size - 1)
-        val mutable = lines.toMutableList()
-        for (i in minOf(a, b)..maxOf(a, b)) mutable[i] = f(mutable[i], i)
-        val nt = mutable.joinToString("\n")
-        return nt to lineStartOffset(nt, from.coerceAtLeast(1))
+        if (text.isEmpty()) {
+            // 与原实现等价：空文本只有一行（索引 0），f 可能返回非空内容
+            val nt = f("", 0)
+            return nt to (if (from <= 1) 0 else nt.length)
+        }
+        var total = 1
+        for (c in text) if (c == '\n') total++
+        val lo = from.coerceIn(1, total)
+        val hi = to.coerceIn(1, total)
+        val a = minOf(lo, hi)
+        val b = maxOf(lo, hi)
+        val sb = StringBuilder(text.length + 64)
+        var line = 1
+        var i = 0
+        var caret = -1
+        while (true) {
+            val nl = text.indexOf('\n', i)
+            val end = if (nl < 0) text.length else nl
+            if (line == from) caret = sb.length
+            if (line in a..b) sb.append(f(text.substring(i, end), line - 1)) else sb.append(text, i, end)
+            if (nl < 0) break
+            sb.append('\n')
+            i = nl + 1
+            line++
+        }
+        // 光标语义与原实现一致：from 越界（> 总行数）时落到文本末尾
+        return sb.toString() to (if (caret >= 0) caret else if (from <= 1) 0 else sb.length)
     }
 
     /**
@@ -347,7 +371,23 @@ internal object EditorTextOps {
     fun formatJson(text: String): String? = JsonPretty(text).pretty()
 
     /** 清理行尾空白。 */
-    fun trimTrailing(text: String): String = text.split('\n').joinToString("\n") { it.trimEnd() }
+    /** 清理行尾空白：单遍扫描，不 split 全篇（大文件下省两份行数组）。 */
+    fun trimTrailing(text: String): String {
+        if (text.isEmpty()) return text
+        val sb = StringBuilder(text.length)
+        var i = 0
+        while (true) {
+            val nl = text.indexOf('\n', i)
+            val end = if (nl < 0) text.length else nl
+            var e = end
+            while (e > i && text[e - 1].isWhitespace()) e--
+            sb.append(text, i, e)
+            if (nl < 0) break
+            sb.append('\n')
+            i = nl + 1
+        }
+        return sb.toString()
+    }
 
     /**
      * 从 [start] 处的 '<' 往后找标签结束的 '>'，跳过引号内的 '>'。

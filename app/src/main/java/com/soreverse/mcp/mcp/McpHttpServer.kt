@@ -7,6 +7,7 @@ import com.soreverse.mcp.core.ApkMcpBridge
 import com.soreverse.mcp.core.CloudflareTunnelManager
 import com.soreverse.mcp.core.EngineProvider
 import com.soreverse.mcp.core.HeavyGate
+import com.soreverse.mcp.core.ToolPerf
 import com.soreverse.mcp.core.SelfArtifactGuard
 import com.soreverse.mcp.core.SettingsStore
 import com.soreverse.mcp.core.StoragePermissionHelper
@@ -842,9 +843,15 @@ $historyRows
         // future.cancel(true) 打断不了 native 调用；若调用方一超时就释放许可，
         // 另一个 heavy 工具会立刻进来并发操作同一引擎/文件，造成状态竞争。
         val worker = java.util.concurrent.Callable {
+            val startedAt = System.currentTimeMillis()
+            var failed = true
             try {
-                callToolPayload(name, args)
+                val r = callToolPayload(name, args)
+                failed = r.has("error")
+                r
             } finally {
+                // 只统计真正执行的时间（不含排队、限流、超时等待）
+                ToolPerf.record(name, System.currentTimeMillis() - startedAt, failed)
                 if (heavy) HeavyGate.release(heavyHandle)
             }
         }
@@ -1273,7 +1280,7 @@ $historyRows
             // leanTools=true hides generic (non-RE) utilities from tools/list to cut
             // token noise; they stay callable by name and return when leanTools=false.
             if (lean && handler.meta.generic) return@forEach
-            out.put(ToolCatalog.toolDescriptor(handler, includeCategory))
+            out.put(ToolCatalog.toolDescriptor(handler, includeCategory, leanDesc = lean))
         }
         if (settings.apkMcpMergeTools) {
             val merged = apkBridge.mergedTools()

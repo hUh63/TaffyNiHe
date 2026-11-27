@@ -211,4 +211,27 @@ class EditorTextOpsTest {
         assertEquals(20001, EditorTextOps.lineOf(big, big.length))
         assertEquals(1, EditorTextOps.lineOf(big, 0))
     }
+
+    @Test
+    fun transformLines_touchesOnlyTargetRange() {
+        val t = "a\nb\nc\nd"
+        val (out, caret) = EditorTextOps.transformLines(t, 2, 3) { line, idx -> "$idx:$line" }
+        assertEquals("a\n1:b\n2:c\nd", out)
+        assertEquals(2, caret)   // 第 2 行行首
+        // 越界：夹到首/末行，不抛
+        val (o2, _) = EditorTextOps.transformLines(t, 99, 99) { line, _ -> "<" + line + ">" }
+        assertEquals("a\nb\nc\n<d>", o2)
+        // 单行文本
+        val (o3, c3) = EditorTextOps.transformLines("x", 1, 1) { line, _ -> line.uppercase() }
+        assertEquals("X", o3)
+        assertEquals(0, c3)
+    }
+
+    @Test
+    fun trimTrailing_keepsLineStructure() {
+        assertEquals("a\nb\n\nc", EditorTextOps.trimTrailing("a  \nb\t\n   \nc\t "))
+        assertEquals("", EditorTextOps.trimTrailing(""))
+        assertEquals("\n\n", EditorTextOps.trimTrailing("  \n\t\n"))
+        assertEquals("no-newline", EditorTextOps.trimTrailing("no-newline  "))
+    }
 }

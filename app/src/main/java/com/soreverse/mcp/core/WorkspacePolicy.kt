@@ -83,7 +83,30 @@ object WorkspacePolicy {
      *  - 工作目录：无隧道时唯一的文件工作区根；
      *  - 隧道开启时：追加 /storage/emulated/0、/sdcard。
      */
+    // 文件系统调用缓存。canonicalPath 要解析符号链接（/data/data/<pkg> → /data/user/0/<pkg>），
+    // 在部分设备上单次就要几毫秒；而工具调用里每个路径类参数都会走一次
+    // validatePath → allowedRoots（原来一次校验要算 8 次 canonicalPath + 一次反射）。
+    // 工具调用通常是突发的一串，用短 TTL 缓存把这块开销降到接近 0。
+    private const val ROOTS_TTL_MS = 1000L
+    private const val CANON_TTL_MS = 10_000L
+
+    @Volatile private var rootsCache: List<String>? = null
+    @Volatile private var rootsCacheAt = 0L
+    private val canonicalCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
+
+    /** 带 TTL 的 canonicalPath；解析失败返回 null（与原实现一致）。 */
+    private fun canonicalOf(path: String): String? {
+        val now = System.currentTimeMillis()
+        canonicalCache[path]?.let { (c, at) -> if (now - at < CANON_TTL_MS) return c }
+        val c = runCatching { File(path).canonicalPath }.getOrNull() ?: return null
+        if (canonicalCache.size > 512) canonicalCache.clear()
+        canonicalCache[path] = c to now
+        return c
+    }
+
     fun allowedRoots(context: Context): List<String> {
+        val now = System.currentTimeMillis()
+        rootsCache?.let { if (now - rootsCacheAt < ROOTS_TTL_MS) return it }
         val roots = mutableListOf<String>()
         runCatching {
             val app = Class.forName("android.app.ActivityThread")
@@ -97,7 +120,7 @@ object WorkspacePolicy {
                     app.filesDir.absolutePath,
                     "/data/user/0/${app.packageName}",
                     "/data/data/${app.packageName}",
-                ).forEach { p -> roots += runCatching { File(p).canonicalPath }.getOrDefault(p) }
+                ).forEach { p -> roots += (canonicalOf(p) ?: p) }
             }
         }
         // 共享暂存目录是全局可写的投放点：只在开了隧道（需要投放文件）或有 root 时放行，
@@ -107,12 +130,14 @@ object WorkspacePolicy {
         }
         System.getProperty("java.io.tmpdir", "/tmp")?.let { roots += it }
         workDirPath(context)?.let {
-            runCatching { roots += File(it).canonicalPath }
+            canonicalOf(it)?.let { c -> roots += c }
         }
         if (isTunnelActive(context)) {
             roots += "/storage/emulated/0"
             roots += "/sdcard"
         }
+        rootsCache = roots
+        rootsCacheAt = now
         return roots
     }
 
@@ -133,8 +158,7 @@ object WorkspacePolicy {
             if (base.isNullOrBlank()) return "Path is relative but no work directory is configured: $path"
             File(base, path).path
         }
-        val canonical = runCatching { File(resolved).canonicalPath }.getOrNull()
-            ?: return "Cannot resolve path: $path"
+        val canonical = canonicalOf(resolved) ?: return "Cannot resolve path: $path"
         val roots = allowedRoots(context)
         val inside = roots.any { root ->
             canonical == root || canonical.startsWith("$root/")

@@ -46,15 +46,31 @@ object ToolCatalogPresentation {
         return order.map { it to (groups[it] ?: emptyList()) }.filter { it.second.isNotEmpty() }
     }
 
-    fun toolDescriptor(handler: ToolHandler, includeCategory: Boolean): JSONObject {
+    /**
+     * @param leanDesc 精简模式：描述只保留首句（tools/list 的体积主要来自描述，
+     *        160+ 工具 × 几百字符在每次握手都要传一遍；完整描述仍可通过
+     *        `taffy_meta_info(action=describe)` 取到）。
+     */
+    fun toolDescriptor(handler: ToolHandler, includeCategory: Boolean, leanDesc: Boolean = false): JSONObject {
         val schema = handler.meta.schemaBuilder(SchemaBuilder)
         val obj = JSONObject()
             .put("name", handler.meta.name)
-            .put("description", handler.meta.en)
+            .put("description", if (leanDesc) shortDescription(handler.meta.en) else handler.meta.en)
             .put("inputSchema", schema)
         if (handler.meta.outputSchema != null) obj.put("outputSchema", handler.meta.outputSchema)
         if (includeCategory) obj.put("category", handler.meta.category)
+        // 会走 HeavyGate 排队的工具显式标出来：客户端据此串行化，
+        // 比并发打进来再收 SERVER_BUSY 更省事（也少一次重试）
+        if (handler.meta.heavy) obj.put("x-taffy-heavy", true)
         return obj
+    }
+
+    /** 取首个句子并限长；不改变原描述的可检索关键词（首句通常是「这是什么工具」）。 */
+    private fun shortDescription(s: String): String {
+        if (s.length <= 160) return s
+        val cut = s.indexOf(". ")
+        val head = if (cut in 1..200) s.substring(0, cut + 1) else s.substring(0, 160)
+        return head.trimEnd() + " …"
     }
 
     fun categoryOf(name: String): String? = ToolCatalog.registry.categoryOf(name)

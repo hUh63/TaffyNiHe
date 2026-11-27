@@ -1,3 +1,56 @@
+## 塔菲逆核 v1.6.1 —— 全仓排查第一批：算法与热路径
+
+这一版没加新功能，全部是「同一个功能更快、更不容易崩」。按模块列：
+
+### 编辑器（纯文本算法）
+
+- `lineOf`：原来 `substring(0, offset).count{...}` —— 2 MB 文本、光标靠后时**一次调用分配 2 MB 前缀**，
+  而 `selectionLineRange` 还会连调两次。改成逐字符扫描，同样 O(offset) 但零分配。
+- `selectionLineRange`：从「两次全扫」改成**一次扫描同时得到两个行号**。
+- 查找（不区分大小写）：原来 `findAll(text.lowercase(), query.lowercase())` ——
+  每次查找分配整篇小写副本，而且 `lowercase()` 在某些字符上会改变长度（İ → i̇），
+  返回的偏移与原文对不上，跳转/替换会落错位置。改成逐字符比较的 `findAllIgnoreCase`，
+  零分配且偏移始终基于原文。
+- 大纲 `outlineOf`：`forEachIndexed { if (size >= 600) return@forEachIndexed }` 是
+  **continue 不是 break** —— 600 项上限从来没生效过，2 MB 文件每次快照照样跑完十万行。
+  改成 `for + break`；正则按语言只编译一次（原来每 250 ms 重新编译 3~8 条）。
+- 行级差异标记：先挡体积（>1.5 MB 直接不标）再 split —— 原来是「先 split 出两份全量行数组，
+  再判断行数上限」，大文件等于白分配几十万个 String；基线备份读盘按 (文件名, mtime, size) 缓存。
+
+### MCP 服务端
+
+- `tools/list`：原来每次请求都为 160+ 工具重建整套 schema JSONObject。
+  改为按配置（含桥接工具清单）缓存整份数组，配置不变直接命中。
+
+### 逆向引擎
+
+- `OllvmDeFlat`：去平坦化逐条指令解析时现场 `new` 十来个 `Regex`（构造 = 编译 Pattern）。
+  12 条全部预编译到 object 初始化，热路径只剩匹配。
+- `SoDeepTools`：生成 C++ 头文件时每个类名/方法名都 `replace(Regex(...))`，提到常量。
+- `StringCensus`：`URL_RE.matches(value)` 对一个串调了两次，缓存一次结果。
+
+### 日志页
+
+- 崩溃关键字表从「每行日志 new 一次 listOf」提到文件级常量。
+- 缓冲区裁剪的丢弃计数改成批量写回（128 行一次）：`dropped` 是 Compose state，
+  原来逐行 `++` 等于逐行触发一次重组，日志刷屏时很贵。
+
+### 有界 IO / 正确性
+
+- `BackupCrypto` v1 旧备份解密：`source.readBytes()` → 32 MB 上限（畸形备份不再能打穿内存）。
+- `PermissionManager` Dhizuku 通道：root 命令的 stdout/stderr 原来 `readText()` 无上限
+  （`logcat` / `cat` 大文件能直接 OOM），改 8 MB 有界读。
+- `IappDecryptTool`：APK 内的 `lib.so` / `libygsiyu.so` 条目 64 MB 上限
+  （`libil2cpp.so` 这类上百 MB 的包不再一次性全读进内存）。
+- `BoreClient`：吞掉 `InterruptedException` 后没恢复中断标志，上层 cancel/close 会失效，
+  现在补 `Thread.currentThread().interrupt()`。
+
+### 测试
+
+`EditorTextOpsTest` 新增 3 组用例（边界行号、大小写不敏感偏移、大偏移不抛），
+`EditorDiffMarksTest` 新增体积闸门用例。另用 3000 组随机样本把
+「新的一次扫描实现」与「旧的两次 lineOf」逐一对拍，结果一致。
+
 ## 塔菲逆核 v1.6.0 —— 编辑器换核：WebView + CodeMirror 6
 
 上一版我把「代码折叠」标成做不到，是因为 sora-editor 0.24.x 根本没有折叠内核

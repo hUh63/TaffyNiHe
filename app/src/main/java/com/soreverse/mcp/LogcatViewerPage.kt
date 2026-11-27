@@ -203,6 +203,12 @@ private fun parseLogLine(line: String): LogLine? {
 /** 暂停状态的页面级持久（跨"离开→重进"保持，修复重进自动恢复采集）。 */
 private var persistedPaused = false
 
+/** 日志缓冲区上限（行）。 */
+private const val MAX_LOG_LINES = 2000
+
+/** 崩溃/ANR 行特征。原来在每行日志的回调里 new 一次 listOf，日志刷屏时是纯浪费。 */
+private val CRASH_KEYS = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
+
 /**
  * Logcat 查看器（对标 LogFox 的 GUI 交互）：
  * 实时日志流 + 级别过滤 + 多 tag 过滤 + 关键字高亮 + 级别着色 + 暂停/清空。
@@ -229,6 +235,9 @@ internal fun LogcatViewerPage(t: UiText) {
     var crashOnly by remember { mutableStateOf(false) }
     var process by remember { mutableStateOf<Process?>(null) }
     var dropped by remember { mutableStateOf(0) }
+    // 用数组而不是 Compose state：这个计数只给「什么时候 flush 到 dropped」用，
+    // 不需要触发重组，每行改 state 反而是负担
+    val pendingDrop = remember { intArrayOf(0) }
     // 当前采集通道说明（无特权时明确提示，避免"静默空日志"）
     var channelInfo by remember { mutableStateOf("") }
     // 启动自检: 权限通道是否真实可用
@@ -407,9 +416,14 @@ internal fun LogcatViewerPage(t: UiText) {
                         for (line in lines.subList(startIdx, lines.size)) {
                             parseLogLine(line)?.let { parsed ->
                                 logs.add(parsed)
-                                while (logs.size > 2000) { logs.removeAt(0); dropped++ }
-                                val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
-                                if (crashKeys.any { line.contains(it, ignoreCase = true) }) {
+                                if (logs.size > MAX_LOG_LINES) {
+                                    val over = logs.size - MAX_LOG_LINES
+                                    repeat(over) { logs.removeAt(0) }
+                                    // dropped 是 Compose state：逐行 ++ 等于逐行触发重组
+                                    pendingDrop[0] += over
+                                    if (pendingDrop[0] >= 128) { dropped += pendingDrop[0]; pendingDrop[0] = 0 }
+                                }
+                                if (CRASH_KEYS.any { line.contains(it, ignoreCase = true) }) {
                                     synchronized(crashLogs) { crashLogs.add(parsed) }
                                 }
                             }
@@ -444,13 +458,15 @@ internal fun LogcatViewerPage(t: UiText) {
                             parseLogLine(line)?.let { parsed ->
                                 synchronized(logs) {
                                     logs.add(parsed)
-                                    while (logs.size > 2000) {
-                                        logs.removeAt(0); dropped++
+                                    if (logs.size > MAX_LOG_LINES) {
+                                        val over = logs.size - MAX_LOG_LINES
+                                        repeat(over) { logs.removeAt(0) }
+                                        pendingDrop[0] += over
+                                        if (pendingDrop[0] >= 128) { dropped += pendingDrop[0]; pendingDrop[0] = 0 }
                                     }
                                 }
                                 // 崩溃/ANR 行收集到崩溃标签页
-                                val crashKeys = listOf("FATAL EXCEPTION", "Process: ", "ANR in ", "SIGSEGV", "SIGABRT", "*** *** ***")
-                                if (crashKeys.any { line.contains(it, ignoreCase = true) }) {
+                                if (CRASH_KEYS.any { line.contains(it, ignoreCase = true) }) {
                                     synchronized(crashLogs) { crashLogs.add(parsed) }
                                 }
                                 notifyCrash(parsed)

@@ -500,7 +500,44 @@ internal fun EngineRuntime.workspace(id: String): Workspace =
 
 internal fun EngineRuntime.dataFor(workspaceId: String, editSessionId: String): ByteArray = if (editSessionId.isBlank()) workspace(workspaceId).data else workspace(workspaceId).edits[editSessionId]?.data ?: error("Edit session not found")
 
-internal fun EngineRuntime.elfFor(workspaceId: String, editSessionId: String): ElfFile = if (editSessionId.isBlank()) workspace(workspaceId).elf else lief.parse(dataFor(workspaceId, editSessionId))
+/**
+ * 编辑会话的 ELF 解析缓存。
+ *
+ * 原来每次 `elfFor(ws, editSession)` 都 `lief.parse(data)` 一遍：一个 10 MB 的 SO
+ * 要几十到几百毫秒，而一次工具调用常连着读好几次（audit / report 更甚）。
+ *
+ * key 用「长度 + 内容 hash」而不是 revision：编辑入口很多（原地写入、undo/redo、
+ * append 截断、回滚、build 回填），只要有一个入口漏了 `revision++`，用 revision
+ * 做 key 就会返回过期的解析结果——那类错误表现为「改完再看还是旧数据」，很难查。
+ * 内容 hash 是 O(n)（10 MB 约 5~10 ms），仍比重新解析快一个数量级。
+ */
+private class EditElfEntry(val size: Int, val hash: Int, val elf: ElfFile)
+
+private val editElfCache = java.util.concurrent.ConcurrentHashMap<String, EditElfEntry>()
+
+internal fun EngineRuntime.elfFor(workspaceId: String, editSessionId: String): ElfFile {
+    if (editSessionId.isBlank()) return workspace(workspaceId).elf
+    val session = workspace(workspaceId).edits[editSessionId] ?: error("Edit session not found")
+    val data = session.data
+    val key = "$workspaceId::$editSessionId"
+    val size = data.size
+    val hash = data.contentHashCode()
+    editElfCache[key]?.let { if (it.size == size && it.hash == hash) return it.elf }
+    val elf = lief.parse(data)
+    // 上限很小：一个 workspace 通常只有一个编辑会话，多开也不该长期占着解析结果
+    if (editElfCache.size > 16) editElfCache.clear()
+    editElfCache[key] = EditElfEntry(size, hash, elf)
+    return elf
+}
+
+/** 关工作区/关编辑会话时清掉对应缓存，避免解析结果跟着 ByteArray 一起留在内存里。 */
+internal fun dropEditElfCache(workspaceId: String, editSessionId: String = "") {
+    if (editSessionId.isBlank()) {
+        editElfCache.keys.removeIf { it.startsWith("$workspaceId::") }
+    } else {
+        editElfCache.remove("$workspaceId::$editSessionId")
+    }
+}
 
 internal fun EngineRuntime.acceptedLocatorForms(): JSONArray = JSONArray(
         listOf(

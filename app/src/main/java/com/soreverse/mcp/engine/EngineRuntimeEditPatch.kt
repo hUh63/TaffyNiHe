@@ -15,7 +15,7 @@ internal fun EngineRuntime.editHex(workspaceId: String, editSessionId: String, l
         val settings = SettingsStore(context)
         val strict = settings.editStrictValidation
         val maxPatch = settings.maxPatchBytes
-        val elf = lief.parse(session.data)
+        val elf = elfFor(workspaceId, editSessionId)
         val sec = ElfSectionResolver.resolve(elf, locator) ?: return@guarded err("SECTION_NOT_FOUND", "Section '${LocatorParser.target(locator, "so_section")}' not found. Call analyze_elf (view=list, subView=sections) to see available sections. If names are duplicated, pass the full locator returned by analyze_elf.", "locator", locator, "availableSections" to elf.sections.mapIndexed { index, section -> EngineJson.sectionKey(section, index) })
         val sectionName = sec.name
         val previews = JSONArray()
@@ -175,7 +175,7 @@ internal fun EngineRuntime.editHexVa(workspaceId: String, editSessionId: String,
         if (patch.isEmpty()) return@guarded err("INVALID_ARGUMENT", "patchHex decoded to empty bytes", "patchHex", "")
         val settings = SettingsStore(context)
         if (patch.size > settings.maxPatchBytes) return@guarded err("PATCH_TOO_LARGE", "Patch size ${patch.size} exceeds maxPatchBytes ${settings.maxPatchBytes}", "patchHex", patch.size)
-        val elf = lief.parse(session.data)
+        val elf = elfFor(workspaceId, editSessionId)
         val off = vaToOffset(elf, va)?.toInt() ?: return@guarded err("OFFSET_OUT_OF_RANGE", "Address ${hex(va)} cannot be mapped to a file offset", "va", hex(va))
         if (off < 0 || off + patch.size > session.data.size) return@guarded err("OFFSET_OUT_OF_RANGE", "Patch range [${hex(off.toLong())}, +${patch.size}) exceeds file bytes (${session.data.size})", "va", hex(va))
         val old = session.data.copyOfRange(off, off + patch.size)
@@ -224,7 +224,7 @@ internal fun EngineRuntime.editAsm(workspaceId: String, editSessionId: String, l
         synchronized(session.lock) {
         val settings = SettingsStore(context)
         val maxPatch = settings.maxPatchBytes
-        val elf = lief.parse(session.data)
+        val elf = elfFor(workspaceId, editSessionId)
         val name = LocatorParser.target(locator, "so_function")
         val sym = (elf.symbols + elf.dynSymbols).firstOrNull { it.name == name }
         val startVa = resolveCodeAddress(session.data, elf, locator) ?: return@guarded err("FUNCTION_NOT_FOUND", "Function or address '$name' could not be resolved", "locator", locator, "acceptedForms" to acceptedLocatorForms())

@@ -210,6 +210,8 @@ internal fun EngineRuntime.close(workspaceId: String): JSONObject = guarded {
         }
     }
     workspaces.remove(workspaceId)
+    // 编辑会话的 ELF 解析缓存也要跟着走，否则解析结果与整份 SO 副本一起驻留
+    dropEditElfCache(workspaceId)
     pageStore.clear()
     searchCache.clear()
     releaseRizinSharedAnalysis()
@@ -309,6 +311,7 @@ internal fun EngineRuntime.evictWorkspacesIfNeeded(keepId: String = ""): List<St
         // 被另一次 open 触发淘汰，会直接以 WORKSPACE_NOT_FOUND 失败并关掉其模拟会话。
         if (now - w.lastAccessAt < recentlyUsedMs) continue
         workspaces.remove(w.id)
+        dropEditElfCache(w.id)
         workspaceBySourceKey.entries.removeAll { it.value == w.id }
         // 绑定在该工作区上的模拟会话必须一起关闭，否则 native VM 与整份 SO 副本继续驻留，
         // 淘汰看上去释放了内存、实际一点没省。

@@ -156,13 +156,17 @@ class McpHttpServer(private val context: Context, private val port: Int, private
      * 否则在跑任务的 finally 会把许可 release 到旧实例上，新实例许可凭空翻倍，
      * heavy 工具就会并发执行、互相踩引擎状态。等名额归零时再切。
      */
-    val apkBridge: ApkMcpBridge get() = bridgeHolder ?: ApkMcpBridge(SettingsStore(context)).also { bridgeHolder = it }
+    // SettingsStore 的构造要跑两次 prefs 迁移检查；服务端是长生命周期对象，复用一份即可
+    // （属性读写仍然走 SharedPreferences，语义不变）
+    private val settingsRef: SettingsStore by lazy { SettingsStore(context) }
+
+    val apkBridge: ApkMcpBridge get() = bridgeHolder ?: ApkMcpBridge(settingsRef).also { bridgeHolder = it }
     private var bridgeHolder: ApkMcpBridge? = null
-    val tunnel: CloudflareTunnelManager get() = tunnelHolder ?: CloudflareTunnelManager(context, SettingsStore(context)).also { tunnelHolder = it }
+    val tunnel: CloudflareTunnelManager get() = tunnelHolder ?: CloudflareTunnelManager(context, settingsRef).also { tunnelHolder = it }
     private var tunnelHolder: CloudflareTunnelManager? = null
 
     fun ensureBridgeProbed() {
-        val s = SettingsStore(context)
+        val s = settingsRef
         if (!s.apkMcpAutoProbe) return
         val configs = s.apkMcpConfigs
         if (configs.isNotEmpty()) {
@@ -179,7 +183,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         // 线程池已 shutdown（所有工具调用被拒）、作用域 Job 已取消（后台任务秒退）。
         if (toolExecutor.isShutdown) toolExecutor = newToolExecutor()
         if (!scopeJob.isActive) scopeJob = SupervisorJob()
-        NativeEngine.select(SettingsStore(context).nativeBackend)
+        NativeEngine.select(settingsRef.nativeBackend)
         engine = embeddedServer(CIO, host = host, port = port) {
             routing {
                 // v2.1.0: CORS preflight OPTIONS handler
@@ -293,7 +297,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
                 }
             )
         }
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         reconfigureHeavyPermits(settings.maxConcurrentTools)
         ToolStats.setPersistEnabled(settings.toolStatsPersist)
         AppLog.i("Ktor MCP server listening on $host:$port/mcp (permits=${settings.maxConcurrentTools})")
@@ -414,7 +418,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
     private suspend fun handleJsonRpcPost(call: ApplicationCall) {
         if (call.rejectUntrustedOrigin()) return
         // 先读取请求体，以便在鉴权失败时也能返回带正确 id 的错误响应
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         val maxBytes = settings.maxRequestKb * 1024
         val contentLength = call.request.header("Content-Length")?.toLongOrNull()
         if (contentLength != null && contentLength > maxBytes) {
@@ -494,7 +498,7 @@ class McpHttpServer(private val context: Context, private val port: Int, private
         // 请求方法全部属于元数据类别时走独立额度：tools/list 的响应形状由协议规定，
         // 不能被「工具结果」的阈值改写（见 META_RESPONSE_CAP 的说明）。
         val metaOnly = methods.isNotEmpty() && methods.all { it in META_METHODS }
-        val configured = SettingsStore(context).toolResultMaxChars
+        val configured = settingsRef.toolResultMaxChars
         val cap = if (metaOnly) {
             META_RESPONSE_CAP
         } else {
@@ -818,7 +822,7 @@ $historyRows
     }
 
     private fun callToolWithPolicy(name: String, args: JSONObject): JSONObject {
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         // 禁用 / 破坏性拦截 / 限频 / 自身 artifact 守卫：与 taffy_script 脚本引擎共用同一套（见 ToolPolicy）
         ToolPolicy.precheck(context, name, args, "server")?.let { return it }
         val heavy = name in ToolCatalog.heavyNames
@@ -888,7 +892,7 @@ $historyRows
     }
 
     private fun toolsCount(): JSONObject {
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         val total = ToolCatalog.ALL.size
         val advertised = advertisedTools()
         val advertisedCount = advertised.length()
@@ -969,7 +973,7 @@ $historyRows
         // 统一工具模式分发：taffy_unified 按 tool 参数路由到目标工具（内置或桥接）
         if (name == UNIFIED_TOOL) return handleUnifiedCall(args)
         val native = EngineProvider.get(context)
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         // 统一工作区路径预检：未开隧道时路径限制在设置页服务配置的工作目录，
         // 开隧道后放行 /sdcard 与 /storage/emulated/0。越界直接返回 PATH_OUTSIDE_WORKSPACE。
         val baseDir = WorkspacePolicy.workDirPath(context)
@@ -1044,7 +1048,7 @@ $historyRows
     }
 
     private fun wrapToolResult(payload: JSONObject): JSONObject {
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         val payloadText = payload.toString().replace("\\/", "/")
         val cap = settings.toolResultMaxChars
         val rendered = if (cap > 0 && payloadText.length > cap) {
@@ -1168,7 +1172,7 @@ $historyRows
     }
 
     private fun io.ktor.server.application.ApplicationCall.authorized(): Boolean {
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         if (!settings.authEnabled) return true
         val token = settings.accessToken
         // fail-closed：开了鉴权却没有可用 token 属于异常态，此时放行等于完全无保护。
@@ -1240,13 +1244,13 @@ $historyRows
     private fun tunnelPublicHosts(): Set<String> {
         val out = mutableSetOf<String>()
         tunnel.status().publicUrl?.let { uriHostOrNull(it)?.let(out::add) }
-        uriHostOrNull(SettingsStore(context).tunnelNamedPublicUrl)?.let(out::add)
+        uriHostOrNull(settingsRef.tunnelNamedPublicUrl)?.let(out::add)
         return out
     }
 
     /** tools/list 是否真的在广告完整内置目录（既无 lean 过滤也无策略禁用）。 */
     private fun advertisesFullCatalog(): Boolean {
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         return !settings.leanTools && settings.disabledTools.isBlank()
     }
 
@@ -1269,7 +1273,7 @@ $historyRows
     @Volatile private var toolsCacheValue: JSONArray? = null
 
     private fun tools(): JSONArray {
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         val includeCategory = settings.includeCategoryInSchema
         val lean = settings.leanTools
         val mergedHash = apkBridge.mergedTools().map { it.name }.hashCode()
@@ -1311,7 +1315,7 @@ $historyRows
         .put("toolCount", advertisedTools().length())
         .put("totalCatalogCount", ToolCatalog.ALL.size)
         .put("builtInToolsAlwaysAdvertised", advertisesFullCatalog())
-        .put("collectToolStats", SettingsStore(context).collectToolStats)
+        .put("collectToolStats", settingsRef.collectToolStats)
         .put("uptimeMillis", System.currentTimeMillis() - startedAt)
         .put("nativeBackends", nativeBackendStatus())
         // heavy 闸门状态：poisoned=true 表示有 native 任务租约超期被回收（可能仍在后台跑），
@@ -1325,7 +1329,7 @@ $historyRows
         val rizin = NativeEngine.active()
         val nativeEngine = com.soreverse.mcp.core.EngineProvider.get(context)
         val lief = nativeEngine.lief
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         return JSONObject()
             .put("rizin", JSONObject().put("available", rizin.available()).put("loadStatus", rizin.loadStatus()))
             .put("lief", JSONObject().put("available", lief.available()).put("loadStatus", lief.loadStatus()))
@@ -1334,7 +1338,7 @@ $historyRows
 
     private fun sysStatus(probe: Boolean): JSONObject {
         if (probe) apkBridge.probe()
-        val s = SettingsStore(context)
+        val s = settingsRef
         val snapshot = apkBridge.snapshotJson()
         val onlineBridges = snapshot.optJSONArray("bridges")
         val onlineBridgeCount = snapshot.optInt("onlineCount")
@@ -1418,7 +1422,7 @@ $historyRows
     }.getOrDefault("")
 
     private fun help(): JSONObject {
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         val catMap = JSONObject()
         ToolCatalog.categoryDescriptions(false).forEach { (cat, desc) ->
             val toolsInCat = ToolCatalog.ALL.filter { it.meta.category == cat }
@@ -1542,7 +1546,7 @@ $historyRows
     private fun listTools(category: String, query: String): JSONObject {
         val q = query.trim().lowercase()
         val hasQuery = q.isNotEmpty()
-        val settings = SettingsStore(context)
+        val settings = settingsRef
         val grouped = JSONObject()
         var matched = 0
         ToolCatalog.ALL.forEach { e ->
@@ -1576,7 +1580,7 @@ $historyRows
     }
 
     private fun describeTools(names: List<String>): JSONObject {
-        val includeCategory = SettingsStore(context).includeCategoryInSchema
+        val includeCategory = settingsRef.includeCategoryInSchema
         val found = JSONArray()
         val missing = JSONArray()
         names.forEach { n ->
@@ -1599,7 +1603,7 @@ $historyRows
     private fun advertisedTools(): JSONArray {
         // 统一工具模式：只暴露 taffy_unified 一个工具（描述内嵌全部可用工具清单），
         // 用于客户端工具数量受限（如只支持少量工具）时绕过限制。默认关闭。
-        if (SettingsStore(context).unifiedToolMode) {
+        if (settingsRef.unifiedToolMode) {
             return JSONArray().put(unifiedToolDescriptor())
         }
         // 全量返回：内置工具（leanTools 控制精简）+ 全部桥接合并工具。

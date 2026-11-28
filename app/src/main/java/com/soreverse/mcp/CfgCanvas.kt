@@ -79,11 +79,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -266,6 +268,14 @@ internal class CfgLayoutResult(
 ) {
     /** 边路径缓存（世界坐标，键 = routing + density）：大图每帧重建上千条 Path 会让手势直接失灵。 */
     internal val edgePathCache = java.util.concurrent.ConcurrentHashMap<String, Triple<Path, Path, Path>>()
+
+    /**
+     * 小地图节点几何缓存（键 = 小地图像素尺寸）。
+     *
+     * 小地图每帧对每个块 drawRect 一次 —— 上千块的图就是在主画布之外再画一遍全部节点，
+     * 而且这部分几何只跟「布局 + 小地图尺寸」有关（缩放/平移只影响视口框），完全可以缓存。
+     */
+    internal val minimapCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Path, Path>>()
 }
 
 /** 布局过程中的可变节点。 */
@@ -1369,6 +1379,23 @@ internal fun applyCfgDrag(layout: CfgLayoutResult, offs: Map<Int, Offset>): CfgL
 }
 
 /** 背景图案绘制（网格 / 蛛网 / 蜂窝 / 雷达 / 无）。 */
+/**
+ * 点阵坐标缓冲（线程本地 + 按需扩容）。
+ *
+ * 背景网格每帧要填上万个点，每次新建 FloatArray 就是每帧几十 KB 垃圾；这个 buffer
+ * 只在 draw 阶段用、用完即弃，完全可以复用。用 ThreadLocal 是因为 PNG 导出会在后台线程
+ * 调同一段绘制代码。
+ */
+private val gridPointBuf = ThreadLocal<FloatArray>()
+
+private fun gridPointBuffer(n: Int): FloatArray {
+    val cur = gridPointBuf.get()
+    if (cur != null && cur.size >= n) return cur
+    val fresh = FloatArray(n)
+    gridPointBuf.set(fresh)
+    return fresh
+}
+
 private fun DrawScope.drawCfgBackground(
     bgStyle: String,
     colors: androidx.compose.material3.ColorScheme,
@@ -1448,18 +1475,27 @@ private fun DrawScope.drawCfgBackground(
             if (step >= 16f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
                 val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
                 val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
-                var gx = ((originX % step) + step) % step
-                var guard = 0
-                while (gx < viewportSize.width && guard < 400) {
-                    var gy = ((originY % step) + step) % step
-                    var guardY = 0
-                    while (gy < viewportSize.height && guardY < 400) {
-                        drawCircle(dotColor, radius = 0.9f, center = Offset(gx, gy))
-                        gy += step
-                        guardY++
+                // 一次 drawPoints 画完整个点阵。原来每个点一次 drawCircle（= 一次 draw call），
+                // 1080p 屏在 16px 间距下就是上万次调用 —— 拖动时手机发烫的主要来源之一。
+                val x0 = ((originX % step) + step) % step
+                val y0 = ((originY % step) + step) % step
+                val cols = if (x0 < viewportSize.width) (((viewportSize.width - x0) / step).toInt() + 1) else 0
+                val rows = if (y0 < viewportSize.height) (((viewportSize.height - y0) / step).toInt() + 1) else 0
+                if (cols > 0 && rows > 0) {
+                    val pts = gridPointBuffer(cols * rows * 2)
+                    var k = 0
+                    var gx = x0
+                    for (i in 0 until cols) {
+                        var gy = y0
+                        for (j in 0 until rows) {
+                            pts[k] = gx
+                            pts[k + 1] = gy
+                            k += 2
+                            gy += step
+                        }
+                        gx += step
                     }
-                    gx += step
-                    guard++
+                    drawPoints(pts, PointMode.Points, dotColor, strokeWidth = 1.8f, cap = StrokeCap.Round)
                 }
             }
         }
@@ -1496,14 +1532,24 @@ private fun DrawScope.drawCfgMinimap(
     // 节点：入口块用暖黄（primary 与 #FFCA28 混合），其余 onSurfaceVariant（对标 Exbin CfgMinimap）
     val entryColor = lerp(colors.primary, Color(0xFF, 0xCA, 0x28), 0.4f)
     val nodeColor = colors.onSurfaceVariant
-    layout.boxes.forEach { b ->
-        if (b.isDummy) return@forEach
-        val l = cx + b.left * s
-        val t = cy + b.top * s
-        val w = (b.w * s).coerceAtLeast(2f)
-        val h = (b.h * s).coerceAtLeast(2f)
-        drawRect(if (b.index == layout.entryIndex) entryColor else nodeColor, topLeft = Offset(l, t), size = Size(w, h))
+    // 节点几何只跟「布局 + 小地图尺寸」有关，缓存成两条 Path：每帧两次 drawPath 取代上千次 drawRect。
+    val cacheKey = size.width.toInt().toString() + "x" + size.height.toInt().toString()
+    val paths = layout.minimapCache.getOrPut(cacheKey) {
+        val entryPath = Path()
+        val nodePath = Path()
+        layout.boxes.forEach { b ->
+            if (b.isDummy) return@forEach
+            val l = cx + b.left * s
+            val t = cy + b.top * s
+            val w = (b.w * s).coerceAtLeast(2f)
+            val h = (b.h * s).coerceAtLeast(2f)
+            val rr = RoundRect(l, t, l + w, t + h, CornerRadius(0f))
+            if (b.index == layout.entryIndex) entryPath.addRoundRect(rr) else nodePath.addRoundRect(rr)
+        }
+        entryPath to nodePath
     }
+    drawPath(paths.first, entryColor)
+    drawPath(paths.second, nodeColor)
     if (viewport.width > 0 && viewport.height > 0 && scale > 0f) {
         val x0 = (0f - (viewport.width / 2f + pan.x)) / scale
         val y0 = (0f - (viewport.height / 2f + pan.y)) / scale
@@ -2206,6 +2252,13 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
     val nodeStroke = max(1f, 1f * density * scl)
     val radius = CornerRadius(8f * density * scl)
     val barW = 3.5f * density * scl
+    if (!showText) {
+        // 大图 / 手势进行中 / 缩放过小：不画文字，并把节点矩形按角色色合并成 6~7 条 Path。
+        // 逐节点 drawRoundRect 在千块级图上是每帧 2~3 千次 draw call（再加上小地图和网格点），
+        // 拖动时 Frametime 直接爆掉 —— 这是「图能拖但手机发烫、拖动掉帧」的主因。
+        drawCfgNodesBulk(layout, colors, density, sc, originX, originY, radius, nodeStroke, barW, selected, simpleView, highlight)
+        return
+    }
     val paintAddr = Paint().apply {
         isAntiAlias = true
         typeface = Typeface.MONOSPACE
@@ -2275,6 +2328,64 @@ internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCfgScene(
                 nc.drawText(ln, px(box.cx) - paintSum.measureText(ln) / 2f, y, paintSum)
             }
         }
+    }
+}
+
+/**
+ * 批量节点绘制：只画矩形与角色色条，不画文字。
+ *
+ * 合并策略是按「角色色」把圆角矩形叙进同一条 Path —— 节点之间不重叠，所以一次
+ * drawPath(fill) + 一次 drawPath(stroke) 与逐个 drawRoundRect 视觉等价。
+ * 选中块与高亮块单独成组，保留它们原来的配色。
+ */
+private fun DrawScope.drawCfgNodesBulk(
+    layout: CfgLayoutResult,
+    colors: androidx.compose.material3.ColorScheme,
+    density: Float,
+    sc: Float,
+    originX: Float,
+    originY: Float,
+    radius: CornerRadius,
+    nodeStroke: Float,
+    barW: Float,
+    selected: Int,
+    simpleView: Boolean,
+    highlight: Set<String>,
+) {
+    fun px(v: Float) = v * sc + originX
+    fun py(v: Float) = v * sc + originY
+    val groups = LinkedHashMap<Color, Path>()
+    layout.boxes.forEach { box ->
+        if (box.isDummy) return@forEach
+        val isSel = box.index == selected
+        val isHit = !simpleView && box.addrText in highlight
+        val roleColor = when {
+            isSel -> colors.primary
+            isHit -> AppPalette.orange
+            layout.loopHeadIndices.contains(box.index) -> AppPalette.purple
+            box.index == layout.entryIndex -> AppPalette.green
+            layout.returnIndices.contains(box.index) -> AppPalette.teal
+            else -> colors.outlineVariant
+        }
+        groups.getOrPut(roleColor) { Path() }.addRoundRect(
+            RoundRect(px(box.left), py(box.top), px(box.right), py(box.bottom), radius),
+        )
+        if (isSel || box.index == layout.entryIndex ||
+            layout.returnIndices.contains(box.index) || layout.loopHeadIndices.contains(box.index)
+        ) {
+            val inset = 3f * density * sc
+            val barH = (box.h * sc - inset * 4f).coerceAtLeast(2f)
+            drawRoundRect(
+                color = roleColor.copy(alpha = 0.95f),
+                topLeft = Offset(px(box.left) + inset, py(box.top) + inset * 2f),
+                size = Size(barW, barH),
+                cornerRadius = CornerRadius(barW / 2f),
+            )
+        }
+    }
+    groups.forEach { (color, path) ->
+        drawPath(path, color.copy(alpha = 0.16f))
+        drawPath(path, color, style = Stroke(width = nodeStroke))
     }
 }
 

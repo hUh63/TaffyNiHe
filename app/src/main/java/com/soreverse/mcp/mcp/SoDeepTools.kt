@@ -6,6 +6,7 @@ import com.soreverse.mcp.core.intValue
 import com.soreverse.mcp.core.ok
 import com.soreverse.mcp.core.str
 import com.soreverse.mcp.engine.NativeSoEngine
+import com.soreverse.mcp.engine.batchText
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -301,9 +302,13 @@ object SoDeepTools {
 
             var raw = engine.rzCommand(ws, "", "avj", false)
             if (cmdStdout(raw).isBlank()) {
-                // rizin 的虚表分析(av)依赖 C++ 分析；首次无输出时补一次全量分析(aaa)再试。
-                engine.rzCommand(ws, "", "aaa", false)
-                raw = engine.rzCommand(ws, "", "avj", false)
+                // rizin 的虚表分析(av)依赖 C++ 分析：首次无输出时补一次全量分析再查。
+                // 两步必须原子地落在同一份分析状态上 —— 拆成两次调用时，中间只要别的线程
+                // 把共享 RzCore 丢了（编辑落盘 / 内存回收），aaa 就白跑，avj 依旧是空。
+                val batch = runCatching { engine.rzCommandBatch(ws, "", listOf("aaa", "avj")) }.getOrNull()
+                if (batch != null && batch.optBoolean("ok", true) && !batch.has("error")) {
+                    raw = JSONObject().put("command", "aaa; avj").put("text", batch.batchText(1))
+                }
             }
             val stdout = cmdStdout(raw)
             if (stdout.isBlank()) {

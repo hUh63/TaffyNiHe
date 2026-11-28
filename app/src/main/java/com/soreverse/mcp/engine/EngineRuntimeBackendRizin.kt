@@ -85,10 +85,13 @@ internal fun EngineRuntime.rzCfg(workspaceId: String, editSessionId: String, loc
     val funcVa = resolveCodeAddress(bytes, elf, locator) ?: return@guarded err("FUNCTION_NOT_FOUND", "Function or address could not be resolved", "locator", locator)
     validateCodeAddress(elf, funcVa, false)?.let { return@guarded it }
     val cfgKey = "cfg|" + elf.architecture + "|" + rzContentStamp(bytes) + "|" + funcVa
-    val result = RzQueryCache.get(cfgKey)
-        ?: NativeEngine.active().cfg(bytes, elf.architecture, funcVa).also {
-            if (it.isNotEmpty()) RzQueryCache.put(cfgKey, it)
-        }
+    val cachedCfg = RzQueryCache.get(cfgKey)
+    val result = cachedCfg ?: NativeEngine.active().cfg(bytes, elf.architecture, funcVa)
+    // error 结果不进缓存：`function_not_found` 往往只是「这个地址还没被分析」，跑过 aa/af
+    // 之后同一地址就能出图；把失败结果缓存下来会让用户永远看不到那张图。
+    if (cachedCfg == null && result.isNotEmpty() && !result.contains("\"error\"")) {
+        RzQueryCache.put(cfgKey, result)
+    }
     val payload = JSONObject(result).put("workspaceId", workspaceId).put("functionName", name).put("functionVa", hex(funcVa))
     normalizeCfgPayload(payload, elf)
     if (payload.has("error")) return@guarded err("RIZIN_CFG_FAILED", payload.optString("error", "Rizin CFG failed"), "locator", locator, "payload" to payload)
@@ -512,6 +515,45 @@ internal fun EngineRuntime.rzCommand(
     }
     res
 }
+
+/**
+ * 只读命令批处理：一次 native 调用跑完 [commands]，按段返回 `{"results":[{"command","text"}]}`。
+ *
+ * 适用场景是「预热分析 + 查询」必须落在**同一个**分析状态上（`aaa`+`avj`、`aac`+`agC`）。
+ * 拆成两次 [rzCommand] 时，中间只要有一次字节变化或内存回收把共享 RzCore 丢掉，预热就白跑，
+ * 查询静默返回空 —— 表现成「点了分析，结果还是空的」。拼成一条 `;` 命令串又分不清哪段失败。
+ */
+internal fun EngineRuntime.rzCommandBatch(
+    workspaceId: String,
+    editSessionId: String = "",
+    commands: List<String>,
+): JSONObject = guarded {
+    if (commands.isEmpty()) return@guarded ok(JSONObject().put("results", JSONArray()))
+    val bytes = dataFor(workspaceId, editSessionId)
+    val elf = elfFor(workspaceId, editSessionId)
+    if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")
+    // 批里只要有一段会改变分析结果，按旧分析缓存下来的函数列表 / CFG 就得整体作废
+    if (commands.any { classifyRzCommand(it) == RzCmdKind.MUTATING }) {
+        RzCmdCache.clear()
+        RzQueryCache.clear()
+    }
+    val raw = NativeEngine.active().commandBatch(bytes, elf.architecture, commands.toTypedArray())
+    val payload = runCatching { JSONObject(raw) }.getOrNull()
+        ?: return@guarded err("RIZIN_COMMAND_FAILED", "Batch payload could not be parsed", "payload", raw)
+    if (payload.has("error")) {
+        return@guarded err(
+            "RIZIN_COMMAND_FAILED",
+            payload.optString("error", "Rizin batch failed"),
+            "payload", payload,
+            "commands" to JSONArray(commands),
+        )
+    }
+    ok(payload.put("workspaceId", workspaceId).put("architecture", elf.architecture))
+}
+
+/** 批处理结果里第 [index] 段的文本；越界或结构不符返回空串。 */
+internal fun JSONObject.batchText(index: Int): String =
+    optJSONArray("results")?.optJSONObject(index)?.optString("text").orEmpty()
 
 /**
  * 内存紧张时丢掉共享 RzCore（它常驻着一整份 SO 的解析结果，随时可重建）。

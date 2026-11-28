@@ -56,6 +56,19 @@ interface NativeEngine {
 
     fun command(bytes: ByteArray, arch: String, command: String, unsafe: Boolean = false): String
 
+    /**
+     * 只读命令批处理：一次进入 native，串行执行 [commands] 里的每条命令，按段返回
+     * `{"results":[{"command":..,"text":..},..]}`。
+     *
+     * 为什么不是简单地把命令用 `;` 拼起来：需要「先预热分析、再查询」的成对场景
+     * （`aaa` + `avj`、`aac` + `agC`）必须落在**同一个**分析状态上。分成两次
+     * [command] 调用时，中间若有别的线程释放了共享 core（编辑落盘 / 指纹变化），
+     * 预热白跑、查询静默变空；拼成一条串又分不清是哪一段失败。
+     *
+     * 任一段属于写/文件/调试类命令时整批拒绝（写命令要独立 core 算 patch）。
+     */
+    fun commandBatch(bytes: ByteArray, arch: String, commands: Array<String>): String
+
     fun decompile(bytes: ByteArray, arch: String, funcVa: Long): String
 
     /**
@@ -148,6 +161,7 @@ object RizinNativeEngine : NativeEngine {
     external fun rzEsilStep(bytes: ByteArray, arch: String, startVa: Long, stepCount: Int): String
     external fun rzDiff(bytesA: ByteArray, bytesB: ByteArray): String
     external fun rzCommand(bytes: ByteArray, arch: String, command: String, unsafe: Boolean): String
+    external fun rzCommandBatch(bytes: ByteArray, arch: String, commands: Array<String>, unsafe: Boolean): String
     external fun rzDecompile(bytes: ByteArray, arch: String, funcVa: Long): String
     external fun rzConfigureGhidra(pluginDir: String, sleighHome: String): Boolean
     external fun rzReleaseShared() // 丢弃共享 RzCore（字节变了以后必须调用）
@@ -248,6 +262,14 @@ object RizinNativeEngine : NativeEngine {
     override fun diff(bytesA: ByteArray, bytesB: ByteArray): String {
         if (!available()) return "{\"error\":\"unavailable\"}"
         return serial { runCatching { rzDiff(bytesA, bytesB) }.getOrDefault("{\"error\":\"failed\"}") }
+    }
+
+    override fun commandBatch(bytes: ByteArray, arch: String, commands: Array<String>): String {
+        if (!available()) return "{\"error\":\"unavailable\"}"
+        if (commands.isEmpty()) return "{\"results\":[]}"
+        return serial {
+            runCatching { rzCommandBatch(bytes, arch, commands, false) }.getOrDefault("{\"error\":\"failed\"}")
+        }
     }
 
     override fun command(bytes: ByteArray, arch: String, command: String, unsafe: Boolean): String {

@@ -44,6 +44,7 @@
 #include <unistd.h>
 #include <ctime>
 #include <time.h>
+#include <unordered_set>
 
 #define RZ_NATIVE_LOG(...) __android_log_print(ANDROID_LOG_INFO, "RzNative", __VA_ARGS__)
 #include <sys/stat.h>
@@ -307,6 +308,9 @@ namespace {
         uint64_t fp = 0;
         uint64_t lastUseMs = 0;
         uint32_t uses = 0;
+        // seedAarch64BranchXrefs 要扫遍每个可执行段（每段最多 8 MB），而 UI 会反复查
+        // 同一个地址（切页签/返回再看）。同一份分析里只需实际 seed 一次。
+        std::unordered_set<ut64> seededXrefs;
     };
     std::mutex g_coreMutex;
     SharedCore g_shared;
@@ -336,6 +340,7 @@ namespace {
         g_shared.bytes = 0;
         g_shared.fp = 0;
         g_shared.uses = 0;
+        g_shared.seededXrefs.clear();
     }
 
     // 返回到已加载并分析完的共享 core；调用方必须持 g_coreMutex
@@ -371,6 +376,74 @@ namespace {
     void cleanupCore(RzCore* core, const std::string& path) {
         if (core) rz_core_free(core);
         if (!path.empty()) unlink(path.c_str());
+    }
+
+    // ── 只读查询的 core 租借 ────────────────────────────────────────────────
+    // rzCommand 的只读路径早就复用共享 core，但 rzFunctions / rzCfg / rzXrefs /
+    // rzSearchBytes / rzScanCrypto 这几个专用 JNI 入口各自 rz_core_new + load +
+    // rz_core_analysis_all —— 同一份 SO 被分析五六遍，6.7 MB 的库每遍 3~10 秒。
+    //
+    // leaseReadOnly 优先借用共享 core（已带 ghidra 配置），建不起来时才退化成
+    // 独立 core（行为与旧实现完全一致，只是慢）。借用期间持有 g_coreMutex，
+    // 所以同一时刻只有一个 JNI 调用在摸这份 core。
+    struct CoreLease {
+        RzCore* core = nullptr;
+        bool owned = false;          // true = 独立 core，release 时要 free
+        std::string path;
+        std::unique_lock<std::mutex> lock;
+    };
+
+    CoreLease leaseReadOnly(const uint8_t* d, size_t n, const char* tag) {
+        CoreLease l;
+        l.lock = std::unique_lock<std::mutex>(g_coreMutex);
+        l.core = acquireSharedLocked(d, n);
+        if (l.core) return l;
+        l.path = writeTempSo(d, n, tag);
+        if (l.path.empty()) return l;
+        RzCore* core = rz_core_new();
+        if (!core) { unlink(l.path.c_str()); l.path.clear(); return l; }
+        applyGhidraConfig(core);
+        if (!rz_core_file_open_load(core, l.path.c_str(), 0, RZ_PERM_RX, false)) {
+            rz_core_free(core);
+            unlink(l.path.c_str());
+            l.path.clear();
+            return l;
+        }
+        rz_core_analysis_all(core);
+        l.core = core;
+        l.owned = true;
+        return l;
+    }
+
+    void releaseLease(CoreLease& l) {
+        if (l.core && l.owned) {
+            rz_core_free(l.core);
+            if (!l.path.empty()) unlink(l.path.c_str());
+        }
+        l.core = nullptr;
+        if (l.lock.owns_lock()) l.lock.unlock();
+    }
+
+    // 命令链要**逐段**检查：`s 0x100; wx 9090 @ 0x100` 的第一段是 s，只查开头会直接放行，
+    // 于是写命令落在共享只读 core 上（既不会重建，还会被 Kotlin 侧当成只读结果缓存），
+    // 后续所有只读查询都被污染。
+    bool commandChainBlocked(const std::string& c) {
+        static const char* blockedList[] = { "!", "o ", "oo", "w", "rm", "mv", "cp", "cat ", "ls " };
+        size_t start = 0;
+        while (start <= c.size()) {
+            const size_t end = c.find_first_of(";\n\r", start); // rizin 三种分隔符都要认
+            const std::string seg = c.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            const size_t b = seg.find_first_not_of(" \t");
+            if (b != std::string::npos) {
+                const std::string t = seg.substr(b);
+                for (const char* bl : blockedList) {
+                    if (t.rfind(bl, 0) == 0) return true;
+                }
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+        return false;
     }
 
     std::string escJson(const std::string& s) {
@@ -994,15 +1067,18 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzXrefs(
     std::string direction = jStr(env, jdirection);
     if (direction.empty()) direction = "to";
 
-    std::string path = writeTempSo(buf.data(), buf.size(), "xref");
-    if (path.empty()) return env->NewStringUTF("{\"xrefs\":[]}");
-    RzCore* core = rz_core_new();
-    if (!core) { unlink(path.c_str()); return env->NewStringUTF("{\"xrefs\":[]}"); }
-    bool ok = rz_core_file_open_load(core, path.c_str(), 0, RZ_PERM_RX, false);
-    if (!ok) { rz_core_free(core); unlink(path.c_str()); return env->NewStringUTF("{\"xrefs\":[]}"); }
-    rz_core_analysis_all(core);
+    CoreLease lease = leaseReadOnly(buf.data(), buf.size(), "xref");
+    RzCore* core = lease.core;
+    if (!core) return env->NewStringUTF("{\"xrefs\":[]}");
     // Recover direct BL/B to this VA into Rizin graph so axt is not empty for PIC code.
-    seedAarch64BranchXrefs(core, static_cast<ut64>(atVa));
+    if (!lease.owned) {
+        // 共享 core：同一地址只扫一次可执行段（结果幂等，重复扫纯属浪费）
+        if (g_shared.seededXrefs.insert(static_cast<ut64>(atVa)).second) {
+            seedAarch64BranchXrefs(core, static_cast<ut64>(atVa));
+        }
+    } else {
+        seedAarch64BranchXrefs(core, static_cast<ut64>(atVa));
+    }
 
     std::string out = "{\"xrefs\":[";
     bool first = true;
@@ -1046,7 +1122,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzXrefs(
     }
 
     out += "]}";
-    cleanupCore(core, path);
+    releaseLease(lease);
     return env->NewStringUTF(out.c_str());
 }
 
@@ -1060,14 +1136,12 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzAnalyze(
     std::vector<uint8_t> buf(len);
     env->GetByteArrayRegion(jbytes, 0, len, reinterpret_cast<jbyte*>(buf.data()));
 
-    std::string path = writeTempSo(buf.data(), buf.size(), "analyze");
-    if (path.empty()) return env->NewStringUTF("{\"error\":\"tempfile\"}");
-    RzCore* core = rz_core_new();
-    if (!core) { unlink(path.c_str()); return env->NewStringUTF("{\"error\":\"core\"}"); }
-    applyGhidraConfig(core);
-    bool ok = rz_core_file_open_load(core, path.c_str(), 0, RZ_PERM_RX, false);
-    if (!ok) { rz_core_free(core); unlink(path.c_str()); return env->NewStringUTF("{\"error\":\"open\"}"); }
-    rz_core_analysis_all(core);
+    // 语义就是「强制重新分析」：丢掉旧共享 core 再重建，并把这份新分析留在共享槽位里。
+    // 旧实现建完 core 立刻 free —— 几秒的分析白跑，下一次查询还得从头再来一遍。
+    std::lock_guard<std::mutex> analyzeLock(g_coreMutex);
+    dropSharedLocked();
+    RzCore* core = acquireSharedLocked(buf.data(), buf.size());
+    if (!core) return env->NewStringUTF("{\"error\":\"open\"}");
 
     RzList* funcs = rz_analysis_function_list(core->analysis);
     // rz_analysis_function_list() 返回的是 RzAnalysis 内部函数链表(analysis->fcns)的
@@ -1080,7 +1154,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzAnalyze(
     snprintf(b, sizeof(b), "{\"ok\":true,\"functions\":%d,\"size\":%zu}", funcCount, buf.size());
     std::string out(b);
 
-    cleanupCore(core, path);
+    // 共享 core 故意不释放：这次分析结果留给后续 rzCommand/rzCfg 直接命中。
     return env->NewStringUTF(out.c_str());
 }
 
@@ -1094,13 +1168,9 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzFunctions(
     std::vector<uint8_t> buf(len);
     env->GetByteArrayRegion(jbytes, 0, len, reinterpret_cast<jbyte*>(buf.data()));
 
-    std::string path = writeTempSo(buf.data(), buf.size(), "funcs");
-    if (path.empty()) return env->NewStringUTF("[]");
-    RzCore* core = rz_core_new();
-    if (!core) { unlink(path.c_str()); return env->NewStringUTF("[]"); }
-    bool ok = rz_core_file_open_load(core, path.c_str(), 0, RZ_PERM_RX, false);
-    if (!ok) { rz_core_free(core); unlink(path.c_str()); return env->NewStringUTF("[]"); }
-    rz_core_analysis_all(core);
+    CoreLease lease = leaseReadOnly(buf.data(), buf.size(), "funcs");
+    RzCore* core = lease.core;
+    if (!core) return env->NewStringUTF("[]");
 
     RzList* funcs = rz_analysis_function_list(core->analysis);
     std::string out = "[";
@@ -1130,7 +1200,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzFunctions(
     }
     out += "]";
 
-    cleanupCore(core, path);
+    releaseLease(lease);
     return env->NewStringUTF(out.c_str());
 }
 
@@ -1144,14 +1214,9 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCfg(
     std::vector<uint8_t> buf(len);
     env->GetByteArrayRegion(jbytes, 0, len, reinterpret_cast<jbyte*>(buf.data()));
 
-    std::string path = writeTempSo(buf.data(), buf.size(), "cfg");
-    if (path.empty()) return env->NewStringUTF("{\"error\":\"tempfile\"}");
-    RzCore* core = rz_core_new();
-    if (!core) { unlink(path.c_str()); return env->NewStringUTF("{\"error\":\"core\"}"); }
-    applyGhidraConfig(core);
-    bool ok = rz_core_file_open_load(core, path.c_str(), 0, RZ_PERM_RX, false);
-    if (!ok) { rz_core_free(core); unlink(path.c_str()); return env->NewStringUTF("{\"error\":\"open\"}"); }
-    rz_core_analysis_all(core);
+    CoreLease lease = leaseReadOnly(buf.data(), buf.size(), "cfg");
+    RzCore* core = lease.core;
+    if (!core) return env->NewStringUTF("{\"error\":\"open\"}");
 
     RzAnalysisFunction* fcn = rz_analysis_get_function_at(core->analysis, (ut64)funcVa);
     if (!fcn) {
@@ -1160,7 +1225,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCfg(
         fcn = rz_analysis_get_function_at(core->analysis, (ut64)funcVa);
     }
     if (!fcn) {
-        cleanupCore(core, path);
+        releaseLease(lease);
         return env->NewStringUTF("{\"error\":\"function_not_found\"}");
     }
 
@@ -1214,7 +1279,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCfg(
     }
     out += "]}";
 
-    cleanupCore(core, path);
+    releaseLease(lease);
     return env->NewStringUTF(out.c_str());
 }
 
@@ -1230,20 +1295,16 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzSearchBytes(
     std::string pattern = jStr(env, jpattern);
     std::string normalizedPattern = normalizeBytePattern(pattern);
 
-    std::string path = writeTempSo(buf.data(), buf.size(), "search");
-    if (path.empty()) return env->NewStringUTF("{\"hits\":[]}");
-    RzCore* core = rz_core_new();
-    if (!core) { unlink(path.c_str()); return env->NewStringUTF("{\"hits\":[]}");
-    }
-    bool ok = rz_core_file_open_load(core, path.c_str(), 0, RZ_PERM_RX, false);
-    if (!ok) { rz_core_free(core); unlink(path.c_str()); return env->NewStringUTF("{\"hits\":[]}"); }
+    CoreLease lease = leaseReadOnly(buf.data(), buf.size(), "search");
+    RzCore* core = lease.core;
+    if (!core) return env->NewStringUTF("{\"hits\":[]}");
 
     RzSearchOpt* opts = rz_search_opt_new();
 
     RzSearchBytesPattern* bp = rz_search_parse_byte_pattern(normalizedPattern.c_str(), nullptr);
     if (!bp) {
         rz_search_opt_free(opts);
-        cleanupCore(core, path);
+        releaseLease(lease);
         std::string out = "{\"hits\":[],\"error\":\"bad_pattern\",\"normalizedPattern\":\"" + escJson(normalizedPattern) + "\"}";
         return env->NewStringUTF(out.c_str());
     }
@@ -1268,7 +1329,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzSearchBytes(
     out += "]}";
 
     rz_search_opt_free(opts);
-    cleanupCore(core, path);
+    releaseLease(lease);
     return env->NewStringUTF(out.c_str());
 }
 
@@ -1282,12 +1343,9 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzScanCrypto(
     std::vector<uint8_t> buf(len);
     env->GetByteArrayRegion(jbytes, 0, len, reinterpret_cast<jbyte*>(buf.data()));
 
-    std::string path = writeTempSo(buf.data(), buf.size(), "crypto");
-    if (path.empty()) return env->NewStringUTF("{\"hits\":[]}");
-    RzCore* core = rz_core_new();
-    if (!core) { unlink(path.c_str()); return env->NewStringUTF("{\"hits\":[]}"); }
-    bool ok = rz_core_file_open_load(core, path.c_str(), 0, RZ_PERM_RX, false);
-    if (!ok) { rz_core_free(core); unlink(path.c_str()); return env->NewStringUTF("{\"hits\":[]}"); }
+    CoreLease lease = leaseReadOnly(buf.data(), buf.size(), "crypto");
+    RzCore* core = lease.core;
+    if (!core) return env->NewStringUTF("{\"hits\":[]}");
 
     std::string out = "{\"hits\":[";
     bool first = true;
@@ -1342,7 +1400,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzScanCrypto(
     }
 
     out += "]}";
-    cleanupCore(core, path);
+    releaseLease(lease);
     return env->NewStringUTF(out.c_str());
 }
 
@@ -1464,25 +1522,7 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommand(
     // 命令链要**逐段**检查：`s 0x100; wx 9090 @ 0x100` 的第一段是 s，只查开头会直接放行，
     // 于是写命令落在共享只读 core 上（既不会重建，还会被 Kotlin 侧当成只读结果缓存），
     // 后续所有只读查询都被污染。
-    auto segmentBlocked = [](const std::string& c) -> bool {
-        static const char* blockedList[] = { "!", "o ", "oo", "w", "rm", "mv", "cp", "cat ", "ls " };
-        size_t start = 0;
-        while (start <= c.size()) {
-            const size_t end = c.find_first_of(";\n\r", start); // rizin 三种分隔符都要认
-            const std::string seg = c.substr(start, end == std::string::npos ? std::string::npos : end - start);
-            const size_t b = seg.find_first_not_of(" \t");
-            if (b != std::string::npos) {
-                const std::string t = seg.substr(b);
-                for (const char* bl : blockedList) {
-                    if (t.rfind(bl, 0) == 0) return true;
-                }
-            }
-            if (end == std::string::npos) break;
-            start = end + 1;
-        }
-        return false;
-    };
-    if (!unsafe && segmentBlocked(cmd)) {
+    if (!unsafe && commandChainBlocked(cmd)) {
         return env->NewStringUTF("{\"error\":\"unsafe_required\",\"message\":\"set unsafe=true for mutating, file, shell, debugger, or external commands\"}");
     }
     jsize len = env->GetArrayLength(jbytes);
@@ -1541,6 +1581,53 @@ Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommand(
         std::lock_guard<std::mutex> lock(g_coreMutex);
         dropSharedLocked();
     }
+    return env->NewStringUTF(out.c_str());
+}
+
+// 只读命令批处理：一次借共享 core，串行执行 N 条命令，按段返回。
+//
+// 单独调 rzCommand 也共享 core，但两件事它做不到：
+//  ① 「先预热分析（aaa/aac）再查询」必须成对落在**同一个** core 上。分成两次调用时，
+//     中间若有别的线程 drop 了共享 core（编辑落盘 / release / 指纹变化），预热白跑，
+//     查询会静默变空 —— 表现成「点了分析，结果还是空的」。
+//  ② 输出按段返回，能直接指出是哪一条命令失败；拼成一条命令串就分不清了。
+// 返回 {"results":[{"command":..,"text":..},..]}，段数与入参一一对应。
+// unsafe=true 不支持（写命令要独立 core 算 patch），直接拒绝而不是降级执行。
+JNIEXPORT jstring JNICALL
+Java_com_soreverse_mcp_nativecore_RizinNativeEngine_rzCommandBatch(
+        JNIEnv* env, jobject, jbyteArray jbytes, jstring, jobjectArray jcmds, jboolean unsafe) {
+    ConsoleContextScope consoleScope("rzCommandBatch");
+    if (unsafe) return env->NewStringUTF("{\"error\":\"unsafe_not_supported\"}");
+    jsize count = jcmds ? env->GetArrayLength(jcmds) : 0;
+    if (count <= 0) return env->NewStringUTF("{\"results\":[]}");
+    jsize len = env->GetArrayLength(jbytes);
+    if (len <= 0) return env->NewStringUTF("{\"error\":\"empty\"}");
+    std::vector<uint8_t> buf(len);
+    env->GetByteArrayRegion(jbytes, 0, len, reinterpret_cast<jbyte*>(buf.data()));
+
+    // 先把命令全部取出来逐段过闸门：任一条不安全就整批拒绝，绝不在 core 上试跑一半。
+    std::vector<std::string> cmds;
+    cmds.reserve(static_cast<size_t>(count));
+    for (jsize i = 0; i < count; i++) {
+        auto js = reinterpret_cast<jstring>(env->GetObjectArrayElement(jcmds, i));
+        cmds.push_back(jStr(env, js));
+        env->DeleteLocalRef(js);
+        if (commandChainBlocked(cmds.back())) {
+            return env->NewStringUTF("{\"error\":\"unsafe_required\",\"message\":\"set unsafe=true for mutating, file, shell, debugger, or external commands\"}");
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    RzCore* core = acquireSharedLocked(buf.data(), buf.size());
+    if (!core) return env->NewStringUTF("{\"error\":\"open\"}");
+    std::string out = "{\"results\":[";
+    for (jsize i = 0; i < count; i++) {
+        char* r = rz_core_cmd_str(core, cmds[static_cast<size_t>(i)].c_str());
+        if (i) out += ",";
+        out += "{\"command\":\"" + escJson(cmds[static_cast<size_t>(i)]) + "\",\"text\":\"" + escJson(r ? r : "") + "\"}";
+        if (r) free(r);
+    }
+    out += "]}";
     return env->NewStringUTF(out.c_str());
 }
 

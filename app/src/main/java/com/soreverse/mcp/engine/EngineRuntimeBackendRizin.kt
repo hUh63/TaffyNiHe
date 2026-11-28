@@ -12,7 +12,10 @@ import org.json.JSONObject
 import java.util.UUID
 
 /** 清掉只读命令缓存（重新分析后调用，否则查询会返回分析前的旧结果）。 */
-internal fun rzInvalidateCommandCache() = RzCmdCache.clear()
+internal fun rzInvalidateCommandCache() {
+    RzCmdCache.clear()
+    RzQueryCache.clear()
+}
 
 /**
  * 字节内容变了之后必须调用一次（hex / 汇编 / 符号补丁、undo / redo / rollback / append）。
@@ -32,11 +35,13 @@ internal fun invalidateRizinAfterEdit() = releaseRizinSharedAnalysis()
  */
 internal fun releaseRizinSharedAnalysis() {
     RzCmdCache.clear()
+    RzQueryCache.clear()
     runCatching { NativeEngine.active().releaseSharedAnalysis() }
 }
 
 internal fun EngineRuntime.rzAnalyze(workspaceId: String, editSessionId: String = ""): JSONObject = guarded {
     RzCmdCache.clear()
+    RzQueryCache.clear()
     val bytes = dataFor(workspaceId, editSessionId)
     val elf = elfFor(workspaceId, editSessionId)
     if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")
@@ -48,7 +53,7 @@ internal fun EngineRuntime.rzFunctions(workspaceId: String, editSessionId: Strin
     val bytes = dataFor(workspaceId, editSessionId)
     val elf = elfFor(workspaceId, editSessionId)
     if (!NativeEngine.active().available()) return@guarded err("RIZIN_UNAVAILABLE", "Rizin native backend not loaded for this ABI")
-    val result = NativeEngine.active().functions(bytes, elf.architecture)
+    val result = nativeFunctionsRaw(bytes, elf.architecture)
     val arr = runCatching { JSONArray(result) }.getOrNull()
     if (arr != null && arr.length() > 0) {
         val wsName = workspaces[workspaceId]?.source?.name ?: "lib.so"
@@ -79,7 +84,11 @@ internal fun EngineRuntime.rzCfg(workspaceId: String, editSessionId: String, loc
     val sym = (elf.symbols + elf.dynSymbols).firstOrNull { it.name == name }
     val funcVa = resolveCodeAddress(bytes, elf, locator) ?: return@guarded err("FUNCTION_NOT_FOUND", "Function or address could not be resolved", "locator", locator)
     validateCodeAddress(elf, funcVa, false)?.let { return@guarded it }
-    val result = NativeEngine.active().cfg(bytes, elf.architecture, funcVa)
+    val cfgKey = "cfg|" + elf.architecture + "|" + rzContentStamp(bytes) + "|" + funcVa
+    val result = RzQueryCache.get(cfgKey)
+        ?: NativeEngine.active().cfg(bytes, elf.architecture, funcVa).also {
+            if (it.isNotEmpty()) RzQueryCache.put(cfgKey, it)
+        }
     val payload = JSONObject(result).put("workspaceId", workspaceId).put("functionName", name).put("functionVa", hex(funcVa))
     normalizeCfgPayload(payload, elf)
     if (payload.has("error")) return@guarded err("RIZIN_CFG_FAILED", payload.optString("error", "Rizin CFG failed"), "locator", locator, "payload" to payload)
@@ -105,7 +114,11 @@ internal fun EngineRuntime.rzXrefs(workspaceId: String, editSessionId: String, l
         ?: sym?.value?.and(-2L)?.takeIf { it > 0 }
         ?: pltStubVa
         ?: return@guarded err("SYMBOL_NOT_FOUND", "Symbol not found and locator has no address or PLT fallback", "locator", locator)
-    val result = NativeEngine.active().xrefs(bytes, elf.architecture, atVa, direction)
+    val xrefKey = "xref|" + elf.architecture + "|" + rzContentStamp(bytes) + "|" + atVa + "|" + direction
+    val result = RzQueryCache.get(xrefKey)
+        ?: NativeEngine.active().xrefs(bytes, elf.architecture, atVa, direction).also {
+            if (it.isNotEmpty()) RzQueryCache.put(xrefKey, it)
+        }
     val payload = JSONObject(result)
     val xrefs = payload.optJSONArray("xrefs") ?: JSONArray().also { payload.put("xrefs", it) }
     val seen = HashSet<String>()
@@ -433,6 +446,21 @@ private object RzCmdCache {
     fun clear() = synchronized(map) { map.clear() }
 }
 
+/**
+ * 函数列表的 native 结果（JSON 数组字符串），按内容指纹缓存。
+ *
+ * 三个调用方（rzFunctions / rizinFunctions / rizinImportStubHints）以前各跑一次
+ * 「新建 RzCore + rz_core_analysis_all」，而 rzXrefs 内部就会调 rizinImportStubHints ——
+ * 一次交叉引用查询等于两遍全量分析（6.7 MB 的 SO 各 3~10 秒）。
+ */
+private fun nativeFunctionsRaw(bytes: ByteArray, arch: String): String {
+    val key = "fn|" + arch + "|" + rzContentStamp(bytes)
+    RzQueryCache.get(key)?.let { return it }
+    val raw = NativeEngine.active().functions(bytes, arch)
+    if (raw.isNotEmpty()) RzQueryCache.put(key, raw)
+    return raw
+}
+
 /** 内容指纹：长度 + 首尾各 2KB。编辑后字节变化会换 key，无需手动失效。 */
 private fun quickHash(b: ByteArray): Long {
     var h = -3750763034362895579L
@@ -474,7 +502,11 @@ internal fun EngineRuntime.rzCommand(
         }
     }
     val res = rzCommandCore(workspaceId, editSessionId, command, unsafe)
-    if (mutating) RzCmdCache.clear()
+    if (mutating) {
+        RzCmdCache.clear()
+        // aa/af/aac 这类命令会改变分析结果（函数边界、交叉引用），原来按旧分析缓存的函数列表/CFG 必须一起作废
+        RzQueryCache.clear()
+    }
     else if (key.isNotEmpty() && res.optBoolean("ok", true) && !res.has("error")) {
         runCatching { RzCmdCache.put(key, res.toString()) }
     }
@@ -995,7 +1027,7 @@ internal fun EngineRuntime.rizinFunctionSize(bytes: ByteArray, elf: ElfFile, sta
 
 internal fun EngineRuntime.rizinFunctions(bytes: ByteArray, elf: ElfFile): List<JSONObject> {
         if (!NativeEngine.active().available()) return emptyList()
-        val arr = runCatching { JSONArray(NativeEngine.active().functions(bytes, elf.architecture)) }.getOrNull() ?: return emptyList()
+        val arr = runCatching { JSONArray(nativeFunctionsRaw(bytes, elf.architecture)) }.getOrNull() ?: return emptyList()
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
     }
 internal fun EngineRuntime.decompileWithContext(workspaceId: String, editSessionId: String, elf: ElfFile, va: Long, lines: List<String> = emptyList()): JSONObject {
@@ -1013,7 +1045,7 @@ internal fun EngineRuntime.decompileWithContext(workspaceId: String, editSession
 internal fun EngineRuntime.rizinImportStubHints(workspaceId: String, editSessionId: String, elf: ElfFile): Map<Long, String> {
         if (!NativeEngine.active().available()) return emptyMap()
         val bytes = runCatching { dataFor(workspaceId, editSessionId) }.getOrNull() ?: return emptyMap()
-        val functions = runCatching { JSONArray(NativeEngine.active().functions(bytes, elf.architecture)) }.getOrNull() ?: return emptyMap()
+        val functions = runCatching { JSONArray(nativeFunctionsRaw(bytes, elf.architecture)) }.getOrNull() ?: return emptyMap()
         val hints = linkedMapOf<Long, String>()
         for (i in 0 until functions.length()) {
             val function = functions.optJSONObject(i) ?: continue

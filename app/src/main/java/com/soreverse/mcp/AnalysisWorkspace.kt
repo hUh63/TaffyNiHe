@@ -2601,9 +2601,9 @@ private fun funcNameAt(arr: JSONArray?, i: Int): String {
 }
 
 /**
- * 入口点兜底：优先「ELF 入口点恰好是某个函数入口 → 该函数」，
- * 其次「ELF 入口点本身能被 rzCfg 接受」，再次「函数列表第一个」，最后「list(functions) 第一项」。
- * 保证用户一键就能看到一张图，而不是空画布。
+ * 入口点兜底：优先「ELF 入口点恰好是某个函数入口」，其次「函数列表第一个」（rizin 已识别，必然能出图），
+ * 函数列表为空时才试「ELF 入口点本身」，最后「list(functions) 第一项」。
+ * 旧顺序会先拿入口点跑一遍 rzCfg 验证 —— 那是又一次 3~10 秒的全量分析，而入口点不在函数列表里时它多半也失败。
  */
 private suspend fun resolveCfgEntry(
     context: android.content.Context,
@@ -2623,13 +2623,13 @@ private suspend fun resolveCfgEntry(
             }
         }
     }
-    if (entry.isNotBlank()) {
-        val r = runCatching { engine.rzCfg(ws, "", entry) }.getOrNull()
-        if (r != null && r.optBoolean("ok", false)) return@withContext (entry to entry)
-    }
     if (funcs != null && funcs.length() > 0) {
         val va = funcVaAt(funcs, 0)
         if (va.isNotBlank()) return@withContext (funcNameAt(funcs, 0) to va)
+    }
+    if (entry.isNotBlank()) {
+        val r = runCatching { engine.rzCfg(ws, "", entry) }.getOrNull()
+        if (r != null && r.optBoolean("ok", false)) return@withContext (entry to entry)
     }
     val item = runCatching { engine.list(ws, "", "functions", "", 1) }.getOrNull()
         ?.optJSONArray("items")?.optJSONObject(0)

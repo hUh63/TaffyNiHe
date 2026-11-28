@@ -1,3 +1,38 @@
+## 塔菲逆核 v1.6.3 —— 引擎层：编辑会话的 ELF 解析不再每次都重来
+
+### 主要收益：ELF 解析按内容缓存
+
+`elfFor(workspaceId, editSessionId)` 原来对**编辑会话**是这样的：
+
+```kotlin
+else lief.parse(dataFor(workspaceId, editSessionId))
+```
+
+也就是**每次调用都重新解析一遍 ELF**。一个 10 MB 的 SO 用 LIEF 解析要几十到几百毫秒，
+而一次工具调用里常连着读好几次（audit / report 一次能读到 3~5 次）。
+
+现在按「长度 + 内容 hash」缓存：同一份内容只解析一次，编辑后内容变了自动重算。
+没用 revision 做 key 是刻意的 —— 编辑入口很多（原地写入、undo/redo、append 截断、
+回滚、build 回填），只要有一个入口漏了 `revision++`，用 revision 就会拿到过期的解析结果，
+那类 bug 表现为「改完再看还是旧数据」，极难定位。内容 hash 是 O(n)（10 MB 约 5~10 ms），
+仍比重新解析快一个数量级。
+
+配套：
+- 关闭工作区、以及超限淘汰工作区时清掉对应缓存（否则解析结果会跟整份 SO 副本一起驻留）；
+- 三个编辑入口（`editHex` / `editAsm` / `editSymbol`）里原来的 `lief.parse(session.data)`
+  也改走同一个缓存 —— 先 analyze 再 edit 的常见顺序能省掉一次完整解析。
+
+### 其他
+
+- MCP 服务端复用一份 `SettingsStore`（构造时要跑两次 prefs 迁移检查，服务端是长生命周期对象）。
+
+### 关于太墟模块
+
+`runtime/`、`harness/`、`feature/` 那 634 个文件扫了一遍（无上限读 27 处、`while(true)` 57 处、
+`runBlocking` 16 处），逐条看下来都是「解析循环 / 阻塞式桥接 / 上游既有约定」，
+没有既能明确修好、又不会破坏上游行为的点，所以这一版**没有动 vendored 代码**。
+硬改只会让后续跟进上游变难。
+
 ## 塔菲逆核 v1.6.2 —— MCP 层：降延迟、减负载、可观测
 
 这一版全部围绕「MCP 调用为什么慢、怎么少传点东西」。

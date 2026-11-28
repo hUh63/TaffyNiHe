@@ -1379,23 +1379,6 @@ internal fun applyCfgDrag(layout: CfgLayoutResult, offs: Map<Int, Offset>): CfgL
 }
 
 /** 背景图案绘制（网格 / 蛛网 / 蜂窝 / 雷达 / 无）。 */
-/**
- * 点阵坐标缓冲（线程本地 + 按需扩容）。
- *
- * 背景网格每帧要填上万个点，每次新建 FloatArray 就是每帧几十 KB 垃圾；这个 buffer
- * 只在 draw 阶段用、用完即弃，完全可以复用。用 ThreadLocal 是因为 PNG 导出会在后台线程
- * 调同一段绘制代码。
- */
-private val gridPointBuf = ThreadLocal<FloatArray>()
-
-private fun gridPointBuffer(n: Int): FloatArray {
-    val cur = gridPointBuf.get()
-    if (cur != null && cur.size >= n) return cur
-    val fresh = FloatArray(n)
-    gridPointBuf.set(fresh)
-    return fresh
-}
-
 private fun DrawScope.drawCfgBackground(
     bgStyle: String,
     colors: androidx.compose.material3.ColorScheme,
@@ -1472,7 +1455,7 @@ private fun DrawScope.drawCfgBackground(
             // 屏幕空间最小间距 16px：否则中大图（scale 中等）会每帧画 1~2 万个圆点，
             // 手势直接被压死 —— 与「切完整模式后图控制不了」叠加。
             val step = 42f * density * sc
-            if (step >= 16f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
+            if (step >= 20f && step <= max(viewportSize.width, viewportSize.height) * 2f) {
                 val fadeIn = ((sc - 0.35f) / 1.65f).coerceIn(0f, 1f)
                 val dotColor = colors.outlineVariant.copy(alpha = 0.10f + 0.28f * fadeIn)
                 // 一次 drawPoints 画完整个点阵。原来每个点一次 drawCircle（= 一次 draw call），
@@ -1482,15 +1465,16 @@ private fun DrawScope.drawCfgBackground(
                 val cols = if (x0 < viewportSize.width) (((viewportSize.width - x0) / step).toInt() + 1) else 0
                 val rows = if (y0 < viewportSize.height) (((viewportSize.height - y0) / step).toInt() + 1) else 0
                 if (cols > 0 && rows > 0) {
-                    val pts = gridPointBuffer(cols * rows * 2)
-                    var k = 0
+                    // 一次 drawPoints 提交整个点阵（1 次 draw call）。原来是**每个点一次 drawCircle**，
+                    // 1080p 屏 16px 间距下就是上万次 draw call —— 拖动时手机发烫的主要来源之一。
+                    // 本 Compose 版本的 drawPoints 只有 List<Offset> 重载（无 FloatArray），
+                    // 所以顺带把屏幕最小间距从 16px 提到 20px，点数再降 ~35%。
+                    val pts = ArrayList<Offset>(cols * rows)
                     var gx = x0
                     for (i in 0 until cols) {
                         var gy = y0
                         for (j in 0 until rows) {
-                            pts[k] = gx
-                            pts[k + 1] = gy
-                            k += 2
+                            pts.add(Offset(gx, gy))
                             gy += step
                         }
                         gx += step
